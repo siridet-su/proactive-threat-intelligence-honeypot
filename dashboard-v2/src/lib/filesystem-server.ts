@@ -17,7 +17,8 @@ import {
   asDateString,
   asStatus,
   asString,
-  buildAuditSessionsQuery,
+  buildAuditSessionsPipeline,
+  buildAuditSummaryPipeline,
   buildSessionCwdHistoryQuery,
   encodeAuditSessionCursor,
   encodeHistoryCursor,
@@ -109,7 +110,7 @@ interface AggregatedAuditPaths extends Document {
 }
 
 function toTopologySession(document: Document, auditPaths?: AggregatedAuditPaths): FilesystemTopologySession | null {
-  const sessionId = asString(document.sessionId);
+  const sessionId = asString(document.sessionId) ?? asString(document.session_id) ?? asString(document.effectiveSessionId);
   const cwdState = normalizeCwdState(document.cwdState);
   if (!sessionId || !cwdState) return null;
   return {
@@ -205,10 +206,10 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
   const truncated = documents.length > TOPOLOGY_LIMIT;
   const liveDocuments = documents.slice(0, TOPOLOGY_LIMIT);
   const liveSessionIds = liveDocuments
-    .map((document) => asString(document.sessionId))
+    .map((document) => asString(document.sessionId) ?? asString(document.session_id))
     .filter((sessionId): sessionId is string => sessionId !== null);
   const closedSessionIds = closedDocuments
-    .map((document) => asString(document.sessionId))
+    .map((document) => asString(document.sessionId) ?? asString(document.session_id))
     .filter((sessionId): sessionId is string => sessionId !== null);
 
   // Closed sessions are immutable; read cached audit summaries and only aggregate
@@ -225,10 +226,10 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
   const getAuditPaths = (id: string) => fetchedAuditPaths.get(id) ?? closedAuditPathsCache.get(id);
 
   const sessions = liveDocuments
-    .map((document) => toTopologySession(document, getAuditPaths(asString(document.sessionId) ?? "")))
+    .map((document) => toTopologySession(document, getAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
     .filter((item): item is FilesystemTopologySession => item !== null);
   const recentClosedSessions = closedDocuments
-    .map((document) => toClosedSession(document, getAuditPaths(asString(document.sessionId) ?? "")))
+    .map((document) => toClosedSession(document, getAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
     .filter((item): item is FilesystemClosedSession => item !== null);
   const nodes = new Map<string, FilesystemTopologyNode>();
 
@@ -315,6 +316,52 @@ export interface AuditSessionsQueryOptions {
   includeSummary?: boolean;
 }
 
+function mapDocumentToClosedSession(document: Document): FilesystemClosedSession | null {
+  const sessionId = asString(document.effectiveSessionId) ?? asString(document.sessionId) ?? asString(document.session_id);
+  const cwdState = normalizeCwdState(document.cwdState);
+  const lifecycle = document.lifecycle;
+  if (!sessionId || !cwdState || !lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) {
+    return null;
+  }
+  const lifecycleRecord = lifecycle as Record<string, unknown>;
+
+  const rawVisited = Array.isArray(document.visitedPaths) ? document.visitedPaths : [cwdState.path];
+  const visitedSet = new Set<string>();
+  for (const p of rawVisited) {
+    if (typeof p === "string" && p.startsWith("/")) {
+      visitedSet.add(p);
+    }
+  }
+  if (cwdState.path?.startsWith("/")) {
+    visitedSet.add(cwdState.path);
+  }
+  const visitedPaths = [...visitedSet].sort((a, b) => a.localeCompare(b));
+
+  const nonRootPaths = visitedPaths.filter((p) => p !== "/");
+  const hasHomePath = nonRootPaths.some((p) => p === "/home" || p.startsWith("/home/"));
+  const hasOutsideHomePath = nonRootPaths.some((p) => p !== "/home" && !p.startsWith("/home/"));
+  const homeOnly = typeof document.homeOnly === "boolean" ? document.homeOnly : (hasHomePath && !hasOutsideHomePath);
+
+  const eventCount = typeof document.eventCount === "number" && Number.isSafeInteger(document.eventCount) && document.eventCount >= 0
+    ? document.eventCount
+    : 0;
+
+  return {
+    sessionId,
+    sourceIp: asString(document.sourceIp) ?? "Unknown",
+    cwdState,
+    lifecycle: {
+      startedAt: asDateString(lifecycleRecord.startedAt),
+      closedAt: asDateString(lifecycleRecord.closedAt),
+    },
+    auditSummary: {
+      visitedPaths,
+      homeOnly,
+      eventCount,
+    },
+  };
+}
+
 export async function getAuditDirectorySummary(options: {
   search?: string | null;
   targetPath?: string | null;
@@ -322,215 +369,22 @@ export async function getAuditDirectorySummary(options: {
 } = {}): Promise<AuditDirectorySummary> {
   const client = await getMongoClient();
   const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
-
-  const baseClosedMatch: Document = {
-    "lifecycle.status": "closed",
-    "cwdState.path": { $type: "string", $ne: "" },
-  };
-
-  const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
-
-  // Normalized search regex
-  const searchTrimmed = options.search?.trim();
-  const searchRegexStr = searchTrimmed
-    ? searchTrimmed.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    : null;
-
-  // Normalized target path prefix regex
-  let targetRegexStr: string | null = null;
-  if (options.targetPath?.trim()) {
-    let normTarget = options.targetPath.trim();
-    if (normTarget.length > 1 && normTarget.endsWith("/")) {
-      normTarget = normTarget.slice(0, -1);
-    }
-    targetRegexStr = `^${normTarget.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(/.*)?$`;
-  }
-
-  const pipeline: Document[] = [
-    { $match: baseClosedMatch },
-    {
-      $project: {
-        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
-        sourceIp: 1,
-        cwdPath: "$cwdState.path",
-      },
-    },
-    {
-      $lookup: {
-        from: HISTORY_COLLECTION,
-        let: { sid: "$effectiveSessionId" },
-        pipeline: [
-          {
-            $match: {
-              $expr: {
-                $and: [
-                  { $in: ["$action", ["entered", "changed", "failed_change"]] },
-                  { $or: [{ $eq: ["$sessionId", "$$sid"] }, { $eq: ["$session_id", "$$sid"] }] },
-                ],
-              },
-            },
-          },
-          {
-            $project: {
-              fromPath: 1,
-              successfulToPath: {
-                $cond: [{ $eq: ["$action", "failed_change"] }, null, "$toPath"],
-              },
-            },
-          },
-        ],
-        as: "historyEvents",
-      },
-    },
-    {
-      $project: {
-        effectiveSessionId: 1,
-        sourceIp: 1,
-        cwdPath: 1,
-        visitedPaths: {
-          $filter: {
-            input: {
-              $setUnion: [
-                ["$cwdPath"],
-                "$historyEvents.fromPath",
-                "$historyEvents.successfulToPath",
-              ],
-            },
-            as: "p",
-            cond: {
-              $and: [
-                { $ne: ["$$p", null] },
-                { $ne: ["$$p", ""] },
-                { $regexMatch: { input: "$$p", regex: "^/" } },
-              ],
-            },
-          },
-        },
-      },
-    },
-    {
-      $addFields: {
-        nonRootPaths: {
-          $filter: {
-            input: "$visitedPaths",
-            as: "p",
-            cond: { $ne: ["$$p", "/"] },
-          },
-        },
-      },
-    },
-    {
-      $addFields: {
-        hasHomePath: {
-          $anyElementTrue: {
-            $map: {
-              input: "$nonRootPaths",
-              as: "p",
-              in: {
-                $or: [
-                  { $eq: ["$$p", "/home"] },
-                  { $regexMatch: { input: "$$p", regex: "^/home/" } },
-                ],
-              },
-            },
-          },
-        },
-        hasOutsideHomePath: {
-          $anyElementTrue: {
-            $map: {
-              input: "$nonRootPaths",
-              as: "p",
-              in: {
-                $and: [
-                  { $ne: ["$$p", "/home"] },
-                  { $not: { $regexMatch: { input: "$$p", regex: "^/home/" } } },
-                ],
-              },
-            },
-          },
-        },
-      },
-    },
-    {
-      $addFields: {
-        homeOnly: {
-          $and: ["$hasHomePath", { $not: "$hasOutsideHomePath" }],
-        },
-        matchesSearch: searchRegexStr
-          ? {
-              $or: [
-                { $regexMatch: { input: "$effectiveSessionId", regex: searchRegexStr, options: "i" } },
-                { $regexMatch: { input: { $ifNull: ["$sourceIp", ""] }, regex: searchRegexStr, options: "i" } },
-                { $regexMatch: { input: "$cwdPath", regex: searchRegexStr, options: "i" } },
-              ],
-            }
-          : true,
-        matchesTarget: targetRegexStr
-          ? {
-              $anyElementTrue: {
-                $map: {
-                  input: "$visitedPaths",
-                  as: "p",
-                  in: { $regexMatch: { input: "$$p", regex: targetRegexStr } },
-                },
-              },
-            }
-          : true,
-      },
-    },
-    {
-      $addFields: {
-        matchesFilter: {
-          $and: [
-            "$matchesSearch",
-            "$matchesTarget",
-            options.hideHome ? { $not: "$homeOnly" } : true,
-          ],
-        },
-      },
-    },
-    {
-      $facet: {
-        overview: [
-          {
-            $group: {
-              _id: null,
-              totalSessions: { $sum: 1 },
-              homeOnlyCount: { $sum: { $cond: ["$homeOnly", 1, 0] } },
-              matchingCount: { $sum: { $cond: ["$matchesFilter", 1, 0] } },
-            },
-          },
-        ],
-        distinctPaths: [
-          { $unwind: "$nonRootPaths" },
-          {
-            $group: {
-              _id: "$nonRootPaths",
-              sessionCount: { $sum: 1 },
-            },
-          },
-          { $sort: { sessionCount: -1, _id: 1 } },
-          { $limit: 100 },
-          {
-            $project: {
-              _id: 0,
-              path: "$_id",
-              sessionCount: 1,
-            },
-          },
-        ],
-      },
-    },
-  ];
+  const pipeline = buildAuditSummaryPipeline({
+    search: options.search,
+    targetPath: options.targetPath,
+    hideHome: options.hideHome,
+    historyCollectionName: HISTORY_COLLECTION,
+  });
 
   const result = await states.aggregate<{
     overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
     distinctPaths: Array<{ path: string; sessionCount: number }>;
-  }>(pipeline).toArray();
+  }>(pipeline, { allowDiskUse: true }).toArray();
 
   const overview = result[0]?.overview?.[0];
   const totalSessions = overview?.totalSessions ?? 0;
   const homeOnlyCount = overview?.homeOnlyCount ?? 0;
+  const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
   const matchingCount = hasFilter ? (overview?.matchingCount ?? 0) : undefined;
   const distinctPaths = result[0]?.distinctPaths ?? [];
 
@@ -544,25 +398,22 @@ export async function getAuditDirectorySummary(options: {
 
 export async function getAuditSessions(options: AuditSessionsQueryOptions = {}): Promise<AuditSessionsPage> {
   const limit = Math.max(1, Math.min(100, options.limit ?? 25));
-  const query = buildAuditSessionsQuery({
+  const pipeline = buildAuditSessionsPipeline({
     search: options.search,
+    targetPath: options.targetPath,
+    hideHome: options.hideHome,
     cursor: options.cursor,
-  });
-  const countQuery = buildAuditSessionsQuery({
-    search: options.search,
-    cursor: null,
+    limit,
+    historyCollectionName: HISTORY_COLLECTION,
   });
 
   const client = await getMongoClient();
   const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
-  const [documents, totalCount, summary] = await Promise.all([
-    states
-      .find(query)
-      .sort({ "lifecycle.closedAt": -1, sessionId: -1 })
-      .limit(limit + 1)
-      .allowDiskUse(true)
-      .toArray(),
-    states.countDocuments(countQuery),
+  const [aggregationResult, summary] = await Promise.all([
+    states.aggregate<{
+      total: Array<{ count: number }>;
+      items: Document[];
+    }>(pipeline, { allowDiskUse: true }).toArray(),
     options.includeSummary
       ? getAuditDirectorySummary({
           search: options.search,
@@ -572,48 +423,28 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
       : Promise.resolve(undefined),
   ]);
 
-  const hasMore = documents.length > limit;
-  const pageDocs = documents.slice(0, limit);
-  const sessionIds = pageDocs
-    .map((doc) => asString(doc.sessionId))
-    .filter((id): id is string => id !== null);
+  const facet = aggregationResult[0];
+  const totalItems = facet?.total?.[0]?.count ?? 0;
+  const rawItems = facet?.items ?? [];
 
-  const uncachedIds = sessionIds.filter((id) => !closedAuditPathsCache.has(id));
-  const fetchedPaths = await aggregateSessionAuditPaths(uncachedIds);
-  for (const id of uncachedIds) {
-    const row = fetchedPaths.get(id);
-    if (row) closedAuditPathsCache.set(id, row);
-  }
+  const hasMore = rawItems.length > limit;
+  const pageDocs = rawItems.slice(0, limit);
 
-  const getAuditPaths = (id: string) => fetchedPaths.get(id) ?? closedAuditPathsCache.get(id);
-
-  let items = pageDocs
-    .map((doc) => toClosedSession(doc, getAuditPaths(asString(doc.sessionId) ?? "")))
+  const items: FilesystemClosedSession[] = pageDocs
+    .map(mapDocumentToClosedSession)
     .filter((item): item is FilesystemClosedSession => item !== null);
 
-  if (options.hideHome) {
-    items = items.filter((session) => !session.auditSummary.homeOnly);
-  }
-  if (options.targetPath) {
-    const normTarget = options.targetPath.length > 1 && options.targetPath.endsWith("/")
-      ? options.targetPath.slice(0, -1)
-      : options.targetPath;
-    items = items.filter((session) =>
-      session.auditSummary.visitedPaths.some((p) => p === normTarget || p.startsWith(`${normTarget}/`)),
-    );
-  }
-
   const lastDoc = pageDocs.at(-1);
-  const nextCursor = hasMore && lastDoc && asString(lastDoc.sessionId)
+  const nextCursor = hasMore && lastDoc
     ? encodeAuditSessionCursor(
         asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(),
-        asString(lastDoc.sessionId)!,
+        asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "",
       )
     : null;
 
   return {
     items,
-    totalItems: totalCount,
+    totalItems,
     nextCursor,
     summary,
   };

@@ -96,6 +96,29 @@ export function encodeAuditSessionCursor(closedAt: string, sessionId: string): s
   return Buffer.from(JSON.stringify({ closedAt, sessionId })).toString("base64url");
 }
 
+export function buildAuditSearchRegexString(search: string | null | undefined): string | null {
+  const trimmed = search?.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function normalizeAuditTargetPath(targetPath: string | null | undefined): string | null {
+  if (!targetPath) return null;
+  let norm = targetPath.trim();
+  while (norm.length > 1 && norm.endsWith("/")) {
+    norm = norm.slice(0, -1);
+  }
+  if (!norm || norm === "all") return null;
+  return norm;
+}
+
+export function buildAuditTargetPathRegexString(targetPath: string | null | undefined): string | null {
+  const norm = normalizeAuditTargetPath(targetPath);
+  if (!norm || norm === "/") return null;
+  const escaped = norm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `^${escaped}(/.*)?$`;
+}
+
 export function buildAuditSessionsQuery(options: {
   search?: string | null;
   cursor?: string | null;
@@ -105,10 +128,9 @@ export function buildAuditSessionsQuery(options: {
     { "cwdState.path": { $type: "string", $ne: "" } },
   ];
 
-  if (options.search?.trim()) {
-    const q = options.search.trim();
-    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const rx = new RegExp(escaped, "i");
+  const searchRegexStr = buildAuditSearchRegexString(options.search);
+  if (searchRegexStr) {
+    const rx = new RegExp(searchRegexStr, "i");
     conditions.push({
       $or: [
         { sessionId: { $regex: rx } },
@@ -119,20 +141,290 @@ export function buildAuditSessionsQuery(options: {
     });
   }
 
-  const decoded = decodeAuditSessionCursor(options.cursor ?? null);
-  if (decoded) {
-    conditions.push({
-      $or: [
-        { "lifecycle.closedAt": { $lt: decoded.closedAt } },
-        {
-          "lifecycle.closedAt": decoded.closedAt,
-          sessionId: { $lt: decoded.sessionId },
-        },
-      ],
-    });
+  if (typeof options.cursor === "string" && options.cursor.trim()) {
+    const decoded = decodeAuditSessionCursor(options.cursor);
+    if (decoded) {
+      const cursorDate = new Date(decoded.closedAt);
+      if (!Number.isNaN(cursorDate.getTime()) && decoded.sessionId) {
+        conditions.push({
+          $or: [
+            { "lifecycle.closedAt": { $lt: cursorDate } },
+            {
+              "lifecycle.closedAt": cursorDate,
+              $or: [
+                { sessionId: { $lt: decoded.sessionId } },
+                { session_id: { $lt: decoded.sessionId } },
+              ],
+            },
+          ],
+        });
+      } else {
+        conditions.push({ $expr: false });
+      }
+    } else {
+      conditions.push({ $expr: false });
+    }
   }
 
   return conditions.length === 1 ? conditions[0] : { $and: conditions };
+}
+
+export interface AuditScopingPipelineOptions {
+  search?: string | null;
+  targetPath?: string | null;
+  hideHome?: boolean;
+  historyCollectionName?: string;
+}
+
+export interface AuditSessionsPipelineOptions extends AuditScopingPipelineOptions {
+  cursor?: string | null;
+  limit?: number;
+}
+
+export function buildAuditScopingStages(options: AuditScopingPipelineOptions): Document[] {
+  const historyCollection = options.historyCollectionName ?? "cwd_events";
+  const searchRegexStr = buildAuditSearchRegexString(options.search);
+  const targetRegexStr = buildAuditTargetPathRegexString(options.targetPath);
+
+  return [
+    {
+      $match: {
+        "lifecycle.status": "closed",
+        "cwdState.path": { $type: "string", $ne: "" },
+      },
+    },
+    {
+      $addFields: {
+        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
+      },
+    },
+    {
+      $lookup: {
+        from: historyCollection,
+        let: { sid: "$effectiveSessionId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $in: ["$action", ["entered", "changed", "failed_change"]] },
+                  { $or: [{ $eq: ["$sessionId", "$$sid"] }, { $eq: ["$session_id", "$$sid"] }] },
+                ],
+              },
+            },
+          },
+          {
+            $project: {
+              fromPath: 1,
+              successfulToPath: {
+                $cond: [{ $eq: ["$action", "failed_change"] }, null, "$toPath"],
+              },
+            },
+          },
+        ],
+        as: "historyEvents",
+      },
+    },
+    {
+      $addFields: {
+        cwdPath: "$cwdState.path",
+        visitedPaths: {
+          $filter: {
+            input: {
+              $setUnion: [
+                ["$cwdState.path"],
+                "$historyEvents.fromPath",
+                "$historyEvents.successfulToPath",
+              ],
+            },
+            as: "p",
+            cond: {
+              $and: [
+                { $ne: ["$$p", null] },
+                { $ne: ["$$p", ""] },
+                { $regexMatch: { input: "$$p", regex: "^/" } },
+              ],
+            },
+          },
+        },
+        eventCount: { $size: "$historyEvents" },
+      },
+    },
+    {
+      $addFields: {
+        nonRootPaths: {
+          $filter: {
+            input: "$visitedPaths",
+            as: "p",
+            cond: { $ne: ["$$p", "/"] },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        hasHomePath: {
+          $anyElementTrue: {
+            $map: {
+              input: "$nonRootPaths",
+              as: "p",
+              in: {
+                $or: [
+                  { $eq: ["$$p", "/home"] },
+                  { $regexMatch: { input: "$$p", regex: "^/home/" } },
+                ],
+              },
+            },
+          },
+        },
+        hasOutsideHomePath: {
+          $anyElementTrue: {
+            $map: {
+              input: "$nonRootPaths",
+              as: "p",
+              in: {
+                $and: [
+                  { $ne: ["$$p", "/home"] },
+                  { $not: { $regexMatch: { input: "$$p", regex: "^/home/" } } },
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
+    {
+      $addFields: {
+        homeOnly: {
+          $and: ["$hasHomePath", { $not: "$hasOutsideHomePath" }],
+        },
+        matchesSearch: searchRegexStr
+          ? {
+              $or: [
+                { $regexMatch: { input: "$effectiveSessionId", regex: searchRegexStr, options: "i" } },
+                { $regexMatch: { input: { $ifNull: ["$sourceIp", ""] }, regex: searchRegexStr, options: "i" } },
+                { $regexMatch: { input: "$cwdPath", regex: searchRegexStr, options: "i" } },
+              ],
+            }
+          : true,
+        matchesTarget: targetRegexStr
+          ? {
+              $anyElementTrue: {
+                $map: {
+                  input: "$visitedPaths",
+                  as: "p",
+                  in: { $regexMatch: { input: "$$p", regex: targetRegexStr } },
+                },
+              },
+            }
+          : true,
+      },
+    },
+    {
+      $addFields: {
+        matchesFilter: {
+          $and: [
+            "$matchesSearch",
+            "$matchesTarget",
+            options.hideHome ? { $not: "$homeOnly" } : true,
+          ],
+        },
+      },
+    },
+  ];
+}
+
+export function buildAuditSessionsPipeline(options: AuditSessionsPipelineOptions): Document[] {
+  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+  const stages = buildAuditScopingStages(options);
+
+  stages.push({
+    $match: {
+      matchesFilter: true,
+    },
+  });
+
+  let cursorMatch: Document | null = null;
+  if (typeof options.cursor === "string" && options.cursor.trim()) {
+    const decoded = decodeAuditSessionCursor(options.cursor);
+    if (decoded) {
+      const cursorDate = new Date(decoded.closedAt);
+      if (!Number.isNaN(cursorDate.getTime()) && decoded.sessionId) {
+        cursorMatch = {
+          $or: [
+            { "lifecycle.closedAt": { $lt: cursorDate } },
+            {
+              "lifecycle.closedAt": { $eq: cursorDate },
+              effectiveSessionId: { $lt: decoded.sessionId },
+            },
+          ],
+        };
+      } else {
+        cursorMatch = { $expr: false };
+      }
+    } else {
+      cursorMatch = { $expr: false };
+    }
+  }
+
+  stages.push({
+    $facet: {
+      total: [
+        { $count: "count" },
+      ],
+      items: [
+        ...(cursorMatch ? [{ $match: cursorMatch }] : []),
+        {
+          $sort: {
+            "lifecycle.closedAt": -1,
+            effectiveSessionId: -1,
+          },
+        },
+        { $limit: limit + 1 },
+      ],
+    },
+  });
+
+  return stages;
+}
+
+export function buildAuditSummaryPipeline(options: AuditScopingPipelineOptions): Document[] {
+  const stages = buildAuditScopingStages(options);
+
+  stages.push({
+    $facet: {
+      overview: [
+        {
+          $group: {
+            _id: null,
+            totalSessions: { $sum: 1 },
+            homeOnlyCount: { $sum: { $cond: ["$homeOnly", 1, 0] } },
+            matchingCount: { $sum: { $cond: ["$matchesFilter", 1, 0] } },
+          },
+        },
+      ],
+      distinctPaths: [
+        { $unwind: "$nonRootPaths" },
+        {
+          $group: {
+            _id: "$nonRootPaths",
+            sessionCount: { $sum: 1 },
+          },
+        },
+        { $sort: { sessionCount: -1, _id: 1 } },
+        { $limit: 100 },
+        {
+          $project: {
+            _id: 0,
+            path: "$_id",
+            sessionCount: 1,
+          },
+        },
+      ],
+    },
+  });
+
+  return stages;
 }
 
 export function normalizeHistoryEvent(document: Document): SessionCwdHistoryEvent | null {

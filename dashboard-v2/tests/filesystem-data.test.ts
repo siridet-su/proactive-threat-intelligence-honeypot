@@ -152,7 +152,7 @@ describe("filesystem audit sessions cursor and query", () => {
     });
   });
 
-  it("applies keyset pagination condition from cursor", () => {
+  it("applies keyset pagination condition from cursor with BSON Date object", () => {
     const cursor = encodeAuditSessionCursor(closedAt, sessionId);
     const query = buildAuditSessionsQuery({ cursor });
     expect(query).toEqual({
@@ -161,8 +161,14 @@ describe("filesystem audit sessions cursor and query", () => {
         { "cwdState.path": { $type: "string", $ne: "" } },
         {
           $or: [
-            { "lifecycle.closedAt": { $lt: closedAt } },
-            { "lifecycle.closedAt": closedAt, sessionId: { $lt: sessionId } },
+            { "lifecycle.closedAt": { $lt: new Date(closedAt) } },
+            {
+              "lifecycle.closedAt": new Date(closedAt),
+              $or: [
+                { sessionId: { $lt: sessionId } },
+                { session_id: { $lt: sessionId } },
+              ],
+            },
           ],
         },
       ],
