@@ -20,6 +20,6 @@ export function terminateCapabilityFrom(
   if (!document.configured) return "unconfigured";
   if (document.available === false) return "error";
   // When document.available is undefined (status-only response where health was not probed),
-  // preserve the previous authoritative capability if provided, or default to "available".
-  return previousCapability ?? "available";
+  // preserve the previous authoritative capability if provided, or fail closed to "loading".
+  return previousCapability ?? "loading";
 }

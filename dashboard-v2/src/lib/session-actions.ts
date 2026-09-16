@@ -60,8 +60,8 @@ function normalizeAction(document: Document): SessionTerminateAction {
 
 export async function sessionIsActive(sessionId: string): Promise<boolean> {
   const client = await getMongoClient();
-  const state = await client.db(DATABASE_NAME).collection(SESSION_STATE_COLLECTION).findOne(
-    { sessionId },
+  const state = await client.db(DATABASE_NAME).collection<{ _id: string; lifecycle?: { status?: string } }>(SESSION_STATE_COLLECTION).findOne(
+    { _id: sessionId },
     { projection: { "lifecycle.status": 1 } },
   );
   return state?.lifecycle?.status === "active";
@@ -128,7 +128,8 @@ export interface TerminateActionWithState {
  * 1. Pending actionId poll path (normal):
  *    - 1 MongoDB read: Single aggregation pipeline on ACTIONS_COLLECTION matching
  *      { actionId, sessionId, action: "terminate_session" } with $lookup joining
- *      SESSION_STATE_COLLECTION (cwd_session_state) for lifecycle status and closedAt.
+ *      SESSION_STATE_COLLECTION (cwd_session_state) on foreignField "_id" (targeting
+ *      the canonical primary key index _id_).
  *    - 0 MongoDB writes: When the action remains in "requested" or "delivered" status
  *      and the session is active or not yet verifiably closed.
  *
@@ -137,31 +138,31 @@ export interface TerminateActionWithState {
  *    - 0 MongoDB writes.
  *
  * 3. Terminal reconciliation paths (state transition):
- *    - 1 MongoDB read: Aggregation pipeline reads action and session lifecycle.
- *    - 1 MongoDB write: Atomic findOneAndUpdate on ACTIONS_COLLECTION:
+ *    - 1 MongoDB read: Aggregation pipeline reads action and session lifecycle via canonical _id.
+ *    - 1 MongoDB write (uncontended): Atomic findOneAndUpdate on ACTIONS_COLLECTION:
  *      a) Verified: When session lifecycle status is "closed" and closedAt >= requestedAt.
  *      b) Failed: When verification timeout (20s) has elapsed.
  *    - Both transitions match { status: { $in: ["requested", "delivered"] } } ensuring
  *      concurrent reconciliation is idempotent and terminal states cannot regress or duplicate.
+ *    - Exceptional extra read under contention: If a concurrent request won the atomic transition,
+ *      findOneAndUpdate returns null; the losing caller performs 1 targeted fallback read
+ *      ({ actionId, sessionId }) to return the authoritative terminal document instead of stale state.
  *
  * 4. Initial capability path (without actionId):
  *    - 1 MongoDB read: Aggregation pipeline matching { sessionId, action: "terminate_session" }
- *      sorted by requestedAt descending (limit 1) with $lookup to SESSION_STATE_COLLECTION.
- *    - If no action exists yet for the session, 1 findOne read on SESSION_STATE_COLLECTION for liveness.
+ *      sorted by requestedAt descending (limit 1) with $lookup to SESSION_STATE_COLLECTION on "_id".
+ *    - If no action exists yet for the session, 1 findOne read on SESSION_STATE_COLLECTION for liveness
+ *      matching { _id: sessionId }.
  */
-export async function getTerminateActionWithState(
+export function buildTerminateActionPipeline(
   sessionId: string,
   actionId?: string,
-): Promise<TerminateActionWithState> {
-  await ensureActionIndexes();
-  const client = await getMongoClient();
-  const db = client.db(DATABASE_NAME);
-
+): Document[] {
   const matchFilter: Document = actionId
     ? { actionId, sessionId, action: "terminate_session" }
     : { sessionId, action: "terminate_session" };
 
-  const pipeline: Document[] = [
+  return [
     { $match: matchFilter },
     { $sort: { requestedAt: -1 } },
     { $limit: 1 },
@@ -169,7 +170,7 @@ export async function getTerminateActionWithState(
       $lookup: {
         from: SESSION_STATE_COLLECTION,
         localField: "sessionId",
-        foreignField: "sessionId",
+        foreignField: "_id",
         as: "sessionDocs",
       },
     },
@@ -189,12 +190,22 @@ export async function getTerminateActionWithState(
       },
     },
   ];
+}
 
+export async function getTerminateActionWithState(
+  sessionId: string,
+  actionId?: string,
+): Promise<TerminateActionWithState> {
+  await ensureActionIndexes();
+  const client = await getMongoClient();
+  const db = client.db(DATABASE_NAME);
+
+  const pipeline = buildTerminateActionPipeline(sessionId, actionId);
   const [document] = await db.collection(ACTIONS_COLLECTION).aggregate(pipeline).toArray();
 
   if (!document) {
-    const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
-      { sessionId },
+    const state = await db.collection<{ _id: string; lifecycle?: { status?: string } }>(SESSION_STATE_COLLECTION).findOne(
+      { _id: sessionId },
       { projection: { "lifecycle.status": 1 } },
     );
     return {
@@ -225,8 +236,20 @@ export async function getTerminateActionWithState(
       { $set: { status: "verified", verifiedAt: new Date(closedAt), failureCategory: null, open: false } },
       { returnDocument: "after" },
     );
+    if (!updated) {
+      // Contention fallback: another concurrent poll won the atomic transition.
+      // Perform a targeted read to retrieve the authoritative terminal document.
+      const authoritative = await db.collection(ACTIONS_COLLECTION).findOne({
+        actionId: action.actionId,
+        sessionId: action.sessionId,
+      });
+      return {
+        action: authoritative ? normalizeAction(authoritative) : action,
+        active: false,
+      };
+    }
     return {
-      action: updated ? normalizeAction(updated) : action,
+      action: normalizeAction(updated),
       active: false,
     };
   }
@@ -237,8 +260,20 @@ export async function getTerminateActionWithState(
       { $set: { status: "failed", failureCategory: "verification_timeout", open: false } },
       { returnDocument: "after" },
     );
+    if (!failed) {
+      // Contention fallback: another concurrent poll won the atomic transition.
+      // Perform a targeted read to retrieve the authoritative terminal document.
+      const authoritative = await db.collection(ACTIONS_COLLECTION).findOne({
+        actionId: action.actionId,
+        sessionId: action.sessionId,
+      });
+      return {
+        action: authoritative ? normalizeAction(authoritative) : action,
+        active,
+      };
+    }
     return {
-      action: failed ? normalizeAction(failed) : action,
+      action: normalizeAction(failed),
       active,
     };
   }

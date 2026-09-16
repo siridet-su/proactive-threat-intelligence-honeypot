@@ -19,6 +19,7 @@ export interface ResponseActionPollerOptions {
   requestedAt?: string | null;
   sessionIsLive?: boolean;
   initialCapability?: TerminateCapability;
+  initialAction?: SessionTerminateAction | null;
   fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
   onTerminal: (event: PollerTerminalEvent) => void;
@@ -61,6 +62,7 @@ export class ResponseActionPollingController {
 
   private currentDelay: number;
   private currentCapability: TerminateCapability;
+  private currentAction: SessionTerminateAction | null;
   private readonly fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   private readonly onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
   private readonly onTerminal: (event: PollerTerminalEvent) => void;
@@ -84,7 +86,8 @@ export class ResponseActionPollingController {
     this.fetchState = options.fetchState;
     this.onActionUpdate = options.onActionUpdate;
     this.onTerminal = options.onTerminal;
-    this.currentCapability = options.initialCapability ?? "available";
+    this.currentCapability = options.initialCapability ?? "loading";
+    this.currentAction = options.initialAction ?? null;
 
     this.clock = options.clock ?? { now: () => Date.now() };
     this.timer = options.timer ?? {
@@ -167,7 +170,10 @@ export class ResponseActionPollingController {
       this.inFlight = false;
       this.abortController = null;
 
-      const action = document.action ?? null;
+      const action = document.action ?? this.currentAction;
+      if (document.action) {
+        this.currentAction = document.action;
+      }
       const capability = terminateCapabilityFrom(document, this.currentCapability);
       this.currentCapability = capability;
       this.onActionUpdate(action, capability);
@@ -252,6 +258,7 @@ export interface ResponseActionLifecycleSyncParams {
   sessionIsLive?: boolean;
   requestedAt?: string | null;
   initialCapability?: TerminateCapability;
+  initialAction?: SessionTerminateAction | null;
   enabled?: boolean;
   fetchState: (sessionId: string, actionId: string, signal: AbortSignal) => Promise<TerminateStatePayload>;
   onActionUpdate: (action: SessionTerminateAction | null, capability: TerminateCapability) => void;
@@ -349,6 +356,7 @@ export class ResponseActionLifecycleManager {
       sessionIsLive: initialSessionIsLive,
       requestedAt: initialRequestedAt,
       initialCapability: params.initialCapability,
+      initialAction: params.initialAction,
       clock: params.clock,
       timer: params.timer,
       maxDurationMs: params.maxDurationMs,

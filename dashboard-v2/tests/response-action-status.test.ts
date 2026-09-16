@@ -4,7 +4,9 @@ vi.mock("server-only", () => ({}));
 
 import { GET } from "../src/app/api/sessions/[id]/actions/terminate/route";
 import { terminateCapabilityFrom } from "../src/components/filesystem/responseActionTypes";
+import { ResponseActionPollingController } from "../src/components/filesystem/responseActionPoller";
 import {
+  buildTerminateActionPipeline,
   getTerminateActionWithState,
 } from "../src/lib/session-actions";
 import {
@@ -16,6 +18,9 @@ import * as mongo from "../src/lib/mongodb";
 const VALID_SESSION_ID = "abcdef123456";
 const VALID_ACTION_ID = "123e4567-e89b-12d3-a456-426614174000";
 
+const originalUrl = process.env.COWRIE_RESPONSE_AGENT_URL;
+const originalToken = process.env.COWRIE_RESPONSE_AGENT_TOKEN;
+
 describe("Response action status and capability separation (FA-004)", () => {
   beforeEach(() => {
     resetResponseControlHealthCache();
@@ -26,10 +31,13 @@ describe("Response action status and capability separation (FA-004)", () => {
   afterEach(() => {
     resetResponseControlHealthCache();
     vi.restoreAllMocks();
+    if (originalUrl === undefined) delete process.env.COWRIE_RESPONSE_AGENT_URL;
+    else process.env.COWRIE_RESPONSE_AGENT_URL = originalUrl;
+    if (originalToken === undefined) delete process.env.COWRIE_RESPONSE_AGENT_TOKEN;
+    else process.env.COWRIE_RESPONSE_AGENT_TOKEN = originalToken;
   });
 
   it("1. Pending status remains requested/delivered after the health cache expires", async () => {
-    // Mock admin session
     vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
       sessionId: "s-1",
       operatorId: "op-1",
@@ -39,7 +47,6 @@ describe("Response action status and capability separation (FA-004)", () => {
     });
     vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
 
-    // Mock DB aggregation returning a pending delivered action
     const mockActionDoc = {
       actionId: VALID_ACTION_ID,
       sessionId: VALID_SESSION_ID,
@@ -67,23 +74,19 @@ describe("Response action status and capability separation (FA-004)", () => {
       }),
     } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-    // Ensure health cache is expired / empty
     resetResponseControlHealthCache();
 
-    // Call GET route with actionId query parameter
     const request = new Request(`http://localhost/api/sessions/${VALID_SESSION_ID}/actions/terminate?actionId=${VALID_ACTION_ID}`);
     const response = await GET(request, { params: Promise.resolve({ id: VALID_SESSION_ID }) });
 
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    // Action status remains truthfully delivered
     expect(body.action).not.toBeNull();
     expect(body.action.status).toBe("delivered");
     expect(body.action.actionId).toBe(VALID_ACTION_ID);
     expect(body.authorized).toBe(true);
     expect(body.configured).toBe(true);
-    // Explicit response contract: 'available' is omitted from status poll responses
     expect(body.available).toBeUndefined();
     expect("available" in body).toBe(false);
   });
@@ -129,11 +132,10 @@ describe("Response action status and capability separation (FA-004)", () => {
     const response = await GET(request, { params: Promise.resolve({ id: VALID_SESSION_ID }) });
 
     expect(response.status).toBe(200);
-    // Crucial requirement: status polling must NEVER initiate outbound Pi health fetch
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("3. Status-only payload does not overwrite a previously known capability with error", () => {
+  it("3. Capability preservation fails closed and never defaults unknown capability to available", () => {
     const statusPayload = {
       authorized: true,
       configured: true,
@@ -150,19 +152,40 @@ describe("Response action status and capability separation (FA-004)", () => {
       },
     };
 
-    // When previously known capability was "available", status payload preserves it
+    // a) available remains available when previously verified
     expect(terminateCapabilityFrom(statusPayload, "available")).toBe("available");
-    // When previously "loading", preserves "loading"
-    expect(terminateCapabilityFrom(statusPayload, "loading")).toBe("loading");
-    // When previous capability is undefined, defaults safely to "available" (never "error")
-    expect(terminateCapabilityFrom(statusPayload)).toBe("available");
 
-    // Explicit probe failure with available: false still maps truthfully to error
+    // b) forbidden/unconfigured/error/loading are preserved appropriately
+    expect(terminateCapabilityFrom(statusPayload, "forbidden")).toBe("forbidden");
+    expect(terminateCapabilityFrom(statusPayload, "unconfigured")).toBe("unconfigured");
+    expect(terminateCapabilityFrom(statusPayload, "error")).toBe("error");
+    expect(terminateCapabilityFrom(statusPayload, "loading")).toBe("loading");
+
+    // c) no previous capability never becomes available (fails closed to "loading")
+    expect(terminateCapabilityFrom(statusPayload, undefined)).toBe("loading");
+    expect(terminateCapabilityFrom(statusPayload)).toBe("loading");
+
+    // ResponseActionPollingController must not initialize unknown capability as available
+    const poller = new ResponseActionPollingController({
+      sessionId: VALID_SESSION_ID,
+      actionId: VALID_ACTION_ID,
+      fetchState: vi.fn(),
+      onActionUpdate: vi.fn(),
+      onTerminal: vi.fn(),
+    });
+    expect((poller as unknown as { currentCapability: string }).currentCapability).toBe("loading");
+
+    // d) an omitted available field cannot expose the Disconnect control
+    // Disconnect button requires capability === "available"; "loading" renders checking state instead
+    const unprobedCapability = terminateCapabilityFrom(statusPayload);
+    expect(unprobedCapability).not.toBe("available");
+    expect(unprobedCapability).toBe("loading");
+
+    // Explicit probe states still map truthfully
     expect(terminateCapabilityFrom({ available: false, authorized: true, configured: true }, "available")).toBe("error");
-    // Explicit forbidden maps to forbidden
     expect(terminateCapabilityFrom({ authorized: false, configured: true }, "available")).toBe("forbidden");
-    // Explicit unconfigured maps to unconfigured
     expect(terminateCapabilityFrom({ authorized: true, configured: false }, "available")).toBe("unconfigured");
+    expect(terminateCapabilityFrom({ available: true, authorized: true, configured: true }, "loading")).toBe("available");
   });
 
   it("4. One MongoDB read operation for the ordinary pending actionId path", async () => {
@@ -202,17 +225,58 @@ describe("Response action status and capability separation (FA-004)", () => {
     expect(result.action?.status).toBe("delivered");
     expect(result.active).toBe(true);
 
-    // Exactly one MongoDB read operation (the aggregation pipeline)
     expect(aggregateSpy).toHaveBeenCalledOnce();
-    // Zero secondary read operations
     expect(findOneSpy).not.toHaveBeenCalled();
-    // Zero write operations for pending action
     expect(findOneAndUpdateSpy).not.toHaveBeenCalled();
   });
 
-  it("5. Verified reconciliation from a qualifying closed lifecycle", async () => {
+  it("5. Pipeline structure proves the lookup targets the index-backed key (_id)", async () => {
+    const pipeline = buildTerminateActionPipeline(VALID_SESSION_ID, VALID_ACTION_ID);
+
+    expect(pipeline[0]).toEqual({
+      $match: {
+        actionId: VALID_ACTION_ID,
+        sessionId: VALID_SESSION_ID,
+        action: "terminate_session",
+      },
+    });
+
+    // Lookup stage must join cwd_session_state on foreignField "_id" (primary key index _id_)
+    const lookupStage = pipeline.find((stage) => "$lookup" in stage);
+    expect(lookupStage).toBeDefined();
+    expect(lookupStage?.$lookup).toEqual({
+      from: "cwd_session_state",
+      localField: "sessionId",
+      foreignField: "_id",
+      as: "sessionDocs",
+    });
+
+    // When no action document is matched, the fallback read must query { _id: sessionId }
+    const findOneSpy = vi.fn().mockResolvedValue({
+      lifecycle: { status: "active" },
+    });
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          aggregate: vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) }),
+          findOne: findOneSpy,
+          createIndex: vi.fn().mockResolvedValue("index"),
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    const result = await getTerminateActionWithState(VALID_SESSION_ID);
+    expect(result.action).toBeNull();
+    expect(result.active).toBe(true);
+    expect(findOneSpy).toHaveBeenCalledWith(
+      { _id: VALID_SESSION_ID },
+      { projection: { "lifecycle.status": 1 } },
+    );
+  });
+
+  it("6. Verified reconciliation from a qualifying closed lifecycle", async () => {
     const requestedAt = new Date("2026-09-16T12:00:00Z");
-    const closedAt = new Date("2026-09-16T12:00:05Z"); // Closed 5 seconds AFTER requestedAt
+    const closedAt = new Date("2026-09-16T12:00:05Z");
 
     const aggregateSpy = vi.fn().mockReturnValue({
       toArray: vi.fn().mockResolvedValue([
@@ -264,7 +328,6 @@ describe("Response action status and capability separation (FA-004)", () => {
     expect(result.action?.verifiedAt).toBe(closedAt.toISOString());
     expect(result.active).toBe(false);
 
-    // 1 read operation + 1 atomic write operation
     expect(aggregateSpy).toHaveBeenCalledOnce();
     expect(findOneAndUpdateSpy).toHaveBeenCalledOnce();
     expect(findOneAndUpdateSpy).toHaveBeenCalledWith(
@@ -274,9 +337,9 @@ describe("Response action status and capability separation (FA-004)", () => {
     );
   });
 
-  it("6. A closure older than requestedAt does not verify the action", async () => {
+  it("7. A closure older than requestedAt does not verify the action", async () => {
     const requestedAt = new Date();
-    const oldClosedAt = new Date(Date.now() - 5_000); // Closed BEFORE requestedAt
+    const oldClosedAt = new Date(Date.now() - 5_000);
 
     const aggregateSpy = vi.fn().mockReturnValue({
       toArray: vi.fn().mockResolvedValue([
@@ -313,13 +376,11 @@ describe("Response action status and capability separation (FA-004)", () => {
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
 
-    // Must NOT be verified because closure occurred before requestedAt
     expect(result.action?.status).toBe("delivered");
     expect(findOneAndUpdateSpy).not.toHaveBeenCalled();
   });
 
-  it("7. Verification timeout transitions atomically to failed", async () => {
-    // Action requested 25 seconds ago (> 20s VERIFICATION_TIMEOUT_MS)
+  it("8. Verification timeout transitions atomically to failed", async () => {
     const requestedAt = new Date(Date.now() - 25_000);
 
     const aggregateSpy = vi.fn().mockReturnValue({
@@ -375,72 +436,271 @@ describe("Response action status and capability separation (FA-004)", () => {
     );
   });
 
-  it("8. Unknown or cross-session actionId is handled deterministically", async () => {
-    const aggregateSpy = vi.fn().mockReturnValue({
-      // Aggregation matches actionId AND sessionId, so cross-session returns empty array
-      toArray: vi.fn().mockResolvedValue([]),
-    });
-    const findOneSpy = vi.fn().mockResolvedValue({
-      lifecycle: { status: "active" },
-    });
+  describe("9. Real concurrent reconciliation race tests", () => {
+    it("verified path: losing race performs targeted fallback read and returns authoritative verified document", async () => {
+      const requestedAt = new Date("2026-09-16T12:00:00Z");
+      const closedAt = new Date("2026-09-16T12:00:05Z");
 
-    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
-      db: () => ({
-        collection: () => ({
-          aggregate: aggregateSpy,
-          findOne: findOneSpy,
-          createIndex: vi.fn().mockResolvedValue("index"),
+      // Both concurrent callers first observe the same pending delivered action
+      const pendingDoc = {
+        actionId: VALID_ACTION_ID,
+        sessionId: VALID_SESSION_ID,
+        action: "terminate_session",
+        status: "delivered",
+        requestedBy: "op-1",
+        requestedAt,
+        deliveredAt: new Date("2026-09-16T12:00:01Z"),
+        verifiedAt: null,
+        failureCategory: null,
+        open: true,
+        sessionLifecycle: {
+          status: "closed",
+          closedAt,
+        },
+      };
+
+      const verifiedDoc = {
+        ...pendingDoc,
+        status: "verified",
+        verifiedAt: closedAt,
+        failureCategory: null,
+        open: false,
+      };
+
+      // Call 1 wins findOneAndUpdate and receives the updated verifiedDoc
+      // Call 2 loses findOneAndUpdate (returns null because status was already transitioned)
+      const findOneAndUpdateMock = vi.fn()
+        .mockResolvedValueOnce(verifiedDoc)
+        .mockResolvedValueOnce(null);
+
+      // Call 2 executes targeted fallback read findOne({ actionId, sessionId }) which returns verifiedDoc
+      const findOneMock = vi.fn().mockResolvedValue(verifiedDoc);
+
+      vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+        db: () => ({
+          collection: () => ({
+            aggregate: () => ({ toArray: vi.fn().mockResolvedValue([pendingDoc]) }),
+            findOneAndUpdate: findOneAndUpdateMock,
+            findOne: findOneMock,
+            createIndex: vi.fn().mockResolvedValue("index"),
+          }),
         }),
-      }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-    const result = await getTerminateActionWithState(VALID_SESSION_ID, "unknown-or-cross-action-id");
+      const [resWinner, resLoser] = await Promise.all([
+        getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
+        getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
+      ]);
 
-    // Action is null; cannot leak cross-session action details
-    expect(result.action).toBeNull();
-    expect(result.active).toBe(true);
+      // Both callers receive the authoritative terminal state
+      expect(resWinner.action?.status).toBe("verified");
+      expect(resLoser.action?.status).toBe("verified");
+      expect(resWinner.action?.verifiedAt).toBe(closedAt.toISOString());
+      expect(resLoser.action?.verifiedAt).toBe(closedAt.toISOString());
+
+      // Losing caller performed exactly one targeted fallback read under contention
+      expect(findOneMock).toHaveBeenCalledOnce();
+      expect(findOneMock).toHaveBeenCalledWith({
+        actionId: VALID_ACTION_ID,
+        sessionId: VALID_SESSION_ID,
+      });
+      // Neither caller regressed to "delivered"
+      expect(resLoser.action?.status).not.toBe("delivered");
+    });
+
+    it("verification_timeout path: losing race performs targeted fallback read and returns failed document", async () => {
+      const requestedAt = new Date(Date.now() - 25_000);
+
+      const pendingDoc = {
+        actionId: VALID_ACTION_ID,
+        sessionId: VALID_SESSION_ID,
+        action: "terminate_session",
+        status: "requested",
+        requestedBy: "op-1",
+        requestedAt,
+        deliveredAt: null,
+        verifiedAt: null,
+        failureCategory: null,
+        open: true,
+        sessionLifecycle: { status: "active" },
+      };
+
+      const failedDoc = {
+        ...pendingDoc,
+        status: "failed",
+        failureCategory: "verification_timeout",
+        open: false,
+      };
+
+      const findOneAndUpdateMock = vi.fn()
+        .mockResolvedValueOnce(failedDoc)
+        .mockResolvedValueOnce(null);
+
+      const findOneMock = vi.fn().mockResolvedValue(failedDoc);
+
+      vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+        db: () => ({
+          collection: () => ({
+            aggregate: () => ({ toArray: vi.fn().mockResolvedValue([pendingDoc]) }),
+            findOneAndUpdate: findOneAndUpdateMock,
+            findOne: findOneMock,
+            createIndex: vi.fn().mockResolvedValue("index"),
+          }),
+        }),
+      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+      const [resWinner, resLoser] = await Promise.all([
+        getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
+        getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
+      ]);
+
+      expect(resWinner.action?.status).toBe("failed");
+      expect(resLoser.action?.status).toBe("failed");
+      expect(resWinner.action?.failureCategory).toBe("verification_timeout");
+      expect(resLoser.action?.failureCategory).toBe("verification_timeout");
+
+      expect(findOneMock).toHaveBeenCalledOnce();
+      expect(resLoser.action?.status).not.toBe("requested");
+    });
   });
 
-  it("9. Concurrent reconciliation cannot regress or duplicate terminal state", async () => {
-    // Action already terminal verified in MongoDB
-    const verifiedDoc = {
-      actionId: VALID_ACTION_ID,
-      sessionId: VALID_SESSION_ID,
-      action: "terminate_session",
-      status: "verified",
-      requestedBy: "op-1",
-      requestedAt: new Date("2026-09-16T12:00:00Z"),
-      deliveredAt: new Date("2026-09-16T12:00:01Z"),
-      verifiedAt: new Date("2026-09-16T12:00:05Z"),
-      failureCategory: null,
-      open: false,
-      sessionLifecycle: { status: "closed", closedAt: new Date("2026-09-16T12:00:05Z") },
-    };
+  describe("10. Route-level unknown and cross-session action handling", () => {
+    it("handles unknown syntactically valid UUID actionId without leaking data or enabling controls", async () => {
+      vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
+        sessionId: "s-1",
+        operatorId: "op-1",
+        role: "admin",
+        mustChangePassword: false,
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+      vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
 
-    const aggregateSpy = vi.fn().mockReturnValue({
-      toArray: vi.fn().mockResolvedValue([verifiedDoc]),
-    });
-    const findOneAndUpdateSpy = vi.fn();
+      const unknownActionId = "99999999-9999-4999-8999-999999999999";
 
-    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
-      db: () => ({
-        collection: () => ({
-          aggregate: aggregateSpy,
-          findOneAndUpdate: findOneAndUpdateSpy,
-          createIndex: vi.fn().mockResolvedValue("index"),
+      // Unknown actionId yields no aggregation match; fallback check indicates active session
+      vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+        db: () => ({
+          collection: () => ({
+            aggregate: () => ({ toArray: vi.fn().mockResolvedValue([]) }),
+            findOne: vi.fn().mockResolvedValue({ lifecycle: { status: "active" } }),
+            createIndex: vi.fn().mockResolvedValue("index"),
+          }),
         }),
-      }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-    // First call
-    const result1 = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
-    // Second concurrent call
-    const result2 = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
+      const request = new Request(`http://localhost/api/sessions/${VALID_SESSION_ID}/actions/terminate?actionId=${unknownActionId}`);
+      const response = await GET(request, { params: Promise.resolve({ id: VALID_SESSION_ID }) });
 
-    expect(result1.action?.status).toBe("verified");
-    expect(result2.action?.status).toBe("verified");
+      expect(response.status).toBe(200);
+      const body = await response.json();
 
-    // Neither call writes to the database; terminal state is stable and idempotent
-    expect(findOneAndUpdateSpy).not.toHaveBeenCalled();
+      expect(body.action).toBeNull();
+      expect(body.authorized).toBe(true);
+      expect(body.configured).toBe(true);
+      expect(body.available).toBeUndefined();
+      expect("available" in body).toBe(false);
+    });
+
+    it("cross-session actionId does not leak action details across sessions", async () => {
+      vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
+        sessionId: "s-1",
+        operatorId: "op-1",
+        role: "admin",
+        mustChangePassword: false,
+        expiresAt: new Date(Date.now() + 3600_000),
+      });
+      vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
+
+      const targetSessionId = "111122223333";
+      const crossSessionActionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+      // Aggregation matches { sessionId: targetSessionId, actionId: crossSessionActionId }
+      // which produces empty array because crossSessionActionId belongs to a different session
+      const aggregateMock = vi.fn().mockReturnValue({ toArray: vi.fn().mockResolvedValue([]) });
+      const findOneMock = vi.fn().mockResolvedValue({ lifecycle: { status: "active" } });
+
+      vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+        db: () => ({
+          collection: () => ({
+            aggregate: aggregateMock,
+            findOne: findOneMock,
+            createIndex: vi.fn().mockResolvedValue("index"),
+          }),
+        }),
+      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+      const request = new Request(`http://localhost/api/sessions/${targetSessionId}/actions/terminate?actionId=${crossSessionActionId}`);
+      const response = await GET(request, { params: Promise.resolve({ id: targetSessionId }) });
+
+      expect(response.status).toBe(200);
+      const body = await response.json();
+
+      // Cross-session action details are completely inaccessible
+      expect(body.action).toBeNull();
+      expect(body.available).toBeUndefined();
+    });
+
+    it("poller preserves known pending action when poll response omits action", async () => {
+      vi.useFakeTimers();
+      const clockNow = 1_000_000;
+      let currentTime = clockNow;
+
+      const mockPendingAction = {
+        actionId: VALID_ACTION_ID,
+        sessionId: VALID_SESSION_ID,
+        action: "terminate_session" as const,
+        status: "delivered" as const,
+        requestedBy: "op-1",
+        requestedAt: new Date(clockNow).toISOString(),
+        deliveredAt: new Date(clockNow).toISOString(),
+        verifiedAt: null,
+        failureCategory: null,
+      };
+
+      // Server returns action: null (e.g. unknown or cross-session status response)
+      const fetchState = vi.fn().mockResolvedValue({
+        authorized: true,
+        configured: true,
+        action: null,
+      });
+
+      const onActionUpdate = vi.fn();
+      const onTerminal = vi.fn();
+
+      const controller = new ResponseActionPollingController({
+        sessionId: VALID_SESSION_ID,
+        actionId: VALID_ACTION_ID,
+        initialAction: mockPendingAction,
+        initialCapability: "available",
+        sessionIsLive: false,
+        fetchState,
+        onActionUpdate,
+        onTerminal,
+        clock: { now: () => currentTime },
+        timer: {
+          setTimeout: (fn, ms) => setTimeout(fn, ms),
+          clearTimeout: (id) => clearTimeout(id as ReturnType<typeof setTimeout>),
+        },
+        maxDurationMs: 24_000,
+      });
+
+      controller.start();
+
+      // Trigger first poll
+      await vi.advanceTimersByTimeAsync(100);
+      currentTime += 100;
+
+      expect(fetchState).toHaveBeenCalledTimes(1);
+      // Poller must preserve the known pending action rather than clearing to null
+      expect(onActionUpdate).toHaveBeenCalledWith(mockPendingAction, "available");
+
+      // Advance to deadline without terminal event: poller should timeout gracefully
+      await vi.advanceTimersByTimeAsync(25_000);
+      currentTime += 25_000;
+
+      expect(onTerminal).toHaveBeenCalledWith(expect.objectContaining({ kind: "timeout" }));
+
+      vi.useRealTimers();
+    });
   });
 });
