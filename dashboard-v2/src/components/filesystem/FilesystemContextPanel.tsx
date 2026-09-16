@@ -17,7 +17,6 @@ interface FilesystemContextPanelProps {
   selectedNode: FilesystemTopologyNode | null;
   sessions: FilesystemTopologySession[];
   recentClosedSessions: FilesystemClosedSession[];
-  liveSessionCount: number;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string) => void;
@@ -30,7 +29,6 @@ export function FilesystemContextPanel({
   selectedNode,
   sessions,
   recentClosedSessions,
-  liveSessionCount,
   selectedSessionId,
   onSelectSession,
   onSelectPath,
@@ -53,7 +51,6 @@ export function FilesystemContextPanel({
         selectedClosedSession={selectedClosedSession}
         selectedNode={selectedNode}
         sessions={sessions}
-        liveSessionCount={liveSessionCount}
         selectedSessionId={selectedSessionId}
         onSelectSession={onSelectSession}
         onSelectPath={onSelectPath}

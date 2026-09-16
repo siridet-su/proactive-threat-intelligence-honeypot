@@ -122,6 +122,13 @@ export interface SessionCwdState {
   sourceEventId: string | null;
 }
 
+/** Complete, server-derived path facts used by Audit filters and counts. */
+export interface FilesystemSessionAuditSummary {
+  visitedPaths: string[];
+  homeOnly: boolean;
+  eventCount: number;
+}
+
 export interface FilesystemTopologyNode {
   path: string;
   parentPath: string | null;
@@ -134,6 +141,7 @@ export interface FilesystemTopologySession {
   sessionId: string;
   sourceIp: string;
   cwdState: SessionCwdState;
+  auditSummary: FilesystemSessionAuditSummary;
 }
 
 /** A session that is no longer live but remains available for CWD audit retention. */
@@ -142,6 +150,12 @@ export interface FilesystemClosedSession extends FilesystemTopologySession {
     startedAt: string | null;
     closedAt: string | null;
   };
+}
+
+export interface AuditSessionsPage {
+  items: FilesystemClosedSession[];
+  nextCursor: string | null;
+  totalItems: number;
 }
 
 export interface FilesystemTopologySnapshot {
@@ -170,6 +184,12 @@ export interface SessionCwdHistoryEvent {
 export interface SessionCwdHistoryPage {
   items: SessionCwdHistoryEvent[];
   nextCursor: string | null;
+  /** Total retained CWD events for this session, independent of pagination. */
+  totalItems: number;
+  /** Retained events excluding failed directory-change attempts. */
+  totalSuccessfulItems: number;
+  /** True when this response reaches the oldest retained event. */
+  complete: boolean;
 }
 
 export type SessionTerminateActionStatus = "requested" | "delivered" | "verified" | "failed";

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock,
   CornerDownRight,
   FastForward,
   History,
@@ -22,23 +23,22 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
-import type { FilesystemTopologySession, SessionCwdHistoryEvent, SessionTerminateAction } from "@/lib/dashboardTypes";
-import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
+import { OperationToast } from "@/components/ui/OperationToast";
+import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
+import {
+  actionLabel,
+  calculateHistoryTimeMetrics,
+  calculateReplayPacingDelay,
+  formatFromPath,
+  formatTimestamp,
+  getHistoryWindowMetrics,
+  isInitialSshEntry,
+  statusLabel,
+  type ReplayPacingMode,
+} from "./filesystemUtils";
+import { useResponseAction } from "./useResponseAction";
 
 type SidebarTab = "replay" | "commands" | "actions";
-type TerminateCapability = "idle" | "loading" | "available" | "forbidden" | "unconfigured" | "error";
-
-interface TerminateStatePayload {
-  available?: boolean;
-  authorized?: boolean;
-  configured?: boolean;
-  action?: SessionTerminateAction | null;
-}
-
-function terminateCapabilityFrom(document: TerminateStatePayload): TerminateCapability {
-  return document.available ? "available" : !document.authorized ? "forbidden" : !document.configured ? "unconfigured" : "error";
-}
 
 const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   replay: 1,
@@ -57,6 +57,9 @@ interface CwdRouteHistoryProps {
   history: SessionCwdHistoryEvent[];
   historyStatus: RegionStatus;
   historyCursor: string | null;
+  historyTotalItems: number;
+  historyTotalSuccessfulItems: number;
+  historyComplete: boolean;
   selectedHistoryEventId: string | null;
   layout?: "card" | "sidebar";
   sessionIsLive?: boolean;
@@ -67,6 +70,8 @@ interface CwdRouteHistoryProps {
   onPause?: () => void;
   playbackSpeed?: number;
   onToggleSpeed?: () => void;
+  pacingMode?: ReplayPacingMode;
+  onTogglePacingMode?: () => void;
   showFailedAttempts?: boolean;
   onToggleShowFailedAttempts?: (show: boolean) => void;
 }
@@ -76,6 +81,9 @@ export function CwdRouteHistory({
   history,
   historyStatus,
   historyCursor,
+  historyTotalItems,
+  historyTotalSuccessfulItems,
+  historyComplete,
   selectedHistoryEventId,
   layout = "card",
   sessionIsLive = false,
@@ -86,32 +94,44 @@ export function CwdRouteHistory({
   onPause,
   playbackSpeed: controlledPlaybackSpeed,
   onToggleSpeed,
+  pacingMode: controlledPacingMode,
+  onTogglePacingMode,
   showFailedAttempts: controlledShowFailedAttempts,
   onToggleShowFailedAttempts,
 }: CwdRouteHistoryProps) {
   const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
   const [internalIsPlaying, setInternalIsPlaying] = useState(false);
   const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
+  const [internalPacingMode, setInternalPacingMode] = useState<ReplayPacingMode>("realistic");
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>("replay");
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
-  const [terminateCapability, setTerminateCapability] = useState<TerminateCapability>("idle");
-  const [terminateCapabilitySessionId, setTerminateCapabilitySessionId] = useState<string | null>(null);
-  const [terminateAction, setTerminateAction] = useState<SessionTerminateAction | null>(null);
-  const [terminateDialogOpen, setTerminateDialogOpen] = useState(false);
-  const [terminateProcessing, setTerminateProcessing] = useState(false);
-  const [terminateError, setTerminateError] = useState<string | undefined>();
-  const [operationToast, setOperationToast] = useState<{ kind: OperationToastKind; title: string; description: string } | null>(null);
   const shouldReduceMotion = useReducedMotion();
+  const isSidebar = layout === "sidebar";
+
+  const {
+    visibleTerminateAction,
+    visibleTerminateCapability,
+    terminateDialogOpen,
+    setTerminateDialogOpen,
+    terminateProcessing,
+    terminateError,
+    setTerminateError,
+    operationToast,
+    setOperationToast,
+    handleTerminateSession,
+  } = useResponseAction({
+    selectedSession,
+    sessionIsLive,
+    enabled: isSidebar && sidebarTab === "actions",
+  });
 
   const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
   const playbackSpeed = controlledPlaybackSpeed !== undefined ? controlledPlaybackSpeed : internalPlaybackSpeed;
+  const pacingMode = controlledPacingMode !== undefined ? controlledPacingMode : internalPacingMode;
   const showFailedAttempts = controlledShowFailedAttempts !== undefined ? controlledShowFailedAttempts : internalShowFailedAttempts;
 
-  const failedCount = useMemo(
-    () => chronologicalHistory.filter((e) => e.action === "failed_change").length,
-    [chronologicalHistory],
-  );
+  const failedCount = Math.max(0, historyTotalItems - historyTotalSuccessfulItems);
 
   const displayedHistory = useMemo(() => {
     if (showFailedAttempts) return chronologicalHistory;
@@ -124,12 +144,23 @@ export function CwdRouteHistory({
     return index >= 0 ? index : displayedHistory.length - 1;
   }, [displayedHistory, selectedHistoryEventId]);
 
+  const displayedHistoryMetrics = useMemo(
+    () => getHistoryWindowMetrics(
+      displayedHistory.length,
+      showFailedAttempts ? historyTotalItems : historyTotalSuccessfulItems,
+      selectedHistoryIndex,
+    ),
+    [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts],
+  );
+
+  const timeMetrics = useMemo(
+    () => calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex),
+    [displayedHistory, selectedHistoryIndex],
+  );
+
   const selectedHistoryEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
-  const controlSessionId = selectedSession?.sessionId ?? null;
-  const visibleTerminateAction = terminateAction?.sessionId === controlSessionId ? terminateAction : null;
-  const visibleTerminateCapability = terminateCapabilitySessionId === controlSessionId ? terminateCapability : "loading";
 
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
@@ -172,30 +203,41 @@ export function CwdRouteHistory({
     }
   }, [displayedHistory, onSelectHistoryEventId, onTogglePlay, selectedHistoryIndex]);
 
-  // Auto-play timer (only active if not controlled externally by parent)
+  // Auto-play timer with dynamic realistic pacing (only active if not controlled externally by parent)
   useEffect(() => {
     if (controlledIsPlaying !== undefined) return;
     if (!isPlaying) return;
 
-    const timer = setTimeout(() => {
-      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        setInternalIsPlaying(false);
-        return;
-      }
+    if (selectedHistoryIndex >= displayedHistory.length - 1) {
+      return;
+    }
 
-      const nextIndex = selectedHistoryIndex + 1;
-      const nextEvent = displayedHistory[nextIndex];
-      if (nextEvent) {
-        onSelectHistoryEventId(nextEvent.id);
-      } else {
+    const nextIndex = selectedHistoryIndex + 1;
+    const nextEvent = displayedHistory[nextIndex];
+    if (!nextEvent) return;
+
+    const nextMetric = timeMetrics.hopMetrics[nextIndex];
+    const delay = calculateReplayPacingDelay(nextMetric?.deltaMs ?? 0, playbackSpeed, pacingMode);
+
+    const timer = setTimeout(() => {
+      onSelectHistoryEventId(nextEvent.id);
+      if (nextIndex >= displayedHistory.length - 1) {
         setInternalIsPlaying(false);
       }
-    }, playbackSpeed);
+    }, delay);
 
     return () => clearTimeout(timer);
-  }, [controlledIsPlaying, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
+  }, [
+    controlledIsPlaying,
+    isPlaying,
+    selectedHistoryIndex,
+    displayedHistory,
+    playbackSpeed,
+    pacingMode,
+    timeMetrics.hopMetrics,
+    onSelectHistoryEventId,
+  ]);
 
-  const isSidebar = layout === "sidebar";
   const sidebarTabColumn = SIDEBAR_TAB_COLUMN[sidebarTab];
   const sidebarContentDirection = shouldReduceMotion ? 0 : sidebarTabDirection;
 
@@ -204,85 +246,6 @@ export function CwdRouteHistory({
     setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
     setSidebarTab(nextTab);
   };
-
-  const fetchTerminateState = useCallback(async (sessionId: string, actionId?: string, signal?: AbortSignal) => {
-    const query = actionId ? `?actionId=${encodeURIComponent(actionId)}` : "";
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/actions/terminate${query}`, {
-      cache: "no-store",
-      credentials: "same-origin",
-      signal,
-    });
-    if (!response.ok) throw new Error("Response control status unavailable");
-    return await response.json() as TerminateStatePayload;
-  }, []);
-
-  useEffect(() => {
-    if (!isSidebar || sidebarTab !== "actions" || !controlSessionId) return;
-    const controller = new AbortController();
-    void fetchTerminateState(controlSessionId, undefined, controller.signal)
-      .then((document) => {
-        setTerminateAction(document.action ?? null);
-        setTerminateCapability(terminateCapabilityFrom(document));
-        setTerminateCapabilitySessionId(controlSessionId);
-      })
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setTerminateCapability("error");
-          setTerminateCapabilitySessionId(controlSessionId);
-        }
-      });
-    return () => controller.abort();
-  }, [controlSessionId, fetchTerminateState, isSidebar, sidebarTab]);
-
-  useEffect(() => {
-    if (!controlSessionId || !visibleTerminateAction || !["requested", "delivered"].includes(visibleTerminateAction.status)) return;
-    const controller = new AbortController();
-    const timer = window.setInterval(() => {
-      void fetchTerminateState(controlSessionId, visibleTerminateAction.actionId, controller.signal)
-        .then((document) => {
-          const action = document.action ?? null;
-          setTerminateAction(action);
-          setTerminateCapability(terminateCapabilityFrom(document));
-          setTerminateCapabilitySessionId(controlSessionId);
-          if (action?.status === "verified") {
-            window.clearInterval(timer);
-            setOperationToast({ kind: "success", title: "Session disconnected", description: "Cowrie emitted the verified session-closed lifecycle event." });
-          } else if (action?.status === "failed") {
-            window.clearInterval(timer);
-          }
-        })
-        .catch(() => undefined);
-    }, 1_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [controlSessionId, fetchTerminateState, visibleTerminateAction]);
-
-  const handleTerminateSession = useCallback(async () => {
-    if (!selectedSession) return;
-    setTerminateProcessing(true);
-    setTerminateError(undefined);
-    try {
-      const response = await fetch(`/api/sessions/${encodeURIComponent(selectedSession.sessionId)}/actions/terminate`, {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmation: selectedSession.sessionId }),
-      });
-      const document = await response.json() as { error?: string; action?: SessionTerminateAction; reconciling?: boolean };
-      if (document.action) setTerminateAction(document.action);
-      if (!response.ok) throw new Error(document.error ?? "Terminate request failed");
-      setTerminateDialogOpen(false);
-      setOperationToast(document.reconciling
-        ? { kind: "success", title: "Reconciling session state", description: "The Pi no longer has this transport. Waiting for Cowrie's closure event before confirming the result." }
-        : { kind: "success", title: "Disconnect requested", description: "The Pi accepted the scoped request. Waiting for Cowrie to confirm session closure." });
-    } catch (error) {
-      setTerminateError(error instanceof Error ? error.message : "Terminate request failed");
-    } finally {
-      setTerminateProcessing(false);
-    }
-  }, [selectedSession]);
 
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
@@ -357,15 +320,15 @@ export function CwdRouteHistory({
             title="Select a session to inspect its path history"
             description="Choose a session from the topology or inspector."
           />
-        ) : historyStatus === "error" && !history.length ? (
+        ) : !isSidebar && historyStatus === "error" && !history.length ? (
           <RegionState
             kind="error"
             title="Session history unavailable"
             description="The selected CWD history could not be loaded."
           />
-        ) : historyStatus === "loading" && !history.length ? (
+        ) : !isSidebar && historyStatus === "loading" && !history.length ? (
           <RegionState kind="loading" title="Loading session history" />
-        ) : !history.length ? (
+        ) : !isSidebar && !history.length ? (
           <RegionState
             kind="empty"
             title="No verified directory transitions"
@@ -399,8 +362,12 @@ export function CwdRouteHistory({
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
-                <span>Hop {selectedHistoryIndex + 1} of {displayedHistory.length}</span>
-                <span>{formatTimestamp(selectedHistoryEvent?.at ?? null)}</span>
+                <span>
+                  {selectedHistoryEvent
+                    ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
+                    : "No route hop recorded"}
+                </span>
+                <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
               </div>
             </div>
             <RegionState
@@ -463,6 +430,20 @@ export function CwdRouteHistory({
               </div>
             )}
                 </div>
+              ) : historyStatus === "error" && !history.length ? (
+                <RegionState
+                  kind="error"
+                  title="Session history unavailable"
+                  description="Route Replay is unavailable, but Command data and Response remain independent."
+                />
+              ) : historyStatus === "loading" && !history.length ? (
+                <RegionState kind="loading" title="Loading session history" />
+              ) : !history.length ? (
+                <RegionState
+                  kind="empty"
+                  title="No verified directory transitions"
+                  description="This session has a known observed path, but Cowrie has not recorded a directory move. Command data and Response remain available from their tabs."
+                />
               ) : (
                 /* Tab 1: Sleek Compact Route Replay */
                 <>
@@ -554,6 +535,29 @@ export function CwdRouteHistory({
                   >
                     {playbackSpeed === 1400 ? "1x" : "2x"}
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onTogglePacingMode) {
+                        onTogglePacingMode();
+                      } else {
+                        setInternalPacingMode((current) => (current === "realistic" ? "uniform" : "realistic"));
+                      }
+                    }}
+                    className={`ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0 flex items-center gap-1 ${
+                      pacingMode === "realistic" ? "border-primary/50 text-primary" : ""
+                    }`}
+                    title={`Playback pacing: ${
+                      pacingMode === "realistic"
+                        ? "Realistic (proportional delay based on real attacker dwell time)"
+                        : "Step (uniform fixed interval)"
+                    }`}
+                    aria-label={`Playback pacing mode: ${pacingMode}`}
+                  >
+                    <Clock className="h-3 w-3" />
+                    <span>{pacingMode === "realistic" ? "Real" : "Step"}</span>
+                  </button>
                 </div>
 
                 {/* Right side: Failures + Hop indicator */}
@@ -577,8 +581,50 @@ export function CwdRouteHistory({
                   )}
 
                   <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs font-semibold text-primary border border-primary-border shrink-0">
-                    Hop {selectedHistoryIndex + 1}/{displayedHistory.length}
+                    Hop {displayedHistoryMetrics.selectedNumber}/{displayedHistoryMetrics.totalItems}
                   </span>
+                </div>
+              </div>
+
+              {/* Interactive Time Scrubber Slider */}
+              <div className="mt-2.5 px-0.5">
+                <div className="flex items-center justify-between gap-2 text-xs font-mono text-text-subtle mb-1">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3 text-text-muted" aria-hidden="true" />
+                    <span className="text-text font-medium">{timeMetrics.summary.formattedCurrentElapsed}</span>
+                    <span className="text-text-muted/60">/</span>
+                    <span>{timeMetrics.summary.formattedTotalDuration}</span>
+                  </span>
+                  <span className="truncate">
+                    {selectedHistoryIndex === 0
+                      ? "Initial entry"
+                      : `Dwell: +${timeMetrics.summary.formattedCurrentDelta}`}
+                  </span>
+                </div>
+
+                {/* Scrub slider */}
+                <div className="relative flex items-center">
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, displayedHistory.length - 1)}
+                    value={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
+                    disabled={displayedHistory.length <= 1}
+                    onChange={(e) => {
+                      handlePause();
+                      const targetIndex = Number(e.target.value);
+                      const targetEvent = displayedHistory[targetIndex];
+                      if (targetEvent) {
+                        onSelectHistoryEventId(targetEvent.id);
+                      }
+                    }}
+                    aria-label="Replay timeline scrubber"
+                    aria-valuemin={0}
+                    aria-valuemax={Math.max(0, displayedHistory.length - 1)}
+                    aria-valuenow={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
+                    aria-valuetext={`Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`}
+                    className="w-full h-1.5 bg-border/60 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 disabled:cursor-not-allowed"
+                  />
                 </div>
               </div>
 
@@ -611,16 +657,23 @@ export function CwdRouteHistory({
                   </span>
                 </div>
 
-                {/* Progress bar */}
-                <div className="mt-1.5 h-1 w-full rounded-full bg-border/40 overflow-hidden">
+                {/* Dual Progress bar: Step progress + Time progress */}
+                <div
+                  className="mt-1.5 relative h-1.5 w-full rounded-full bg-border/40 overflow-hidden"
+                  title={`Time elapsed: ${Math.round(timeMetrics.summary.timeProgressPercent)}% | Hop: ${displayedHistoryMetrics.selectedNumber}/${displayedHistoryMetrics.totalItems}`}
+                >
                   <div
-                    className={`h-full rounded-full transition-all duration-200 ${
+                    className="absolute inset-y-0 left-0 bg-primary/25 transition-all duration-200"
+                    style={{ width: `${timeMetrics.summary.timeProgressPercent}%` }}
+                  />
+                  <div
+                    className={`relative h-full rounded-full transition-all duration-200 ${
                       isFailedHop ? "bg-warning" : "bg-primary"
                     }`}
                     style={{
                       width: `${
-                        displayedHistory.length > 0
-                          ? Math.min(100, Math.max(0, ((selectedHistoryIndex + 1) / displayedHistory.length) * 100))
+                        displayedHistoryMetrics.totalItems > 0
+                          ? Math.min(100, Math.max(0, (displayedHistoryMetrics.selectedNumber / displayedHistoryMetrics.totalItems) * 100))
                           : 0
                       }%`,
                     }}
@@ -629,7 +682,12 @@ export function CwdRouteHistory({
               </div>
             </div>
 
-            {historyCursor && (
+            <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-subtle" aria-live="polite">
+              <span>{historyComplete ? "Complete retained history loaded" : `${history.length} of ${historyTotalItems} retained events loaded`}</span>
+              <span className="shrink-0 font-mono">{historyTotalItems} total</span>
+            </div>
+
+            {!historyComplete && historyCursor && (
               <button
                 type="button"
                 className="ui-button mt-3"
@@ -641,7 +699,7 @@ export function CwdRouteHistory({
                 ) : (
                   <Plus className="h-4 w-4" />
                 )}
-                Load earlier moves
+                Load earlier moves ({Math.max(0, historyTotalItems - history.length)} remaining)
               </button>
             )}
 
@@ -654,9 +712,20 @@ export function CwdRouteHistory({
                 {displayedHistory.map((event, index) => {
                   const isCurrent = event.id === activeHistoryEventId;
                   const isFailed = event.action === "failed_change";
+                  const hopMetric = timeMetrics.hopMetrics[index];
+                  const isPauseDetected = (hopMetric?.deltaMs ?? 0) >= 60_000;
 
                   return (
                     <li key={event.id} className="relative pb-2.5 last:pb-0">
+                      {index > 0 && isPauseDetected && (
+                        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-mono text-warning select-none">
+                          <div className="h-px w-3 bg-warning/40" aria-hidden="true" />
+                          <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-[10px] font-medium">
+                            <Clock className="h-2.5 w-2.5" aria-hidden="true" />
+                            Attacker pause: +{hopMetric?.formattedDelta}
+                          </span>
+                        </div>
+                      )}
                       <span
                         className={`absolute -left-[27px] top-2.5 flex h-2.5 w-2.5 rounded-full border-2 border-surface ${
                           isFailed
@@ -686,12 +755,15 @@ export function CwdRouteHistory({
                         <div className="flex items-center justify-between gap-1.5 min-w-0">
                           <p className="truncate font-medium text-xs text-text min-w-0">
                             <span className="mr-1.5 font-mono text-xs text-text-subtle">
-                              {String(index + 1).padStart(2, "0")}
+                              {String(displayedHistoryMetrics.indexOffset + index + 1).padStart(2, "0")}
                             </span>
                             {actionLabel(event)}
                           </p>
-                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1">
-                            {formatTimestamp(event.at)}
+                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1 flex items-center gap-1.5">
+                            <span>{formatTimestamp(event.at)}</span>
+                            <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-[10px] text-text-muted">
+                              {hopMetric?.formattedElapsed ?? "+00:00"}
+                            </span>
                           </time>
                         </div>
                         <div className="mt-1.5 space-y-0.5 font-mono text-xs">
@@ -733,22 +805,36 @@ export function CwdRouteHistory({
                           </div>
                         </div>
                         <div
-                          className="mt-1.5 flex items-center gap-1.5 text-xs text-text-subtle"
+                          className="mt-1.5 flex items-center justify-between gap-1.5 text-xs text-text-subtle"
                           title={event.sequence !== null ? `Event Sequence: ${event.sequence}` : undefined}
                         >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              event.status === "confirmed"
-                                ? "bg-success"
-                                : event.status === "conditional_candidate"
-                                  ? "bg-warning"
-                                  : isFailed
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                event.status === "confirmed"
+                                  ? "bg-success"
+                                  : event.status === "conditional_candidate"
                                     ? "bg-warning"
-                                    : "bg-info"
+                                    : isFailed
+                                      ? "bg-warning"
+                                      : "bg-info"
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span className="truncate">{statusLabel(event.status)}</span>
+                          </div>
+
+                          <span
+                            className={`inline-flex shrink-0 items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                              isPauseDetected
+                                ? "bg-warning-subtle text-warning border border-warning-border font-medium"
+                                : "text-text-subtle bg-surface border border-border/50"
                             }`}
-                            aria-hidden="true"
-                          />
-                          <span>{statusLabel(event.status)}</span>
+                            title={`Dwell before this hop: ${hopMetric?.formattedDelta ?? "0s"}`}
+                          >
+                            <Clock className="h-2.5 w-2.5" aria-hidden="true" />
+                            <span>{index === 0 ? "Entry" : `+${hopMetric?.formattedDelta ?? "0s"}`}</span>
+                          </span>
                         </div>
                       </button>
                     </li>

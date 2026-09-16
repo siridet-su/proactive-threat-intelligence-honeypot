@@ -18,6 +18,7 @@ import type {
 import {
   compactDirectoryPath,
   formatTimestamp,
+  getDirectorySessionCounts,
   isSensitiveDirectory,
   pathBreadcrumbs,
   statusBadgeClass,
@@ -30,7 +31,6 @@ interface FilesystemInspectorProps {
   selectedClosedSession: FilesystemClosedSession | null;
   selectedNode: FilesystemTopologyNode | null;
   sessions: FilesystemTopologySession[];
-  liveSessionCount: number;
   selectedSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string) => void;
@@ -38,15 +38,16 @@ interface FilesystemInspectorProps {
 }
 
 type InspectorTab = "session" | "directory";
-type DirectoryView = "recent" | "all";
+type DirectoryView = "all" | "exact" | "sources";
 
 interface DirectorySessionRowProps {
   session: FilesystemTopologySession;
   selected: boolean;
   onSelect?: () => void;
+  isExact?: boolean;
 }
 
-function DirectorySessionRow({ session, selected, onSelect }: DirectorySessionRowProps) {
+function DirectorySessionRow({ session, selected, onSelect, isExact }: DirectorySessionRowProps) {
   const path = session.cwdState.path;
   return (
     <button
@@ -60,7 +61,20 @@ function DirectorySessionRow({ session, selected, onSelect }: DirectorySessionRo
       }`}
     >
       <span className="min-w-0">
-        <span className="block truncate font-mono text-xs text-text">{session.sourceIp}</span>
+        <span className="flex items-center gap-1.5 font-mono text-xs text-text truncate">
+          <span>{session.sourceIp}</span>
+          {isExact !== undefined && (
+            <span
+              className={`rounded px-1.5 py-0.2 text-[10px] font-semibold ${
+                isExact
+                  ? "bg-primary-subtle text-primary border border-primary-border/50"
+                  : "bg-surface-subtle text-text-subtle border border-border"
+              }`}
+            >
+              {isExact ? "Exact" : "Subdir"}
+            </span>
+          )}
+        </span>
         <span className="mt-0.5 block truncate font-mono text-xs text-text-muted" title={path ?? "Unknown path"}>
           {path ? compactDirectoryPath(path) : "Unknown path"}
         </span>
@@ -85,14 +99,13 @@ export function FilesystemInspector({
   selectedClosedSession,
   selectedNode,
   sessions,
-  liveSessionCount,
   selectedSessionId,
   onSelectSession,
   onSelectPath,
   onOpenAudit,
 }: FilesystemInspectorProps) {
   const [activeTab, setActiveTab] = useState<InspectorTab>("session");
-  const [directoryView, setDirectoryView] = useState<DirectoryView>("recent");
+  const [directoryView, setDirectoryView] = useState<DirectoryView>("all");
 
   const lastSelectedPath = useRef<string | null>(selectedNode?.path ?? null);
   const lastSelectedSession = useRef<string | null>(selectedSessionId);
@@ -129,6 +142,21 @@ export function FilesystemInspector({
     [selectedNode],
   );
 
+  const nodeCounts = useMemo(() => {
+    if (!selectedNode) return { exactCount: 0, descendantCount: 0, branchCount: 0, uniqueSourcesCount: 0 };
+    return getDirectorySessionCounts(selectedNode.path, selectedNode.sessionIds, sessions);
+  }, [selectedNode, sessions]);
+
+  const exactSessions = useMemo(() => {
+    if (!selectedNode) return [];
+    return sessions
+      .filter((s) => s.cwdState.path === selectedNode.path)
+      .sort(
+        (a, b) =>
+          (Date.parse(b.cwdState.observedAt ?? "") || 0) - (Date.parse(a.cwdState.observedAt ?? "") || 0),
+      );
+  }, [selectedNode, sessions]);
+
   const branchSessions = useMemo(() => {
     if (!selectedNode) return [];
     const sessionIds = new Set(selectedNode.sessionIds);
@@ -140,15 +168,26 @@ export function FilesystemInspector({
       );
   }, [selectedNode, sessions]);
 
+  const siblingSessions = useMemo(() => {
+    if (!selectedSession) return [];
+    return sessions
+      .filter((s) => s.sourceIp === selectedSession.sourceIp && s.sessionId !== selectedSession.sessionId)
+      .sort(
+        (left, right) =>
+          (Date.parse(right.cwdState.observedAt ?? "") || 0) - (Date.parse(left.cwdState.observedAt ?? "") || 0),
+      );
+  }, [selectedSession, sessions]);
+
   const sourceGroups = useMemo(() => {
+    const listToGroup = directoryView === "exact" ? exactSessions : branchSessions;
     const grouped = new Map<string, FilesystemTopologySession[]>();
-    for (const session of branchSessions) {
+    for (const session of listToGroup) {
       const group = grouped.get(session.sourceIp) ?? [];
       group.push(session);
       grouped.set(session.sourceIp, group);
     }
     return [...grouped.entries()].map(([sourceIp, sourceSessions]) => ({ sourceIp, sessions: sourceSessions }));
-  }, [branchSessions]);
+  }, [branchSessions, directoryView, exactSessions]);
 
   return (
     <div className={embedded ? "" : "ui-panel h-fit p-5"}>
@@ -207,8 +246,11 @@ export function FilesystemInspector({
             <FolderOpen className="h-3.5 w-3.5" aria-hidden="true" />
             Directory
             {selectedNode && (
-              <span className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-mono font-bold text-primary">
-                {liveSessionCount}
+              <span
+                className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-mono font-bold text-primary"
+                title={`${nodeCounts.exactCount} at exact path, ${nodeCounts.descendantCount} in child directories (${nodeCounts.branchCount} total across branch)`}
+              >
+                {nodeCounts.branchCount}
               </span>
             )}
           </button>
@@ -265,6 +307,58 @@ export function FilesystemInspector({
                     </dd>
                   </div>
                 </>
+              )}
+
+              {siblingSessions.length > 0 && (
+                <div className="border-t border-border pt-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-semibold text-text">
+                      Other active sessions from this IP ({siblingSessions.length})
+                    </span>
+                    <span className="text-[11px] text-text-subtle">Concurrent routes</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto overscroll-contain pr-1">
+                    {siblingSessions.map((sibling) => (
+                      <div
+                        key={sibling.sessionId}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-2.5 py-1.5 transition-colors hover:border-border-strong hover:bg-surface-hover"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => onSelectSession(sibling.sessionId)}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring rounded"
+                          aria-label={`Switch to session ${sibling.sessionId}; path ${sibling.cwdState.path ?? "unknown"}`}
+                        >
+                          <div className="min-w-0">
+                            <span className="block font-mono text-xs text-text truncate">
+                              {sibling.sessionId.slice(0, 10)}…
+                            </span>
+                            <span
+                              className="block font-mono text-xs text-text-muted truncate"
+                              title={sibling.cwdState.path ?? "Unknown path"}
+                            >
+                              {sibling.cwdState.path ? compactDirectoryPath(sibling.cwdState.path) : "Unknown path"}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-text-subtle shrink-0">
+                            {formatTimestamp(sibling.cwdState.observedAt)}
+                          </span>
+                        </button>
+                        {onOpenAudit && (
+                          <button
+                            type="button"
+                            title={`Audit sibling session ${sibling.sessionId}`}
+                            aria-label={`Audit sibling session ${sibling.sessionId}`}
+                            onClick={() => onOpenAudit(sibling.sessionId)}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-primary hover:bg-primary-subtle transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+                          >
+                            <Route className="h-3.5 w-3.5" aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
 
               <div className="mt-4 flex gap-2 rounded-lg border border-warning-border bg-warning-subtle p-2.5 text-xs text-text-muted">
@@ -329,51 +423,102 @@ export function FilesystemInspector({
                 )}
               </div>
 
+              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs select-none">
+                <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">Exact path</div>
+                  <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.exactCount}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">In subdirs</div>
+                  <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.descendantCount}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
+                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">Unique sources</div>
+                  <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.uniqueSourcesCount}</div>
+                </div>
+              </div>
+
               <div className="mt-4">
                 <div className="flex items-center justify-between gap-2 border-b border-border pb-2 text-xs">
-                  <span className="font-semibold text-text">Live sessions</span>
+                  <span className="font-semibold text-text">Directory sessions</span>
                   <div className="flex items-center gap-1" aria-label="Directory session grouping">
-                    <button
-                      type="button"
-                      aria-pressed={directoryView === "recent"}
-                      onClick={() => setDirectoryView("recent")}
-                      className={`min-h-9 rounded px-2 text-xs font-medium transition-colors ${
-                        directoryView === "recent"
-                          ? "bg-surface-hover font-semibold text-text"
-                          : "text-text-subtle hover:text-text"
-                      }`}
-                    >
-                      Recent ({branchSessions.length})
-                    </button>
                     <button
                       type="button"
                       aria-pressed={directoryView === "all"}
                       onClick={() => setDirectoryView("all")}
-                      className={`min-h-9 rounded px-2 text-xs font-medium transition-colors ${
+                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
                         directoryView === "all"
                           ? "bg-surface-hover font-semibold text-text"
                           : "text-text-subtle hover:text-text"
                       }`}
                     >
-                      By IP ({sourceGroups.length})
+                      All in branch ({nodeCounts.branchCount})
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={directoryView === "exact"}
+                      onClick={() => setDirectoryView("exact")}
+                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
+                        directoryView === "exact"
+                          ? "bg-surface-hover font-semibold text-text"
+                          : "text-text-subtle hover:text-text"
+                      }`}
+                    >
+                      Exact path ({nodeCounts.exactCount})
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={directoryView === "sources"}
+                      onClick={() => setDirectoryView("sources")}
+                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
+                        directoryView === "sources"
+                          ? "bg-surface-hover font-semibold text-text"
+                          : "text-text-subtle hover:text-text"
+                      }`}
+                    >
+                      By source ({sourceGroups.length})
                     </button>
                   </div>
                 </div>
 
-                {branchSessions.length ? (
-                  directoryView === "recent" ? (
-                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="Recent directory activity">
+                {directoryView === "all" ? (
+                  branchSessions.length ? (
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="All directory sessions in branch">
                       {branchSessions.map((session) => (
                         <DirectorySessionRow
                           key={session.sessionId}
                           session={session}
                           selected={session.sessionId === selectedSessionId}
+                          isExact={session.cwdState.path === selectedNode.path}
                           onSelect={() => onSelectSession(session.sessionId)}
                         />
                       ))}
                     </div>
                   ) : (
-                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="All directory activity grouped by source">
+                    <p className="mt-3 text-xs text-text-muted">No live sessions are mapped to this directory branch.</p>
+                  )
+                ) : directoryView === "exact" ? (
+                  exactSessions.length ? (
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="Exact path directory sessions">
+                      {exactSessions.map((session) => (
+                        <DirectorySessionRow
+                          key={session.sessionId}
+                          session={session}
+                          selected={session.sessionId === selectedSessionId}
+                          isExact={true}
+                          onSelect={() => onSelectSession(session.sessionId)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-text-muted">
+                      No active sessions are directly located in <code className="font-mono text-text">{selectedNode.path}</code>.
+                      {nodeCounts.descendantCount > 0 ? ` All ${nodeCounts.descendantCount} active sessions in this branch are inside subdirectories.` : ""}
+                    </p>
+                  )
+                ) : (
+                  sourceGroups.length ? (
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="Directory activity grouped by source">
                       {sourceGroups.map((source) => (
                         <details key={source.sourceIp} className="group rounded-lg border border-border bg-surface-subtle overflow-hidden">
                           <summary className="cursor-pointer list-none px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [&::-webkit-details-marker]:hidden">
@@ -398,6 +543,7 @@ export function FilesystemInspector({
                                 key={session.sessionId}
                                 session={session}
                                 selected={session.sessionId === selectedSessionId}
+                                isExact={session.cwdState.path === selectedNode.path}
                                 onSelect={() => onSelectSession(session.sessionId)}
                               />
                             ))}
@@ -405,9 +551,9 @@ export function FilesystemInspector({
                         </details>
                       ))}
                     </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-text-muted">No sources are mapped to this directory branch.</p>
                   )
-                ) : (
-                  <p className="mt-3 text-xs text-text-muted">No live sessions are mapped to this directory branch.</p>
                 )}
               </div>
             </>

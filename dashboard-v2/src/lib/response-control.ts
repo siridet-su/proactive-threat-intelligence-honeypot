@@ -70,13 +70,36 @@ function responseAgentBase(): URL {
   return base;
 }
 
-export async function responseControlHealthy(): Promise<boolean> {
+let healthCache: { healthy: boolean; expiresAt: number } | null = null;
+export const RESPONSE_HEALTH_CACHE_TTL_MS = 10_000;
+
+export function resetResponseControlHealthCache(): void {
+  healthCache = null;
+}
+
+export function responseControlCachedHealth(): boolean {
+  if (healthCache && healthCache.expiresAt > Date.now()) {
+    return healthCache.healthy;
+  }
+  return false;
+}
+
+export async function responseControlHealthy(forceRefresh = false): Promise<boolean> {
+  const now = Date.now();
+  if (!forceRefresh && healthCache && healthCache.expiresAt > now) {
+    return healthCache.healthy;
+  }
+
   const token = responseAgentToken();
-  if (!token) return false;
+  if (!token) {
+    healthCache = { healthy: false, expiresAt: now + RESPONSE_HEALTH_CACHE_TTL_MS };
+    return false;
+  }
   let endpoint: URL;
   try {
     endpoint = new URL("/v1/health", responseAgentBase());
   } catch {
+    healthCache = { healthy: false, expiresAt: now + RESPONSE_HEALTH_CACHE_TTL_MS };
     return false;
   }
 
@@ -89,10 +112,16 @@ export async function responseControlHealthy(): Promise<boolean> {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
-    if (!response.ok) return false;
+    if (!response.ok) {
+      healthCache = { healthy: false, expiresAt: Date.now() + RESPONSE_HEALTH_CACHE_TTL_MS };
+      return false;
+    }
     const document: unknown = await response.json();
-    return Boolean(document && typeof document === "object" && (document as { ok?: unknown }).ok === true && (document as { status?: unknown }).status === "ready");
+    const healthy = Boolean(document && typeof document === "object" && (document as { ok?: unknown }).ok === true && (document as { status?: unknown }).status === "ready");
+    healthCache = { healthy, expiresAt: Date.now() + RESPONSE_HEALTH_CACHE_TTL_MS };
+    return healthy;
   } catch {
+    healthCache = { healthy: false, expiresAt: Date.now() + RESPONSE_HEALTH_CACHE_TTL_MS };
     return false;
   } finally {
     clearTimeout(timeout);

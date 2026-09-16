@@ -5,7 +5,13 @@ import { join } from "node:path";
 
 vi.mock("server-only", () => ({}));
 
-import { requestSessionTermination, responseControlConfigured, responseControlHealthy } from "../src/lib/response-control";
+import {
+  requestSessionTermination,
+  resetResponseControlHealthCache,
+  responseControlCachedHealth,
+  responseControlConfigured,
+  responseControlHealthy,
+} from "../src/lib/response-control";
 
 const originalURL = process.env.COWRIE_RESPONSE_AGENT_URL;
 const originalToken = process.env.COWRIE_RESPONSE_AGENT_TOKEN;
@@ -15,6 +21,7 @@ let fixtureDirectory: string;
 
 describe("response control client", () => {
   beforeEach(() => {
+    resetResponseControlHealthCache();
     fixtureDirectory = mkdtempSync(join(tmpdir(), "pti-response-control-"));
     process.env.COWRIE_RESPONSE_AGENT_URL = "http://100.118.43.30:8788";
     process.env.COWRIE_RESPONSE_AGENT_TOKEN = "01234567890123456789012345678901";
@@ -22,6 +29,7 @@ describe("response control client", () => {
   });
 
   afterEach(() => {
+    resetResponseControlHealthCache();
     vi.restoreAllMocks();
     if (originalURL === undefined) delete process.env.COWRIE_RESPONSE_AGENT_URL;
     else process.env.COWRIE_RESPONSE_AGENT_URL = originalURL;
@@ -73,6 +81,32 @@ describe("response control client", () => {
     ));
 
     expect(await responseControlHealthy()).toBe(false);
+  });
+
+  it("caches healthy status within TTL to avoid repeated outbound pings", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ ok: true, status: "ready" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+
+    expect(await responseControlHealthy()).toBe(true);
+    expect(await responseControlHealthy()).toBe(true);
+    expect(await responseControlHealthy()).toBe(true);
+    // Only 1 fetch call because subsequent calls hit the TTL cache
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(responseControlCachedHealth()).toBe(true);
+  });
+
+  it("forceRefresh bypasses the health cache", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(
+      JSON.stringify({ ok: true, status: "ready" }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+
+    expect(await responseControlHealthy()).toBe(true);
+    expect(await responseControlHealthy(true)).toBe(true);
+    // 2 fetch calls because forceRefresh was set
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("prefers a private absolute token file for deployed runtimes", async () => {

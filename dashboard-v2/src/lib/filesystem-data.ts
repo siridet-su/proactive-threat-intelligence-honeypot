@@ -2,6 +2,7 @@ import { Long, type Document } from "mongodb";
 
 import type {
   CwdObservationStatus,
+  FilesystemSessionAuditSummary,
   SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
 
@@ -71,6 +72,68 @@ export function buildSessionCwdHistoryQuery(sessionId: string, cursor: string | 
   };
 }
 
+export interface AuditSessionCursor {
+  closedAt: string;
+  sessionId: string;
+}
+
+export function decodeAuditSessionCursor(cursor: string | null): AuditSessionCursor | null {
+  if (!cursor) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      closedAt?: unknown;
+      sessionId?: unknown;
+    };
+    if (typeof decoded.closedAt !== "string" || typeof decoded.sessionId !== "string") return null;
+    const closedAt = asDateString(decoded.closedAt);
+    return closedAt && decoded.sessionId ? { closedAt, sessionId: decoded.sessionId } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function encodeAuditSessionCursor(closedAt: string, sessionId: string): string {
+  return Buffer.from(JSON.stringify({ closedAt, sessionId })).toString("base64url");
+}
+
+export function buildAuditSessionsQuery(options: {
+  search?: string | null;
+  cursor?: string | null;
+}): Document {
+  const conditions: Document[] = [
+    { "lifecycle.status": "closed" },
+    { "cwdState.path": { $type: "string", $ne: "" } },
+  ];
+
+  if (options.search?.trim()) {
+    const q = options.search.trim();
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const rx = new RegExp(escaped, "i");
+    conditions.push({
+      $or: [
+        { sessionId: { $regex: rx } },
+        { sourceIp: { $regex: rx } },
+        { "cwdState.path": { $regex: rx } },
+      ],
+    });
+  }
+
+  const decoded = decodeAuditSessionCursor(options.cursor ?? null);
+  if (decoded) {
+    conditions.push({
+      $or: [
+        { "lifecycle.closedAt": { $lt: decoded.closedAt } },
+        {
+          "lifecycle.closedAt": decoded.closedAt,
+          sessionId: { $lt: decoded.sessionId },
+        },
+      ],
+    });
+  }
+
+  return conditions.length === 1 ? conditions[0] : { $and: conditions };
+}
+
 export function normalizeHistoryEvent(document: Document): SessionCwdHistoryEvent | null {
   const sessionId = asString(document.sessionId) ?? asString(document.session_id);
   const at = asDateString(document.at) ?? asDateString(document.timestamp);
@@ -89,5 +152,46 @@ export function normalizeHistoryEvent(document: Document): SessionCwdHistoryEven
     action,
     status: asStatus(document.status),
     sourceEventId: asString(document.sourceEventId),
+  };
+}
+
+function canonicalObservedPath(value: unknown): string | null {
+  const path = asString(value);
+  return path?.startsWith("/") ? path : null;
+}
+
+/**
+ * Normalizes the result of the MongoDB history aggregation and combines it with
+ * the session's current/last CWD. Root is a traversal boundary rather than a
+ * home directory, so it does not make an otherwise home-only session unsafe.
+ */
+export function normalizeSessionAuditSummary(
+  currentPath: string | null,
+  fromPaths: unknown,
+  toPaths: unknown,
+  eventCount: unknown,
+): FilesystemSessionAuditSummary {
+  const visited = new Set<string>();
+  const register = (value: unknown) => {
+    const path = canonicalObservedPath(value);
+    if (path) visited.add(path);
+  };
+
+  register(currentPath);
+  if (Array.isArray(fromPaths)) fromPaths.forEach(register);
+  if (Array.isArray(toPaths)) toPaths.forEach(register);
+
+  const visitedPaths = [...visited].sort((left, right) => left.localeCompare(right));
+  const nonRootPaths = visitedPaths.filter((path) => path !== "/");
+  const hasHomePath = nonRootPaths.some((path) => path === "/home" || path.startsWith("/home/"));
+  const hasOutsideHomePath = nonRootPaths.some((path) => path !== "/home" && !path.startsWith("/home/"));
+  const normalizedEventCount = typeof eventCount === "number" && Number.isSafeInteger(eventCount) && eventCount >= 0
+    ? eventCount
+    : 0;
+
+  return {
+    visitedPaths,
+    homeOnly: hasHomePath && !hasOutsideHomePath,
+    eventCount: normalizedEventCount,
   };
 }

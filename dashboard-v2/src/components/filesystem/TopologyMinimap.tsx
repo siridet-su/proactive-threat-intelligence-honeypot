@@ -194,25 +194,33 @@ export function TopologyMinimap({
 
                   {/* Callout Leader Lines (Directory Node to Attacker IP) */}
                   {calloutPositions.map(({ callout, position }) => {
-                    const targetNode = graphNodeByPath.get(callout.path);
-                    if (!targetNode) return null;
-                    const isSelectedSession = callout.sessionIds.includes(selectedSessionId ?? "");
-                    const startX = normalizeX(targetNode.x);
-                    const startY = normalizeY(targetNode.y);
-                    const endX = normalizeX(position.x);
-                    const endY = normalizeY(position.y);
-                    const midX = (startX + endX) / 2;
-                    return (
-                      <path
-                        key={`minimap-leader-${callout.sourceIp}`}
-                        d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
-                        fill="none"
-                        stroke={isSelectedSession ? "var(--primary)" : "var(--border-strong)"}
-                        strokeWidth={isSelectedSession ? "1" : "0.6"}
-                        strokeDasharray={isSelectedSession ? undefined : "1.5 1.5"}
-                        strokeOpacity={isSelectedSession ? 0.95 : 0.45}
-                      />
-                    );
+                    const paths = callout.targetPaths?.length ? callout.targetPaths : [callout.path];
+                    const isSelectedCluster = callout.sessionIds.includes(selectedSessionId ?? "");
+                    const selectedSessionPath = selectedSessionId
+                      ? callout.sessions?.find((s) => s.sessionId === selectedSessionId)?.path
+                      : null;
+
+                    return paths.map((path, pIdx) => {
+                      const targetNode = graphNodeByPath.get(path);
+                      if (!targetNode) return null;
+                      const isPrimaryActivePath = isSelectedCluster && (path === selectedSessionPath || (!selectedSessionPath && path === callout.path));
+                      const startX = normalizeX(targetNode.x);
+                      const startY = normalizeY(targetNode.y);
+                      const endX = normalizeX(position.x);
+                      const endY = normalizeY(position.y);
+                      const midX = (startX + endX) / 2;
+                      return (
+                        <path
+                          key={`minimap-leader-${callout.sourceIp}-${path}-${pIdx}`}
+                          d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
+                          fill="none"
+                          stroke={isPrimaryActivePath ? "var(--primary)" : isSelectedCluster ? "var(--primary)" : "var(--border-strong)"}
+                          strokeWidth={isPrimaryActivePath ? "1" : isSelectedCluster ? "0.8" : "0.5"}
+                          strokeDasharray={isPrimaryActivePath ? undefined : "1.5 1.5"}
+                          strokeOpacity={isPrimaryActivePath ? 0.95 : isSelectedCluster ? 0.7 : 0.4}
+                        />
+                      );
+                    });
                   })}
 
                   {/* Directory Nodes */}

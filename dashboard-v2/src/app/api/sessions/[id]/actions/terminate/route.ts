@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
-import { requestSessionTermination, responseControlConfigured, responseControlHealthy } from "@/lib/response-control";
+import {
+  requestSessionTermination,
+  responseControlCachedHealth,
+  responseControlConfigured,
+  responseControlHealthy,
+} from "@/lib/response-control";
 import {
   createTerminateAction,
   getTerminateAction,
+  getTerminateActionWithState,
   markTerminateActionDelivered,
   markTerminateActionFailed,
   sessionIsActive,
@@ -34,11 +40,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const actionId = new URL(request.url).searchParams.get("actionId") ?? undefined;
   if (actionId && !ACTION_ID_PATTERN.test(actionId)) return NextResponse.json({ error: "Invalid action ID" }, { status: 400 });
   const configured = responseControlConfigured();
-  const [action, active, healthy] = await Promise.all([
-    administrator ? getTerminateAction(id, actionId) : null,
-    sessionIsActive(id),
-    administrator && configured ? responseControlHealthy() : false,
+
+  // If actionId is provided, this request is checking status on an existing/pending action.
+  // We do NOT perform an active Pi health check over the network during status polling,
+  // preventing outbound ping storms. We reuse cached health state instead.
+  const isStatusPoll = Boolean(actionId);
+
+  const [{ action, active }, healthy] = await Promise.all([
+    administrator
+      ? getTerminateActionWithState(id, actionId)
+      : (async () => ({ action: null, active: await sessionIsActive(id) }))(),
+    administrator && configured
+      ? (isStatusPoll ? responseControlCachedHealth() : responseControlHealthy())
+      : false,
   ]);
+
   return NextResponse.json({
     available: administrator && healthy,
     authorized: administrator,

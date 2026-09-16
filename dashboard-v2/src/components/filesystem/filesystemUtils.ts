@@ -1,3 +1,4 @@
+import type { RegionStatus } from "@/components/ui/RegionState";
 import type {
   FilesystemClosedSession,
   FilesystemTopologyNode,
@@ -39,17 +40,70 @@ export const DEFAULT_TIMELINE_SIDEBAR_WIDTH = 420;
 export const MAP_MIN_ZOOM = 0.35;
 export const MAP_MAX_ZOOM = 2.75;
 
+export function clampTimelineSidebarWidth(targetWidth: number, viewportWidth?: number): number {
+  if (!Number.isFinite(targetWidth)) return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
+  const maxAllowed = viewportWidth && Number.isFinite(viewportWidth)
+    ? Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, Math.floor(viewportWidth * 0.65))
+    : MAX_TIMELINE_SIDEBAR_WIDTH;
+  const effectiveMax = Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, maxAllowed);
+  return Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, Math.min(effectiveMax, Math.round(targetWidth)));
+}
+
+export function getMotionDuration(shouldReduceMotion: boolean, normalDuration = 0.55): number {
+  return shouldReduceMotion ? 0 : normalDuration;
+}
+
 export function isSnapshot(value: unknown): value is FilesystemTopologySnapshot {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<FilesystemTopologySnapshot>;
-  return Array.isArray(candidate.nodes) && Array.isArray(candidate.sessions) && Array.isArray(candidate.recentClosedSessions) &&
+  const hasAuditSummary = (session: unknown) => {
+    if (!session || typeof session !== "object") return false;
+    const summary = (session as Partial<FilesystemTopologySession>).auditSummary;
+    return Boolean(summary && Array.isArray(summary.visitedPaths) && typeof summary.homeOnly === "boolean" &&
+      typeof summary.eventCount === "number");
+  };
+  return Array.isArray(candidate.nodes) && Array.isArray(candidate.sessions) && candidate.sessions.every(hasAuditSummary) &&
+    Array.isArray(candidate.recentClosedSessions) && candidate.recentClosedSessions.every(hasAuditSummary) &&
     typeof candidate.truncated === "boolean" && typeof candidate.generatedAt === "string";
 }
 
 export function isHistoryPage(value: unknown): value is SessionCwdHistoryPage {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<SessionCwdHistoryPage>;
-  return Array.isArray(candidate.items) && (typeof candidate.nextCursor === "string" || candidate.nextCursor === null);
+  return Array.isArray(candidate.items) && (typeof candidate.nextCursor === "string" || candidate.nextCursor === null) &&
+    Number.isSafeInteger(candidate.totalItems) && (candidate.totalItems ?? -1) >= 0 &&
+    Number.isSafeInteger(candidate.totalSuccessfulItems) && (candidate.totalSuccessfulItems ?? -1) >= 0 &&
+    (candidate.totalSuccessfulItems ?? 1) <= (candidate.totalItems ?? 0) &&
+    typeof candidate.complete === "boolean";
+}
+
+export interface HistoryWindowMetrics {
+  totalItems: number;
+  loadedItems: number;
+  unloadedItems: number;
+  indexOffset: number;
+  selectedNumber: number;
+}
+
+/**
+ * Maps a selected index in the newest loaded history window to its stable,
+ * one-based position in the complete retained route.
+ */
+export function getHistoryWindowMetrics(
+  loadedItems: number,
+  reportedTotalItems: number,
+  selectedIndex: number,
+): HistoryWindowMetrics {
+  const safeLoadedItems = Math.max(0, Math.trunc(loadedItems));
+  const totalItems = Math.max(safeLoadedItems, Math.trunc(reportedTotalItems));
+  const indexOffset = totalItems - safeLoadedItems;
+  return {
+    totalItems,
+    loadedItems: safeLoadedItems,
+    unloadedItems: indexOffset,
+    indexOffset,
+    selectedNumber: selectedIndex >= 0 ? indexOffset + selectedIndex + 1 : 0,
+  };
 }
 
 export function formatTimestamp(value: string | null): string {
@@ -57,6 +111,186 @@ export function formatTimestamp(value: string | null): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "No timestamp";
   return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+}
+
+/**
+ * Format a duration in milliseconds into a concise forensic time delta.
+ */
+export function formatTimeDelta(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "0s";
+  if (ms < 1000) return "<1s";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  if (totalMinutes < 60) {
+    return `${totalMinutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+  }
+  const totalHours = Math.floor(totalMinutes / 60);
+  const remainingMinutes = totalMinutes % 60;
+  if (totalHours < 24) {
+    return `${totalHours}h ${String(remainingMinutes).padStart(2, "0")}m`;
+  }
+  const totalDays = Math.floor(totalHours / 24);
+  const remainingHours = totalHours % 24;
+  return `${totalDays}d ${String(remainingHours).padStart(2, "0")}h`;
+}
+
+/**
+ * Format relative elapsed time (e.g. from session start) in mm:ss or hh:mm:ss.
+ */
+export function formatElapsedTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "+00:00";
+  const totalSeconds = Math.floor(ms / 1000);
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  if (hours > 0) {
+    return `+${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `+${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export interface HopTimeMetrics {
+  eventId: string;
+  deltaMs: number;
+  formattedDelta: string;
+  elapsedMs: number;
+  formattedElapsed: string;
+  timeProgressPercent: number;
+}
+
+export interface SessionReplayTimeSummary {
+  totalDurationMs: number;
+  formattedTotalDuration: string;
+  currentElapsedMs: number;
+  formattedCurrentElapsed: string;
+  currentDeltaMs: number;
+  formattedCurrentDelta: string;
+  timeProgressPercent: number;
+}
+
+/**
+ * Calculates per-hop time deltas and cumulative elapsed times for a chronological history list.
+ */
+export function calculateHistoryTimeMetrics(
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedIndex: number,
+): {
+  hopMetrics: HopTimeMetrics[];
+  summary: SessionReplayTimeSummary;
+} {
+  if (!displayedHistory.length) {
+    return {
+      hopMetrics: [],
+      summary: {
+        totalDurationMs: 0,
+        formattedTotalDuration: "0s",
+        currentElapsedMs: 0,
+        formattedCurrentElapsed: "+00:00",
+        currentDeltaMs: 0,
+        formattedCurrentDelta: "0s",
+        timeProgressPercent: 0,
+      },
+    };
+  }
+
+  const parsedTimes = displayedHistory.map((ev) => (ev.at ? new Date(ev.at).getTime() : NaN));
+  const validTimes = parsedTimes.filter((t) => Number.isFinite(t));
+  const firstTime = validTimes.length > 0 ? validTimes[0] : NaN;
+  const lastTime = validTimes.length > 0 ? validTimes[validTimes.length - 1] : NaN;
+  const totalDurationMs = Number.isFinite(firstTime) && Number.isFinite(lastTime) ? Math.max(0, lastTime - firstTime) : 0;
+
+  const hopMetrics: HopTimeMetrics[] = [];
+  let prevTime = firstTime;
+
+  for (let i = 0; i < displayedHistory.length; i++) {
+    const ev = displayedHistory[i];
+    const currTime = parsedTimes[i];
+    let deltaMs = 0;
+    let elapsedMs = 0;
+
+    if (Number.isFinite(currTime) && Number.isFinite(firstTime)) {
+      if (i > 0 && Number.isFinite(prevTime)) {
+        deltaMs = Math.max(0, currTime - prevTime);
+      }
+      elapsedMs = Math.max(0, currTime - firstTime);
+      prevTime = currTime;
+    }
+
+    const timeProgressPercent =
+      totalDurationMs > 0
+        ? Math.min(100, Math.max(0, (elapsedMs / totalDurationMs) * 100))
+        : displayedHistory.length > 1
+          ? (i / (displayedHistory.length - 1)) * 100
+          : 0;
+
+    hopMetrics.push({
+      eventId: ev.id,
+      deltaMs,
+      formattedDelta: formatTimeDelta(deltaMs),
+      elapsedMs,
+      formattedElapsed: formatElapsedTime(elapsedMs),
+      timeProgressPercent,
+    });
+  }
+
+  const safeIndex = Math.max(0, Math.min(displayedHistory.length - 1, selectedIndex >= 0 ? selectedIndex : 0));
+  const currentMetric = hopMetrics[safeIndex] ?? {
+    eventId: displayedHistory[safeIndex]?.id ?? "",
+    deltaMs: 0,
+    formattedDelta: "0s",
+    elapsedMs: 0,
+    formattedElapsed: "+00:00",
+    timeProgressPercent: 0,
+  };
+
+  const summary: SessionReplayTimeSummary = {
+    totalDurationMs,
+    formattedTotalDuration: formatTimeDelta(totalDurationMs),
+    currentElapsedMs: currentMetric.elapsedMs,
+    formattedCurrentElapsed: currentMetric.formattedElapsed,
+    currentDeltaMs: currentMetric.deltaMs,
+    formattedCurrentDelta: currentMetric.formattedDelta,
+    timeProgressPercent: currentMetric.timeProgressPercent,
+  };
+
+  return { hopMetrics, summary };
+}
+
+export type ReplayPacingMode = "realistic" | "uniform";
+
+/**
+ * Calculates playback delay based on pacing mode and real event dwell delta.
+ * In "uniform" mode: returns fixed playbackSpeed (e.g. 1400ms or 700ms).
+ * In "realistic" mode: returns dynamic delay clamped between 300ms and 3200ms.
+ */
+export function calculateReplayPacingDelay(
+  deltaMs: number,
+  playbackSpeed: number,
+  pacingMode: ReplayPacingMode = "realistic",
+): number {
+  if (pacingMode === "uniform") {
+    return playbackSpeed;
+  }
+
+  const speedFactor = playbackSpeed === 700 ? 2 : 1;
+  const safeDelta = Math.max(0, Number.isFinite(deltaMs) ? deltaMs : 0);
+
+  let unscaledDelay: number;
+  if (safeDelta <= 1000) {
+    unscaledDelay = 600;
+  } else if (safeDelta <= 10_000) {
+    unscaledDelay = 600 + (safeDelta / 10_000) * 800;
+  } else if (safeDelta <= 60_000) {
+    unscaledDelay = 1400 + (Math.log10(safeDelta / 10_000) / Math.log10(6)) * 800;
+  } else {
+    unscaledDelay = 2200 + Math.min(1000, Math.log10(safeDelta / 60_000) * 500);
+  }
+
+  const finalDelay = Math.round(unscaledDelay / speedFactor);
+  return Math.min(3200, Math.max(300, finalDelay));
 }
 
 export function directorySegment(path: string): string {
@@ -136,21 +370,76 @@ export function actionLabel(event: SessionCwdHistoryEvent): string {
 }
 
 
-export type GraphNode = FilesystemTopologyNode & { x: number; y: number };
+export type TopologyDensityMode = "detailed" | "clustered" | "aggregated";
+export type TopologyDensityPreference = "auto" | TopologyDensityMode;
+
+export interface DensityThresholds {
+  detailedMaxNodes: number;
+  detailedMaxSources: number;
+  clusteredMaxNodes: number;
+  clusteredMaxSources: number;
+}
+
+export const DEFAULT_DENSITY_THRESHOLDS: DensityThresholds = {
+  detailedMaxNodes: 15,
+  detailedMaxSources: 4,
+  clusteredMaxNodes: 42,
+  clusteredMaxSources: 10,
+};
+
+export interface TopologyDensityAnalysis {
+  mode: TopologyDensityMode;
+  isAuto: boolean;
+  totalNodes: number;
+  renderedNodes: number;
+  hiddenNodes: number;
+  totalSources: number;
+  renderedSources: number;
+  hiddenSources: number;
+  hasAggregatedBranches: boolean;
+  focusedBranchPath: string | null;
+}
+
+export type GraphNode = FilesystemTopologyNode & {
+  x: number;
+  y: number;
+  hiddenChildCount?: number;
+  isAggregated?: boolean;
+};
 export type GraphElementSize = { width: number; height: number };
 export type GraphElementBounds = GraphElementSize & { x: number; y: number };
+
+export interface GraphCalloutSession {
+  sessionId: string;
+  path: string;
+  observedAt: string | null;
+}
+
 export type GraphCallout = {
   sourceIp: string;
   sessionIds: string[];
   path: string;
+  sessions: GraphCalloutSession[];
+  targetPaths: string[];
 };
+
+export interface PointForGraphOptions {
+  nodeLimit?: number | null;
+  selectedSessionId?: string | null;
+  densityMode?: TopologyDensityMode;
+  focusedPath?: string | null;
+}
 
 export function pointForGraph(
   nodes: FilesystemTopologyNode[],
   sessions: FilesystemTopologySession[],
   selectedPath: string | null,
   isAuditMode = false,
+  options?: PointForGraphOptions,
 ): GraphNode[] {
+  const densityMode = options?.densityMode ?? "clustered";
+  const focusedPath = options?.focusedPath ?? selectedPath ?? null;
+
   const byPath = new Map(nodes.map((node) => [node.path, node]));
   const included = new Set<string>(["/"]);
   const recentSessions = [...sessions].sort((left, right) => {
@@ -165,9 +454,60 @@ export function pointForGraph(
   };
   for (const session of recentSessions) includePath(session.cwdState.path);
   includePath(selectedPath);
-  for (const node of [...nodes].sort((left, right) => Date.parse(right.observedAt ?? "") - Date.parse(left.observedAt ?? ""))) {
-    if (included.size >= GRAPH_NODE_LIMIT) break;
-    includePath(node.path);
+  if (options?.selectedSessionId) {
+    const selectedSession = sessions.find((session) => session.sessionId === options.selectedSessionId);
+    if (selectedSession?.cwdState?.path) {
+      includePath(selectedSession.cwdState.path);
+    }
+  }
+
+  if (densityMode === "detailed") {
+    const effectiveLimit = options?.nodeLimit !== undefined ? options.nodeLimit : null;
+    for (const node of [...nodes].sort((left, right) => Date.parse(right.observedAt ?? "") - Date.parse(left.observedAt ?? ""))) {
+      if (effectiveLimit !== null && included.size >= effectiveLimit) break;
+      includePath(node.path);
+    }
+  } else if (densityMode === "aggregated") {
+    // Aggregated mode:
+    // 1) Expand on focus: If focusedPath is given, expand its whole subtree!
+    if (focusedPath) {
+      includePath(focusedPath);
+      const prefix = focusedPath === "/" ? "/" : `${focusedPath}/`;
+      for (const node of nodes) {
+        if (node.path.startsWith(prefix)) {
+          includePath(node.path);
+        }
+      }
+    }
+
+    // 2) Keep primary hubs at depth <= 1 (root's immediate children)
+    for (const node of nodes) {
+      if (node.depth <= 1) {
+        includePath(node.path);
+      }
+    }
+
+    // 3) Respect explicit nodeLimit if specified
+    if (options?.nodeLimit) {
+      const sorted = [...nodes].sort((a, b) => Date.parse(b.observedAt ?? "") - Date.parse(a.observedAt ?? ""));
+      for (const node of sorted) {
+        if (included.size >= options.nodeLimit) break;
+        includePath(node.path);
+      }
+    }
+  } else {
+    // Clustered mode (balanced default):
+    const effectiveLimit =
+      options?.nodeLimit !== undefined
+        ? options.nodeLimit
+        : isAuditMode
+          ? null
+          : GRAPH_NODE_LIMIT;
+
+    for (const node of [...nodes].sort((left, right) => Date.parse(right.observedAt ?? "") - Date.parse(left.observedAt ?? ""))) {
+      if (effectiveLimit !== null && included.size >= effectiveLimit) break;
+      includePath(node.path);
+    }
   }
 
   const selected = nodes.filter((node) => included.has(node.path));
@@ -243,7 +583,20 @@ export function pointForGraph(
     const leafPosition = horizontalByPath.get(node.path) ?? 0;
     const x = leafCount === 1 ? 50 : treeLeft + (totalTreeWidth * leafPosition) / (leafCount - 1);
     const y = startY + node.depth * depthStep;
-    return { ...node, x, y };
+
+    const prefix = node.path === "/" ? "/" : `${node.path}/`;
+    const totalDescendants = nodes.filter((n) => n.path !== node.path && n.path.startsWith(prefix)).length;
+    const renderedDescendants = selected.filter((n) => n.path !== node.path && n.path.startsWith(prefix)).length;
+    const hiddenChildCount = Math.max(0, totalDescendants - renderedDescendants);
+    const isAggregated = hiddenChildCount > 0;
+
+    return {
+      ...node,
+      x,
+      y,
+      hiddenChildCount,
+      isAggregated,
+    };
   });
 
   // Intelligent horizontal clearance enforcement:
@@ -280,7 +633,17 @@ export function pointForGraph(
   return positioned;
 }
 
-export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNodeByPath: Map<string, GraphNode>): GraphCallout[] {
+export interface CalloutsForGraphOptions {
+  calloutLimit?: number | null;
+  selectedSessionId?: string | null;
+  densityMode?: TopologyDensityMode;
+}
+
+export function calloutsForGraph(
+  sessions: FilesystemTopologySession[],
+  graphNodeByPath: Map<string, GraphNode>,
+  options?: CalloutsForGraphOptions,
+): GraphCallout[] {
   const groups = new Map<string, FilesystemTopologySession[]>();
   for (const session of sessions) {
     if (!session.cwdState.path) continue;
@@ -294,13 +657,49 @@ export function calloutsForGraph(sessions: FilesystemTopologySession[], graphNod
     group.push({ ...session, cwdState: { ...session.cwdState, path: effectivePath } });
     groups.set(session.sourceIp, group);
   }
-  return [...groups.entries()]
+  const allCallouts: GraphCallout[] = [...groups.entries()]
     .map(([sourceIp, group]) => {
       const ordered = [...group].sort((left, right) => Date.parse(right.cwdState.observedAt ?? "") - Date.parse(left.cwdState.observedAt ?? ""));
-      return { sourceIp, sessionIds: ordered.map((session) => session.sessionId), path: ordered[0].cwdState.path! };
+      const clusterSessions: GraphCalloutSession[] = ordered.map((s) => ({
+        sessionId: s.sessionId,
+        path: s.cwdState.path!,
+        observedAt: s.cwdState.observedAt,
+      }));
+      const distinctPaths = [...new Set(clusterSessions.map((s) => s.path))];
+      return {
+        sourceIp,
+        sessionIds: ordered.map((session) => session.sessionId),
+        path: ordered[0].cwdState.path!,
+        sessions: clusterSessions,
+        targetPaths: distinctPaths,
+      };
     })
-    .sort((left, right) => left.sourceIp.localeCompare(right.sourceIp, undefined, { numeric: true }))
-    .slice(0, GRAPH_CALLOUT_LIMIT);
+    .sort((left, right) => left.sourceIp.localeCompare(right.sourceIp, undefined, { numeric: true }));
+
+  const defaultLimit =
+    options?.densityMode === "detailed"
+      ? null
+      : options?.densityMode === "aggregated"
+        ? 6
+        : GRAPH_CALLOUT_LIMIT;
+
+  const limit = options?.calloutLimit !== undefined ? options.calloutLimit : defaultLimit;
+  if (limit === null || allCallouts.length <= limit) {
+    return allCallouts;
+  }
+
+  const slice = allCallouts.slice(0, limit);
+  if (options?.selectedSessionId) {
+    const isSelectedInSlice = slice.some((c) => c.sessionIds.includes(options.selectedSessionId!));
+    if (!isSelectedInSlice) {
+      const selectedCallout = allCallouts.find((c) => c.sessionIds.includes(options.selectedSessionId!));
+      if (selectedCallout) {
+        slice[slice.length - 1] = selectedCallout;
+        slice.sort((left, right) => left.sourceIp.localeCompare(right.sourceIp, undefined, { numeric: true }));
+      }
+    }
+  }
+  return slice;
 }
 
 export function sourceRailPositions(
@@ -410,10 +809,11 @@ export function sourceRailPositions(
       return;
     }
 
-    // At most eight source clusters are rendered. A single relaxed column per side keeps
-    // labels aligned and prevents connectors from weaving between staggered columns.
-    const minGap = rail.length >= 4 ? 11.5 : 14;
+    // Adaptive vertical spacing: relax minimum separation as count grows to stay within canvas bounds.
     const count = rail.length;
+    const nominalGap = rail.length >= 4 ? 11.5 : 14;
+    const availableSpace = Math.max(10, maxRailY - 18);
+    const minGap = count > 1 ? Math.min(nominalGap, availableSpace / (count - 1)) : nominalGap;
     const targetYs = rail.map((c) => Math.min(maxRailY, Math.max(18, graphNodeByPath.get(c.path)?.y ?? 50)));
 
     const ys = [...targetYs];
@@ -474,6 +874,259 @@ export function resolveCalloutPositions(
   return resolved;
 }
 
+export interface WorldBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+  width: number;
+  height: number;
+  centerX: number;
+  centerY: number;
+}
+
+export interface FitViewportOptions {
+  surfaceWidth: number;
+  surfaceHeight: number;
+  planeWidth: number;
+  planeHeight: number;
+  planeOffsetLeft?: number;
+  planeOffsetTop?: number;
+  hasMinimap?: boolean;
+  isMinimapCollapsed?: boolean;
+  minPadding?: number;
+}
+
+/**
+ * Calculates two-dimensional world bounds in plane coordinates (%) for all active nodes and callouts.
+ * Considers actual measured element sizes, manual drag offsets (including positions outside 0..100),
+ * and adds defensive visual breathing room.
+ */
+export function calculateWorldBounds(
+  nodes: readonly GraphNode[],
+  callouts: readonly GraphCallout[],
+  manualNodes: Record<string, LabelPosition> = {},
+  manualLabels: Record<string, LabelPosition> = {},
+  automaticCalloutPositions: Map<string, LabelPosition> = new Map(),
+  nodeElementBounds: Record<string, GraphElementBounds> = {},
+  calloutElementBounds: Record<string, GraphElementBounds> = {},
+): WorldBounds {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+
+  for (const node of nodes) {
+    const bounds = nodeElementBounds[node.path];
+    const halfWidth = bounds?.width ? bounds.width / 2 : 8;
+    const halfHeight = bounds?.height ? bounds.height / 2 : 4;
+    const posX = manualNodes[node.path]?.x ?? node.x;
+    const posY = manualNodes[node.path]?.y ?? node.y;
+
+    const left = posX - halfWidth;
+    const right = posX + halfWidth;
+    const top = posY - halfHeight;
+    const bottom = posY + halfHeight;
+
+    if (left < minX) minX = left;
+    if (right > maxX) maxX = right;
+    if (top < minY) minY = top;
+    if (bottom > maxY) maxY = bottom;
+  }
+
+  for (const callout of callouts) {
+    const bounds = calloutElementBounds[callout.sourceIp];
+    const halfWidth = bounds?.width ? bounds.width / 2 : 8.5;
+    const halfHeight = bounds?.height ? bounds.height / 2 : 5;
+    const pos = manualLabels[callout.sourceIp] ?? automaticCalloutPositions.get(callout.sourceIp) ?? { x: 90, y: 50 };
+    const posX = pos.x;
+    const posY = pos.y;
+
+    const left = posX - halfWidth;
+    const right = posX + halfWidth;
+    const top = posY - halfHeight;
+    const bottom = posY + halfHeight;
+
+    if (left < minX) minX = left;
+    if (right > maxX) maxX = right;
+    if (top < minY) minY = top;
+    if (bottom > maxY) maxY = bottom;
+  }
+
+  if (!Number.isFinite(minX) || !Number.isFinite(maxX) || minX >= maxX) {
+    minX = 20;
+    maxX = 80;
+  }
+  if (!Number.isFinite(minY) || !Number.isFinite(maxY) || minY >= maxY) {
+    minY = 15;
+    maxY = 85;
+  }
+
+  // Visual breathing room (padding in coordinate percentage, default 2.5%)
+  const PADDING_PERCENT = 2.5;
+  const safeMinX = minX - PADDING_PERCENT;
+  const safeMaxX = maxX + PADDING_PERCENT;
+  const safeMinY = minY - PADDING_PERCENT;
+  const safeMaxY = maxY + PADDING_PERCENT;
+
+  return {
+    minX: safeMinX,
+    maxX: safeMaxX,
+    minY: safeMinY,
+    maxY: safeMaxY,
+    width: safeMaxX - safeMinX,
+    height: safeMaxY - safeMinY,
+    centerX: (safeMinX + safeMaxX) / 2,
+    centerY: (safeMinY + safeMaxY) / 2,
+  };
+}
+
+/**
+ * Calculates zoom and 2D pan to fit the topology within the viewport.
+ * Considers:
+ * - 2D world bounds across X and Y
+ * - Surface dimensions (compact vs fullscreen)
+ * - Rendered element sizes
+ * - Coordinates outside 0..100
+ * - Minimap clearance
+ */
+export function calculateTwoDimensionalFit(
+  bounds: WorldBounds,
+  options: FitViewportOptions,
+): { zoom: number; pan: Pan } | null {
+  const {
+    surfaceWidth,
+    surfaceHeight,
+    planeWidth,
+    planeHeight,
+    planeOffsetLeft = 0,
+    planeOffsetTop = 0,
+    hasMinimap = false,
+    isMinimapCollapsed = false,
+    minPadding = 24,
+  } = options;
+
+  if (!surfaceWidth || !surfaceHeight || !planeWidth || !planeHeight) return null;
+
+  // Actual unscaled content dimensions in plane pixels
+  const unscaledContentWidthPx = (bounds.width / 100) * planeWidth;
+  const unscaledContentHeightPx = (bounds.height / 100) * planeHeight;
+
+  if (unscaledContentWidthPx <= 0 || unscaledContentHeightPx <= 0) return null;
+
+  // Surface clearance padding
+  const paddingLeft = minPadding;
+  let paddingRight = minPadding;
+  const paddingTop = minPadding;
+  let paddingBottom = minPadding;
+
+  // Minimap clearance: When minimap is active and not collapsed, it takes bottom-right corner (~140px width, ~95px height)
+  // on screens >= sm (640px)
+  if (hasMinimap && !isMinimapCollapsed && surfaceWidth >= 640) {
+    paddingRight = Math.max(paddingRight, 48);
+    paddingBottom = Math.max(paddingBottom, 60);
+  }
+
+  const availableWidth = Math.max(80, surfaceWidth - (paddingLeft + paddingRight));
+  const availableHeight = Math.max(80, surfaceHeight - (paddingTop + paddingBottom));
+
+  const scaleX = availableWidth / unscaledContentWidthPx;
+  const scaleY = availableHeight / unscaledContentHeightPx;
+
+  // Choose the scale that fits both dimensions, bounded by MAP_MIN_ZOOM and 1.0
+  const idealZoom = Math.min(scaleX, scaleY);
+  const fitZoom = Math.min(1.0, Math.max(MAP_MIN_ZOOM, Number(idealZoom.toFixed(2))));
+
+  // Center the bounding box in the available surface area (taking padding asymmetry into account)
+  const targetSurfaceCenterX = paddingLeft + availableWidth / 2;
+  const targetSurfaceCenterY = paddingTop + availableHeight / 2;
+
+  const contentCenterPxX = (bounds.centerX / 100) * planeWidth * fitZoom;
+  const contentCenterPxY = (bounds.centerY / 100) * planeHeight * fitZoom;
+
+  let panX = Math.round(targetSurfaceCenterX - planeOffsetLeft - contentCenterPxX);
+  let panY = Math.round(targetSurfaceCenterY - planeOffsetTop - contentCenterPxY);
+
+  // Screen-space bounding box check
+  const screenLeft = planeOffsetLeft + panX + (bounds.minX / 100) * planeWidth * fitZoom;
+  const screenRight = planeOffsetLeft + panX + (bounds.maxX / 100) * planeWidth * fitZoom;
+  const screenTop = planeOffsetTop + panY + (bounds.minY / 100) * planeHeight * fitZoom;
+  const screenBottom = planeOffsetTop + panY + (bounds.maxY / 100) * planeHeight * fitZoom;
+
+  // Defensive screen edge clearance
+  if (screenLeft < paddingLeft) {
+    panX += Math.round(paddingLeft - screenLeft);
+  } else if (screenRight > surfaceWidth - paddingRight) {
+    panX -= Math.round(screenRight - (surfaceWidth - paddingRight));
+  }
+
+  if (screenTop < paddingTop) {
+    panY += Math.round(paddingTop - screenTop);
+  } else if (screenBottom > surfaceHeight - paddingBottom) {
+    panY -= Math.round(screenBottom - (surfaceHeight - paddingBottom));
+  }
+
+  // Final minimap clearance: if the content bottom-right specifically intersects the minimap rectangle
+  if (hasMinimap && !isMinimapCollapsed && surfaceWidth >= 640) {
+    const currentScreenRight = planeOffsetLeft + panX + (bounds.maxX / 100) * planeWidth * fitZoom;
+    const currentScreenBottom = planeOffsetTop + panY + (bounds.maxY / 100) * planeHeight * fitZoom;
+    const minimapLeft = surfaceWidth - 140;
+    const minimapTop = surfaceHeight - 95;
+
+    if (currentScreenRight > minimapLeft && currentScreenBottom > minimapTop) {
+      const currentScreenLeft = planeOffsetLeft + panX + (bounds.minX / 100) * planeWidth * fitZoom;
+      const shiftX = Math.round(currentScreenRight - minimapLeft + 8);
+      if (currentScreenLeft - shiftX >= minPadding) {
+        panX -= shiftX;
+      } else {
+        const currentScreenTop = planeOffsetTop + panY + (bounds.minY / 100) * planeHeight * fitZoom;
+        const shiftY = Math.round(currentScreenBottom - minimapTop + 8);
+        if (currentScreenTop - shiftY >= minPadding) {
+          panY -= shiftY;
+        }
+      }
+    }
+  }
+
+  return {
+    zoom: fitZoom,
+    pan: { x: panX, y: panY },
+  };
+}
+
+export interface DirectorySessionCounts {
+  exactCount: number;
+  descendantCount: number;
+  branchCount: number;
+  uniqueSourcesCount: number;
+}
+
+/**
+ * Calculates authoritative session counts for a directory node:
+ * - exactCount: sessions currently verified directly in this path
+ * - descendantCount: sessions currently in subdirectories below this path
+ * - branchCount: total sessions in this subtree (exactCount + descendantCount)
+ * - uniqueSourcesCount: unique IP sources touching this subtree
+ */
+export function getDirectorySessionCounts(
+  nodePath: string,
+  nodeSessionIds: readonly string[],
+  sessions: readonly FilesystemTopologySession[],
+): DirectorySessionCounts {
+  const sessionIdsSet = new Set(nodeSessionIds);
+  const branch = sessions.filter((s) => sessionIdsSet.has(s.sessionId));
+  const exact = branch.filter((s) => s.cwdState.path === nodePath);
+  const descendant = branch.filter((s) => s.cwdState.path !== nodePath);
+  const uniqueSources = new Set(branch.map((s) => s.sourceIp)).size;
+
+  return {
+    exactCount: exact.length,
+    descendantCount: descendant.length,
+    branchCount: branch.length,
+    uniqueSourcesCount: uniqueSources,
+  };
+}
+
 export function leaderEndpoints(
   node: GraphNode,
   label: LabelPosition,
@@ -519,15 +1172,13 @@ export function buildAuditSnapshot(
   history: SessionCwdHistoryEvent[],
 ): FilesystemTopologySnapshot {
   if (!session) {
-    return (
-      baseSnapshot ?? {
-        nodes: [],
-        sessions: [],
-        recentClosedSessions: [],
-        truncated: false,
-        generatedAt: new Date().toISOString(),
-      }
-    );
+    return {
+      nodes: [],
+      sessions: [],
+      recentClosedSessions: [],
+      truncated: false,
+      generatedAt: new Date().toISOString(),
+    };
   }
 
   const nodesMap = new Map<string, FilesystemTopologyNode>();
@@ -594,6 +1245,7 @@ export function buildAuditSnapshot(
         sessionId: session.sessionId,
         sourceIp: session.sourceIp,
         cwdState: session.cwdState,
+        auditSummary: session.auditSummary,
       },
     ],
     recentClosedSessions: [],
@@ -608,51 +1260,8 @@ export function buildAuditSnapshot(
  */
 export function isHomeOnlySession(
   session: FilesystemTopologySession | FilesystemClosedSession,
-  allNodes: readonly FilesystemTopologyNode[] = [],
-  sessionHistoryEvents: readonly SessionCwdHistoryEvent[] = [],
 ): boolean {
-  const cwd = session.cwdState.path;
-  if (!cwd) return false;
-
-  const isHomePath = (p: string | null | undefined): boolean => {
-    if (!p || p === "/") return false;
-    return p === "/home" || p.startsWith("/home/");
-  };
-
-  // If the session's current cwd is outside /home and not root, it left /home
-  if (!isHomePath(cwd) && cwd !== "/") {
-    return false;
-  }
-
-  // Check all topology nodes where this session is registered
-  for (const node of allNodes) {
-    if (node.path === "/") continue;
-    if (node.sessionIds.includes(session.sessionId)) {
-      if (!isHomePath(node.path)) {
-        return false;
-      }
-    }
-  }
-
-  // Check history events if loaded
-  for (const event of sessionHistoryEvents) {
-    if (event.fromPath && event.fromPath !== "/" && !isHomePath(event.fromPath)) {
-      return false;
-    }
-    if (event.action !== "failed_change" && event.toPath && event.toPath !== "/" && !isHomePath(event.toPath)) {
-      return false;
-    }
-  }
-
-  // If cwd is "/" and no nodes are under /home, then it's a root session, not home
-  if (cwd === "/") {
-    const hasHomeNode = allNodes.some(
-      (n) => n.sessionIds.includes(session.sessionId) && isHomePath(n.path),
-    );
-    if (!hasHomeNode) return false;
-  }
-
-  return true;
+  return session.auditSummary.homeOnly;
 }
 
 /**
@@ -662,8 +1271,6 @@ export function isHomeOnlySession(
 export function sessionTouchesPath(
   session: FilesystemTopologySession | FilesystemClosedSession,
   targetPath: string,
-  allNodes: readonly FilesystemTopologyNode[] = [],
-  sessionHistoryEvents: readonly SessionCwdHistoryEvent[] = [],
 ): boolean {
   if (!targetPath || targetPath === "" || targetPath === "all") return true;
 
@@ -683,23 +1290,7 @@ export function sessionTouchesPath(
     return norm === normTarget || norm.startsWith(`${normTarget}/`);
   };
 
-  // 1. Current cwd
-  if (matches(session.cwdState.path)) return true;
-
-  // 2. Topology nodes
-  for (const node of allNodes) {
-    if (node.sessionIds.includes(session.sessionId) && matches(node.path)) {
-      return true;
-    }
-  }
-
-  // 3. History events
-  for (const event of sessionHistoryEvents) {
-    if (matches(event.fromPath)) return true;
-    if (event.action !== "failed_change" && matches(event.toPath)) return true;
-  }
-
-  return false;
+  return session.auditSummary.visitedPaths.some(matches);
 }
 
 export interface DistinctPathOption {
@@ -712,7 +1303,6 @@ export interface DistinctPathOption {
  * sorted by session count descending, then path ascending.
  */
 export function getDistinctSessionPaths(
-  allNodes: readonly FilesystemTopologyNode[] = [],
   sessions: readonly FilesystemTopologySession[] = [],
   recentClosedSessions: readonly FilesystemClosedSession[] = [],
 ): DistinctPathOption[] {
@@ -727,19 +1317,12 @@ export function getDistinctSessionPaths(
     pathSessionMap.get(norm)?.add(sessionId);
   };
 
-  for (const node of allNodes) {
-    if (node.path === "/") continue;
-    for (const sid of node.sessionIds) {
-      addPathSession(node.path, sid);
-    }
-  }
-
   for (const s of sessions) {
-    addPathSession(s.cwdState.path, s.sessionId);
+    for (const path of s.auditSummary.visitedPaths) addPathSession(path, s.sessionId);
   }
 
   for (const s of recentClosedSessions) {
-    addPathSession(s.cwdState.path, s.sessionId);
+    for (const path of s.auditSummary.visitedPaths) addPathSession(path, s.sessionId);
   }
 
   return [...pathSessionMap.entries()]
@@ -753,4 +1336,275 @@ export function getDistinctSessionPaths(
       }
       return a.path.localeCompare(b.path);
     });
+}
+
+export interface AuditUrlParams {
+  view?: "live" | "audit";
+  sessionId?: string | null;
+  hideHome?: boolean;
+  targetPath?: string | null;
+  hop?: string | null;
+}
+
+export function parseAuditUrlParams(search: string): AuditUrlParams {
+  const params = new URLSearchParams(search);
+  const viewParam = params.get("view");
+  const view = viewParam === "audit" ? "audit" : "live";
+  const sessionId = params.get("sessionId");
+  const hideHomeParam = params.get("hideHome");
+  const hideHome = hideHomeParam === "1" || hideHomeParam === "true";
+  const targetPath = params.get("targetPath");
+  const hop = params.get("hop");
+
+  return {
+    view,
+    sessionId: sessionId || null,
+    hideHome,
+    targetPath: targetPath || null,
+    hop: hop || null,
+  };
+}
+
+export function buildAuditUrlSearch(params: AuditUrlParams): string {
+  if (params.view !== "audit") return "";
+
+  const sp = new URLSearchParams();
+  sp.set("view", "audit");
+  if (params.sessionId) sp.set("sessionId", params.sessionId);
+  if (params.hideHome) sp.set("hideHome", "1");
+  if (params.targetPath) sp.set("targetPath", params.targetPath);
+  if (params.hop) sp.set("hop", params.hop);
+
+  const str = sp.toString();
+  return str ? `?${str}` : "";
+}
+
+export interface SessionResolutionResult {
+  sessionId: string | null;
+  expiredSessionId: string | null;
+}
+
+/**
+ * Resolves session selection without silent hijacking.
+ * If a requested or current candidate does not exist in known sessions:
+ * - In Audit mode or when explicitly requested, returns { sessionId: null, expiredSessionId: candidateId }
+ * - In Live mode without an explicit URL request, falls back to the first available live session.
+ */
+export function resolveSessionSelection(
+  requestedSessionId: string | null,
+  currentSessionId: string | null,
+  knownSessions: readonly { sessionId: string }[],
+  isAuditMode: boolean,
+): SessionResolutionResult {
+  const candidateId = requestedSessionId ?? currentSessionId;
+  if (!candidateId) {
+    const fallback = knownSessions[0]?.sessionId ?? null;
+    return { sessionId: fallback, expiredSessionId: null };
+  }
+
+  const exists = knownSessions.some((s) => s.sessionId === candidateId);
+  if (exists) {
+    return { sessionId: candidateId, expiredSessionId: null };
+  }
+
+  if (isAuditMode || requestedSessionId !== null) {
+    return { sessionId: null, expiredSessionId: candidateId };
+  }
+
+  const fallback = knownSessions[0]?.sessionId ?? null;
+  return { sessionId: fallback, expiredSessionId: null };
+}
+
+export const DEFAULT_STALE_THRESHOLD_MS = 30_000;
+
+export function formatUpdateAge(ageMs: number): string {
+  if (typeof ageMs !== "number" || isNaN(ageMs) || ageMs < 0) return "Just now";
+  if (ageMs < 3_000) return "Just now";
+  if (ageMs < 60_000) return `${Math.floor(ageMs / 1_000)}s ago`;
+  if (ageMs < 3_600_000) return `${Math.floor(ageMs / 60_000)}m ago`;
+  return `${Math.floor(ageMs / 3_600_000)}h ago`;
+}
+
+export type FreshnessClassification = "fresh" | "stale" | "degraded" | "offline";
+
+export interface FreshnessState {
+  classification: FreshnessClassification;
+  label: string;
+  detail: string;
+  badgeClass: string;
+  dotClass: string;
+  isDegraded: boolean;
+  isStale: boolean;
+}
+
+export function getFreshnessState(params: {
+  lastUpdateAgeMs: number;
+  staleThresholdMs?: number;
+  streamState: StreamState;
+  regionStatus: RegionStatus;
+  hasSnapshot: boolean;
+}): FreshnessState {
+  const {
+    lastUpdateAgeMs,
+    staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
+    streamState,
+    regionStatus,
+    hasSnapshot,
+  } = params;
+
+  if (!hasSnapshot) {
+    if (regionStatus === "loading" || streamState === "connecting") {
+      return {
+        classification: "offline",
+        label: "Connecting",
+        detail: "Connecting to real-time filesystem stream...",
+        badgeClass: "border-border bg-surface-subtle text-text-subtle",
+        dotClass: "bg-text-subtle animate-pulse",
+        isDegraded: false,
+        isStale: false,
+      };
+    }
+    return {
+      classification: "offline",
+      label: "Offline",
+      detail: "Topology stream unavailable. No valid snapshot loaded.",
+      badgeClass: "border-danger-border bg-danger-subtle text-danger",
+      dotClass: "bg-danger",
+      isDegraded: true,
+      isStale: true,
+    };
+  }
+
+  const isTransportLive = streamState === "live";
+  const isTimeStale = lastUpdateAgeMs > staleThresholdMs;
+
+  if (!isTransportLive || regionStatus === "stale" || regionStatus === "error") {
+    return {
+      classification: "degraded",
+      label: "Degraded",
+      detail: `Reconnecting transport — displaying retained snapshot from ${formatUpdateAge(lastUpdateAgeMs)}.`,
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning animate-pulse",
+      isDegraded: true,
+      isStale: isTimeStale,
+    };
+  }
+
+  if (isTimeStale) {
+    return {
+      classification: "stale",
+      label: "Stale",
+      detail: `Connected, but no new telemetry for ${formatUpdateAge(lastUpdateAgeMs)} (threshold: ${Math.round(staleThresholdMs / 1000)}s).`,
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning",
+      isDegraded: false,
+      isStale: true,
+    };
+  }
+
+  return {
+    classification: "fresh",
+    label: "Live & Fresh",
+    detail: `Live stream active · updated ${formatUpdateAge(lastUpdateAgeMs)}.`,
+    badgeClass: "border-success-border bg-success-subtle text-success",
+    dotClass: "bg-success",
+    isDegraded: false,
+    isStale: false,
+  };
+}
+
+export type ToolbarDomain =
+  | "global-views"
+  | "canvas-navigation"
+  | "layout-editing"
+  | "replay-actions";
+
+export interface ToolbarGroupContract {
+  domain: ToolbarDomain;
+  role: "toolbar" | "group" | "tablist" | "region";
+  ariaLabel: string;
+  isAtomic: boolean;
+  subgroups?: string[];
+}
+
+export const TOOLBAR_HIERARCHY_CONTRACT: Record<ToolbarDomain, ToolbarGroupContract> = {
+  "global-views": {
+    domain: "global-views",
+    role: "toolbar",
+    ariaLabel: "Global filesystem controls",
+    isAtomic: false,
+    subgroups: ["Filesystem view modes", "Stream telemetry status"],
+  },
+  "canvas-navigation": {
+    domain: "canvas-navigation",
+    role: "group",
+    ariaLabel: "Canvas navigation",
+    isAtomic: true,
+    subgroups: ["Zoom controls", "Camera alignment"],
+  },
+  "layout-editing": {
+    domain: "layout-editing",
+    role: "group",
+    ariaLabel: "Layout editing",
+    isAtomic: true,
+    subgroups: ["Interaction mode", "Layout options"],
+  },
+  "replay-actions": {
+    domain: "replay-actions",
+    role: "toolbar",
+    ariaLabel: "Audit session and replay toolbar",
+    isAtomic: false,
+    subgroups: ["Audited session and filter controls", "Replay and workspace actions"],
+  },
+};
+
+export function getToolbarGroupContract(domain: ToolbarDomain): ToolbarGroupContract {
+  return TOOLBAR_HIERARCHY_CONTRACT[domain];
+}
+
+export function analyzeTopologyDensity(
+  nodes: readonly FilesystemTopologyNode[],
+  sessions: readonly FilesystemTopologySession[],
+  preference: TopologyDensityPreference = "auto",
+  focusedPath: string | null = null,
+  renderedGraphNodes?: readonly GraphNode[],
+  renderedGraphCallouts?: readonly GraphCallout[],
+  thresholds: DensityThresholds = DEFAULT_DENSITY_THRESHOLDS,
+): TopologyDensityAnalysis {
+  const totalNodes = nodes.length;
+  const uniqueSources = new Set(sessions.map((s) => s.sourceIp));
+  const totalSources = uniqueSources.size;
+
+  let mode: TopologyDensityMode;
+  if (preference !== "auto") {
+    mode = preference;
+  } else {
+    if (totalNodes <= thresholds.detailedMaxNodes && totalSources <= thresholds.detailedMaxSources) {
+      mode = "detailed";
+    } else if (totalNodes <= thresholds.clusteredMaxNodes && totalSources <= thresholds.clusteredMaxSources) {
+      mode = "clustered";
+    } else {
+      mode = "aggregated";
+    }
+  }
+
+  const renderedNodes = renderedGraphNodes ? renderedGraphNodes.length : totalNodes;
+  const hiddenNodes = Math.max(0, totalNodes - renderedNodes);
+  const renderedSources = renderedGraphCallouts
+    ? new Set(renderedGraphCallouts.map((c) => c.sourceIp)).size
+    : totalSources;
+  const hiddenSources = Math.max(0, totalSources - renderedSources);
+
+  return {
+    mode,
+    isAuto: preference === "auto",
+    totalNodes,
+    renderedNodes,
+    hiddenNodes,
+    totalSources,
+    renderedSources,
+    hiddenSources,
+    hasAggregatedBranches: mode === "aggregated" || hiddenNodes > 0,
+    focusedBranchPath: focusedPath,
+  };
 }

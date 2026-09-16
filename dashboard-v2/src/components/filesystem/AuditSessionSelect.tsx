@@ -1,7 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Check, ChevronDown, RotateCcw, Search, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, RotateCcw } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -9,19 +8,24 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
 import type {
+  AuditSessionsPage,
   FilesystemClosedSession,
   FilesystemTopologySession,
 } from "@/lib/dashboardTypes";
+import {
+  ComboboxPopover,
+  ComboboxSearchInput,
+  useComboboxNavigation,
+} from "./ComboboxPopover";
 
 export interface AuditSessionSelectProps {
   sessions: readonly FilesystemTopologySession[];
   recentClosedSessions: readonly FilesystemClosedSession[];
   selectedSessionId: string | null;
-  onSelectSession: (sessionId: string) => void;
+  onSelectSession: (sessionId: string, session?: FilesystemTopologySession | FilesystemClosedSession) => void;
   className?: string;
   totalCount?: number;
   hasActiveFilters?: boolean;
@@ -41,35 +45,134 @@ export function AuditSessionSelect({
   allSessionsList,
 }: AuditSessionSelectProps) {
   const [open, setOpen] = useState(false);
-  const reducedMotion = useReducedMotion();
   const [searchQuery, setSearchQuery] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
+  const [remoteSessions, setRemoteSessions] = useState<FilesystemClosedSession[]>([]);
+  const [remoteCursor, setRemoteCursor] = useState<string | null>(null);
+  const [hasMoreRemote, setHasMoreRemote] = useState(false);
+  const [isLoadingRemote, setIsLoadingRemote] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const menuId = `${triggerId}-menu`;
 
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    setRemoteSessions([]);
+    setRemoteCursor(null);
+    setHasMoreRemote(false);
+  }, []);
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (!value.trim()) {
+      setRemoteSessions([]);
+      setRemoteCursor(null);
+      setHasMoreRemote(false);
+    }
+  };
+
+  // Query remote audit directory when searching
+  useEffect(() => {
+    if (!open) return;
+    const query = searchQuery.trim();
+    if (!query) return;
+
+    const timer = setTimeout(async () => {
+      setIsLoadingRemote(true);
+      try {
+        const response = await fetch(
+          `/api/filesystem-topology/audit-sessions?q=${encodeURIComponent(query)}&limit=25`,
+          { cache: "no-store" },
+        );
+        if (!response.ok) return;
+        const data: unknown = await response.json();
+        const page = data as Partial<AuditSessionsPage>;
+        if (Array.isArray(page.items)) {
+          setRemoteSessions(page.items);
+          setRemoteCursor(page.nextCursor ?? null);
+          setHasMoreRemote(Boolean(page.nextCursor));
+        }
+      } catch {
+        // preserve local results
+      } finally {
+        setIsLoadingRemote(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [open, searchQuery]);
+
+  const handleLoadMore = useCallback(async () => {
+    if (isLoadingRemote) return;
+    setIsLoadingRemote(true);
+    try {
+      const q = searchQuery.trim();
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (remoteCursor) params.set("cursor", remoteCursor);
+      params.set("limit", "25");
+
+      const response = await fetch(
+        `/api/filesystem-topology/audit-sessions?${params.toString()}`,
+        { cache: "no-store" },
+      );
+      if (!response.ok) return;
+      const data: unknown = await response.json();
+      const page = data as Partial<AuditSessionsPage>;
+      if (Array.isArray(page.items)) {
+        setRemoteSessions((prev) => {
+          const seen = new Set(prev.map((s) => s.sessionId));
+          const additions = page.items?.filter((s) => !seen.has(s.sessionId)) ?? [];
+          return [...prev, ...additions];
+        });
+        setRemoteCursor(page.nextCursor ?? null);
+        setHasMoreRemote(Boolean(page.nextCursor));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsLoadingRemote(false);
+    }
+  }, [isLoadingRemote, remoteCursor, searchQuery]);
+
+  const combinedClosedSessions = useMemo(() => {
+    const seen = new Set<string>();
+    const list: FilesystemClosedSession[] = [];
+    for (const s of recentClosedSessions) {
+      if (!seen.has(s.sessionId)) {
+        seen.add(s.sessionId);
+        list.push(s);
+      }
+    }
+    for (const s of remoteSessions) {
+      if (!seen.has(s.sessionId)) {
+        seen.add(s.sessionId);
+        list.push(s);
+      }
+    }
+    return list;
+  }, [recentClosedSessions, remoteSessions]);
+
   const effectiveAllSessions = useMemo(
-    () => allSessionsList ?? [...sessions, ...recentClosedSessions],
-    [allSessionsList, sessions, recentClosedSessions],
+    () => allSessionsList ?? [...sessions, ...combinedClosedSessions],
+    [allSessionsList, sessions, combinedClosedSessions],
   );
 
   const selectedSession = useMemo(
     () =>
       effectiveAllSessions.find((s) => s.sessionId === selectedSessionId) ??
-      [...sessions, ...recentClosedSessions].find((s) => s.sessionId === selectedSessionId) ??
+      [...sessions, ...combinedClosedSessions].find((s) => s.sessionId === selectedSessionId) ??
       null,
-    [effectiveAllSessions, sessions, recentClosedSessions, selectedSessionId],
+    [effectiveAllSessions, sessions, combinedClosedSessions, selectedSessionId],
   );
 
   const isSelectedClosed = useMemo(
     () =>
       selectedSession
         ? "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle)
-        : recentClosedSessions.some((s) => s.sessionId === selectedSessionId),
-    [selectedSession, recentClosedSessions, selectedSessionId],
+        : combinedClosedSessions.some((s) => s.sessionId === selectedSessionId),
+    [selectedSession, combinedClosedSessions, selectedSessionId],
   );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -85,14 +188,14 @@ export function AuditSessionSelect({
   }, [sessions, normalizedQuery]);
 
   const filteredClosedSessions = useMemo(() => {
-    if (!normalizedQuery) return recentClosedSessions;
-    return recentClosedSessions.filter(
+    if (!normalizedQuery) return combinedClosedSessions;
+    return combinedClosedSessions.filter(
       (s) =>
         s.sourceIp.toLowerCase().includes(normalizedQuery) ||
         s.sessionId.toLowerCase().includes(normalizedQuery) ||
         (s.cwdState?.path && s.cwdState.path.toLowerCase().includes(normalizedQuery)),
     );
-  }, [recentClosedSessions, normalizedQuery]);
+  }, [combinedClosedSessions, normalizedQuery]);
 
   const allDisplaySessions = useMemo(
     () => [...filteredActiveSessions, ...filteredClosedSessions],
@@ -117,31 +220,35 @@ export function AuditSessionSelect({
   const closeMenu = useCallback(() => {
     setOpen(false);
     setSearchQuery("");
+    setRemoteSessions([]);
+    setRemoteCursor(null);
+    setHasMoreRemote(false);
   }, []);
 
-  // Close on click outside or Escape
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        closeMenu();
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeMenu();
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open, closeMenu]);
+  const handleSelect = useCallback(
+    (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
+      onSelectSession(sessionId, sessionObj);
+      closeMenu();
+      triggerRef.current?.focus();
+    },
+    [onSelectSession, closeMenu],
+  );
+
+  const {
+    activeIndex,
+    registerOptionRef,
+    handleTriggerKeyDown,
+    handleInputKeyDown,
+    handleOptionKeyDown,
+  } = useComboboxNavigation<FilesystemTopologySession | FilesystemClosedSession>({
+    items: allDisplaySessions,
+    getLabel: (s) => `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`,
+    onClose: closeMenu,
+    onSelect: (s) => handleSelect(s.sessionId, s),
+    triggerRef,
+    searchInputRef,
+    selectedIndex,
+  });
 
   // Focus search input when opened
   useEffect(() => {
@@ -150,52 +257,8 @@ export function AuditSessionSelect({
     return () => clearTimeout(timer);
   }, [open]);
 
-  // Scroll active option into view when opened
-  useEffect(() => {
-    if (!open) return;
-    if (selectedIndex >= 0 && optionRefs.current[selectedIndex]) {
-      optionRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
-    }
-  }, [open, selectedIndex]);
-
-  const handleSelect = useCallback(
-    (sessionId: string) => {
-      onSelectSession(sessionId);
-      closeMenu();
-      triggerRef.current?.focus();
-    },
-    [onSelectSession, closeMenu],
-  );
-
-  const focusOption = (index: number) => {
-    if (!allDisplaySessions.length) return;
-    const nextIndex = (index + allDisplaySessions.length) % allDisplaySessions.length;
-    optionRefs.current[nextIndex]?.focus();
-  };
-
-  const handleTriggerKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      setOpen(true);
-      focusOption(event.key === "ArrowDown" ? selectedIndex + 1 : selectedIndex - 1);
-    }
-  };
-
-  const handleOptionKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      focusOption(event.key === "ArrowDown" ? index + 1 : index - 1);
-    } else if (event.key === "Home") {
-      event.preventDefault();
-      focusOption(0);
-    } else if (event.key === "End") {
-      event.preventDefault();
-      focusOption(allDisplaySessions.length - 1);
-    }
-  };
-
   return (
-    <div ref={rootRef} className={`relative inline-block text-left ${className ?? ""}`}>
+    <div className={`relative inline-block text-left ${className ?? ""}`}>
       {/* Trigger Button */}
       <button
         ref={triggerRef}
@@ -240,8 +303,11 @@ export function AuditSessionSelect({
                 ({isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"})
               </span>
               {isSelectedFilteredOut && (
-                <span className="hidden h-[18px] rounded-full border border-primary-border bg-surface px-1.5 font-sans text-xs font-semibold leading-4 text-primary shadow-2xs md:inline">
-                  Filtered
+                <span
+                  className="h-[18px] rounded-full border border-warning-border bg-warning-subtle px-1.5 font-sans text-[10px] font-semibold leading-4 text-warning shadow-2xs inline"
+                  title="This session is pinned outside the active filter criteria"
+                >
+                  Outside filter
                 </span>
               )}
             </>
@@ -257,130 +323,117 @@ export function AuditSessionSelect({
         />
       </button>
 
-      {/* Animated Dropdown Menu */}
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            id={menuId}
-            role="listbox"
-            aria-labelledby={triggerId}
-            initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reducedMotion ? undefined : { opacity: 0, y: -6, scale: 0.98 }}
-            transition={reducedMotion ? { duration: 0 } : { duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-            className="absolute left-0 top-[calc(100%+6px)] z-50 min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain rounded-xl border border-border bg-surface-raised p-1.5 shadow-lg"
-          >
-            {/* Search Input inside Session Dropdown */}
-            <div className="relative mb-1.5 px-1 pt-1">
-              <Search className="absolute left-3 top-3 h-3.5 w-3.5 text-text-subtle" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search IP, session ID, or path..."
-                className="w-full rounded-lg border border-border bg-surface-subtle pl-8 pr-7 py-1.5 text-xs font-mono text-text placeholder:text-text-subtle focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary/40"
-              />
-              {searchQuery && (
-                <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="Clear session search"
-                className="absolute right-3 top-3 text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
+      {/* Animated Dropdown Menu using ComboboxPopover */}
+      <ComboboxPopover
+        id={menuId}
+        isOpen={open}
+        onClose={closeMenu}
+        triggerRef={triggerRef}
+        ariaLabel="Select session to audit"
+        totalCount={allDisplaySessions.length}
+        className="min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain"
+      >
+        {/* Search Input inside Session Dropdown */}
+        <ComboboxSearchInput
+          inputRef={searchInputRef}
+          value={searchQuery}
+          onChange={handleSearchChange}
+          onClear={handleClearSearch}
+          onKeyDown={handleInputKeyDown}
+          placeholder="Search IP, session ID, or path..."
+          isLoading={isLoadingRemote}
+          ariaControls={menuId}
+        />
+
+        {/* Callout if currently audited session is hidden by active filter */}
+        {isSelectedFilteredOut && selectedSession && (
+          <div className="mx-1 mb-2 rounded-lg border border-primary-border bg-primary-subtle p-2 text-xs">
+            <div className="text-xs font-semibold uppercase tracking-wider text-primary">
+              Selected session (hidden by active filter):
+            </div>
+            <div className="mt-1 flex items-center justify-between font-mono text-xs">
+              <div className="flex items-center gap-1.5 truncate">
+                <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
+                <strong className="text-text">{selectedSession.sourceIp}</strong>
+                <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
+              </div>
+              <span className="px-1.5 py-0.2 rounded bg-surface border border-border/60 text-text-muted text-xs shrink-0">
+                {selectedSession.cwdState?.path ?? "/"}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Active Sessions */}
+        {filteredActiveSessions.length > 0 && (
+          <div>
+            <div className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none">
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                Active Sessions ({filteredActiveSessions.length})
+              </div>
+              {totalCount !== undefined && totalCount > allDisplaySessions.length && (
+                <span className="text-xs font-mono text-primary/80 lowercase">
+                  filtered
+                </span>
               )}
             </div>
+            <div className="space-y-0.5">
+              {filteredActiveSessions.map((s, idx) => {
+                const isSelected = s.sessionId === selectedSessionId;
+                const globalIndex = idx;
+                const isOutsideHome =
+                  s.cwdState?.path &&
+                  s.cwdState.path !== "/" &&
+                  s.cwdState.path !== "/home" &&
+                  !s.cwdState.path.startsWith("/home/");
 
-            {/* Callout if currently audited session is hidden by active filter */}
-            {isSelectedFilteredOut && selectedSession && (
-              <div className="mx-1 mb-2 rounded-lg border border-primary-border bg-primary-subtle p-2 text-xs">
-                <div className="text-xs font-semibold uppercase tracking-wider text-primary">
-                  Selected session (hidden by active filter):
-                </div>
-                <div className="mt-1 flex items-center justify-between font-mono text-xs">
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
-                    <strong className="text-text">{selectedSession.sourceIp}</strong>
-                    <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
-                  </div>
-                  <span className="px-1.5 py-0.2 rounded bg-surface border border-border/60 text-text-muted text-xs shrink-0">
-                    {selectedSession.cwdState?.path ?? "/"}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* Active Sessions */}
-            {filteredActiveSessions.length > 0 && (
-              <div>
-                <div className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none">
-                  <div className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                    Active Sessions ({filteredActiveSessions.length})
-                  </div>
-                  {totalCount !== undefined && totalCount > allDisplaySessions.length && (
-                    <span className="text-xs font-mono text-primary/80 lowercase">
-                      filtered
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-0.5">
-                  {filteredActiveSessions.map((s, idx) => {
-                    const isSelected = s.sessionId === selectedSessionId;
-                    const globalIndex = idx;
-                    const isOutsideHome =
-                      s.cwdState?.path &&
-                      s.cwdState.path !== "/" &&
-                      s.cwdState.path !== "/home" &&
-                      !s.cwdState.path.startsWith("/home/");
-
-                    return (
-                      <button
-                        key={s.sessionId}
-                        ref={(el) => {
-                          optionRefs.current[globalIndex] = el;
-                        }}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected}
-                        onClick={() => handleSelect(s.sessionId)}
-                        onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors ${
-                          isSelected
-                            ? "bg-primary-subtle text-primary border border-primary-border/50"
-                            : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
-                          <strong className={isSelected ? "text-primary" : "text-text"}>
-                            {s.sourceIp}
-                          </strong>
-                          <span className="text-text-subtle">·</span>
-                          <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
-                          {s.cwdState?.path && (
-                            <span
-                              className={`truncate px-1.5 py-0.2 rounded text-xs border ${
-                                isOutsideHome
-                                  ? "bg-primary/10 text-primary border-primary/30 font-semibold"
-                                  : "bg-surface-subtle text-text-subtle border-border/50"
-                              }`}
-                            >
-                              {s.cwdState.path}
-                            </span>
-                          )}
-                        </div>
-                        {isSelected && (
-                          <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+                return (
+                  <button
+                    key={s.sessionId}
+                    ref={registerOptionRef(globalIndex)}
+                    type="button"
+                    role="option"
+                    id={`${menuId}-opt-${globalIndex}`}
+                    aria-selected={isSelected}
+                    onClick={() => handleSelect(s.sessionId, s)}
+                    onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
+                    className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                      isSelected
+                        ? "bg-primary-subtle text-primary border border-primary-border/50"
+                        : activeIndex === globalIndex
+                          ? "bg-surface-hover text-text border border-border/50"
+                          : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
+                      <strong className={isSelected ? "text-primary" : "text-text"}>
+                        {s.sourceIp}
+                      </strong>
+                      <span className="text-text-subtle">·</span>
+                      <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                      {s.cwdState?.path && (
+                        <span
+                          className={`truncate px-1.5 py-0.2 rounded text-xs border ${
+                            isOutsideHome
+                              ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                              : "bg-surface-subtle text-text-subtle border-border/50"
+                          }`}
+                        >
+                          {s.cwdState.path}
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && (
+                      <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
             {/* Closed Sessions */}
             {filteredClosedSessions.length > 0 && (
@@ -402,18 +455,19 @@ export function AuditSessionSelect({
                     return (
                       <button
                         key={s.sessionId}
-                        ref={(el) => {
-                          optionRefs.current[globalIndex] = el;
-                        }}
+                        ref={registerOptionRef(globalIndex)}
                         type="button"
                         role="option"
+                        id={`${menuId}-opt-${globalIndex}`}
                         aria-selected={isSelected}
-                        onClick={() => handleSelect(s.sessionId)}
+                        onClick={() => handleSelect(s.sessionId, s)}
                         onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors ${
+                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
                           isSelected
                             ? "bg-primary-subtle text-primary border border-primary-border/50"
-                            : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                            : activeIndex === globalIndex
+                              ? "bg-surface-hover text-text border border-border/50"
+                              : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
                         }`}
                       >
                         <div className="flex items-center gap-1.5 truncate">
@@ -445,6 +499,35 @@ export function AuditSessionSelect({
                     );
                   })}
                 </div>
+
+                {/* Pagination / Remote Directory Retrieval */}
+                {(hasMoreRemote || (!searchQuery && recentClosedSessions.length >= 12 && remoteSessions.length === 0)) && (
+                  <div className="pt-2 px-1">
+                    <button
+                      type="button"
+                      onClick={handleLoadMore}
+                      disabled={isLoadingRemote}
+                      className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-border/80 bg-surface-subtle/70 px-2 py-1.5 text-xs font-mono text-text-muted hover:bg-surface-hover hover:text-text hover:border-primary/40 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isLoadingRemote ? (
+                        <>
+                          <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                          <span>Loading audit directory…</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Load older closed sessions</span>
+                          <ChevronDown className="h-3 w-3 text-text-subtle" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+                {remoteSessions.length > 0 && !hasMoreRemote && (
+                  <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
+                    All matching directory sessions loaded ({combinedClosedSessions.length})
+                  </div>
+                )}
               </div>
             )}
 
@@ -461,7 +544,7 @@ export function AuditSessionSelect({
                         type="button"
                         onClick={() => {
                           onResetFilters();
-                          setSearchQuery("");
+                          handleClearSearch();
                         }}
                         className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-subtle px-2 py-1 text-xs text-primary hover:bg-surface-hover hover:border-primary/40 transition-colors cursor-pointer"
                       >
@@ -475,9 +558,7 @@ export function AuditSessionSelect({
                 )}
               </div>
             )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </ComboboxPopover>
     </div>
   );
 }

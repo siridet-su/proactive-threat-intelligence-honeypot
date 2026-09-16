@@ -2,6 +2,7 @@
 "use client";
 
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Maximize2,
@@ -17,12 +18,11 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import type { RegionStatus } from "@/components/ui/RegionState";
 import type {
+  AuditSessionsPage,
   FilesystemClosedSession,
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
-  SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
@@ -30,109 +30,77 @@ import { CwdRouteHistory } from "./CwdRouteHistory";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { TimelineSplitter } from "./TimelineSplitter";
 import {
+  DEFAULT_STALE_THRESHOLD_MS,
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
-  MAX_TIMELINE_SIDEBAR_WIDTH,
-  MIN_TIMELINE_SIDEBAR_WIDTH,
   TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
+  clampTimelineSidebarWidth,
+  formatUpdateAge,
   getDistinctSessionPaths,
-  isHistoryPage,
   isHomeOnlySession,
-  isSnapshot,
+  resolveSessionSelection,
   sessionTouchesPath,
-  type ActiveHopRoute,
   type DistinctPathOption,
-  type StreamState,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
+import { useFilesystemStreaming } from "./useFilesystemStreaming";
+import { useSessionCwdHistory } from "./useSessionCwdHistory";
+import { useFilesystemUrlState } from "./useFilesystemUrlState";
+import { useAuditReplay } from "./useAuditReplay";
 
 export function FilesystemActivity() {
   const shouldReduceMotion = useReducedMotion();
-  const [viewMode, setViewMode] = useState<"live" | "audit">("live");
-  const [snapshot, setSnapshot] = useState<FilesystemTopologySnapshot | null>(null);
-  const [regionStatus, setRegionStatus] = useState<RegionStatus>("loading");
-  const [streamState, setStreamState] = useState<StreamState>("connecting");
+
+  // Selected session and path state
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [history, setHistory] = useState<SessionCwdHistoryEvent[]>([]);
-  const [historyCursor, setHistoryCursor] = useState<string | null>(null);
-  const [historyStatus, setHistoryStatus] = useState<RegionStatus>("loading");
-  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<string | null>(null);
-  const [isHydrated, setIsHydrated] = useState(false);
-
-  // Audit Mode Filter State
-  const [hideHomeOnly, setHideHomeOnly] = useState(false);
-  const [targetPathFilter, setTargetPathFilter] = useState<string | null>(null);
+  const [extraAuditSessions, setExtraAuditSessions] = useState<Map<string, FilesystemClosedSession | FilesystemTopologySession>>(new Map());
 
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
-  const [timelineWidth, setTimelineWidth] = useState<number>(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
+  const [timelineWidth, setTimelineWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
+    try {
+      const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
+      if (saved) {
+        const parsedWidth = parseInt(saved, 10);
+        if (Number.isFinite(parsedWidth)) {
+          return clampTimelineSidebarWidth(parsedWidth);
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
+  });
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
   const [showFailedAttempts, setShowFailedAttempts] = useState(true);
 
-  const historyRequest = useRef<{ generation: number; sessionId: string; controller: AbortController } | null>(null);
-  const latestSnapshotAt = useRef(0);
+  // Cross-cutting refs
   const selectedSessionIdRef = useRef<string | null>(null);
   const selectedLiveCwdRef = useRef<string | null>(null);
   const auditDialogRef = useRef<HTMLDivElement | null>(null);
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
+  const auditLookupInFlightRef = useRef<string | null>(null);
+  const lookupRemoteAuditSessionRef = useRef<((targetId: string) => Promise<void>) | null>(null);
+  const selectSessionRef = useRef<((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => void) | null>(null);
+  const handleSnapshotAppliedRef = useRef<((data: FilesystemTopologySnapshot) => void) | null>(null);
 
   useEffect(() => {
     selectedSessionIdRef.current = selectedSessionId;
   }, [selectedSessionId]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsHydrated(true);
-      if (typeof window !== "undefined") {
-        const params = new URLSearchParams(window.location.search);
-        const urlView = params.get("view");
-        const urlSessionId = params.get("sessionId");
-        if (urlView === "audit") {
-          setViewMode("audit");
-        }
-        if (urlSessionId) {
-          selectedSessionIdRef.current = urlSessionId;
-          setSelectedSessionId(urlSessionId);
-        }
-        const urlHideHome = params.get("hideHome");
-        if (urlHideHome === "1" || urlHideHome === "true") {
-          setHideHomeOnly(true);
-        }
-        const urlTargetPath = params.get("targetPath");
-        if (urlTargetPath) {
-          setTargetPathFilter(urlTargetPath);
-        }
-
-        try {
-          const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
-          if (saved) {
-            const parsed = parseInt(saved, 10);
-            if (!Number.isNaN(parsed)) {
-              setTimelineWidth(Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, parsed)));
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
-
   // Persist timeline width preference
   useEffect(() => {
-    if (isHydrated && typeof window !== "undefined") {
+    if (typeof window !== "undefined") {
       try {
         localStorage.setItem(TIMELINE_SIDEBAR_STORAGE_KEY, String(timelineWidth));
       } catch {
         // ignore
       }
     }
-  }, [timelineWidth, isHydrated]);
+  }, [timelineWidth]);
 
   // Prevent text selection and preserve resize cursor during drag
   useEffect(() => {
@@ -158,9 +126,7 @@ export function FilesystemActivity() {
 
     const onMouseMove = (moveEvent: MouseEvent) => {
       const deltaX = startX - moveEvent.clientX;
-      const maxAllowed = Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, Math.floor(window.innerWidth * 0.65));
-      const clamped = Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, Math.min(maxAllowed, startWidth + deltaX));
-      setTimelineWidth(clamped);
+      setTimelineWidth(clampTimelineSidebarWidth(startWidth + deltaX, window.innerWidth));
     };
 
     const onMouseUp = () => {
@@ -180,33 +146,139 @@ export function FilesystemActivity() {
   const handleSplitterKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowLeft") {
       e.preventDefault();
-      setTimelineWidth((curr) => Math.min(MAX_TIMELINE_SIDEBAR_WIDTH, curr + 24));
+      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr + 24, window.innerWidth));
     } else if (e.key === "ArrowRight") {
       e.preventDefault();
-      setTimelineWidth((curr) => Math.max(MIN_TIMELINE_SIDEBAR_WIDTH, curr - 24));
+      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr - 24, window.innerWidth));
     } else if (e.key === "Enter" || e.key === " " || e.key === "Home") {
       e.preventDefault();
       setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
     }
   }, []);
 
-  const applySnapshot = useCallback((data: FilesystemTopologySnapshot) => {
-    const timestamp = Date.parse(data.generatedAt);
-    if (Number.isFinite(timestamp) && timestamp < latestSnapshotAt.current) return;
-    if (Number.isFinite(timestamp)) latestSnapshotAt.current = timestamp;
+  // Streaming & snapshot management hook
+  const {
+    snapshot,
+    regionStatus,
+    streamState,
+    isHydrated,
+    lastUpdateAgeMs,
+    freshnessState,
+    refresh,
+    handleReconnect,
+  } = useFilesystemStreaming({
+    onSnapshotApplied: (data) => handleSnapshotAppliedRef.current?.(data),
+  });
 
-    setSnapshot(data);
-    setRegionStatus("ready");
+  const dispatchSelectSession = useCallback((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
+    selectSessionRef.current?.(sessionId, sessionObj);
+  }, []);
 
-    const knownSessions = [...data.sessions, ...data.recentClosedSessions];
-    const currentSessionId = selectedSessionIdRef.current;
-    const nextSessionId = knownSessions.some((session) => session.sessionId === currentSessionId)
-      ? currentSessionId
-      : data.sessions[0]?.sessionId ?? data.recentClosedSessions[0]?.sessionId ?? null;
+  const dispatchLookupRemoteAuditSession = useCallback(async (targetId: string) => {
+    await lookupRemoteAuditSessionRef.current?.(targetId);
+  }, []);
+
+  // URL state synchronization and routing hook
+  const {
+    viewMode,
+    switchViewMode,
+    hideHomeOnly,
+    setHideHomeOnly,
+    targetPathFilter,
+    setTargetPathFilter,
+    selectedHistoryEventId,
+    setSelectedHistoryEventId,
+    expiredSessionId,
+    setExpiredSessionId,
+    requestedHopRef,
+    requestedSessionIdRef,
+    isUserNavigatingRef,
+  } = useFilesystemUrlState({
+    isHydrated,
+    snapshot,
+    extraAuditSessions,
+    selectedSessionId,
+    selectedSessionIdRef,
+    selectSession: dispatchSelectSession,
+    lookupRemoteAuditSession: dispatchLookupRemoteAuditSession,
+    setSelectedSessionId,
+    onExitFullscreenAndPlaying: () => {
+      setIsAuditFullscreen(false);
+    },
+  });
+
+  // Session CWD history keyset pagination hook
+  const {
+    history,
+    historyCursor,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    historyStatus,
+    loadHistory,
+    resetHistory,
+  } = useSessionCwdHistory({
+    requestedHopRef,
+    onSelectHistoryEventId: setSelectedHistoryEventId,
+  });
+
+  // Audit replay scrubber, timer, and active hop route hook
+  const {
+    isPlaying,
+    setIsPlaying,
+    playbackSpeed,
+    pacingMode,
+    displayedHistory,
+    selectedHistoryIndex,
+    displayedHistoryMetrics,
+    activeHop,
+    handlePrevHop,
+    handleNextHop,
+    handleTogglePlay,
+    handlePause,
+    handleToggleSpeed,
+    handleTogglePacingMode,
+  } = useAuditReplay({
+    viewMode,
+    history,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    showFailedAttempts,
+    selectedHistoryEventId,
+    onSelectHistoryEventId: setSelectedHistoryEventId,
+  });
+
+  const handleSnapshotApplied = useCallback((data: FilesystemTopologySnapshot) => {
+    const knownSessions = [
+      ...data.sessions,
+      ...data.recentClosedSessions,
+      ...extraAuditSessions.values(),
+    ];
+    const candidateId = requestedSessionIdRef.current ?? selectedSessionIdRef.current;
+    const resolution = resolveSessionSelection(
+      requestedSessionIdRef.current,
+      selectedSessionIdRef.current,
+      knownSessions,
+      viewMode === "audit",
+    );
+    requestedSessionIdRef.current = null;
+
+    if (resolution.expiredSessionId) {
+      if (viewMode === "audit" && candidateId && lookupRemoteAuditSessionRef.current) {
+        void lookupRemoteAuditSessionRef.current(candidateId);
+      } else {
+        setExpiredSessionId(resolution.expiredSessionId);
+        selectedSessionIdRef.current = null;
+        setSelectedSessionId(null);
+      }
+    } else {
+      setExpiredSessionId(null);
+      selectedSessionIdRef.current = resolution.sessionId;
+      setSelectedSessionId(resolution.sessionId);
+    }
+
+    const nextSessionId = resolution.sessionId;
     const selectedLiveSession = data.sessions.find((session) => session.sessionId === nextSessionId) ?? null;
-
-    selectedSessionIdRef.current = nextSessionId;
-    setSelectedSessionId(nextSessionId);
 
     const liveCwdChanged =
       Boolean(selectedLiveSession?.cwdState.path) &&
@@ -223,137 +295,44 @@ export function FilesystemActivity() {
       if (valid) return current;
       return selectedLiveSession?.cwdState.path ?? data.sessions[0]?.cwdState.path ?? data.nodes[0]?.path ?? null;
     });
-  }, []);
+  }, [extraAuditSessions, viewMode, setExpiredSessionId, requestedSessionIdRef]);
 
-  const refresh = useCallback(async () => {
-    setRegionStatus((current) => (snapshot ? "refreshing" : current === "error" ? "loading" : current));
-    try {
-      const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
-      if (!response.ok) throw new Error("Topology request failed");
-      const data: unknown = await response.json();
-      if (!isSnapshot(data)) throw new Error("Topology response unavailable");
-      applySnapshot(data);
-    } catch {
-      setRegionStatus(snapshot ? "stale" : "error");
-    }
-  }, [applySnapshot, snapshot]);
-
-  // SSE Stream subscription with HTTP fallback
   useEffect(() => {
-    let disposed = false;
-    let source: EventSource | null = null;
-    let retry: number | null = null;
+    handleSnapshotAppliedRef.current = handleSnapshotApplied;
+  }, [handleSnapshotApplied]);
 
-    const fetchSnapshot = async () => {
-      try {
-        const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
-        if (!response.ok) throw new Error("Topology fallback failed");
-        const data: unknown = await response.json();
-        if (!isSnapshot(data) || disposed) return;
-        applySnapshot(data);
-      } catch {
-        if (!disposed) setRegionStatus((current) => (current === "ready" ? "stale" : "error"));
+  const allSessions = useMemo(() => {
+    const combined: (FilesystemTopologySession | FilesystemClosedSession)[] = [
+      ...(snapshot?.sessions ?? []),
+      ...(snapshot?.recentClosedSessions ?? []),
+    ];
+    if (!extraAuditSessions.size) return combined;
+    const seen = new Set(combined.map((s) => s.sessionId));
+    for (const session of extraAuditSessions.values()) {
+      if (!seen.has(session.sessionId)) {
+        combined.push(session);
       }
-    };
-
-    const onMessage = (event: MessageEvent<string>) => {
-      try {
-        const message: unknown = JSON.parse(event.data);
-        if (!message || typeof message !== "object") return;
-        const data = (message as { data?: unknown }).data;
-        if (!isSnapshot(data)) return;
-        applySnapshot(data);
-        setStreamState("live");
-      } catch {
-        /* retain the last valid topology */
-      }
-    };
-
-    const connect = () => {
-      source = new EventSource("/api/filesystem-topology/stream");
-      source.addEventListener("snapshot", onMessage as EventListener);
-      source.addEventListener("topology.update", onMessage as EventListener);
-      source.onopen = () => {
-        if (disposed) return;
-        setIsHydrated(true);
-        setStreamState("live");
-      };
-      source.onerror = () => {
-        if (disposed || source === null) return;
-        setIsHydrated(true);
-        setStreamState("stale");
-        source.close();
-        source = null;
-        void fetchSnapshot();
-        retry = window.setTimeout(connect, 5_000);
-      };
-    };
-
-    connect();
-    return () => {
-      disposed = true;
-      source?.close();
-      if (retry !== null) window.clearTimeout(retry);
-    };
-  }, [applySnapshot]);
-
-  // CWD history pagination with cancellation
-  const lastHistorySessionId = useRef<string | null>(null);
-  const loadHistory = useCallback(async (sessionId: string, cursor: string | null, append = false) => {
-    const generation = (historyRequest.current?.generation ?? 0) + 1;
-    historyRequest.current?.controller.abort();
-    const controller = new AbortController();
-    historyRequest.current = { generation, sessionId, controller };
-    const isNewSession = sessionId !== lastHistorySessionId.current;
-    lastHistorySessionId.current = sessionId;
-    if (!append && isNewSession) {
-      setHistory([]);
-      setHistoryCursor(null);
-      setSelectedHistoryEventId(null);
     }
-    setHistoryStatus(append || !isNewSession ? "refreshing" : "loading");
-    try {
-      const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
-      const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cwd-history${params}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      if (!response.ok) throw new Error("History request failed");
-      const data: unknown = await response.json();
-      if (!isHistoryPage(data)) throw new Error("History response unavailable");
-      const active = historyRequest.current;
-      if (!active || active.generation !== generation || active.sessionId !== sessionId) return;
-      setHistory((current) => (append ? [...current, ...data.items] : data.items));
-      setHistoryCursor(data.nextCursor);
-      setHistoryStatus("ready");
-    } catch {
-      if (controller.signal.aborted || historyRequest.current?.generation !== generation) return;
-      setHistoryStatus("error");
-    }
-  }, []);
-
-  const allSessions = useMemo(
-    () => [...(snapshot?.sessions ?? []), ...(snapshot?.recentClosedSessions ?? [])],
-    [snapshot],
-  );
+    return combined;
+  }, [snapshot, extraAuditSessions]);
   const sessionById = useMemo(() => new Map(allSessions.map((s) => [s.sessionId, s])), [allSessions]);
   const selectedSession = useMemo(() => sessionById.get(selectedSessionId ?? "") ?? null, [selectedSessionId, sessionById]);
-  const selectedClosedSession = useMemo(
-    () => snapshot?.recentClosedSessions.find((s) => s.sessionId === selectedSessionId) ?? null,
-    [selectedSessionId, snapshot],
-  );
+  const selectedClosedSession = useMemo(() => {
+    const fromSnapshot = snapshot?.recentClosedSessions.find((s) => s.sessionId === selectedSessionId);
+    if (fromSnapshot) return fromSnapshot;
+    const fromExtra = extraAuditSessions.get(selectedSessionId ?? "");
+    if (fromExtra && "lifecycle" in fromExtra && Boolean(fromExtra.lifecycle)) {
+      return fromExtra as FilesystemClosedSession;
+    }
+    return null;
+  }, [selectedSessionId, snapshot, extraAuditSessions]);
   const selectedNode = useMemo(
     () => snapshot?.nodes.find((n) => n.path === selectedPath) ?? null,
-    [selectedPath, snapshot],
-  );
-  const selectedNodeLiveSessionCount = useMemo(
-    () => (selectedPath ? (snapshot?.sessions.filter((session) => session.cwdState.path === selectedPath).length ?? 0) : 0),
     [selectedPath, snapshot],
   );
 
   const distinctPaths: DistinctPathOption[] = useMemo(() => {
     return getDistinctSessionPaths(
-      snapshot?.nodes ?? [],
       snapshot?.sessions ?? [],
       snapshot?.recentClosedSessions ?? [],
     );
@@ -368,21 +347,19 @@ export function FilesystemActivity() {
   } = useMemo(() => {
     const allActive = snapshot?.sessions ?? [];
     const allClosed = snapshot?.recentClosedSessions ?? [];
-    const allNodes = snapshot?.nodes ?? [];
-
     let homeCount = 0;
     for (const s of allActive) {
-      if (isHomeOnlySession(s, allNodes)) homeCount++;
+      if (isHomeOnlySession(s)) homeCount++;
     }
     for (const s of allClosed) {
-      if (isHomeOnlySession(s, allNodes)) homeCount++;
+      if (isHomeOnlySession(s)) homeCount++;
     }
 
     const filterFn = (s: FilesystemTopologySession | FilesystemClosedSession) => {
-      if (hideHomeOnly && isHomeOnlySession(s, allNodes)) {
+      if (hideHomeOnly && isHomeOnlySession(s)) {
         return false;
       }
-      if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter, allNodes)) {
+      if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) {
         return false;
       }
       return true;
@@ -402,52 +379,68 @@ export function FilesystemActivity() {
     };
   }, [snapshot, hideHomeOnly, targetPathFilter]);
 
+  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
+
   const handleResetAuditFilters = useCallback(() => {
     setHideHomeOnly(false);
     setTargetPathFilter(null);
-  }, []);
+  }, [setHideHomeOnly, setTargetPathFilter]);
 
-  // Sync URL query params with audit filters
-  useEffect(() => {
-    if (viewMode !== "audit" || typeof window === "undefined") return;
-    const url = new URL(window.location.href);
-    if (hideHomeOnly) {
-      url.searchParams.set("hideHome", "1");
-    } else {
-      url.searchParams.delete("hideHome");
+  const isSelectedFilteredOut = useMemo(() => {
+    if (!selectedSession || !hasActiveFilters) return false;
+    if (hideHomeOnly && isHomeOnlySession(selectedSession)) return true;
+    if (targetPathFilter && !sessionTouchesPath(selectedSession, targetPathFilter)) return true;
+    return false;
+  }, [selectedSession, hasActiveFilters, hideHomeOnly, targetPathFilter]);
+
+  const auditCanvasTitle = useMemo(() => {
+    if (!selectedSession) return "No Session Selected";
+    if (isSelectedFilteredOut) {
+      return `Attack Trajectory: ${selectedSession.sourceIp} (Pinned Outside Filter)`;
     }
-    if (targetPathFilter) {
-      url.searchParams.set("targetPath", targetPathFilter);
-    } else {
-      url.searchParams.delete("targetPath");
+    return `Attack Trajectory: ${selectedSession.sourceIp}`;
+  }, [selectedSession, isSelectedFilteredOut]);
+
+  const auditCanvasSubtitle = useMemo(() => {
+    if (!selectedSession) return "Choose a session from the dropdown to replay its filesystem trajectory.";
+    if (filteredSessionsCount === 0) {
+      return `0 of ${totalSessionsCount} sessions match the active filter criteria. This session is pinned outside the result set.`;
     }
-    window.history.replaceState(null, "", url.toString());
-  }, [viewMode, hideHomeOnly, targetPathFilter]);
+    if (isSelectedFilteredOut) {
+      return `This session is pinned outside the active filter criteria (${filteredSessionsCount} matching session${filteredSessionsCount === 1 ? "" : "s"} available).`;
+    }
+    return "All historical directories touched by this session are preserved on the canvas.";
+  }, [selectedSession, filteredSessionsCount, totalSessionsCount, isSelectedFilteredOut]);
 
   // Reload CWD route when a new source event arrives for the selected session
   useEffect(() => {
-    if (!selectedSessionId) {
-      historyRequest.current?.controller.abort();
-      return;
-    }
+    if (!selectedSessionId) return;
     const request = window.setTimeout(() => {
       void loadHistory(selectedSessionId, null);
     }, 0);
     return () => {
       window.clearTimeout(request);
-      if (historyRequest.current?.sessionId === selectedSessionId) historyRequest.current.controller.abort();
     };
   }, [loadHistory, selectedSession?.cwdState.sourceEventId, selectedSessionId]);
 
   const selectSession = useCallback(
-    (sessionId: string) => {
+    (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
+      if (sessionObj) {
+        setExtraAuditSessions((prev) => {
+          if (prev.has(sessionId)) return prev;
+          const next = new Map(prev);
+          next.set(sessionId, sessionObj);
+          return next;
+        });
+      }
       const isDifferentSession = sessionId !== selectedSessionIdRef.current;
-      const session = sessionById.get(sessionId);
-      historyRequest.current?.controller.abort();
+      const session = sessionObj ?? sessionById.get(sessionId);
+      setExpiredSessionId(null);
       if (isDifferentSession) {
-        setHistory([]);
-        setHistoryCursor(null);
-        setSelectedHistoryEventId(null);
+        resetHistory();
+        if (requestedHopRef.current === null) {
+          setSelectedHistoryEventId(null);
+        }
       }
       setIsPlaying(false);
       selectedSessionIdRef.current = sessionId;
@@ -458,19 +451,70 @@ export function FilesystemActivity() {
       }
       void loadHistory(sessionId, null);
     },
-    [sessionById, snapshot?.nodes, loadHistory],
+    [sessionById, snapshot?.nodes, loadHistory, resetHistory, requestedHopRef, setSelectedHistoryEventId, setIsPlaying, setExpiredSessionId],
+  );
+
+  useEffect(() => {
+    selectSessionRef.current = selectSession;
+  }, [selectSession]);
+
+  const lookupRemoteAuditSession = useCallback(
+    async (targetId: string) => {
+      if (!targetId || auditLookupInFlightRef.current === targetId) return;
+      auditLookupInFlightRef.current = targetId;
+      try {
+        const res = await fetch(
+          `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(targetId)}&limit=1`,
+          { cache: "no-store" },
+        );
+        if (res.ok) {
+          const data: unknown = await res.json();
+          const page = data as Partial<AuditSessionsPage>;
+          const found = page.items?.find((s) => s.sessionId === targetId);
+          if (found) {
+            setExtraAuditSessions((prev) => {
+              const next = new Map(prev);
+              next.set(found.sessionId, found);
+              return next;
+            });
+            setExpiredSessionId(null);
+            selectSession(found.sessionId, found);
+            return;
+          }
+        }
+      } catch {
+        // proceed to mark expired
+      } finally {
+        auditLookupInFlightRef.current = null;
+      }
+      setExpiredSessionId(targetId);
+      selectedSessionIdRef.current = null;
+      setSelectedSessionId(null);
+    },
+    [selectSession, setExpiredSessionId],
+  );
+
+  useEffect(() => {
+    lookupRemoteAuditSessionRef.current = lookupRemoteAuditSession;
+  }, [lookupRemoteAuditSession]);
+
+  const handleUserSelectSession = useCallback(
+    (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
+      isUserNavigatingRef.current = true;
+      selectSession(sessionId, sessionObj);
+    },
+    [selectSession, isUserNavigatingRef],
   );
 
   const handleToggleHideHomeOnly = useCallback(() => {
     setHideHomeOnly((prev) => {
       const next = !prev;
       if (next && selectedSessionId) {
-        const allNodes = snapshot?.nodes ?? [];
         const currentSession = sessionById.get(selectedSessionId);
-        if (currentSession && isHomeOnlySession(currentSession, allNodes)) {
+        if (currentSession && isHomeOnlySession(currentSession)) {
           const firstNonHome = allSessions.find((s) => {
-            if (isHomeOnlySession(s, allNodes)) return false;
-            if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter, allNodes)) return false;
+            if (isHomeOnlySession(s)) return false;
+            if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
             return true;
           });
           if (firstNonHome) {
@@ -480,18 +524,17 @@ export function FilesystemActivity() {
       }
       return next;
     });
-  }, [selectedSessionId, snapshot?.nodes, sessionById, allSessions, targetPathFilter, selectSession]);
+  }, [selectedSessionId, sessionById, allSessions, targetPathFilter, selectSession, setHideHomeOnly]);
 
   const handleSelectTargetPath = useCallback(
     (path: string | null) => {
       setTargetPathFilter(path);
       if (path && selectedSessionId) {
-        const allNodes = snapshot?.nodes ?? [];
         const currentSession = sessionById.get(selectedSessionId);
-        if (currentSession && !sessionTouchesPath(currentSession, path, allNodes)) {
+        if (currentSession && !sessionTouchesPath(currentSession, path)) {
           const firstMatching = allSessions.find((s) => {
-            if (hideHomeOnly && isHomeOnlySession(s, allNodes)) return false;
-            if (!sessionTouchesPath(s, path, allNodes)) return false;
+            if (hideHomeOnly && isHomeOnlySession(s)) return false;
+            if (!sessionTouchesPath(s, path)) return false;
             return true;
           });
           if (firstMatching) {
@@ -500,7 +543,7 @@ export function FilesystemActivity() {
         }
       }
     },
-    [selectedSessionId, snapshot?.nodes, sessionById, allSessions, hideHomeOnly, selectSession],
+    [selectedSessionId, sessionById, allSessions, hideHomeOnly, selectSession, setTargetPathFilter],
   );
 
   // Decoupled directory selection: inspects directory metadata without destroying the currently audited session
@@ -508,142 +551,16 @@ export function FilesystemActivity() {
     setSelectedPath(path);
   };
 
-  const switchViewMode = useCallback(
-    (mode: "live" | "audit", targetSessionId?: string) => {
-      if (mode === "live") {
-        setIsAuditFullscreen(false);
-        setIsPlaying(false);
-      }
-      setViewMode(mode);
-      const sid =
-        targetSessionId ??
-        selectedSessionIdRef.current ??
-        snapshot?.sessions[0]?.sessionId ??
-        snapshot?.recentClosedSessions[0]?.sessionId ??
-        null;
-      if (sid) {
-        selectSession(sid);
-      }
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        if (mode === "audit") {
-          url.searchParams.set("view", "audit");
-          if (sid) url.searchParams.set("sessionId", sid);
-          if (hideHomeOnly) url.searchParams.set("hideHome", "1");
-          else url.searchParams.delete("hideHome");
-          if (targetPathFilter) url.searchParams.set("targetPath", targetPathFilter);
-          else url.searchParams.delete("targetPath");
-        } else {
-          url.searchParams.delete("view");
-          url.searchParams.delete("sessionId");
-          url.searchParams.delete("hideHome");
-          url.searchParams.delete("targetPath");
-        }
-        window.history.replaceState(null, "", url.toString());
-      }
-    },
-    [selectSession, snapshot?.sessions, snapshot?.recentClosedSessions, hideHomeOnly, targetPathFilter],
-  );
 
   const auditSnapshot = useMemo(() => {
     if (viewMode !== "audit") return null;
     return buildAuditSnapshot(snapshot, selectedSession, history);
   }, [viewMode, snapshot, selectedSession, history]);
 
-  const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
-
-  const displayedHistory = useMemo(() => {
-    if (showFailedAttempts) return chronologicalHistory;
-    return chronologicalHistory.filter((e) => e.action !== "failed_change");
-  }, [chronologicalHistory, showFailedAttempts]);
-
-  const selectedHistoryIndex = useMemo(() => {
-    if (!displayedHistory.length) return -1;
-    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
-    return index >= 0 ? index : displayedHistory.length - 1;
-  }, [displayedHistory, selectedHistoryEventId]);
-
-  const activeHop: ActiveHopRoute | null = useMemo(() => {
-    if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
-    const currentEvent = displayedHistory[selectedHistoryIndex];
-    const isFailed = currentEvent.action === "failed_change";
-    const visitedStepMap: Record<string, number> = {};
-    for (let i = 0; i <= selectedHistoryIndex; i++) {
-      const ev = displayedHistory[i];
-      if (ev.action !== "failed_change" && ev.toPath && visitedStepMap[ev.toPath] === undefined) {
-        visitedStepMap[ev.toPath] = i + 1;
-      }
-    }
-    return {
-      eventId: currentEvent.id,
-      fromPath: currentEvent.fromPath,
-      toPath: isFailed ? currentEvent.fromPath : currentEvent.toPath,
-      action: currentEvent.action,
-      status: currentEvent.status,
-      at: currentEvent.at,
-      stepIndex: selectedHistoryIndex,
-      totalSteps: displayedHistory.length,
-      visitedPaths: Object.keys(visitedStepMap),
-      visitedStepMap,
-      isFailedAttempt: isFailed,
-    };
-  }, [displayedHistory, selectedHistoryIndex]);
-
-  const handlePrevHop = useCallback(() => {
-    setIsPlaying(false);
-    if (selectedHistoryIndex > 0) {
-      setSelectedHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
-    }
-  }, [displayedHistory, selectedHistoryIndex]);
-
-  const handleNextHop = useCallback(() => {
-    setIsPlaying(false);
-    if (selectedHistoryIndex >= 0 && selectedHistoryIndex < displayedHistory.length - 1) {
-      setSelectedHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
-    }
-  }, [displayedHistory, selectedHistoryIndex]);
-
-  const handleTogglePlay = useCallback(() => {
-    if (selectedHistoryIndex >= displayedHistory.length - 1) {
-      setSelectedHistoryEventId(displayedHistory[0]?.id ?? null);
-    }
-    setIsPlaying((prev) => !prev);
-  }, [displayedHistory, selectedHistoryIndex]);
-
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-  }, []);
-
-  const handleToggleSpeed = useCallback(() => {
-    setPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
-  }, []);
-
   const enterAuditFullscreen = useCallback(() => {
     focusBeforeFullscreenRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setIsAuditFullscreen(true);
   }, []);
-
-  // Synchronized auto-play timer for audit mode
-  useEffect(() => {
-    if (viewMode !== "audit" || !isPlaying) return;
-
-    const timer = setTimeout(() => {
-      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        setIsPlaying(false);
-        return;
-      }
-
-      const nextIndex = selectedHistoryIndex + 1;
-      const nextEvent = displayedHistory[nextIndex];
-      if (nextEvent) {
-        setSelectedHistoryEventId(nextEvent.id);
-      } else {
-        setIsPlaying(false);
-      }
-    }, playbackSpeed);
-
-    return () => clearTimeout(timer);
-  }, [viewMode, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed]);
 
   // Global audit keyboard shortcuts (Space: play/pause, Left/Right: step, Esc: exit fullscreen)
   useEffect(() => {
@@ -746,8 +663,8 @@ export function FilesystemActivity() {
 
   return (
     <div className="space-y-5 pb-10 sm:pb-14">
-      {/* Header Section */}
-      <section className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Header Section: Global view controls and real-time telemetry status */}
+      <section className="flex flex-col gap-3.5 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-text">Filesystem activity</h1>
           <p className="mt-0.5 max-w-2xl text-xs text-text-muted">
@@ -757,24 +674,31 @@ export function FilesystemActivity() {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Global view controls: View switcher & real-time telemetry status */}
+        <div
+          className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0"
+          role="toolbar"
+          aria-label="Global filesystem controls"
+        >
           {/* Mode Switcher Tabs */}
           <div
-            className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5"
-            aria-label="Filesystem views"
+            className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5 shadow-2xs shrink-0 flex-nowrap"
+            role="tablist"
+            aria-label="Filesystem view modes"
           >
             <button
               type="button"
-              aria-pressed={viewMode === "live"}
+              role="tab"
+              aria-selected={viewMode === "live"}
               onClick={() => switchViewMode("live")}
               className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                 viewMode === "live"
                   ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text"
+                  : "text-text-muted hover:text-text border border-transparent"
               }`}
             >
               <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-              Live Topology
+              <span>Live Topology</span>
               {snapshot?.sessions.length ? (
                 <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
                   {snapshot.sessions.length}
@@ -784,16 +708,17 @@ export function FilesystemActivity() {
 
             <button
               type="button"
-              aria-pressed={viewMode === "audit"}
+              role="tab"
+              aria-selected={viewMode === "audit"}
               onClick={() => switchViewMode("audit")}
               className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
                 viewMode === "audit"
                   ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text"
+                  : "text-text-muted hover:text-text border border-transparent"
               }`}
             >
               <Route className="h-3.5 w-3.5" aria-hidden="true" />
-              Session Audit & Replay
+              <span>Session Audit & Replay</span>
               {selectedSession && (
                 <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
                   .{selectedSession.sourceIp.split(".").pop()}
@@ -802,26 +727,70 @@ export function FilesystemActivity() {
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Telemetry Status Bar & Actions */}
+          <div
+            className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap rounded-lg border border-border/70 bg-surface-subtle/50 p-1"
+            role="region"
+            aria-label="Stream telemetry status"
+          >
             <span
               className={`ui-badge ${
                 streamState === "live"
                   ? "border-success-border bg-success-subtle text-success"
+                  : streamState === "connecting"
+                  ? "border-border bg-surface-subtle text-text-subtle"
                   : "border-warning-border bg-warning-subtle text-warning"
               }`}
+              title={
+                streamState === "live"
+                  ? "Real-time SSE event stream connected"
+                  : streamState === "connecting"
+                  ? "Connecting to real-time event stream"
+                  : "SSE event stream disconnected, reconnecting..."
+              }
             >
-              <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-              {streamState === "live" ? "Live updates" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
+              <Radio className={`h-3.5 w-3.5 ${streamState === "live" ? "" : "animate-pulse"}`} aria-hidden="true" />
+              {streamState === "live" ? "Live stream" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
             </span>
+
+            {snapshot && (
+              <span
+                className={`ui-badge ${freshnessState.badgeClass}`}
+                title={freshnessState.detail}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
+                <span>
+                  {freshnessState.label} · {formatUpdateAge(lastUpdateAgeMs)}
+                </span>
+              </span>
+            )}
+
+            {(freshnessState.isDegraded || streamState === "stale") && (
+              <button
+                type="button"
+                className="ui-button border-warning-border bg-warning-subtle text-warning hover:bg-warning/20 font-semibold"
+                onClick={handleReconnect}
+                title="Force reconnect SSE stream and refresh snapshot"
+              >
+                <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+                Reconnect
+              </button>
+            )}
+
             <button
               type="button"
               className="ui-button"
+              disabled={!isHydrated || regionStatus === "loading" || regionStatus === "refreshing"}
               onClick={() => {
                 if (!isHydrated || regionStatus === "loading" || regionStatus === "refreshing") return;
                 void refresh();
               }}
+              title="Fetch fresh snapshot via HTTP"
             >
-              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              <RefreshCw
+                className={`h-4 w-4 ${regionStatus === "refreshing" || regionStatus === "loading" ? "animate-spin text-primary" : ""}`}
+                aria-hidden="true"
+              />
               Refresh
             </button>
           </div>
@@ -840,6 +809,9 @@ export function FilesystemActivity() {
               selectedPath={selectedPath}
               onSelectSession={selectSession}
               onSelectPath={selectPath}
+              onRefresh={refresh}
+              onReconnect={handleReconnect}
+              staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
             />
           </div>
 
@@ -849,7 +821,6 @@ export function FilesystemActivity() {
             selectedNode={selectedNode}
             sessions={snapshot?.sessions ?? []}
             recentClosedSessions={snapshot?.recentClosedSessions ?? []}
-            liveSessionCount={selectedNodeLiveSessionCount}
             selectedSessionId={selectedSessionId}
             onSelectSession={selectSession}
             onSelectPath={selectPath}
@@ -868,46 +839,60 @@ export function FilesystemActivity() {
         >
           {/* Studio Top Navigation Bar */}
           <header className="grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
-            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-              <div className="flex items-center gap-2">
-                <Route className="h-4 w-4 text-primary" />
+            <div
+              className="flex min-w-0 flex-wrap items-center gap-2.5"
+              role="group"
+              aria-label="Studio identity and session scope"
+            >
+              <div className="flex items-center gap-2 shrink-0">
+                <Route className="h-4 w-4 text-primary" aria-hidden="true" />
                 <span className="text-sm font-semibold text-text">Audit Replay Studio</span>
               </div>
-              <div className="h-4 w-px bg-border hidden sm:block" />
-              <span className="text-xs text-text-subtle font-medium hidden md:inline">Audited Session:</span>
-              <AuditSessionSelect
-                sessions={filteredActiveSessions}
-                recentClosedSessions={filteredClosedSessions}
-                selectedSessionId={selectedSessionId}
-                onSelectSession={selectSession}
-                totalCount={totalSessionsCount}
-                hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
-                onResetFilters={handleResetAuditFilters}
-                allSessionsList={allSessions}
-              />
-              <AuditFilterControls
-                hideHomeOnly={hideHomeOnly}
-                onToggleHideHomeOnly={handleToggleHideHomeOnly}
-                targetPath={targetPathFilter}
-                onSelectTargetPath={handleSelectTargetPath}
-                distinctPaths={distinctPaths}
-                homeOnlyCount={homeOnlyCount}
-                filteredCount={filteredSessionsCount}
-                totalCount={totalSessionsCount}
-                onResetFilters={handleResetAuditFilters}
-                selectedCanvasPath={selectedPath}
-              />
+              <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
+              <span className="text-xs text-text-subtle font-medium hidden md:inline shrink-0">Audited Session:</span>
+              <div className="flex items-center gap-2 flex-wrap min-w-0" role="group" aria-label="Session and filter selectors">
+                <AuditSessionSelect
+                  sessions={filteredActiveSessions}
+                  recentClosedSessions={filteredClosedSessions}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleUserSelectSession}
+                  totalCount={totalSessionsCount}
+                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  onResetFilters={handleResetAuditFilters}
+                  allSessionsList={allSessions}
+                />
+                <AuditFilterControls
+                  hideHomeOnly={hideHomeOnly}
+                  onToggleHideHomeOnly={handleToggleHideHomeOnly}
+                  targetPath={targetPathFilter}
+                  onSelectTargetPath={handleSelectTargetPath}
+                  distinctPaths={distinctPaths}
+                  homeOnlyCount={homeOnlyCount}
+                  filteredCount={filteredSessionsCount}
+                  totalCount={totalSessionsCount}
+                  onResetFilters={handleResetAuditFilters}
+                  selectedCanvasPath={selectedPath}
+                />
+              </div>
               {selectedSession && (
-                <span className="font-mono text-xs text-text-subtle hidden xl:inline">
+                <span className="font-mono text-xs text-text-subtle hidden xl:inline shrink-0">
                   IP: <strong className="text-text">{selectedSession.sourceIp}</strong>
                 </span>
               )}
             </div>
 
             {/* Stable right-side control cluster */}
-            <div className="flex min-h-10 flex-wrap items-center justify-end gap-2 justify-self-end xl:flex-nowrap">
+            <div
+              className="flex min-h-10 flex-wrap items-center justify-start sm:justify-end gap-2 justify-self-start sm:justify-self-end xl:flex-nowrap"
+              role="toolbar"
+              aria-label="Studio replay and workspace actions"
+            >
               {displayedHistory.length > 0 && (
-                <div className="relative h-10 w-72 shrink-0 overflow-hidden">
+                <div
+                  className="relative h-10 w-72 shrink-0 overflow-hidden"
+                  role="group"
+                  aria-label="Quick replay scrubber"
+                >
                   <AnimatePresence initial={false} mode="wait">
                     {isTimelineCollapsed ? (
                       <motion.div
@@ -952,7 +937,7 @@ export function FilesystemActivity() {
                             <ChevronRight className="h-3.5 w-3.5" />
                           </button>
                           <span className="border-l border-border/60 px-1.5 font-mono text-xs text-text-muted">
-                            Hop <strong className="text-primary">{selectedHistoryIndex + 1}</strong> of {displayedHistory.length}
+                            Hop <strong className="text-primary">{displayedHistoryMetrics.selectedNumber}</strong> of {displayedHistoryMetrics.totalItems}
                           </span>
                         </div>
                       </motion.div>
@@ -977,29 +962,31 @@ export function FilesystemActivity() {
                 </div>
               )}
 
-              {/* Toggle Timeline Collapse (70/30 vs 100%) */}
-              <button
-                type="button"
-                onClick={() => setIsTimelineCollapsed((c) => !c)}
-                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
-                title={isTimelineCollapsed ? "Show timeline sidebar" : "Collapse timeline sidebar"}
-                aria-pressed={isTimelineCollapsed}
-              >
-                {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Workspace views">
+                {/* Toggle Timeline Collapse (70/30 vs 100%) */}
+                <button
+                  type="button"
+                  onClick={() => setIsTimelineCollapsed((c) => !c)}
+                  className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
+                  title={isTimelineCollapsed ? "Show timeline sidebar" : "Collapse timeline sidebar"}
+                  aria-pressed={isTimelineCollapsed}
+                >
+                  {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+                  <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
+                </button>
 
-              {/* Exit Fullscreen Button */}
-              <button
-                type="button"
-                onClick={() => setIsAuditFullscreen(false)}
-                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5 bg-surface-subtle hover:bg-surface-hover"
-                title="Exit Fullscreen Studio (Esc)"
-                aria-label="Exit Fullscreen Studio"
-              >
-                <Minimize2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Exit Fullscreen</span>
-              </button>
+                {/* Exit Fullscreen Button */}
+                <button
+                  type="button"
+                  onClick={() => setIsAuditFullscreen(false)}
+                  className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5 bg-surface-subtle hover:bg-surface-hover"
+                  title="Exit Fullscreen Studio (Esc)"
+                  aria-label="Exit Fullscreen Studio"
+                >
+                  <Minimize2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Exit Fullscreen</span>
+                </button>
+              </div>
             </div>
           </header>
 
@@ -1007,6 +994,102 @@ export function FilesystemActivity() {
           <div className="min-h-0 flex-1 flex overflow-hidden">
             {/* Left Canvas: Flex-1 fills available width smoothly */}
             <div className="min-w-0 flex-1 h-full flex flex-col">
+              {expiredSessionId ? (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+                    <span>
+                      <strong>Requested audit session is no longer available:</strong> Session{" "}
+                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {allSessions.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = allSessions[0];
+                          setExpiredSessionId(null);
+                          if (first) {
+                            isUserNavigatingRef.current = true;
+                            selectSession(first.sessionId);
+                          }
+                        }}
+                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
+                      >
+                        View latest available session
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpiredSessionId(null);
+                        switchViewMode("live");
+                      }}
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                    >
+                      Return to live view
+                    </button>
+                  </div>
+                </div>
+              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                    <span>
+                      {filteredSessionsCount === 0 ? (
+                        <>
+                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
+                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
+                          {hideHomeOnly ? " [excluding /home]" : ""}.
+                          {selectedSession ? (
+                            <span className="text-text-muted ml-1">
+                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {filteredSessionsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
+                          if (first) selectSession(first.sessionId);
+                        }}
+                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        Switch to match
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleResetAuditFilters}
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                    >
+                      Reset filters
+                    </button>
+                    {selectedSession && filteredSessionsCount === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          selectedSessionIdRef.current = null;
+                          setSelectedSessionId(null);
+                        }}
+                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
               <TopologyCanvas
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
@@ -1015,12 +1098,15 @@ export function FilesystemActivity() {
                 selectedPath={selectedPath}
                 activeHop={activeHop}
                 hopDurationMs={playbackSpeed}
-                title={`Attack Trajectory: ${selectedSession?.sourceIp ?? "Session"}`}
-                subtitle="All historical directories touched by this session are preserved on the canvas."
+                title={auditCanvasTitle}
+                subtitle={auditCanvasSubtitle}
                 onSelectSession={selectSession}
                 onSelectPath={selectPath}
                 isExpanded={isAuditFullscreen}
                 onToggleExpand={() => setIsAuditFullscreen(false)}
+                onRefresh={refresh}
+                onReconnect={handleReconnect}
+                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
                 isAuditMode={true}
                 isResizingContainer={isDraggingTimeline}
                 className="h-full flex-1 min-h-0"
@@ -1064,6 +1150,9 @@ export function FilesystemActivity() {
                   history={history}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}
+                  historyTotalItems={historyTotalItems}
+                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+                  historyComplete={historyComplete}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
                   onSelectHistoryEventId={setSelectedHistoryEventId}
@@ -1075,6 +1164,8 @@ export function FilesystemActivity() {
                   onPause={handlePause}
                   playbackSpeed={playbackSpeed}
                   onToggleSpeed={handleToggleSpeed}
+                  pacingMode={pacingMode}
+                  onTogglePacingMode={handleTogglePacingMode}
                   showFailedAttempts={showFailedAttempts}
                   onToggleShowFailedAttempts={setShowFailedAttempts}
                 />
@@ -1085,20 +1176,28 @@ export function FilesystemActivity() {
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
         <div className="space-y-4">
-          {/* Target Session Selector & Action Bar (Compact Single-Row Toolbar) */}
-          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs">
-            <div className="flex flex-wrap items-center gap-2">
+          {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
+          <div
+            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            role="toolbar"
+            aria-label="Audit session and replay toolbar"
+          >
+            <div
+              className="flex flex-wrap items-center gap-2 min-w-0"
+              role="group"
+              aria-label="Audited session and filter controls"
+            >
               <AuditSessionSelect
                 sessions={filteredActiveSessions}
                 recentClosedSessions={filteredClosedSessions}
                 selectedSessionId={selectedSessionId}
-                onSelectSession={selectSession}
+                onSelectSession={handleUserSelectSession}
                 totalCount={totalSessionsCount}
                 hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
                 onResetFilters={handleResetAuditFilters}
                 allSessionsList={allSessions}
               />
-              <div className="h-4 w-px bg-border hidden sm:block" />
+              <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
               <AuditFilterControls
                 hideHomeOnly={hideHomeOnly}
                 onToggleHideHomeOnly={handleToggleHideHomeOnly}
@@ -1113,7 +1212,11 @@ export function FilesystemActivity() {
               />
             </div>
 
-            <div className="flex items-center gap-1.5 text-xs">
+            <div
+              className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
+              role="toolbar"
+              aria-label="Replay and workspace actions"
+            >
               {/* Compact Scrubber when Timeline is collapsed */}
               <div
                 className={`overflow-hidden transition-all duration-300 ease-in-out motion-reduce:transition-none flex items-center ${
@@ -1121,8 +1224,10 @@ export function FilesystemActivity() {
                     ? "max-w-xs opacity-100"
                     : "max-w-0 opacity-0 pointer-events-none"
                 }`}
+                role="group"
+                aria-label="Playback scrubber"
               >
-                <div className="flex items-center gap-1 rounded-lg border border-border bg-surface-subtle px-1.5 py-0.5 shrink-0">
+                <div className="flex items-center gap-1 rounded-lg border border-border/80 bg-surface-subtle px-1.5 py-0.5 shrink-0">
                   <button
                     type="button"
                     onClick={handlePrevHop}
@@ -1156,41 +1261,140 @@ export function FilesystemActivity() {
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
                   <span className="text-xs font-mono text-text-muted px-1">
-                    {selectedHistoryIndex + 1}/{displayedHistory.length}
+                    {displayedHistoryMetrics.selectedNumber}/{displayedHistoryMetrics.totalItems}
                   </span>
                 </div>
               </div>
 
-              {/* Toggle Timeline Collapse */}
-              <button
-                type="button"
-                onClick={() => setIsTimelineCollapsed((c) => !c)}
-                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
-                title={isTimelineCollapsed ? "Show timeline panel" : "Collapse timeline panel"}
-                aria-pressed={isTimelineCollapsed}
-              >
-                {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5 text-primary" /> : <PanelRightClose className="h-3.5 w-3.5" />}
-                <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
-              </button>
+              {/* Workspace actions: Timeline Toggle & Fullscreen */}
+              <div className="flex items-center gap-1.5 shrink-0" role="group" aria-label="Workspace views">
+                {/* Toggle Timeline Collapse */}
+                <button
+                  type="button"
+                  onClick={() => setIsTimelineCollapsed((c) => !c)}
+                  className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
+                  title={isTimelineCollapsed ? "Show timeline panel" : "Collapse timeline panel"}
+                  aria-pressed={isTimelineCollapsed}
+                >
+                  {isTimelineCollapsed ? <PanelRightOpen className="h-3.5 w-3.5 text-primary" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+                  <span className="hidden sm:inline">{isTimelineCollapsed ? "Show Timeline" : "Hide Timeline"}</span>
+                </button>
 
-              {/* Fullscreen Button */}
-              <button
-                type="button"
-                onClick={enterAuditFullscreen}
-                data-audit-fullscreen-trigger="true"
-                className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
-                title="Enter Fullscreen Audit Studio"
-                aria-label="Enter Fullscreen Audit Studio"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Fullscreen</span>
-              </button>
+                {/* Fullscreen Button */}
+                <button
+                  type="button"
+                  onClick={enterAuditFullscreen}
+                  data-audit-fullscreen-trigger="true"
+                  className="ui-button h-9 px-2.5 text-xs flex items-center gap-1.5"
+                  title="Enter Fullscreen Audit Studio"
+                  aria-label="Enter Fullscreen Audit Studio"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Fullscreen</span>
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Side-by-Side Audit Layout */}
           <div className="flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]">
             <div className="min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0">
+              {expiredSessionId ? (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
+                    <span>
+                      <strong>Requested audit session is no longer available:</strong> Session{" "}
+                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {allSessions.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = allSessions[0];
+                          setExpiredSessionId(null);
+                          if (first) {
+                            isUserNavigatingRef.current = true;
+                            selectSession(first.sessionId);
+                          }
+                        }}
+                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
+                      >
+                        View latest available session
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpiredSessionId(null);
+                        switchViewMode("live");
+                      }}
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                    >
+                      Return to live view
+                    </button>
+                  </div>
+                </div>
+              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                    <span>
+                      {filteredSessionsCount === 0 ? (
+                        <>
+                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
+                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
+                          {hideHomeOnly ? " [excluding /home]" : ""}.
+                          {selectedSession ? (
+                            <span className="text-text-muted ml-1">
+                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <>
+                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
+                        </>
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {filteredSessionsCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
+                          if (first) selectSession(first.sessionId);
+                        }}
+                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        Switch to match
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleResetAuditFilters}
+                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                    >
+                      Reset filters
+                    </button>
+                    {selectedSession && filteredSessionsCount === 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          selectedSessionIdRef.current = null;
+                          setSelectedSessionId(null);
+                        }}
+                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
+                      >
+                        Clear selection
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
               <TopologyCanvas
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
@@ -1199,12 +1403,15 @@ export function FilesystemActivity() {
                 selectedPath={selectedPath}
                 activeHop={activeHop}
                 hopDurationMs={playbackSpeed}
-                title={`Attack Trajectory: ${selectedSession?.sourceIp ?? "Session"}`}
-                subtitle="All historical directories touched by this session are preserved on the canvas."
+                title={auditCanvasTitle}
+                subtitle={auditCanvasSubtitle}
                 onSelectSession={selectSession}
                 onSelectPath={selectPath}
                 isExpanded={false}
                 onToggleExpand={enterAuditFullscreen}
+                onRefresh={refresh}
+                onReconnect={handleReconnect}
+                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
                 isAuditMode={true}
                 isResizingContainer={isDraggingTimeline}
                 className="h-full flex-1 min-h-0"
@@ -1251,6 +1458,9 @@ export function FilesystemActivity() {
                   history={history}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}
+                  historyTotalItems={historyTotalItems}
+                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+                  historyComplete={historyComplete}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
                   onSelectHistoryEventId={setSelectedHistoryEventId}
@@ -1262,6 +1472,8 @@ export function FilesystemActivity() {
                   onPause={handlePause}
                   playbackSpeed={playbackSpeed}
                   onToggleSpeed={handleToggleSpeed}
+                  pacingMode={pacingMode}
+                  onTogglePacingMode={handleTogglePacingMode}
                   showFailedAttempts={showFailedAttempts}
                   onToggleShowFailedAttempts={setShowFailedAttempts}
                 />

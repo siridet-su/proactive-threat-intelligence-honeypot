@@ -3,10 +3,11 @@ import "server-only";
 import type { ChangeStream, Document } from "mongodb";
 
 import type {
+  AuditSessionsPage,
+  FilesystemClosedSession,
   FilesystemTopologyNode,
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
-  FilesystemClosedSession,
   SessionCwdHistoryEvent,
   SessionCwdHistoryPage,
   SessionCwdState,
@@ -15,9 +16,12 @@ import {
   asDateString,
   asStatus,
   asString,
+  buildAuditSessionsQuery,
   buildSessionCwdHistoryQuery,
+  encodeAuditSessionCursor,
   encodeHistoryCursor,
   normalizeHistoryEvent,
+  normalizeSessionAuditSummary,
 } from "@/lib/filesystem-data";
 import { getMongoClient } from "@/lib/mongodb";
 
@@ -27,9 +31,16 @@ const DATABASE_NAME = "honeypot_db";
 const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
 const TOPOLOGY_LIMIT = 500;
-const RECENT_CLOSED_LIMIT = 250;
+// Live topology SSE broadcast maintains only a small immediate transition buffer
+// of recently closed sessions; the complete searchable/paginated closed directory
+// is accessed via the dedicated audit sessions API.
+const RECENT_CLOSED_BUFFER_LIMIT = 12;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
+
+// Closed session audit paths are immutable once closed; cached in-memory
+// to avoid querying and aggregating cwd_events on high-frequency live CWD ticks.
+const closedAuditPathsCache = new Map<string, AggregatedAuditPaths>();
 interface TopologySubscriber {
   changed: (snapshot: FilesystemTopologySnapshot) => void;
   unavailable: () => void;
@@ -89,7 +100,14 @@ function pathAncestors(path: string): string[] {
   return paths;
 }
 
-function toTopologySession(document: Document): FilesystemTopologySession | null {
+interface AggregatedAuditPaths extends Document {
+  _id: string;
+  fromPaths: unknown[];
+  toPaths: unknown[];
+  eventCount: number;
+}
+
+function toTopologySession(document: Document, auditPaths?: AggregatedAuditPaths): FilesystemTopologySession | null {
   const sessionId = asString(document.sessionId);
   const cwdState = normalizeCwdState(document.cwdState);
   if (!sessionId || !cwdState) return null;
@@ -97,11 +115,17 @@ function toTopologySession(document: Document): FilesystemTopologySession | null
     sessionId,
     sourceIp: asString(document.sourceIp) ?? "Unknown",
     cwdState,
+    auditSummary: normalizeSessionAuditSummary(
+      cwdState.path,
+      auditPaths?.fromPaths,
+      auditPaths?.toPaths,
+      auditPaths?.eventCount,
+    ),
   };
 }
 
-function toClosedSession(document: Document): FilesystemClosedSession | null {
-  const session = toTopologySession(document);
+function toClosedSession(document: Document, auditPaths?: AggregatedAuditPaths): FilesystemClosedSession | null {
+  const session = toTopologySession(document, auditPaths);
   const lifecycle = document.lifecycle;
   if (!session || !lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) return null;
   const lifecycleRecord = lifecycle as Record<string, unknown>;
@@ -112,6 +136,40 @@ function toClosedSession(document: Document): FilesystemClosedSession | null {
       closedAt: asDateString(lifecycleRecord.closedAt),
     },
   };
+}
+
+async function aggregateSessionAuditPaths(sessionIds: string[]): Promise<Map<string, AggregatedAuditPaths>> {
+  if (!sessionIds.length) return new Map();
+  const client = await getMongoClient();
+  const rows = await client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION).aggregate<AggregatedAuditPaths>([
+    {
+      $match: {
+        action: { $in: ["entered", "changed", "failed_change"] },
+        $or: [
+          { sessionId: { $in: sessionIds } },
+          { session_id: { $in: sessionIds } },
+        ],
+      },
+    },
+    {
+      $project: {
+        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
+        fromPath: 1,
+        successfulToPath: {
+          $cond: [{ $eq: ["$action", "failed_change"] }, null, "$toPath"],
+        },
+      },
+    },
+    {
+      $group: {
+        _id: "$effectiveSessionId",
+        fromPaths: { $addToSet: "$fromPath" },
+        toPaths: { $addToSet: "$successfulToPath" },
+        eventCount: { $sum: 1 },
+      },
+    },
+  ]).toArray();
+  return new Map(rows.map((row) => [row._id, row]));
 }
 
 /**
@@ -133,19 +191,44 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
     .limit(TOPOLOGY_LIMIT + 1)
     .allowDiskUse(true)
     .toArray(),
-    // Closed sessions are intentionally outside the live topology, but the
-    // most recent verified state remains directly reachable for audit.
+    // Closed sessions are intentionally outside the live topology, but a
+    // small immediate buffer remains in the live snapshot for graceful transition.
     states
       .find({ "lifecycle.status": "closed", "cwdState.path": { $type: "string", $ne: "" } })
       .sort({ "lifecycle.closedAt": -1, sessionId: -1 })
-      .limit(RECENT_CLOSED_LIMIT)
+      .limit(RECENT_CLOSED_BUFFER_LIMIT)
       .allowDiskUse(true)
       .toArray(),
   ]);
 
   const truncated = documents.length > TOPOLOGY_LIMIT;
-  const sessions = documents.slice(0, TOPOLOGY_LIMIT).map(toTopologySession).filter((item): item is FilesystemTopologySession => item !== null);
-  const recentClosedSessions = closedDocuments.map(toClosedSession).filter((item): item is FilesystemClosedSession => item !== null);
+  const liveDocuments = documents.slice(0, TOPOLOGY_LIMIT);
+  const liveSessionIds = liveDocuments
+    .map((document) => asString(document.sessionId))
+    .filter((sessionId): sessionId is string => sessionId !== null);
+  const closedSessionIds = closedDocuments
+    .map((document) => asString(document.sessionId))
+    .filter((sessionId): sessionId is string => sessionId !== null);
+
+  // Closed sessions are immutable; read cached audit summaries and only aggregate
+  // active sessions and uncached recent closed sessions.
+  const uncachedClosedIds = closedSessionIds.filter((id) => !closedAuditPathsCache.has(id));
+  const neededIds = [...liveSessionIds, ...uncachedClosedIds];
+  const fetchedAuditPaths = await aggregateSessionAuditPaths(neededIds);
+
+  for (const id of uncachedClosedIds) {
+    const row = fetchedAuditPaths.get(id);
+    if (row) closedAuditPathsCache.set(id, row);
+  }
+
+  const getAuditPaths = (id: string) => fetchedAuditPaths.get(id) ?? closedAuditPathsCache.get(id);
+
+  const sessions = liveDocuments
+    .map((document) => toTopologySession(document, getAuditPaths(asString(document.sessionId) ?? "")))
+    .filter((item): item is FilesystemTopologySession => item !== null);
+  const recentClosedSessions = closedDocuments
+    .map((document) => toClosedSession(document, getAuditPaths(asString(document.sessionId) ?? "")))
+    .filter((item): item is FilesystemClosedSession => item !== null);
   const nodes = new Map<string, FilesystemTopologyNode>();
 
   for (const session of sessions) {
@@ -192,20 +275,111 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
 
 export async function getSessionCwdHistory(sessionId: string, cursor: string | null): Promise<SessionCwdHistoryPage> {
   const sanitizedSessionId = sessionId.trim().slice(0, 300);
-  if (!sanitizedSessionId) return { items: [], nextCursor: null };
+  if (!sanitizedSessionId) {
+    return { items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true };
+  }
   const query = buildSessionCwdHistoryQuery(sanitizedSessionId, cursor);
+  const sessionQuery = buildSessionCwdHistoryQuery(sanitizedSessionId, null);
 
   const client = await getMongoClient();
-  const documents = await client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION)
-    .find(query)
-    .sort({ at: -1, eventId: -1 })
-    .limit(HISTORY_PAGE_SIZE + 1)
-    .allowDiskUse(true)
-    .toArray();
+  const collection = client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION);
+  const [documents, totalItems, totalSuccessfulItems] = await Promise.all([
+    collection
+      .find(query)
+      .sort({ at: -1, eventId: -1 })
+      .limit(HISTORY_PAGE_SIZE + 1)
+      .allowDiskUse(true)
+      .toArray(),
+    collection.countDocuments(sessionQuery),
+    collection.countDocuments({ $and: [sessionQuery, { action: { $ne: "failed_change" } }] }),
+  ]);
   const events = documents.map(normalizeHistoryEvent).filter((item): item is SessionCwdHistoryEvent => item !== null);
   const hasMore = events.length > HISTORY_PAGE_SIZE;
   const items = events.slice(0, HISTORY_PAGE_SIZE);
-  return { items, nextCursor: hasMore && items.length ? encodeHistoryCursor(items.at(-1)!) : null };
+  return {
+    items,
+    nextCursor: hasMore && items.length ? encodeHistoryCursor(items.at(-1)!) : null,
+    totalItems,
+    totalSuccessfulItems,
+    complete: !hasMore,
+  };
+}
+
+export interface AuditSessionsQueryOptions {
+  search?: string | null;
+  targetPath?: string | null;
+  hideHome?: boolean;
+  cursor?: string | null;
+  limit?: number;
+}
+
+export async function getAuditSessions(options: AuditSessionsQueryOptions = {}): Promise<AuditSessionsPage> {
+  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+  const query = buildAuditSessionsQuery({
+    search: options.search,
+    cursor: options.cursor,
+  });
+  const countQuery = buildAuditSessionsQuery({
+    search: options.search,
+    cursor: null,
+  });
+
+  const client = await getMongoClient();
+  const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
+  const [documents, totalCount] = await Promise.all([
+    states
+      .find(query)
+      .sort({ "lifecycle.closedAt": -1, sessionId: -1 })
+      .limit(limit + 1)
+      .allowDiskUse(true)
+      .toArray(),
+    states.countDocuments(countQuery),
+  ]);
+
+  const hasMore = documents.length > limit;
+  const pageDocs = documents.slice(0, limit);
+  const sessionIds = pageDocs
+    .map((doc) => asString(doc.sessionId))
+    .filter((id): id is string => id !== null);
+
+  const uncachedIds = sessionIds.filter((id) => !closedAuditPathsCache.has(id));
+  const fetchedPaths = await aggregateSessionAuditPaths(uncachedIds);
+  for (const id of uncachedIds) {
+    const row = fetchedPaths.get(id);
+    if (row) closedAuditPathsCache.set(id, row);
+  }
+
+  const getAuditPaths = (id: string) => fetchedPaths.get(id) ?? closedAuditPathsCache.get(id);
+
+  let items = pageDocs
+    .map((doc) => toClosedSession(doc, getAuditPaths(asString(doc.sessionId) ?? "")))
+    .filter((item): item is FilesystemClosedSession => item !== null);
+
+  if (options.hideHome) {
+    items = items.filter((session) => !session.auditSummary.homeOnly);
+  }
+  if (options.targetPath) {
+    const normTarget = options.targetPath.length > 1 && options.targetPath.endsWith("/")
+      ? options.targetPath.slice(0, -1)
+      : options.targetPath;
+    items = items.filter((session) =>
+      session.auditSummary.visitedPaths.some((p) => p === normTarget || p.startsWith(`${normTarget}/`)),
+    );
+  }
+
+  const lastDoc = pageDocs.at(-1);
+  const nextCursor = hasMore && lastDoc && asString(lastDoc.sessionId)
+    ? encodeAuditSessionCursor(
+        asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(),
+        asString(lastDoc.sessionId)!,
+      )
+    : null;
+
+  return {
+    items,
+    totalItems: totalCount,
+    nextCursor,
+  };
 }
 
 async function flushTopologyBroadcast() {

@@ -117,7 +117,15 @@ export async function markTerminateActionFailed(actionId: string, failureCategor
   return result ? normalizeAction(result) : null;
 }
 
-export async function getTerminateAction(sessionId: string, actionId?: string): Promise<SessionTerminateAction | null> {
+export interface TerminateActionWithState {
+  action: SessionTerminateAction | null;
+  active: boolean;
+}
+
+export async function getTerminateActionWithState(
+  sessionId: string,
+  actionId?: string,
+): Promise<TerminateActionWithState> {
   await ensureActionIndexes();
   const client = await getMongoClient();
   const db = client.db(DATABASE_NAME);
@@ -125,9 +133,30 @@ export async function getTerminateAction(sessionId: string, actionId?: string): 
     actionId ? { actionId, sessionId, action: "terminate_session" } : { sessionId, action: "terminate_session" },
     { sort: { requestedAt: -1 } },
   );
-  if (!document) return null;
+  if (!document) {
+    const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
+      { sessionId },
+      { projection: { "lifecycle.status": 1 } },
+    );
+    return {
+      action: null,
+      active: state?.lifecycle?.status === "active",
+    };
+  }
   const action = normalizeAction(document);
-  if (action.status !== "requested" && action.status !== "delivered") return action;
+  if (action.status !== "requested" && action.status !== "delivered") {
+    if (action.status === "verified") {
+      return { action, active: false };
+    }
+    const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
+      { sessionId },
+      { projection: { "lifecycle.status": 1 } },
+    );
+    return {
+      action,
+      active: state?.lifecycle?.status === "active",
+    };
+  }
 
   const state = await db.collection(SESSION_STATE_COLLECTION).findOne(
     { sessionId },
@@ -140,10 +169,25 @@ export async function getTerminateAction(sessionId: string, actionId?: string): 
       { $set: { status: "verified", verifiedAt: new Date(closedAt), failureCategory: null, open: false } },
       { returnDocument: "after" },
     );
-    return updated ? normalizeAction(updated) : action;
+    return {
+      action: updated ? normalizeAction(updated) : action,
+      active: false,
+    };
   }
   if (Date.now() - Date.parse(action.requestedAt) > VERIFICATION_TIMEOUT_MS) {
-    return markTerminateActionFailed(action.actionId, "verification_timeout");
+    const failed = await markTerminateActionFailed(action.actionId, "verification_timeout");
+    return {
+      action: failed,
+      active: state?.lifecycle?.status === "active",
+    };
   }
-  return action;
+  return {
+    action,
+    active: state?.lifecycle?.status === "active",
+  };
+}
+
+export async function getTerminateAction(sessionId: string, actionId?: string): Promise<SessionTerminateAction | null> {
+  const result = await getTerminateActionWithState(sessionId, actionId);
+  return result.action;
 }
