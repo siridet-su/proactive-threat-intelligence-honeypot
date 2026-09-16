@@ -1980,6 +1980,8 @@ def _session_overview(session: Dict[str, Any]) -> Dict[str, Any]:
     geo = (session.get("geo") or _extract_geo(payload)) if scope["is_public"] else {}
     if not geo and geo_context:
         geo = _geo_from_context(geo_context)
+    lifecycle_status = _text(payload.get("status") or "").lower()
+    is_ended = bool(payload.get("is_ended")) or lifecycle_status in {"closed", "ended"}
     return {
         "session_id": session.get("session_id") or payload.get("session_id") or "unknown",
         "sensor": payload.get("sensor") or payload.get("sensor_id") or session.get("sensor") or "",
@@ -1997,6 +1999,9 @@ def _session_overview(session: Dict[str, Any]) -> Dict[str, Any]:
         "start_time": payload.get("start_time") or "",
         "updated_at": session.get("updated_at") or "",
         "duration": payload.get("duration") or "",
+        "session_status": "closed" if is_ended else (lifecycle_status or "active"),
+        "is_ended": is_ended,
+        "ended": is_ended,
         "login_username": payload.get("login_username") or "",
         "login_success": payload.get("login_success"),
         "client_version": payload.get("client_version") or "",
@@ -2203,6 +2208,7 @@ def load_dashboard_session_detail(
         ],
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
+        "ensemble_evidence": payload.get("ensemble_evidence") or {},
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
@@ -2371,6 +2377,7 @@ def load_session_detail(
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
+        "ensemble_evidence": payload.get("ensemble_evidence") or {},
         # Keep trusted observed TTPs separate from contextual correlations in
         # the API/reporting handoff.  The legacy correlation key remains for
         # compatibility, but it is never the trusted observed namespace.
@@ -2631,7 +2638,14 @@ def load_snapshot(
         if item["payload"].get("analysis_skip_reason") == "no_commands"
         or item["analysis_status"] == "skipped"
     )
-    active_sessions = sum(1 for item in sessions if not bool(item["payload"].get("is_ended")))
+    active_sessions = sum(
+        1
+        for item in sessions
+        if not (
+            bool(item["payload"].get("is_ended"))
+            or _text(item["payload"].get("status")).lower() in {"closed", "ended"}
+        )
+    )
     latest_updated = max([item["updated_at"] for item in sessions if item["updated_at"]] or [""])
 
     events = []
@@ -3992,6 +4006,71 @@ def _classification_quality_warnings(classification_quality: Dict[str, Any]) -> 
     return warnings
 
 
+def _render_ensemble_evidence(value: Any) -> str:
+    if not isinstance(value, dict) or not value:
+        return '<div class="empty">No late-fusion evidence snapshot is available.</div>'
+    model2 = value.get("model2") if isinstance(value.get("model2"), dict) else {}
+
+    def display_bool(flag: Any) -> str:
+        if flag is True:
+            return "YES"
+        if flag is False:
+            return "NO"
+        return "-"
+
+    if model2.get("one_model") is True:
+        model2_architecture = "UNIFIED_ONE_MODEL"
+        model2_note = (
+            "Model2 is one unified multi-output model used as a shadow "
+            "corroborator; it does not replace Model1 and numeric scores are "
+            "not fused."
+        )
+    elif model2.get("one_model") is False:
+        model2_architecture = "NOT_UNIFIED"
+        model2_note = "Model2 evidence is not marked as a unified one-model result."
+    else:
+        model2_architecture = "-"
+        model2_note = (
+            "Primary: Model1. Model2 is corroborating, contradicting, or "
+            "unavailable; the native scores are not combined."
+        )
+    rows = []
+    for item in value.get("results") or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            "<tr>"
+            f"<td><strong>{_html(item.get('technique_id') or '-')}</strong></td>"
+            f"<td>{_html(item.get('model1_result') or 'NOT_APPLICABLE')}</td>"
+            f"<td class=\"num\">{_html(item.get('model1_margin') if item.get('model1_margin') is not None else '-')}</td>"
+            f"<td>{_html(item.get('model2_result') or 'UNAVAILABLE')}</td>"
+            f"<td>{_html(item.get('evidence_state') or '-')}</td>"
+            "</tr>"
+        )
+    table = (
+        "<table><thead><tr><th>technique</th><th>Model1</th>"
+        "<th>Model1 raw margin</th><th>Model2</th><th>ensemble state</th>"
+        "</tr></thead><tbody>"
+        + ("".join(rows) or '<tr><td colspan="5" class="empty">No shared-technique rows.</td></tr>')
+        + "</tbody></table>"
+    )
+    meta = (
+        '<div class="warning"><strong>Advisory evidence only:</strong> '
+        f"{_html(model2_note)}</div>"
+        '<div class="overview-grid prediction-meta">'
+        f'<div class="kv"><span>Model2 status</span><strong>{_html(model2.get("status") or "-")}</strong></div>'
+        f'<div class="kv"><span>Model2 available at</span><strong>{_html(model2.get("available_at") or "-")}</strong></div>'
+        f'<div class="kv"><span>Model2 architecture</span><strong>{_html(model2_architecture)}</strong></div>'
+        f'<div class="kv"><span>One inference call</span><strong>{_html(display_bool(model2.get("one_inference_call")))}</strong></div>'
+        f'<div class="kv"><span>Independent binary heads</span><strong>{_html(display_bool(model2.get("independent_binary_heads")))}</strong></div>'
+        f'<div class="kv"><span>Model2 version</span><strong>{_html(model2.get("model_version") or model2.get("model_id") or "-")}</strong></div>'
+        f'<div class="kv"><span>computed at</span><strong>{_html(value.get("ensemble_computed_at") or "-")}</strong></div>'
+        f'<div class="kv"><span>authority</span><strong>{_html(value.get("ensemble_authority") or "ADVISORY_ONLY")}</strong></div>'
+        "</div>"
+    )
+    return meta + table
+
+
 def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
@@ -4002,6 +4081,11 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         error = (detail.get("errors") or {}).get("predictions") or ""
         suffix = f" {_html(error)}" if error else ""
         return f'<div class="empty">No prediction snapshot recorded for this session yet.{suffix}</div>'
+
+    ensemble_html = (
+        "<h3>Model1 + Model2 Ensemble Evidence</h3>"
+        + _render_ensemble_evidence(payload.get("ensemble_evidence") or detail.get("ensemble_evidence") or {})
+    )
 
     if payload.get("prediction_mode") == "professor_approved_corrected_target_transformer_poc":
         model = payload.get("active_model") or {}
@@ -4064,7 +4148,7 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
                 f'<div class="empty">Transformer forecast {_html(status)}: '
                 f'{_html(payload.get("prediction_status_reason") or "unavailable")}</div>'
             )
-        return warning + meta + body
+        return warning + meta + ensemble_html + body
 
     ranking = payload.get("final_ranking") or []
     prediction_status = str(payload.get("prediction_status") or ("predicted" if ranking else "abstained"))
@@ -4307,6 +4391,7 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     return (
         meta
         + warnings_html
+        + ensemble_html
         + "<h3>Ranked Next-Step Hypotheses</h3>"
         + ranking_html
         + "<h3>Generic Progression Prior (Non-empirical, Offline Planning Only)</h3>"
