@@ -478,8 +478,8 @@ def test_monitor_can_preserve_legacy_callback_containment_or_propagate() -> None
 
 
 class _RecoveryCoordinator:
-    def __init__(self, **_kwargs: object) -> None:
-        pass
+    def __init__(self, **kwargs: object) -> None:
+        self._kwargs = kwargs
 
     async def analyze(self, _ioc_bundle: object, _tactic_summary: object, sessions: object, **kwargs: object) -> dict:
         from production.reporting.session_assessment_v4 import (
@@ -489,6 +489,22 @@ class _RecoveryCoordinator:
         return build_session_assessment_v4(
             sessions,
             raw_events=kwargs.get("raw_events", []),
+            behavior_policy_document=self._kwargs.get("behavior_policy_document"),
+            behavior_policy_path=str(self._kwargs.get("behavior_policy_path") or ""),
+            classification_policy=self._kwargs.get("classification_policy"),
+            classification_policy_path=str(
+                self._kwargs.get("classification_rules_path") or ""
+            ),
+            model_artifact_provenance=self._kwargs.get("prediction_policy"),
+            prediction_context=self._kwargs.get("prediction_context") or {},
+            correlation_context=kwargs.get("session_correlations") or [],
+            mitre_cache_path=str(self._kwargs.get("mitre_cache_path") or ""),
+            response_guidance_policy_path=str(
+                self._kwargs.get("response_guidance_policy_path") or ""
+            ),
+            response_guidance_asset_profile_path=str(
+                self._kwargs.get("response_guidance_asset_profile_path") or ""
+            ),
         )
 
 
