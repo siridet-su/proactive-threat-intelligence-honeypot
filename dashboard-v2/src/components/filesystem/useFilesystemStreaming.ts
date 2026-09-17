@@ -13,16 +13,20 @@ import {
   type SnapshotTransitionState,
 } from "@/lib/filesystem-freshness";
 import {
-  isSnapshot,
   type StreamState,
 } from "./filesystemUtils";
 import { FilesystemStreamLifecycleManager } from "./filesystemStreamManager";
+import {
+  FilesystemRefreshLifecycleManager,
+  type RefreshStatus,
+} from "./filesystemRefreshManager";
 
 const defaultGetNow = () => Date.now();
 
 export interface UseFilesystemStreamingOptions {
   onSnapshotApplied?: (snapshot: FilesystemTopologySnapshot) => void;
   getNow?: () => number;
+  fetchRefresh?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 export interface UseFilesystemStreamingReturn {
@@ -44,6 +48,8 @@ export interface UseFilesystemStreamingReturn {
   refresh: () => Promise<void>;
   handleReconnect: () => void;
   applySnapshot: (data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number) => boolean;
+  refreshStatus: RefreshStatus;
+  refreshError: string | null;
 }
 
 const INITIAL_TRANSITION_STATE: SnapshotTransitionState = {
@@ -108,19 +114,42 @@ export function useFilesystemStreaming(
     applySnapshotRef.current = applySnapshot;
   }, [applySnapshot]);
 
+  const [refreshState, setRefreshState] = useState<{ status: RefreshStatus; error: string | null }>({
+    status: "idle",
+    error: null,
+  });
+
+  const refreshManagerRef = useRef<FilesystemRefreshLifecycleManager | null>(null);
+
+  // Initialize refresh manager and abort in-flight refresh on component unmount
+  useEffect(() => {
+    const manager = new FilesystemRefreshLifecycleManager({
+      fetchSnapshot: options.fetchRefresh,
+      hasSnapshot: () => Boolean(coordinatorRef.current?.getState().envelope.snapshot),
+      applySnapshot: (snap) => applySnapshotRef.current(snap),
+      onRegionStatus: (st) => setRegionStatus(st),
+      onRefreshStatus: (st, err) => setRefreshState({ status: st, error: err?.message ?? null }),
+    });
+    refreshManagerRef.current = manager;
+
+    return () => {
+      refreshManagerRef.current = null;
+      manager.dispose();
+    };
+  }, [options.fetchRefresh]);
+
   const refresh = useCallback(async () => {
-    const hasSnapshot = Boolean(coordinatorRef.current?.getState().envelope.snapshot);
-    setRegionStatus((current) => (hasSnapshot ? "refreshing" : current === "error" ? "loading" : current));
-    try {
-      const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
-      if (!response.ok) throw new Error("Topology request failed");
-      const data: unknown = await response.json();
-      if (!isSnapshot(data)) throw new Error("Topology response unavailable");
-      applySnapshotRef.current(data);
-    } catch {
-      setRegionStatus((current) => (current === "refreshing" || current === "ready" ? "stale" : "error"));
+    if (!refreshManagerRef.current) {
+      refreshManagerRef.current = new FilesystemRefreshLifecycleManager({
+        fetchSnapshot: options.fetchRefresh,
+        hasSnapshot: () => Boolean(coordinatorRef.current?.getState().envelope.snapshot),
+        applySnapshot: (snap) => applySnapshotRef.current(snap),
+        onRegionStatus: (st) => setRegionStatus(st),
+        onRefreshStatus: (st, err) => setRefreshState({ status: st, error: err?.message ?? null }),
+      });
     }
-  }, []);
+    await refreshManagerRef.current.refresh();
+  }, [options.fetchRefresh]);
 
   const handleReconnect = useCallback(() => {
     reconnectStreamRef.current?.();
@@ -205,5 +234,7 @@ export function useFilesystemStreaming(
     refresh,
     handleReconnect,
     applySnapshot,
+    refreshStatus: refreshState.status,
+    refreshError: refreshState.error,
   };
 }

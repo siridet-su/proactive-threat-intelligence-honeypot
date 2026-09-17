@@ -1451,6 +1451,12 @@ export {
   type StreamLifecycleOptions,
 } from "./filesystemStreamManager";
 
+export {
+  FilesystemRefreshLifecycleManager,
+  type RefreshLifecycleOptions,
+  type RefreshStatus,
+} from "./filesystemRefreshManager";
+
 export type ToolbarDomain =
   | "global-views"
   | "canvas-navigation"

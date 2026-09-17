@@ -11,12 +11,16 @@ import {
   processSnapshotTransition,
   SnapshotIngestionCoordinator,
   TelemetryFreshnessTracker,
+  type FilesystemRegionStatus,
   type SnapshotTransitionState,
   type TelemetryTrustMarker,
 } from "../src/lib/filesystem-freshness";
 import {
   FilesystemStreamLifecycleManager,
 } from "../src/components/filesystem/filesystemStreamManager";
+import {
+  FilesystemRefreshLifecycleManager,
+} from "../src/components/filesystem/filesystemRefreshManager";
 import { isSnapshot } from "../src/components/filesystem/filesystemUtils";
 
 describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
@@ -987,6 +991,333 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         latestTelemetryAt: 12345,
       };
       expect(isSnapshot(invalid)).toBe(false);
+    });
+  });
+
+  describe("FilesystemRefreshLifecycleManager & Transport Ownership Separation", () => {
+    it("live SSE + retained snapshot + failed manual refresh remains live/fresh or live/stale according to telemetry, never Degraded solely because HTTP failed", async () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const now = Date.parse("2026-09-17T12:00:10.000Z");
+      const telemetryTime = "2026-09-17T12:00:05.000Z"; // 5s ago (fresh)
+      const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:05.000Z",
+        latestTelemetryAt: telemetryTime,
+        sessions: [
+          {
+            sessionId: "s1",
+            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
+            cwdState: { path: "/", observedAt: telemetryTime, status: "confirmed" },
+            sourceIp: "10.0.0.1",
+            sourceGeo: null,
+            lifecycle: { status: "active", startedAt: null, closedAt: null },
+            nodeIds: ["/"],
+          },
+        ],
+      };
+
+      // Ingest initial snapshot
+      coordinator.ingest(snapshot, now - 5_000);
+
+      let regionStatus: FilesystemRegionStatus = "ready";
+      const refreshManager = new FilesystemRefreshLifecycleManager({
+        hasSnapshot: () => Boolean(coordinator.getState().envelope.snapshot),
+        applySnapshot: (s) => coordinator.ingest(s, now).accepted,
+        fetchSnapshot: () => Promise.reject(new Error("Network connection refused")),
+        onRegionStatus: (st) => { regionStatus = st; },
+      });
+
+      // Execute failed manual refresh
+      const result = await refreshManager.refresh();
+      expect(result).toBe(false);
+      expect(refreshManager.getRefreshStatus()).toBe("error");
+      expect(refreshManager.getRefreshError()?.message).toBe("Network connection refused");
+
+      // Invariant 1: regionStatus remains "ready" because an accepted snapshot is present
+      expect(regionStatus).toBe("ready");
+
+      // Invariant 2: SSE transport is "live", so freshness is evaluated strictly from telemetry!
+      const metrics = calculateTelemetryAge({
+        snapshot: coordinator.getState().envelope.snapshot,
+        snapshotReceivedAtMs: coordinator.getState().envelope.snapshotReceivedAtMs,
+        now,
+        trustMarker: coordinator.getState().trustMarker,
+      });
+
+      const freshness = getFreshnessState({
+        telemetryAgeMs: metrics.telemetryAgeMs,
+        telemetryStatus: metrics.telemetryStatus,
+        snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
+        streamState: "live", // SSE stream is live
+        regionStatus,
+        hasSnapshot: true,
+      });
+
+      // Must be Fresh, NOT Degraded!
+      expect(freshness.classification).toBe("fresh");
+      expect(freshness.label).toBe("Live & Fresh");
+      expect(freshness.isDegraded).toBe(false);
+      expect(formatPageBadgeText(freshness)).toBe("Live & Fresh · 5s ago");
+
+      // Case B: Same scenario but telemetry is stale (45s ago)
+      const staleTelemetryTime = "2026-09-17T11:59:25.000Z";
+      const staleSnapshot: FilesystemTopologySnapshot = {
+        ...snapshot,
+        latestTelemetryAt: staleTelemetryTime,
+        sessions: [
+          {
+            ...snapshot.sessions![0],
+            cwdState: { path: "/", observedAt: staleTelemetryTime, status: "confirmed" },
+          },
+        ],
+      };
+      coordinator.ingest(staleSnapshot, now - 5_000);
+
+      const metricsStale = calculateTelemetryAge({
+        snapshot: coordinator.getState().envelope.snapshot,
+        snapshotReceivedAtMs: coordinator.getState().envelope.snapshotReceivedAtMs,
+        now,
+        trustMarker: coordinator.getState().trustMarker,
+      });
+      const freshnessStale = getFreshnessState({
+        telemetryAgeMs: metricsStale.telemetryAgeMs,
+        telemetryStatus: metricsStale.telemetryStatus,
+        snapshotReceiptAgeMs: metricsStale.snapshotReceiptAgeMs,
+        streamState: "live",
+        regionStatus,
+        hasSnapshot: true,
+      });
+
+      // Must be Stale (Xs ago), NEVER Degraded!
+      expect(freshnessStale.classification).toBe("stale");
+      expect(freshnessStale.label).toBe("Stale");
+      expect(freshnessStale.isDegraded).toBe(false);
+      expect(formatPageBadgeText(freshnessStale)).toBe("Stale · 45s ago");
+    });
+
+    it("refresh A pending, SSE snapshot B accepted, refresh A fails late: B remains authoritative and transport remains live", async () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const timeA = Date.parse("2026-09-17T12:00:00.000Z");
+      const timeB = Date.parse("2026-09-17T12:00:05.000Z");
+
+      const snapshotA: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:00.000Z",
+      };
+      coordinator.ingest(snapshotA, timeA);
+
+      let rejectRefreshA: ((err: Error) => void) | null = null;
+      let regionStatus: FilesystemRegionStatus = "ready";
+      const refreshManager = new FilesystemRefreshLifecycleManager({
+        hasSnapshot: () => Boolean(coordinator.getState().envelope.snapshot),
+        applySnapshot: (s) => coordinator.ingest(s, Date.now()).accepted,
+        fetchSnapshot: () => new Promise<Response>((_, reject) => {
+          rejectRefreshA = reject;
+        }),
+        onRegionStatus: (st) => { regionStatus = st; },
+      });
+
+      // Start refresh A
+      const refreshPromise = refreshManager.refresh();
+      expect(regionStatus).toBe("refreshing");
+
+      // While refresh A is pending, SSE snapshot B arrives and is accepted!
+      const snapshotB: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:05.000Z",
+      };
+      const sseAccepted = coordinator.ingest(snapshotB, timeB);
+      expect(sseAccepted.accepted).toBe(true);
+      expect(coordinator.getState().envelope.snapshot).toBe(snapshotB);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(timeB);
+
+      // Now refresh A fails late
+      rejectRefreshA!(new Error("Gateway Timeout 504"));
+      const refreshResult = await refreshPromise;
+      expect(refreshResult).toBe(false);
+
+      // Snapshot B remains completely authoritative!
+      expect(coordinator.getState().envelope.snapshot).toBe(snapshotB);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(timeB);
+      // Region status is restored to "ready" because snapshot B exists
+      expect(regionStatus).toBe("ready");
+
+      // Freshness remains based on snapshot B and live stream
+      const freshness = getFreshnessState({
+        streamState: "live",
+        regionStatus,
+        hasSnapshot: true,
+      });
+      expect(freshness.classification).not.toBe("degraded");
+      expect(freshness.classification).not.toBe("offline");
+    });
+
+    it("refresh A superseded by refresh B: A is aborted and cannot mutate status", async () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const signals: boolean[] = [];
+      let resolveRefreshB: ((res: Response) => void) | null = null;
+
+      const refreshManager = new FilesystemRefreshLifecycleManager({
+        hasSnapshot: () => Boolean(coordinator.getState().envelope.snapshot),
+        applySnapshot: (s) => coordinator.ingest(s, Date.now()).accepted,
+        fetchSnapshot: (_url, init) => {
+          if (refreshManager.getCurrentGeneration() === 1) {
+            return new Promise<Response>((_, reject) => {
+              init?.signal?.addEventListener("abort", () => {
+                signals.push(true);
+                reject(new DOMException("The operation was aborted.", "AbortError"));
+              });
+            });
+          }
+          // Request B
+          return new Promise<Response>((resolve) => {
+            resolveRefreshB = resolve;
+          });
+        },
+      });
+
+      // Start refresh A (gen 1)
+      const promiseA = refreshManager.refresh();
+      expect(refreshManager.getCurrentGeneration()).toBe(1);
+
+      // Start refresh B (gen 2) before A finishes
+      const promiseB = refreshManager.refresh();
+      expect(refreshManager.getCurrentGeneration()).toBe(2);
+
+      // Refresh A must have been aborted!
+      expect(signals.length).toBe(1);
+      expect(signals[0]).toBe(true);
+
+      const snapshotB: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:10.000Z",
+      };
+      resolveRefreshB!(new Response(JSON.stringify(snapshotB)));
+
+      const resultB = await promiseB;
+      expect(resultB).toBe(true);
+      expect(refreshManager.getRefreshStatus()).toBe("idle");
+      expect(coordinator.getState().envelope.snapshot).toEqual(snapshotB);
+
+      const resultA = await promiseA;
+      expect(resultA).toBe(false);
+    });
+
+    it("refresh A returns an out-of-order snapshot: snapshot and receipt timestamp remain unchanged without false degradation", async () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const acceptedTime = Date.parse("2026-09-17T12:00:10.000Z");
+      const currentSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:10.000Z",
+      };
+      coordinator.ingest(currentSnapshot, acceptedTime);
+
+      let regionStatus = "ready";
+      // Refresh returns older snapshot (out of order)
+      const staleSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T11:50:00.000Z",
+      };
+
+      const refreshManager = new FilesystemRefreshLifecycleManager({
+        hasSnapshot: () => Boolean(coordinator.getState().envelope.snapshot),
+        applySnapshot: (s) => coordinator.ingest(s, Date.now()).accepted,
+        fetchSnapshot: () => Promise.resolve(new Response(JSON.stringify(staleSnapshot))),
+        onRegionStatus: (st) => { regionStatus = st; },
+      });
+
+      const result = await refreshManager.refresh();
+      expect(result).toBe(false);
+      expect(refreshManager.getRefreshStatus()).toBe("idle");
+      expect(refreshManager.getRefreshError()).toBeNull();
+
+      // Current snapshot is preserved, receipt time is NOT reset
+      expect(coordinator.getState().envelope.snapshot).toBe(currentSnapshot);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(acceptedTime);
+      // Region status is restored to "ready" without false degradation
+      expect(regionStatus).toBe("ready");
+    });
+
+    it("unmount aborts the active refresh and prevents late state updates", async () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      let aborted = false;
+      let resolveFetch: ((res: Response) => void) | null = null;
+      const regionStatusUpdates: string[] = [];
+
+      const refreshManager = new FilesystemRefreshLifecycleManager({
+        hasSnapshot: () => Boolean(coordinator.getState().envelope.snapshot),
+        applySnapshot: (s) => coordinator.ingest(s, Date.now()).accepted,
+        fetchSnapshot: (_url, init) => {
+          init?.signal?.addEventListener("abort", () => { aborted = true; });
+          return new Promise<Response>((resolve) => {
+            resolveFetch = resolve;
+          });
+        },
+        onRegionStatus: (st) => { regionStatusUpdates.push(st); },
+      });
+
+      const promise = refreshManager.refresh();
+      expect(regionStatusUpdates).toEqual(["loading"]);
+
+      // Unmount / dispose
+      refreshManager.dispose();
+      expect(aborted).toBe(true);
+      expect(refreshManager.isDisposed()).toBe(true);
+
+      // Late resolution after unmount
+      resolveFetch!(new Response(JSON.stringify(baseEmptySnapshot)));
+      const result = await promise;
+      expect(result).toBe(false);
+
+      // No new state updates dispatched
+      expect(regionStatusUpdates).toEqual(["loading"]);
+    });
+
+    it("streamState=\"stale\" with retained snapshot still classifies as Degraded", () => {
+      const state = getFreshnessState({
+        streamState: "stale",
+        regionStatus: "ready",
+        hasSnapshot: true,
+        snapshotReceiptAgeMs: 5_000,
+        telemetryStatus: "valid",
+        telemetryAgeMs: 5_000,
+      });
+
+      expect(state.classification).toBe("degraded");
+      expect(state.label).toBe("Degraded");
+      expect(state.isDegraded).toBe(true);
+      expect(formatPageBadgeText(state)).toBe("Degraded · Retained snapshot");
+    });
+
+    it("no snapshot plus unavailable transport still classifies as Offline", () => {
+      // Transport disconnected with no snapshot
+      const state1 = getFreshnessState({
+        streamState: "stale",
+        regionStatus: "ready",
+        hasSnapshot: false,
+      });
+      expect(state1.classification).toBe("offline");
+      expect(state1.label).toBe("Offline");
+      expect(state1.isDegraded).toBe(true);
+
+      // Error region status with no snapshot
+      const state2 = getFreshnessState({
+        streamState: "stale",
+        regionStatus: "error",
+        hasSnapshot: false,
+      });
+      expect(state2.classification).toBe("offline");
+      expect(state2.label).toBe("Offline");
+
+      // Connecting stream state with no snapshot
+      const stateConnecting = getFreshnessState({
+        streamState: "connecting",
+        regionStatus: "loading",
+        hasSnapshot: false,
+      });
+      expect(stateConnecting.classification).toBe("offline");
+      expect(stateConnecting.label).toBe("Connecting");
+      expect(stateConnecting.isDegraded).toBe(false);
     });
   });
 });

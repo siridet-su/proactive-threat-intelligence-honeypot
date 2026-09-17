@@ -474,7 +474,7 @@ export interface FreshnessStateParams {
   hasTelemetry?: boolean;
   staleThresholdMs?: number;
   streamState: FilesystemStreamState;
-  regionStatus: FilesystemRegionStatus;
+  regionStatus?: FilesystemRegionStatus;
   hasSnapshot: boolean;
 }
 
@@ -483,7 +483,7 @@ export function getFreshnessState(params: FreshnessStateParams): FreshnessState 
     lastUpdateAgeMs,
     staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
     streamState,
-    regionStatus,
+    regionStatus = "ready",
     hasSnapshot,
   } = params;
 
@@ -521,7 +521,7 @@ export function getFreshnessState(params: FreshnessStateParams): FreshnessState 
     : null;
 
   if (!hasSnapshot) {
-    if (regionStatus === "loading" || streamState === "connecting") {
+    if (regionStatus === "loading" || regionStatus === "refreshing" || streamState === "connecting") {
       return {
         classification: "offline",
         label: "Connecting",
@@ -551,7 +551,10 @@ export function getFreshnessState(params: FreshnessStateParams): FreshnessState 
     };
   }
 
-  const isTransportLive = streamState === "live" && regionStatus !== "error" && regionStatus !== "stale";
+  // streamState is the authoritative owner of real-time transport health.
+  // When a snapshot is present and streamState is "live", manual HTTP refresh failures
+  // or in-flight HTTP requests must NEVER downgrade live transport to Degraded or Offline.
+  const isTransportLive = streamState === "live";
 
   // Retained snapshot with degraded transport or error
   if (!isTransportLive) {
