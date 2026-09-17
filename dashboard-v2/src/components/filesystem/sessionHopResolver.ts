@@ -335,6 +335,8 @@ export class RemoteAuditLookupCoordinator {
     sessionId: string;
     targetHopId: string | null;
     generation: number;
+    promise: Promise<FilesystemClosedSession | null>;
+    subscribers: Set<RemoteAuditLookupCallback>;
   } | null = null;
   private generation = 0;
   private abortController: AbortController | null = null;
@@ -497,35 +499,39 @@ export class RemoteAuditLookupCoordinator {
    * Requests a remote lookup for a retained session not in the active snapshot.
    *
    * Idempotence & Deduplication:
-   * Repeated snapshot updates for the same in-flight {sessionId, targetHopId}
-   * reuse the existing lookup without aborting or restarting it.
+   * Repeated snapshot updates or concurrent popstate navigations for the same in-flight {sessionId, targetHopId}
+   * reuse and join the existing in-flight lookup promise without aborting, restarting, or returning premature null.
+   * The same promise object is returned to all callers for the same in-flight intent, preserving reference identity.
    *
    * Scope change:
-   * A genuinely different remote intent aborts the old request and starts a new one.
+   * A genuinely different remote intent aborts the old request, clears subscribers, and starts a new one.
    */
-  async requestLookup(
+  requestLookup(
     intent: RemoteAuditLookupIntent,
     overrideCallbacks?: RemoteAuditLookupCallback,
     overrideFetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
   ): Promise<FilesystemClosedSession | null> {
     const sessionId = intent.sessionId;
     const normHop = normalizeHop(intent.targetHopId);
-    if (!sessionId) return null;
+    if (!sessionId) return Promise.resolve(null);
 
     if (this.viewMode !== "audit") {
-      return null;
+      return Promise.resolve(null);
     }
 
     const callbacks = overrideCallbacks ?? this.callbacks;
     const fetchFn = overrideFetchSession ?? this.fetchSession;
 
-    // Reuse in-flight lookup if same intent is already executing
+    // Join in-flight lookup if same intent is already executing — return the SAME promise object
     if (
       this.inFlightIntent &&
       this.inFlightIntent.sessionId === sessionId &&
       normalizeHop(this.inFlightIntent.targetHopId) === normHop
     ) {
-      return null;
+      if (callbacks) {
+        this.inFlightIntent.subscribers.add(callbacks);
+      }
+      return this.inFlightIntent.promise;
     }
 
     // A genuinely different intent aborts the old request
@@ -534,81 +540,122 @@ export class RemoteAuditLookupCoordinator {
     this.currentTargetHopId = normHop;
     const currentGen = this.generation;
 
+    const controller = new AbortController();
+    this.abortController = controller;
+
+    const subscribers = new Set<RemoteAuditLookupCallback>();
+    if (callbacks) {
+      subscribers.add(callbacks);
+    }
+
+    const lookupPromise = (async (): Promise<FilesystemClosedSession | null> => {
+      try {
+        let found: FilesystemClosedSession | null = null;
+        if (fetchFn) {
+          found = await fetchFn(sessionId, controller.signal);
+        } else {
+          const res = await fetch(
+            `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(sessionId)}&limit=1`,
+            { cache: "no-store", signal: controller.signal },
+          );
+          if (res.ok) {
+            const data: unknown = await res.json();
+            const page = data as Partial<AuditSessionsPage>;
+            found = page.items?.find((s) => s.sessionId === sessionId) ?? null;
+          }
+        }
+
+        // Check if navigation scope or generation moved while awaiting response
+        if (
+          controller.signal.aborted ||
+          this.generation !== currentGen ||
+          this.viewMode !== "audit" ||
+          !this.inFlightIntent ||
+          this.inFlightIntent.generation !== currentGen ||
+          this.inFlightIntent.sessionId !== sessionId ||
+          normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
+          this.currentSessionId !== sessionId ||
+          normalizeHop(this.currentTargetHopId) !== normHop
+        ) {
+          return null;
+        }
+
+        const subs = Array.from(subscribers);
+        subscribers.clear();
+
+        if (found) {
+          for (const sub of subs) {
+            try {
+              sub.onSessionFound(found, normHop);
+            } catch {
+              // Ignore subscriber errors
+            }
+          }
+          return found;
+        } else {
+          for (const sub of subs) {
+            try {
+              sub.onSessionNotFound(sessionId);
+            } catch {
+              // Ignore subscriber errors
+            }
+          }
+          return null;
+        }
+      } catch {
+        if (
+          controller.signal.aborted ||
+          this.generation !== currentGen ||
+          this.viewMode !== "audit" ||
+          !this.inFlightIntent ||
+          this.inFlightIntent.generation !== currentGen ||
+          this.inFlightIntent.sessionId !== sessionId ||
+          normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
+          this.currentSessionId !== sessionId ||
+          normalizeHop(this.currentTargetHopId) !== normHop
+        ) {
+          return null;
+        }
+        const subs = Array.from(subscribers);
+        subscribers.clear();
+        for (const sub of subs) {
+          try {
+            sub.onSessionNotFound(sessionId);
+          } catch {
+            // Ignore subscriber errors
+          }
+        }
+        return null;
+      } finally {
+        if (this.generation === currentGen) {
+          this.inFlightIntent = null;
+          this.abortController = null;
+        }
+      }
+    })();
+
     this.inFlightIntent = {
       sessionId,
       targetHopId: normHop,
       generation: currentGen,
+      promise: lookupPromise,
+      subscribers,
     };
 
-    const controller = new AbortController();
-    this.abortController = controller;
+    return lookupPromise;
+  }
 
-    try {
-      let found: FilesystemClosedSession | null = null;
-      if (fetchFn) {
-        found = await fetchFn(sessionId, controller.signal);
-      } else {
-        const res = await fetch(
-          `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(sessionId)}&limit=1`,
-          { cache: "no-store", signal: controller.signal },
-        );
-        if (res.ok) {
-          const data: unknown = await res.json();
-          const page = data as Partial<AuditSessionsPage>;
-          found = page.items?.find((s) => s.sessionId === sessionId) ?? null;
-        }
-      }
-
-      // Check if navigation scope or generation moved while awaiting response
-      if (
-        controller.signal.aborted ||
-        this.generation !== currentGen ||
-        this.viewMode !== "audit" ||
-        !this.inFlightIntent ||
-        this.inFlightIntent.generation !== currentGen ||
-        this.inFlightIntent.sessionId !== sessionId ||
-        normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
-        this.currentSessionId !== sessionId ||
-        normalizeHop(this.currentTargetHopId) !== normHop
-      ) {
-        return null;
-      }
-
-      if (found) {
-        callbacks?.onSessionFound(found, normHop);
-        return found;
-      } else {
-        callbacks?.onSessionNotFound(sessionId);
-        return null;
-      }
-    } catch {
-      if (
-        controller.signal.aborted ||
-        this.generation !== currentGen ||
-        this.viewMode !== "audit" ||
-        !this.inFlightIntent ||
-        this.inFlightIntent.generation !== currentGen ||
-        this.inFlightIntent.sessionId !== sessionId ||
-        normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
-        this.currentSessionId !== sessionId ||
-        normalizeHop(this.currentTargetHopId) !== normHop
-      ) {
-        return null;
-      }
-      callbacks?.onSessionNotFound(sessionId);
-      return null;
-    } finally {
-      if (this.generation === currentGen) {
-        this.inFlightIntent = null;
-        this.abortController = null;
-      }
-    }
+  /**
+   * Returns true if a remote lookup is currently in flight.
+   */
+  isInFlight(): boolean {
+    return this.inFlightIntent !== null;
   }
 
   /**
    * Backwards-compatible alias for requestLookup.
    */
-  async lookup(
+  lookup(
     intent: RemoteAuditLookupIntent,
     callbacks?: RemoteAuditLookupCallback,
     fetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
@@ -616,12 +663,24 @@ export class RemoteAuditLookupCoordinator {
     return this.requestLookup(intent, callbacks, fetchSession);
   }
 
+  /**
+   * Safely unregisters a subscriber callback from any active in-flight lookup.
+   */
+  unsubscribe(callbacks?: RemoteAuditLookupCallback): void {
+    if (callbacks && this.inFlightIntent) {
+      this.inFlightIntent.subscribers.delete(callbacks);
+    }
+  }
+
   abort(): void {
     if (this.abortController) {
       this.abortController.abort();
       this.abortController = null;
     }
-    this.inFlightIntent = null;
+    if (this.inFlightIntent) {
+      this.inFlightIntent.subscribers.clear();
+      this.inFlightIntent = null;
+    }
     this.generation += 1;
   }
 

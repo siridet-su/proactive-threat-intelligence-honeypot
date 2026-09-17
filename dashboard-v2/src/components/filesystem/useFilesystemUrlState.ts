@@ -31,21 +31,34 @@ export interface UseFilesystemUrlStateOptions {
   isHydrated: boolean;
   snapshot: FilesystemTopologySnapshot | null;
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
+  setExtraAuditSessions?: (
+    updater: (
+      prev: Map<string, FilesystemClosedSession | FilesystemTopologySession>,
+    ) => Map<string, FilesystemClosedSession | FilesystemTopologySession>,
+  ) => void;
   selectedSessionId: string | null;
   selectedSessionIdRef?: React.MutableRefObject<string | null>;
-  selectSession: (
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
+  selectSession?: (
     sessionId: string,
     sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
     targetHopId?: string | null,
   ) => void;
-  lookupRemoteAuditSession: (intent: RemoteAuditLookupIntent) => Promise<void> | void;
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
+  lookupRemoteAuditSession?: (intent: RemoteAuditLookupIntent) => Promise<void> | void;
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   coordinator?: RemoteAuditLookupCoordinator;
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   onExitFullscreenAndPlaying?: () => void;
   setSelectedSessionId?: (id: string | null) => void;
 
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   allSessions?: FilesystemTopologySession[];
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   sessionById?: Map<string, FilesystemTopologySession | FilesystemClosedSession>;
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   resetHistory?: () => void;
+  /** @deprecated Bind domain callbacks via navigationCoordinator.bindDomainAdapter() instead */
   resetRequestedHopState?: () => void;
 }
 
@@ -77,10 +90,6 @@ export function useFilesystemUrlState(
     snapshot,
     extraAuditSessions,
     selectedSessionId,
-    selectSession,
-    lookupRemoteAuditSession,
-    coordinator,
-    onExitFullscreenAndPlaying,
     setSelectedSessionId,
   } = options;
 
@@ -115,7 +124,8 @@ export function useFilesystemUrlState(
     typeof window !== "undefined" ? parseAuditUrlParams(window.location.search).sessionId ?? null : null,
   );
 
-  const selectedSessionIdRef = useRef<string | null>(selectedSessionId);
+  const fallbackSelectedSessionIdRef = useRef<string | null>(selectedSessionId);
+  const activeSessionIdRef = options.selectedSessionIdRef ?? fallbackSelectedSessionIdRef;
 
   const viewModeRef = useRef<"live" | "audit">(viewMode);
   const hideHomeOnlyRef = useRef<boolean>(hideHomeOnly);
@@ -140,8 +150,10 @@ export function useFilesystemUrlState(
   }, [selectedHistoryEventId]);
 
   useEffect(() => {
-    selectedSessionIdRef.current = selectedSessionId;
-  }, [selectedSessionId]);
+    if (!options.selectedSessionIdRef) {
+      fallbackSelectedSessionIdRef.current = selectedSessionId;
+    }
+  }, [options.selectedSessionIdRef, selectedSessionId]);
 
   useEffect(() => {
     expiredSessionIdRef.current = expiredSessionId;
@@ -149,11 +161,11 @@ export function useFilesystemUrlState(
 
   const [navigationCoordinator] = useState(() => new FilesystemNavigationCoordinator());
 
-  // Synchronize dynamic options
+  // Synchronize dynamic URL state bindings owned exclusively by useFilesystemUrlState
   useEffect(() => {
-    navigationCoordinator.updateOptions({
+    navigationCoordinator.bindUrlState({
       getViewMode: () => viewModeRef.current,
-      getSelectedSessionId: () => selectedSessionIdRef.current,
+      getSelectedSessionId: () => activeSessionIdRef.current,
       getHideHomeOnly: () => hideHomeOnlyRef.current,
       getTargetPathFilter: () => targetPathFilterRef.current,
       getSelectedHistoryEventId: () => selectedHistoryEventIdRef.current,
@@ -161,8 +173,7 @@ export function useFilesystemUrlState(
       getExpiredSessionId: () => expiredSessionIdRef.current,
       getSnapshot: () => snapshot,
       getExtraAuditSessions: () => extraAuditSessions,
-      getAllSessions: () => options.allSessions ?? [],
-      getSessionById: () => options.sessionById ?? new Map(),
+      setExtraAuditSessions: options.setExtraAuditSessions,
 
       setViewMode,
       setHideHomeOnly,
@@ -170,7 +181,7 @@ export function useFilesystemUrlState(
       setSelectedHistoryEventId,
       setExpiredSessionId,
       setSelectedSessionId: (id) => {
-        selectedSessionIdRef.current = id;
+        activeSessionIdRef.current = id;
         setSelectedSessionId?.(id);
       },
       setRequestedHop: (hop) => {
@@ -179,31 +190,19 @@ export function useFilesystemUrlState(
       setRequestedSessionId: (sid) => {
         requestedSessionIdRef.current = sid;
       },
-
-      selectSession,
-      resetHistory: () => options.resetHistory?.(),
-      resetRequestedHopState: () => options.resetRequestedHopState?.(),
-      onExitFullscreenAndPlaying,
-
-      coordinator,
-      lookupRemoteAuditSession: (intent) => lookupRemoteAuditSession(intent),
     });
   }, [
     navigationCoordinator,
     snapshot,
     extraAuditSessions,
-    options,
+    options.setExtraAuditSessions,
     setViewMode,
     setHideHomeOnly,
     setTargetPathFilter,
     setSelectedHistoryEventId,
     setExpiredSessionId,
     setSelectedSessionId,
-    selectSession,
-    onExitFullscreenAndPlaying,
-    coordinator,
-    lookupRemoteAuditSession,
-    selectedSessionIdRef,
+    activeSessionIdRef,
   ]);
 
   const commitUserNavigation = useCallback(
@@ -301,6 +300,11 @@ export interface ProcessAuditPopStateParams {
   setSelectedSessionId?: (id: string | null) => void;
 }
 
+/**
+ * @deprecated Legacy standalone popstate processor from FA-005.
+ * Production navigation now routes exclusively through FilesystemNavigationCoordinator.
+ * Retained for backwards compatibility with FA-005 test harnesses.
+ */
 export function processAuditPopState(params: ProcessAuditPopStateParams): void {
   const parsed = parseAuditUrlParams(params.search);
   const nextView = parsed.view ?? "live";

@@ -31,36 +31,40 @@ export interface PopStateTransaction {
   status: "pending" | "terminal";
 }
 
-export interface FilesystemNavigationCoordinatorOptions {
-  // State getters
+/**
+ * URL and React state bindings owned by useFilesystemUrlState.
+ */
+export interface NavigationUrlStateBindings {
   getViewMode: () => "live" | "audit";
-  getSelectedSessionId: () => string | null;
-  getHideHomeOnly: () => boolean;
-  getTargetPathFilter: () => string | null;
-  getSelectedHistoryEventId: () => string | null;
-  getRequestedHop: () => string | null;
-  getExpiredSessionId: () => string | null;
-  getSnapshot: () => FilesystemTopologySnapshot | null;
-  getExtraAuditSessions: () => Map<string, FilesystemClosedSession | FilesystemTopologySession>;
-  getAllSessions: () => (FilesystemTopologySession | FilesystemClosedSession)[];
-  getSessionById: () => Map<string, FilesystemTopologySession | FilesystemClosedSession>;
-
-  // State setters
   setViewMode: (mode: "live" | "audit") => void;
-  setHideHomeOnly: (hide: boolean) => void;
-  setTargetPathFilter: (path: string | null) => void;
-  setSelectedHistoryEventId: (eventId: string | null) => void;
-  setExpiredSessionId: (id: string | null) => void;
+  getSelectedSessionId: () => string | null;
   setSelectedSessionId: (id: string | null) => void;
+  getHideHomeOnly: () => boolean;
+  setHideHomeOnly: (hide: boolean) => void;
+  getTargetPathFilter: () => string | null;
+  setTargetPathFilter: (path: string | null) => void;
+  getSelectedHistoryEventId: () => string | null;
+  setSelectedHistoryEventId: (eventId: string | null) => void;
+  getExpiredSessionId: () => string | null;
+  setExpiredSessionId: (id: string | null) => void;
+  getRequestedHop: () => string | null;
   setRequestedHop: (hop: string | null) => void;
   setRequestedSessionId: (sessionId: string | null) => void;
+  getSnapshot: () => FilesystemTopologySnapshot | null;
+  getExtraAuditSessions: () => Map<string, FilesystemClosedSession | FilesystemTopologySession>;
   setExtraAuditSessions?: (
     updater: (
       prev: Map<string, FilesystemClosedSession | FilesystemTopologySession>,
     ) => Map<string, FilesystemClosedSession | FilesystemTopologySession>,
   ) => void;
+}
 
-  // Domain callbacks
+/**
+ * Domain adapter callbacks and data owned exclusively by FilesystemActivity.
+ */
+export interface NavigationDomainAdapter {
+  getAllSessions: () => (FilesystemTopologySession | FilesystemClosedSession)[];
+  getSessionById: () => Map<string, FilesystemTopologySession | FilesystemClosedSession>;
   selectSession: (
     sessionId: string,
     sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
@@ -69,11 +73,11 @@ export interface FilesystemNavigationCoordinatorOptions {
   resetHistory: () => void;
   resetRequestedHopState: () => void;
   onExitFullscreenAndPlaying?: () => void;
-
-  // Remote coordinator
   coordinator?: RemoteAuditLookupCoordinator | null;
   lookupRemoteAuditSession?: (intent: RemoteAuditLookupIntent) => Promise<void> | void;
 }
+
+export type FilesystemNavigationCoordinatorOptions = NavigationUrlStateBindings & NavigationDomainAdapter;
 
 /**
  * FilesystemNavigationCoordinator
@@ -125,8 +129,35 @@ export class FilesystemNavigationCoordinator {
     this.options = options;
   }
 
+  /**
+   * Binds URL state getters and setters owned exclusively by useFilesystemUrlState.
+   * Does not touch or overwrite domain adapter callbacks.
+   */
+  bindUrlState(bindings: NavigationUrlStateBindings): void {
+    this.options = { ...this.options, ...bindings };
+  }
+
+  /**
+   * Binds domain callbacks and session accessors owned exclusively by FilesystemActivity.
+   * Does not touch or overwrite URL state bindings.
+   */
+  bindDomainAdapter(adapter: NavigationDomainAdapter): void {
+    this.options = { ...this.options, ...adapter };
+  }
+
+  /**
+   * Updates coordinator options without overwriting existing production callbacks with undefined.
+   */
   updateOptions(options: Partial<FilesystemNavigationCoordinatorOptions>): void {
-    this.options = { ...this.options, ...options };
+    const next = { ...this.options };
+    for (const key of Object.keys(options) as (keyof FilesystemNavigationCoordinatorOptions)[]) {
+      const val = options[key];
+      if (val !== undefined) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (next as any)[key] = val;
+      }
+    }
+    this.options = next;
   }
 
   getActiveTransaction(): PopStateTransaction | null {
@@ -470,11 +501,20 @@ export class FilesystemNavigationCoordinator {
    * coordinates remote lookups, and guards against stale URL overwrite loops.
    */
   handlePopState(searchString: string): void {
-    const txId = ++this.transactionCounter;
     const parsed = parseAuditUrlParams(searchString);
     const nextView = parsed.view ?? "live";
     const effectiveHop = nextView === "live" ? null : (parsed.hop ?? null);
 
+    // Deduplicate if an active popstate transaction is already pending for this identical canonical target
+    if (
+      this.activeTransaction &&
+      this.activeTransaction.status === "pending" &&
+      areAuditUrlParamsEqual(this.activeTransaction.target, parsed)
+    ) {
+      return;
+    }
+
+    const txId = ++this.transactionCounter;
     this.activeTransaction = {
       id: txId,
       target: parsed,
@@ -554,6 +594,27 @@ export class FilesystemNavigationCoordinator {
     sessionId: string,
     targetHopId: string | null,
   ): Promise<void> {
+    const txCallbacks = {
+      onSessionFound: (session: FilesystemClosedSession, targetHopId?: string | null) => {
+        if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
+        this.markTransactionTerminal(txId);
+        this.options.setExtraAuditSessions?.((prev) => {
+          if (prev.has(session.sessionId)) return prev;
+          const next = new Map(prev);
+          next.set(session.sessionId, session);
+          return next;
+        });
+        this.options.setExpiredSessionId(null);
+        this.options.selectSession(session.sessionId, session, targetHopId ?? null);
+      },
+      onSessionNotFound: (targetId: string) => {
+        if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
+        this.markTransactionTerminal(txId);
+        this.options.setExpiredSessionId(targetId);
+        this.options.setSelectedSessionId(null);
+      },
+    };
+
     try {
       if (!this.options.coordinator) {
         this.markTransactionTerminal(txId);
@@ -562,32 +623,14 @@ export class FilesystemNavigationCoordinator {
 
       await this.options.coordinator.lookup(
         { sessionId, targetHopId },
-        {
-          onSessionFound: (session, hop) => {
-            if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
-            this.markTransactionTerminal(txId);
-            this.options.setExtraAuditSessions?.((prev) => {
-              if (prev.has(session.sessionId)) return prev;
-              const next = new Map(prev);
-              next.set(session.sessionId, session);
-              return next;
-            });
-            this.options.setExpiredSessionId(null);
-            this.options.selectSession(session.sessionId, session, hop);
-          },
-          onSessionNotFound: (targetId) => {
-            if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
-            this.markTransactionTerminal(txId);
-            this.options.setExpiredSessionId(targetId);
-            this.options.setSelectedSessionId(null);
-          },
-        },
+        txCallbacks,
       );
     } catch {
       if (this.activeTransaction?.id === txId) {
         this.markTransactionTerminal(txId);
       }
     } finally {
+      this.options.coordinator?.unsubscribe(txCallbacks);
       if (this.activeTransaction?.id === txId && this.activeTransaction.status === "pending") {
         this.markTransactionTerminal(txId);
       }

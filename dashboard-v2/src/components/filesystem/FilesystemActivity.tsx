@@ -222,6 +222,7 @@ export function FilesystemActivity() {
     isHydrated,
     snapshot,
     extraAuditSessions,
+    setExtraAuditSessions,
     selectedSessionId,
     selectedSessionIdRef,
     selectSession: dispatchSelectSession,
@@ -564,19 +565,9 @@ export function FilesystemActivity() {
   }, [lookupRemoteAuditSession]);
 
   useEffect(() => {
-    navigationCoordinator.updateOptions({
-      getViewMode: () => viewModeRef.current,
-      getSelectedSessionId: () => selectedSessionIdRef.current,
-      getHideHomeOnly: () => hideHomeOnly,
-      getTargetPathFilter: () => targetPathFilter,
-      getSelectedHistoryEventId: () => selectedHistoryEventId,
-      getRequestedHop: () => requestedHopRef.current,
-      getExpiredSessionId: () => expiredSessionId,
-      getSnapshot: () => snapshot,
-      getExtraAuditSessions: () => extraAuditSessions,
+    navigationCoordinator.bindDomainAdapter({
       getAllSessions: () => allSessions,
       getSessionById: () => sessionById,
-
       selectSession,
       resetHistory,
       resetRequestedHopState,
@@ -584,28 +575,18 @@ export function FilesystemActivity() {
         setIsPlaying(false);
         setIsAuditFullscreen(false);
       },
-
       coordinator: remoteAuditLookupManager,
       lookupRemoteAuditSession: (intent) => lookupRemoteAuditSessionRef.current?.(intent),
     });
   }, [
     allSessions,
     sessionById,
-    expiredSessionId,
-    extraAuditSessions,
-    hideHomeOnly,
     navigationCoordinator,
     remoteAuditLookupManager,
     resetHistory,
     resetRequestedHopState,
     selectSession,
-    selectedHistoryEventId,
     setIsPlaying,
-    snapshot,
-    targetPathFilter,
-    viewModeRef,
-    selectedSessionIdRef,
-    requestedHopRef,
   ]);
 
   const handleUserSelectSession = useCallback(
