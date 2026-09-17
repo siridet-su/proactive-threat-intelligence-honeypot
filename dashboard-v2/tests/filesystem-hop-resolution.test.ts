@@ -91,6 +91,265 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     expect(appliedHop).toBe("cwd:deep-hop-42");
   });
 
+  // 1b. Popstate to unknown retained session uses real callback path and selects returned session with requested hop
+  it("popstate to unknown retained session uses real callback path and selects returned session with requested hop", async () => {
+    let recordedSession: FilesystemClosedSession | null = null;
+    let selectedSessionId: string | null = null;
+    let selectedSessionObj: FilesystemClosedSession | null = null;
+    let forwardedHop: string | null = null;
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+
+    const expectedSession = makeClosedSession({ sessionId: "sess-retained-popstate" });
+    const fetchSession = vi.fn().mockResolvedValue(expectedSession);
+
+    // Production lookup wrapper (identical to lookupRemoteAuditSession in FilesystemActivity)
+    const lookupRemoteAuditSession = async (intent: { sessionId: string; targetHopId?: string | null }) => {
+      await coordinator.lookup(
+        intent,
+        {
+          onSessionFound: (found, targetHop) => {
+            recordedSession = found;
+            selectedSessionId = found.sessionId;
+            selectedSessionObj = found;
+            forwardedHop = targetHop ?? null;
+          },
+          onSessionNotFound: vi.fn(),
+        },
+        fetchSession,
+      );
+    };
+
+    // Popstate navigation arrives: ?view=audit&session=sess-retained-popstate&hop=cwd:hop-99
+    coordinator.notifyNavigationScope({
+      viewMode: "audit",
+      sessionId: "sess-retained-popstate",
+      targetHopId: "cwd:hop-99",
+    });
+    await lookupRemoteAuditSession({
+      sessionId: "sess-retained-popstate",
+      targetHopId: "cwd:hop-99",
+    });
+
+    // Authoritative UI callback path was invoked
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(recordedSession).toEqual(expectedSession);
+    expect(selectedSessionId).toBe("sess-retained-popstate");
+    expect(selectedSessionObj).toEqual(expectedSession);
+    expect(forwardedHop).toBe("cwd:hop-99");
+    expect(coordinator.getInFlightSessionId()).toBeNull();
+  });
+
+  // 1c. In-flight A/H1 followed by navigation to A/H2 aborts/discards H1 and applies H2
+  it("in-flight A/H1 followed by navigation to A/H2 aborts/discards H1 and applies H2", async () => {
+    let appliedHop: string | null = null;
+    const onSessionFound = vi.fn((_session: FilesystemClosedSession, hop?: string | null) => {
+      appliedHop = hop ?? null;
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveH1!: (val: FilesystemClosedSession | null) => void;
+    let signalH1!: AbortSignal;
+    const promiseH1 = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveH1 = res;
+    });
+
+    // Request A with H1
+    const lookupH1 = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-1" },
+      undefined,
+      (_id, signal) => {
+        signalH1 = signal;
+        return promiseH1;
+      },
+    );
+
+    expect(signalH1.aborted).toBe(false);
+
+    // Navigation occurs to same session with different hop H2
+    coordinator.notifyNavigationScope({
+      viewMode: "audit",
+      sessionId: "sess-A",
+      targetHopId: "hop-2",
+    });
+
+    expect(signalH1.aborted).toBe(true);
+
+    const sessionA = makeClosedSession({ sessionId: "sess-A" });
+    const lookupH2 = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-2" },
+      undefined,
+      async () => sessionA,
+    );
+
+    // Late H1 resolves
+    resolveH1(sessionA);
+    await Promise.all([lookupH1, lookupH2]);
+
+    // Only H2 is applied
+    expect(onSessionFound).toHaveBeenCalledTimes(1);
+    expect(appliedHop).toBe("hop-2");
+  });
+
+  // 1d. In-flight A/H1 followed by navigation to A/null aborts/discards H1
+  it("in-flight A/H1 followed by navigation to A/null aborts/discards H1", async () => {
+    const onSessionFound = vi.fn();
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveH1!: (val: FilesystemClosedSession | null) => void;
+    let signalH1!: AbortSignal;
+    const promiseH1 = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveH1 = res;
+    });
+
+    const lookupH1 = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-1" },
+      undefined,
+      (_id, signal) => {
+        signalH1 = signal;
+        return promiseH1;
+      },
+    );
+
+    expect(signalH1.aborted).toBe(false);
+
+    // Navigation occurs to same session with hop cleared (null)
+    coordinator.notifyNavigationScope({
+      viewMode: "audit",
+      sessionId: "sess-A",
+      targetHopId: null,
+    });
+
+    expect(signalH1.aborted).toBe(true);
+
+    // Late H1 resolves
+    resolveH1(makeClosedSession({ sessionId: "sess-A" }));
+    await lookupH1;
+
+    // H1 response is discarded
+    expect(onSessionFound).not.toHaveBeenCalled();
+  });
+
+  // 1e. Same-session user selection clearing hop cannot be overwritten by late response
+  it("same-session user selection clearing hop cannot be overwritten by late response", async () => {
+    const requestedHopRef = { current: "hop-1" as string | null };
+    let selectedHistoryEventId: string | null = "hop-1";
+    let selectedSessionId: string | null = "sess-A";
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound: (_session, hop) => {
+          requestedHopRef.current = hop ?? null;
+          selectedHistoryEventId = hop ?? null;
+        },
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveH1!: (val: FilesystemClosedSession | null) => void;
+    let signalH1!: AbortSignal;
+    const promiseH1 = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveH1 = res;
+    });
+
+    // In-flight lookup for A with hop-1
+    const lookupH1 = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-1" },
+      undefined,
+      (_id, signal) => {
+        signalH1 = signal;
+        return promiseH1;
+      },
+    );
+
+    // User explicitly selects session A in UI (clears hop)
+    const handleUserSelectSession = (sessionId: string) => {
+      coordinator.notifyNavigationScope({
+        viewMode: "audit",
+        sessionId,
+        targetHopId: null,
+      });
+      requestedHopRef.current = null;
+      selectedHistoryEventId = null;
+      selectedSessionId = sessionId;
+    };
+
+    handleUserSelectSession("sess-A");
+
+    expect(signalH1.aborted).toBe(true);
+    expect(requestedHopRef.current).toBeNull();
+    expect(selectedHistoryEventId).toBeNull();
+
+    // Late H1 resolves
+    resolveH1(makeClosedSession({ sessionId: "sess-A" }));
+    await lookupH1;
+
+    // Hop remains null, never overwritten by late H1
+    expect(selectedSessionId).toBe("sess-A");
+    expect(requestedHopRef.current).toBeNull();
+    expect(selectedHistoryEventId).toBeNull();
+  });
+
+  // 1f. Popstate/session change before snapshot hydration invalidates old request
+  it("popstate/session change before snapshot hydration invalidates old request", async () => {
+    const onSessionFound = vi.fn();
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveA!: (val: FilesystemClosedSession | null) => void;
+    let signalA!: AbortSignal;
+    const promiseA = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveA = res;
+    });
+
+    // Pre-hydration request for session A
+    const lookupA = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-1" },
+      undefined,
+      (_id, signal) => {
+        signalA = signal;
+        return promiseA;
+      },
+    );
+
+    expect(signalA.aborted).toBe(false);
+
+    // Before snapshot hydrates (snapshot === null), popstate fires to session B
+    coordinator.notifyNavigationScope({
+      viewMode: "audit",
+      sessionId: "sess-B",
+      targetHopId: null,
+    });
+
+    expect(signalA.aborted).toBe(true);
+
+    // Late A arrives
+    resolveA(makeClosedSession({ sessionId: "sess-A" }));
+    await lookupA;
+
+    // A is discarded, callbacks never called
+    expect(onSessionFound).not.toHaveBeenCalled();
+  });
+
   // 2. Popstate to known session while remote A is in flight preserves B when A resolves late
   it("preserves known session selection when popstate occurs while remote lookup A is in flight and resolves late", async () => {
     let selectedSessionId: string | null = null;

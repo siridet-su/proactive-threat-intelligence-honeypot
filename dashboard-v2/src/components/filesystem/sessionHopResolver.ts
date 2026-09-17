@@ -300,9 +300,23 @@ export interface RemoteAuditLookupCallback {
 
 export type RemoteAuditLookupCallbacks = RemoteAuditLookupCallback;
 
+export interface NavigationScope {
+  viewMode: "live" | "audit";
+  sessionId: string | null;
+  targetHopId: string | null;
+  generation: number;
+}
+
+export function normalizeHop(hop?: string | null): string | null {
+  if (!hop) return null;
+  const trimmed = hop.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export interface RemoteAuditLookupCoordinatorOptions {
   initialViewMode?: "live" | "audit";
   initialSessionId?: string | null;
+  initialTargetHopId?: string | null;
   fetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>;
   callbacks?: RemoteAuditLookupCallback;
 }
@@ -310,9 +324,10 @@ export interface RemoteAuditLookupCoordinatorOptions {
 export class RemoteAuditLookupCoordinator {
   private viewMode: "live" | "audit";
   private currentSessionId: string | null = null;
+  private currentTargetHopId: string | null = null;
   private inFlightIntent: {
     sessionId: string;
-    targetHopId?: string | null;
+    targetHopId: string | null;
     generation: number;
   } | null = null;
   private generation = 0;
@@ -323,6 +338,7 @@ export class RemoteAuditLookupCoordinator {
   constructor(options?: RemoteAuditLookupCoordinatorOptions) {
     this.viewMode = options?.initialViewMode ?? "live";
     this.currentSessionId = options?.initialSessionId ?? null;
+    this.currentTargetHopId = normalizeHop(options?.initialTargetHopId);
     this.fetchSession = options?.fetchSession;
     this.callbacks = options?.callbacks;
   }
@@ -337,6 +353,19 @@ export class RemoteAuditLookupCoordinator {
 
   getCurrentSessionId(): string | null {
     return this.currentSessionId;
+  }
+
+  getCurrentTargetHopId(): string | null {
+    return this.currentTargetHopId;
+  }
+
+  getNavigationScope(): NavigationScope {
+    return {
+      viewMode: this.viewMode,
+      sessionId: this.currentSessionId,
+      targetHopId: this.currentTargetHopId,
+      generation: this.generation,
+    };
   }
 
   getInFlightSessionId(): string | null {
@@ -356,27 +385,67 @@ export class RemoteAuditLookupCoordinator {
   }
 
   /**
-   * Notifies the coordinator that viewMode has changed (Live/Audit switch or popstate).
-   * Switching out of audit mode invalidates any in-flight remote lookup.
+   * Authoritative navigation scope update.
+   * Any explicit navigation changing session or hop:
+   * - same session, different hop
+   * - same session, hop cleared
+   * - popstate to known session with different hop/null
+   * - user selection of current session (explicitly clears hop)
+   * - switching to live
+   *
+   * advances generation and invalidates/aborts the prior lookup,
+   * while preserving deduplication for repeated identical requests.
    */
-  notifyViewModeChanged(nextMode: "live" | "audit"): void {
-    if (this.viewMode === nextMode) return;
-    this.viewMode = nextMode;
-    if (nextMode !== "audit") {
-      this.abort();
+  notifyNavigationScope(scope: {
+    viewMode?: "live" | "audit";
+    sessionId?: string | null;
+    targetHopId?: string | null;
+  }): void {
+    const nextViewMode = scope.viewMode !== undefined ? scope.viewMode : this.viewMode;
+    const nextSessionId = scope.sessionId !== undefined ? (scope.sessionId ?? null) : this.currentSessionId;
+    let nextTargetHopId = scope.targetHopId !== undefined ? normalizeHop(scope.targetHopId) : this.currentTargetHopId;
+    if (nextViewMode === "live") {
+      nextTargetHopId = null;
     }
+
+    const isSameScope =
+      this.viewMode === nextViewMode &&
+      this.currentSessionId === nextSessionId &&
+      this.currentTargetHopId === nextTargetHopId;
+
+    const matchesInFlight =
+      !this.inFlightIntent ||
+      (this.inFlightIntent.sessionId === nextSessionId &&
+        normalizeHop(this.inFlightIntent.targetHopId) === nextTargetHopId &&
+        nextViewMode === "audit");
+
+    if (isSameScope && matchesInFlight) {
+      return;
+    }
+
+    this.viewMode = nextViewMode;
+    this.currentSessionId = nextSessionId;
+    this.currentTargetHopId = nextTargetHopId;
+
+    this.abort();
   }
 
   /**
-   * Notifies the coordinator that a session was selected (user click, topology click,
-   * popstate to known session, etc.). If an in-flight lookup exists for a different
-   * session, it is immediately aborted.
+   * Notifies the coordinator that viewMode has changed (Live/Audit switch or popstate).
    */
-  notifySessionSelected(sessionId: string | null): void {
-    this.currentSessionId = sessionId;
-    if (this.inFlightIntent && this.inFlightIntent.sessionId !== sessionId) {
-      this.abort();
-    }
+  notifyViewModeChanged(nextMode: "live" | "audit"): void {
+    this.notifyNavigationScope({ viewMode: nextMode });
+  }
+
+  /**
+   * Notifies the coordinator that a session was selected.
+   * Defaults targetHopId to null (hop cleared on session change/user click).
+   */
+  notifySessionSelected(sessionId: string | null, targetHopId: string | null = null): void {
+    this.notifyNavigationScope({
+      sessionId,
+      targetHopId,
+    });
   }
 
   /**
@@ -394,7 +463,8 @@ export class RemoteAuditLookupCoordinator {
     overrideCallbacks?: RemoteAuditLookupCallback,
     overrideFetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
   ): Promise<FilesystemClosedSession | null> {
-    const { sessionId, targetHopId } = intent;
+    const sessionId = intent.sessionId;
+    const normHop = normalizeHop(intent.targetHopId);
     if (!sessionId) return null;
 
     if (this.viewMode !== "audit") {
@@ -408,19 +478,20 @@ export class RemoteAuditLookupCoordinator {
     if (
       this.inFlightIntent &&
       this.inFlightIntent.sessionId === sessionId &&
-      (this.inFlightIntent.targetHopId ?? null) === (targetHopId ?? null)
+      normalizeHop(this.inFlightIntent.targetHopId) === normHop
     ) {
       return null;
     }
 
     // A genuinely different intent aborts the old request
     this.abort();
-    this.generation += 1;
+    this.currentSessionId = sessionId;
+    this.currentTargetHopId = normHop;
     const currentGen = this.generation;
 
     this.inFlightIntent = {
       sessionId,
-      targetHopId,
+      targetHopId: normHop,
       generation: currentGen,
     };
 
@@ -450,13 +521,16 @@ export class RemoteAuditLookupCoordinator {
         this.viewMode !== "audit" ||
         !this.inFlightIntent ||
         this.inFlightIntent.generation !== currentGen ||
-        this.inFlightIntent.sessionId !== sessionId
+        this.inFlightIntent.sessionId !== sessionId ||
+        normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
+        this.currentSessionId !== sessionId ||
+        normalizeHop(this.currentTargetHopId) !== normHop
       ) {
         return null;
       }
 
       if (found) {
-        callbacks?.onSessionFound(found, targetHopId);
+        callbacks?.onSessionFound(found, normHop);
         return found;
       } else {
         callbacks?.onSessionNotFound(sessionId);
@@ -468,7 +542,11 @@ export class RemoteAuditLookupCoordinator {
         this.generation !== currentGen ||
         this.viewMode !== "audit" ||
         !this.inFlightIntent ||
-        this.inFlightIntent.generation !== currentGen
+        this.inFlightIntent.generation !== currentGen ||
+        this.inFlightIntent.sessionId !== sessionId ||
+        normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
+        this.currentSessionId !== sessionId ||
+        normalizeHop(this.currentTargetHopId) !== normHop
       ) {
         return null;
       }
@@ -505,6 +583,7 @@ export class RemoteAuditLookupCoordinator {
   destroy(): void {
     this.abort();
     this.currentSessionId = null;
+    this.currentTargetHopId = null;
     this.callbacks = undefined;
   }
 }

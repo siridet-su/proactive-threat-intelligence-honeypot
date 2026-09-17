@@ -108,7 +108,6 @@ export function useFilesystemUrlState(
         onExitFullscreenAndPlaying?.();
       }
       isUserNavigatingRef.current = true;
-      coordinator?.notifyViewModeChanged(mode);
       setViewMode(mode);
       setExpiredSessionId(null);
       const sid =
@@ -117,9 +116,25 @@ export function useFilesystemUrlState(
         snapshot?.sessions[0]?.sessionId ??
         snapshot?.recentClosedSessions[0]?.sessionId ??
         null;
-      if (sid) {
-        coordinator?.notifySessionSelected(sid);
+      if (mode === "live") {
+        coordinator?.notifyNavigationScope({
+          viewMode: "live",
+          sessionId: sid,
+          targetHopId: null,
+        });
+      } else if (sid) {
+        coordinator?.notifyNavigationScope({
+          viewMode: "audit",
+          sessionId: sid,
+          targetHopId: null,
+        });
         selectSession(sid);
+      } else {
+        coordinator?.notifyNavigationScope({
+          viewMode: "audit",
+          sessionId: null,
+          targetHopId: null,
+        });
       }
     },
     [coordinator, onExitFullscreenAndPlaying, selectSession, selectedSessionIdRef, snapshot?.recentClosedSessions, snapshot?.sessions],
@@ -131,7 +146,11 @@ export function useFilesystemUrlState(
     const handlePopState = () => {
       const parsed = parseAuditUrlParams(window.location.search);
       const nextView = parsed.view ?? "live";
-      coordinator?.notifyViewModeChanged(nextView);
+      coordinator?.notifyNavigationScope({
+        viewMode: nextView,
+        sessionId: parsed.sessionId ?? null,
+        targetHopId: parsed.hop ?? null,
+      });
       setViewMode(nextView);
       setHideHomeOnly(Boolean(parsed.hideHome));
       setTargetPathFilter(parsed.targetPath ?? null);
@@ -149,17 +168,11 @@ export function useFilesystemUrlState(
           const resolution = resolveSessionSelection(parsed.sessionId, null, known, parsed.view === "audit");
           if (resolution.expiredSessionId) {
             if (parsed.view === "audit") {
-              void (coordinator
-                ? coordinator.requestLookup({
-                    sessionId: resolution.expiredSessionId,
-                    targetHopId: parsed.hop ?? null,
-                  })
-                : lookupRemoteAuditSession({
-                    sessionId: resolution.expiredSessionId,
-                    targetHopId: parsed.hop ?? null,
-                  }));
+              void lookupRemoteAuditSession({
+                sessionId: resolution.expiredSessionId,
+                targetHopId: parsed.hop ?? null,
+              });
             } else {
-              coordinator?.notifySessionSelected(null);
               setExpiredSessionId(resolution.expiredSessionId);
               selectedSessionIdRef.current = null;
               setSelectedSessionId?.(null);
@@ -167,7 +180,6 @@ export function useFilesystemUrlState(
           } else {
             setExpiredSessionId(null);
             if (resolution.sessionId) {
-              coordinator?.notifySessionSelected(resolution.sessionId);
               selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
             }
           }
@@ -179,7 +191,6 @@ export function useFilesystemUrlState(
         requestedSessionIdRef.current = null;
         setExpiredSessionId(null);
         if (parsed.view === "audit") {
-          coordinator?.notifySessionSelected(null);
           selectedSessionIdRef.current = null;
           setSelectedSessionId?.(null);
         }
