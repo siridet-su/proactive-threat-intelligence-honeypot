@@ -49,7 +49,7 @@ import {
   useAuditDirectory,
 } from "./useAuditDirectory";
 import {
-  RemoteAuditLookupManager,
+  RemoteAuditLookupCoordinator,
   type RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
 
@@ -87,10 +87,17 @@ export function FilesystemActivity() {
   const selectedLiveCwdRef = useRef<string | null>(null);
   const auditDialogRef = useRef<HTMLDivElement | null>(null);
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
-  const [remoteAuditLookupManager] = useState(() => new RemoteAuditLookupManager());
+  const [remoteAuditLookupManager] = useState(() => new RemoteAuditLookupCoordinator());
   const lookupRemoteAuditSessionRef = useRef<((intentOrId: RemoteAuditLookupIntent | string, explicitHop?: string | null) => Promise<void> | void) | null>(null);
   const selectSessionRef = useRef<((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void) | null>(null);
   const handleSnapshotAppliedRef = useRef<((data: FilesystemTopologySnapshot) => void) | null>(null);
+
+  // Unmount cleanup: abort any in-flight remote lookup
+  useEffect(() => {
+    return () => {
+      remoteAuditLookupManager.destroy();
+    };
+  }, [remoteAuditLookupManager]);
 
   useEffect(() => {
     selectedSessionIdRef.current = selectedSessionId;
@@ -206,11 +213,16 @@ export function FilesystemActivity() {
     selectedSessionIdRef,
     selectSession: dispatchSelectSession,
     lookupRemoteAuditSession: dispatchLookupRemoteAuditSession,
+    coordinator: remoteAuditLookupManager,
     setSelectedSessionId,
     onExitFullscreenAndPlaying: () => {
       setIsAuditFullscreen(false);
     },
   });
+
+  useEffect(() => {
+    remoteAuditLookupManager.notifyViewModeChanged(viewMode);
+  }, [remoteAuditLookupManager, viewMode]);
 
   // Session CWD history keyset pagination hook
   const {
@@ -454,6 +466,7 @@ export function FilesystemActivity() {
       sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
       targetHopId?: string | null,
     ) => {
+      remoteAuditLookupManager.notifySessionSelected(sessionId);
       if (sessionObj) {
         setExtraAuditSessions((prev) => {
           if (prev.has(sessionId)) return prev;
@@ -484,7 +497,7 @@ export function FilesystemActivity() {
       }
       void loadHistory(sessionId, null);
     },
-    [sessionById, snapshot?.nodes, loadHistory, resetHistory, requestedHopRef, setSelectedHistoryEventId, setIsPlaying, setExpiredSessionId],
+    [remoteAuditLookupManager, sessionById, snapshot?.nodes, loadHistory, resetHistory, requestedHopRef, setSelectedHistoryEventId, setIsPlaying, setExpiredSessionId],
   );
 
   useEffect(() => {
@@ -529,7 +542,7 @@ export function FilesystemActivity() {
   const handleUserSelectSession = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
       isUserNavigatingRef.current = true;
-      remoteAuditLookupManager.abort();
+      remoteAuditLookupManager.notifySessionSelected(sessionId);
       clearRequestedHop();
       setSelectedHistoryEventId(null);
       selectSession(sessionId, sessionObj);

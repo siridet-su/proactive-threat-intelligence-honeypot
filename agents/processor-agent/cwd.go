@@ -345,3 +345,15 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	}
 	return nil
 }
+
+// cwdEventIndexModels returns the MongoDB indexes provisioned for cwd_events.
+// Both canonical sessionId and legacy session_id compound indexes are defined
+// so mixed-schema rank aggregations ($or: [{ sessionId }, { session_id }])
+// execute via index-union IXSCAN without falling back to collection scans.
+func cwdEventIndexModels() []mongo.IndexModel {
+	return []mongo.IndexModel{
+		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
+		{Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	}
+}

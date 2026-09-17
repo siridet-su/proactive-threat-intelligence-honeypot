@@ -203,3 +203,29 @@ func TestCowrieCwdContractFixtures(t *testing.T) {
 		}
 	}
 }
+
+func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
+	indexes := cwdEventIndexModels()
+	hasCanonical := false
+	hasLegacy := false
+
+	for _, idx := range indexes {
+		keys, ok := idx.Keys.(bson.D)
+		if !ok {
+			continue
+		}
+		if sameIndexKeys(keys, bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}) {
+			hasCanonical = true
+		}
+		if sameIndexKeys(keys, bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}) {
+			hasLegacy = true
+		}
+	}
+
+	if !hasCanonical {
+		t.Fatal("expected canonical sessionId compound index in cwd_events index models")
+	}
+	if !hasLegacy {
+		t.Fatal("expected legacy session_id compound index in cwd_events index models to support mixed-schema rank aggregation")
+	}
+}

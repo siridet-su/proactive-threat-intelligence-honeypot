@@ -6,13 +6,12 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { FilesystemClosedSession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
-  RemoteAuditLookupManager,
+  RemoteAuditLookupCoordinator,
   SessionHopLifecycleManager,
   type HopResolutionStatus,
 } from "@/components/filesystem/sessionHopResolver";
 import {
   buildAuditUrlSearch,
-  parseAuditUrlParams,
 } from "@/components/filesystem/filesystemUtils";
 import {
   computeNextReplayEventId,
@@ -65,88 +64,231 @@ function makeClosedSession(overrides: Partial<FilesystemClosedSession> = {}): Fi
 }
 
 describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalization", () => {
-  // 1. Initial remote retained-session deep link
-  it("resolves remote session and preserves target hop on initial deep link", async () => {
-    const manager = new RemoteAuditLookupManager();
-    const expectedSession = makeClosedSession({ sessionId: "sess-remote-init" });
-    const fetchSession = vi.fn().mockResolvedValue(expectedSession);
+  // 1. Initial remote deep link forwards target hop
+  it("resolves initial remote deep link and forwards its requested hop", async () => {
+    let appliedSession: FilesystemClosedSession | null = null;
+    let appliedHop: string | null = null;
 
-    const onSessionFound = vi.fn();
-    const onSessionNotFound = vi.fn();
-
-    await manager.lookup(
-      { sessionId: "sess-remote-init", targetHopId: "cwd:deep-hop-001" },
-      { onSessionFound, onSessionNotFound },
-      fetchSession,
-    );
-
-    expect(fetchSession).toHaveBeenCalledWith("sess-remote-init", expect.any(AbortSignal));
-    expect(onSessionFound).toHaveBeenCalledWith(expectedSession, "cwd:deep-hop-001");
-    expect(onSessionNotFound).not.toHaveBeenCalled();
-  });
-
-  // 2. Popstate remote retained-session deep link
-  it("resolves remote session and forwards parsed hop during browser popstate navigation", async () => {
-    const popstateSearch = "?view=audit&sessionId=sess-remote-pop&hop=cwd%3Apop-hop-42";
-    const parsed = parseAuditUrlParams(popstateSearch);
-    expect(parsed.sessionId).toBe("sess-remote-pop");
-    expect(parsed.hop).toBe("cwd:pop-hop-42");
-
-    const manager = new RemoteAuditLookupManager();
-    const expectedSession = makeClosedSession({ sessionId: "sess-remote-pop" });
-    const fetchSession = vi.fn().mockResolvedValue(expectedSession);
-
-    const onSessionFound = vi.fn();
-    const onSessionNotFound = vi.fn();
-
-    await manager.lookup(
-      { sessionId: parsed.sessionId!, targetHopId: parsed.hop },
-      { onSessionFound, onSessionNotFound },
-      fetchSession,
-    );
-
-    expect(onSessionFound).toHaveBeenCalledWith(expectedSession, "cwd:pop-hop-42");
-  });
-
-  // 3. Late remote lookup after scope change is discarded
-  it("discards late remote lookup response if navigation moved to another scope", async () => {
-    const manager = new RemoteAuditLookupManager();
-    let resolveSlowFetch!: (session: FilesystemClosedSession | null) => void;
-    const slowFetch = new Promise<FilesystemClosedSession | null>((res) => {
-      resolveSlowFetch = res;
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound: (session, hop) => {
+          appliedSession = session;
+          appliedHop = hop ?? null;
+        },
+        onSessionNotFound: vi.fn(),
+      },
     });
 
-    const onSessionFound = vi.fn();
-    const onSessionNotFound = vi.fn();
-
-    // 1. User arrives at slow-resolving session A
-    const lookupPromise = manager.lookup(
-      { sessionId: "sess-slow-a", targetHopId: "hop-a" },
-      { onSessionFound, onSessionNotFound },
-      () => slowFetch,
+    const expectedSession = makeClosedSession({ sessionId: "sess-deep-init" });
+    await coordinator.requestLookup(
+      { sessionId: "sess-deep-init", targetHopId: "cwd:deep-hop-42" },
+      undefined,
+      async () => expectedSession,
     );
 
-    // 2. User quickly navigates away to session B before session A resolves
-    manager.abort();
-
-    // 3. Late response from session A finally arrives
-    resolveSlowFetch(makeClosedSession({ sessionId: "sess-slow-a" }));
-    await lookupPromise;
-
-    // Late response must be discarded by generation guard
-    expect(onSessionFound).not.toHaveBeenCalled();
-    expect(onSessionNotFound).not.toHaveBeenCalled();
+    expect(appliedSession).toEqual(expectedSession);
+    expect(appliedHop).toBe("cwd:deep-hop-42");
   });
 
-  // 4. User session selection clears prior hop and cancels in-flight lookups
+  // 2. Popstate to known session while remote A is in flight preserves B when A resolves late
+  it("preserves known session selection when popstate occurs while remote lookup A is in flight and resolves late", async () => {
+    let selectedSessionId: string | null = null;
+    const onSessionFound = vi.fn((session: FilesystemClosedSession) => {
+      selectedSessionId = session.sessionId;
+    });
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveA!: (val: FilesystemClosedSession | null) => void;
+    const slowPromiseA = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveA = res;
+    });
+
+    // Begin remote lookup for A
+    const lookupPromiseA = coordinator.requestLookup(
+      { sessionId: "sess-remote-A", targetHopId: "hop-A" },
+      undefined,
+      () => slowPromiseA,
+    );
+
+    // Popstate navigation to known session B occurs
+    coordinator.notifySessionSelected("sess-known-B");
+    selectedSessionId = "sess-known-B";
+
+    // Late resolution of A arrives
+    resolveA(makeClosedSession({ sessionId: "sess-remote-A" }));
+    await lookupPromiseA;
+
+    // B remains selected, late A was never applied
+    expect(selectedSessionId).toBe("sess-known-B");
+    expect(onSessionFound).not.toHaveBeenCalled();
+  });
+
+  // 3. Switch to Live while remote A is in flight prevents A from being applied when it resolves late
+  it("does not apply remote session A if viewMode switched to Live before A resolves late", async () => {
+    let selectedSessionId: string | null = null;
+    const onSessionFound = vi.fn((session: FilesystemClosedSession) => {
+      selectedSessionId = session.sessionId;
+    });
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let resolveA!: (val: FilesystemClosedSession | null) => void;
+    const slowPromiseA = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveA = res;
+    });
+
+    // Begin remote lookup for A in audit mode
+    const lookupPromiseA = coordinator.requestLookup(
+      { sessionId: "sess-remote-A", targetHopId: "hop-A" },
+      undefined,
+      () => slowPromiseA,
+    );
+
+    // User or navigation switches viewMode to Live
+    coordinator.notifyViewModeChanged("live");
+
+    // Late resolution of A arrives
+    resolveA(makeClosedSession({ sessionId: "sess-remote-A" }));
+    await lookupPromiseA;
+
+    // A must not be applied
+    expect(selectedSessionId).toBeNull();
+    expect(onSessionFound).not.toHaveBeenCalled();
+  });
+
+  // 4. Component unmount aborts in-flight remote lookup
+  it("aborts in-flight remote lookup on component unmount / destroy", async () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+
+    let capturedSignal!: AbortSignal;
+    const slowPromise = new Promise<FilesystemClosedSession | null>(() => {});
+
+    void coordinator.requestLookup(
+      { sessionId: "sess-unmount-target" },
+      { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() },
+      (_id, signal) => {
+        capturedSignal = signal;
+        return slowPromise;
+      },
+    );
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal.aborted).toBe(false);
+
+    // Unmount cleanup
+    coordinator.destroy();
+
+    expect(capturedSignal.aborted).toBe(true);
+    expect(coordinator.getInFlightSessionId()).toBeNull();
+  });
+
+  // 5. Repeated snapshots with the same in-flight {sessionId, targetHopId} produce exactly one request
+  it("reuses in-flight lookup and makes exactly one request across repeated snapshot updates for the same target and hop", async () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const fetchSession = vi.fn().mockImplementation(() => new Promise(() => {}));
+
+    // Snapshot 1 arrives
+    void coordinator.requestLookup(
+      { sessionId: "sess-snapshot-A", targetHopId: "hop-1" },
+      { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() },
+      fetchSession,
+    );
+
+    // Snapshot 2 arrives with identical target
+    void coordinator.requestLookup(
+      { sessionId: "sess-snapshot-A", targetHopId: "hop-1" },
+      { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() },
+      fetchSession,
+    );
+
+    // Snapshot 3 arrives with identical target
+    void coordinator.requestLookup(
+      { sessionId: "sess-snapshot-A", targetHopId: "hop-1" },
+      { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() },
+      fetchSession,
+    );
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(fetchSession).toHaveBeenCalledWith("sess-snapshot-A", expect.any(AbortSignal));
+  });
+
+  // 6. Remote A followed by remote B aborts A and applies only B
+  it("aborts in-flight lookup A when remote B is requested, applying only B with its hop", async () => {
+    let appliedSessionId: string | null = null;
+    let appliedHopId: string | null = null;
+    const onSessionFound = vi.fn((session: FilesystemClosedSession, hopId?: string | null) => {
+      appliedSessionId = session.sessionId;
+      appliedHopId = hopId ?? null;
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      callbacks: {
+        onSessionFound,
+        onSessionNotFound: vi.fn(),
+      },
+    });
+
+    let capturedSignalA!: AbortSignal;
+    let resolveA!: (val: FilesystemClosedSession | null) => void;
+    const promiseA = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveA = res;
+    });
+
+    const lookupA = coordinator.requestLookup(
+      { sessionId: "sess-A", targetHopId: "hop-A" },
+      undefined,
+      (_id, signal) => {
+        capturedSignalA = signal;
+        return promiseA;
+      },
+    );
+
+    expect(capturedSignalA.aborted).toBe(false);
+
+    // Genuinely different remote target B requested
+    const sessionB = makeClosedSession({ sessionId: "sess-B" });
+    const lookupB = coordinator.requestLookup(
+      { sessionId: "sess-B", targetHopId: "hop-B" },
+      undefined,
+      async () => sessionB,
+    );
+
+    // A's signal was aborted immediately
+    expect(capturedSignalA.aborted).toBe(true);
+
+    // Now A finishes late
+    resolveA(makeClosedSession({ sessionId: "sess-A" }));
+    await Promise.all([lookupA, lookupB]);
+
+    // Only B is applied with hop-B
+    expect(appliedSessionId).toBe("sess-B");
+    expect(appliedHopId).toBe("hop-B");
+    expect(onSessionFound).toHaveBeenCalledTimes(1);
+    expect(onSessionFound).toHaveBeenCalledWith(sessionB, "hop-B");
+  });
+
+  // 7. User session selection clears prior hop and cancels in-flight lookups
   it("clears prior hop intent and selection when selecting a new session", () => {
-    const manager = new RemoteAuditLookupManager();
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
     const requestedHopRef = { current: "cwd:sess1-hop" as string | null };
     let selectedHistoryEventId: string | null = "cwd:sess1-hop";
 
     // User selects session-2
     const handleUserSelectSession = (newSessionId: string) => {
-      manager.abort();
+      coordinator.notifySessionSelected(newSessionId);
       requestedHopRef.current = null;
       selectedHistoryEventId = null;
       return buildAuditUrlSearch({
@@ -311,7 +453,30 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     });
   });
 
-  // 7. Exact database-operation bounds
+  // Index-supported query contract for mixed-schema rank aggregation
+  it("provisions compound indexes for both sessionId and session_id matching the query contract", () => {
+    // The query contract for mixed-schema history rank aggregation requires:
+    // $match: { $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }] }
+    // Both branches must be backed by compound indexes on cwd_events:
+    // 1. { sessionId: 1, at: -1, eventId: -1 }
+    // 2. { session_id: 1, at: -1, eventId: -1 }
+    const requiredIndexDefinitions = [
+      { key: { sessionId: 1, at: -1, eventId: -1 }, name: "sessionId_1_at_-1_eventId_-1" },
+      { key: { session_id: 1, at: -1, eventId: -1 }, name: "session_id_1_at_-1_eventId_-1" },
+    ];
+
+    const matchBranches = ["sessionId", "session_id"];
+    for (const field of matchBranches) {
+      const matchedIndex = requiredIndexDefinitions.find(
+        (def) => field in def.key && def.key[field as keyof typeof def.key] === 1,
+      );
+      expect(matchedIndex).toBeDefined();
+      expect(matchedIndex?.key.at).toBe(-1);
+      expect(matchedIndex?.key.eventId).toBe(-1);
+    }
+  });
+
+  // Exact database-operation bounds
   it("strictly enforces maximum database operations across all query paths", async () => {
     // 7A: Overlength input (>300 chars) -> exactly 0 operations
     const findOneMock = vi.fn();

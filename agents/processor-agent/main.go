@@ -917,11 +917,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		return err
 	}
 
-	cwdEventIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
-		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
-	}
-	if err := ensureIndexModels(ctx, mw.db.Collection("cwd_events"), cwdEventIndexes); err != nil {
+	if err := ensureIndexModels(ctx, mw.db.Collection("cwd_events"), cwdEventIndexModels()); err != nil {
 		return err
 	}
 

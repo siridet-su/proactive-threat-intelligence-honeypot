@@ -12,7 +12,10 @@ import {
   parseAuditUrlParams,
   resolveSessionSelection,
 } from "./filesystemUtils";
-import type { RemoteAuditLookupIntent } from "./sessionHopResolver";
+import type {
+  RemoteAuditLookupCoordinator,
+  RemoteAuditLookupIntent,
+} from "./sessionHopResolver";
 
 export interface UseFilesystemUrlStateOptions {
   isHydrated: boolean;
@@ -22,6 +25,7 @@ export interface UseFilesystemUrlStateOptions {
   selectedSessionIdRef: React.MutableRefObject<string | null>;
   selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
   lookupRemoteAuditSession: (target: RemoteAuditLookupIntent | string, targetHopId?: string | null) => Promise<void> | void;
+  coordinator?: RemoteAuditLookupCoordinator;
   setSelectedSessionId?: (id: string | null) => void;
   onExitFullscreenAndPlaying?: () => void;
 }
@@ -55,6 +59,7 @@ export function useFilesystemUrlState(
     selectedSessionIdRef,
     selectSession,
     lookupRemoteAuditSession,
+    coordinator,
     setSelectedSessionId,
     onExitFullscreenAndPlaying,
   } = options;
@@ -103,6 +108,7 @@ export function useFilesystemUrlState(
         onExitFullscreenAndPlaying?.();
       }
       isUserNavigatingRef.current = true;
+      coordinator?.notifyViewModeChanged(mode);
       setViewMode(mode);
       setExpiredSessionId(null);
       const sid =
@@ -112,10 +118,11 @@ export function useFilesystemUrlState(
         snapshot?.recentClosedSessions[0]?.sessionId ??
         null;
       if (sid) {
+        coordinator?.notifySessionSelected(sid);
         selectSession(sid);
       }
     },
-    [onExitFullscreenAndPlaying, selectSession, selectedSessionIdRef, snapshot?.recentClosedSessions, snapshot?.sessions],
+    [coordinator, onExitFullscreenAndPlaying, selectSession, selectedSessionIdRef, snapshot?.recentClosedSessions, snapshot?.sessions],
   );
 
   // Listen for browser Back and Forward navigation (popstate)
@@ -123,7 +130,9 @@ export function useFilesystemUrlState(
     if (typeof window === "undefined") return;
     const handlePopState = () => {
       const parsed = parseAuditUrlParams(window.location.search);
-      setViewMode(parsed.view ?? "live");
+      const nextView = parsed.view ?? "live";
+      coordinator?.notifyViewModeChanged(nextView);
+      setViewMode(nextView);
       setHideHomeOnly(Boolean(parsed.hideHome));
       setTargetPathFilter(parsed.targetPath ?? null);
       requestedHopRef.current = parsed.hop ?? null;
@@ -140,18 +149,27 @@ export function useFilesystemUrlState(
           const resolution = resolveSessionSelection(parsed.sessionId, null, known, parsed.view === "audit");
           if (resolution.expiredSessionId) {
             if (parsed.view === "audit") {
-              void lookupRemoteAuditSession({
-                sessionId: resolution.expiredSessionId,
-                targetHopId: parsed.hop ?? null,
-              });
+              void (coordinator
+                ? coordinator.requestLookup({
+                    sessionId: resolution.expiredSessionId,
+                    targetHopId: parsed.hop ?? null,
+                  })
+                : lookupRemoteAuditSession({
+                    sessionId: resolution.expiredSessionId,
+                    targetHopId: parsed.hop ?? null,
+                  }));
             } else {
+              coordinator?.notifySessionSelected(null);
               setExpiredSessionId(resolution.expiredSessionId);
               selectedSessionIdRef.current = null;
               setSelectedSessionId?.(null);
             }
           } else {
             setExpiredSessionId(null);
-            if (resolution.sessionId) selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
+            if (resolution.sessionId) {
+              coordinator?.notifySessionSelected(resolution.sessionId);
+              selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
+            }
           }
         } else {
           selectedSessionIdRef.current = parsed.sessionId;
@@ -161,6 +179,7 @@ export function useFilesystemUrlState(
         requestedSessionIdRef.current = null;
         setExpiredSessionId(null);
         if (parsed.view === "audit") {
+          coordinator?.notifySessionSelected(null);
           selectedSessionIdRef.current = null;
           setSelectedSessionId?.(null);
         }
@@ -169,7 +188,7 @@ export function useFilesystemUrlState(
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [snapshot, selectSession, lookupRemoteAuditSession, extraAuditSessions, selectedSessionIdRef, setSelectedSessionId]);
+  }, [coordinator, snapshot, selectSession, lookupRemoteAuditSession, extraAuditSessions, selectedSessionIdRef, setSelectedSessionId]);
 
   // Synchronize React navigation & filter state with the URL
   useEffect(() => {
