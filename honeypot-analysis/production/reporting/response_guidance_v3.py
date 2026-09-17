@@ -711,6 +711,7 @@ def _snapshot_reference_candidates(
         ("direct_cowrie_events", "direct_cowrie_events"),
         ("cowrie_event_evidence", "cowrie_event_evidence"),
         ("trusted_attck_candidates", "trusted_attck_candidates"),
+        ("observed_trusted_ttps", "observed_trusted_ttps"),
         ("classification_events", "classification_events"),
     )
     indexed: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
@@ -722,23 +723,14 @@ def _snapshot_reference_candidates(
                 _clean(item.get("evidence_id")),
                 _clean(item.get("evidence_ref")),
             }
+            if collection == "observed_trusted_ttps":
+                # Raw classifier records are intentionally absent from the v3
+                # snapshot; resolve their stable IDs through the canonical
+                # trusted observed-TTP projection that retains those IDs.
+                ids.update(_texts(item.get("classification_event_refs") or []))
+                ids.update(_texts(item.get("evidence_refs") or []))
             for evidence_id in sorted(item for item in ids if item):
                 indexed.setdefault(evidence_id, []).append((source, deepcopy(item)))
-    # Typed semantic selection may bind a guidance item to a trusted
-    # classification evidence ID that is represented only by the canonical
-    # semantic graph's bounded evidence node.  Index that projection as a
-    # fallback while preserving the higher-priority direct/observed
-    # projections above.
-    graph = snapshot.get("semantic_graph")
-    if isinstance(graph, Mapping):
-        for item in graph.get("evidence_nodes") or []:
-            if not isinstance(item, dict):
-                continue
-            evidence_id = _clean(item.get("evidence_id"))
-            if evidence_id:
-                indexed.setdefault(evidence_id, []).append(
-                    ("semantic_graph.evidence_nodes", deepcopy(item))
-                )
     return indexed
 
 
@@ -750,8 +742,8 @@ _REFERENCE_SOURCE_PRIORITY = (
     "transfer_observations",
     "cowrie_event_evidence",
     "trusted_attck_candidates",
+    "observed_trusted_ttps",
     "classification_events",
-    "semantic_graph.evidence_nodes",
 )
 
 
@@ -1135,6 +1127,7 @@ def _validate_binding(
     *,
     expected_session_id: str = "",
     expected_assessment_id: str = "",
+    policy_path_override: str = "",
 ) -> List[str]:
     """Independently validate response-guidance content bindings."""
 
@@ -1243,7 +1236,9 @@ def _validate_binding(
         errors.append("policy content binding is required")
         policy_binding = {}
     if _clean(policy_binding.get("status")) == "verified":
-        policy_path = _clean(policy_binding.get("path"))
+        policy_path = _clean(policy_path_override) or _clean(
+            policy_binding.get("path")
+        )
         if not policy_path:
             errors.append("verified policy binding requires a source path")
         else:
@@ -1410,6 +1405,7 @@ def validate_response_guidance_v3(
     *,
     expected_session_id: str = "",
     expected_assessment_id: str = "",
+    policy_path_override: str = "",
 ) -> List[str]:
     """Validate the immutable-evidence and no-automation v3 output contract."""
 
@@ -1845,6 +1841,7 @@ def validate_response_guidance_v3(
         binding,
         expected_session_id=expected_session_id,
         expected_assessment_id=expected_assessment_id,
+        policy_path_override=policy_path_override,
     )
     errors.extend(binding_errors)
     identity_arguments = {

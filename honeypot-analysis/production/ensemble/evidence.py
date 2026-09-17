@@ -888,14 +888,7 @@ def _authenticated_sensor_session_alias(
     *,
     canonical_id: str,
 ) -> str:
-    """Return the authenticated sensor-local ID for one canonical session.
-
-    Ingest intentionally namespaces a Cowrie session ID with the authenticated
-    sensor identity before it enters canonical storage.  Model2's capture
-    boundary records the sensor-local Cowrie ID, so this is the only permitted
-    alias: it is derived from authenticated identity, never from source IP,
-    timestamps, tuple similarity, or result arrival order.
-    """
+    """Return the authenticated sensor-local ID for one canonical session."""
 
     sensor_id = _clean(payload.get("sensor_id") or payload.get("sensor"))
     sensor_session_id = _clean(payload.get("sensor_session_id"))
@@ -917,14 +910,7 @@ def _rebind_model2_v5_evidence(
     source_session_id: str,
     canonical_id: str,
 ) -> dict[str, Any] | None:
-    """Rebind validated V5 evidence through an authenticated session alias.
-
-    ``load_bound_model2_v5_result`` has already validated the raw result,
-    including its exact run/measurement/episode identities and all frozen
-    artifact/binding gates.  This function changes only the outer canonical
-    session namespace after the authenticated sensor-local identity has been
-    proven by ``_authenticated_sensor_session_alias``.
-    """
+    """Rebind already-validated V5 evidence through authenticated identity."""
 
     if not isinstance(value, Mapping):
         return None
@@ -995,9 +981,6 @@ def build_ensemble_from_session_payload(
         and _clean(model2_value.get("schema_version"))
         == MODEL2_V5_COMPLETED_EVIDENCE_SCHEMA
     ):
-        # Preserve the validated V5 binding fields.  The generic completed-run
-        # normalizer intentionally predates measurement/episode identities and
-        # would otherwise discard them from the production audit projection.
         model2 = dict(model2_value)
     else:
         model2 = normalize_model2_completed_run_evidence(

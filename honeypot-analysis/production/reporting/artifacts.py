@@ -7,6 +7,7 @@ import json
 import os
 import re
 import stat
+import tempfile
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
@@ -1171,7 +1172,15 @@ def write_pdf_report(
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.lib.units import cm
-        from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+        from reportlab.platypus import (
+            HRFlowable,
+            PageBreak,
+            Paragraph,
+            SimpleDocTemplate,
+            Spacer,
+            Table,
+            TableStyle,
+        )
     except ImportError as exc:
         raise _PDFExportUnavailable("PDF renderer is unavailable") from exc
 
@@ -1182,132 +1191,421 @@ def write_pdf_report(
         session_payload,
     )
     filename = f"{_safe_name(session_id)}_{version}_threat_report.pdf"
+    generated_at = _artifact_timestamp(report, session_payload)
     styles = getSampleStyleSheet()
-    title = ParagraphStyle("TitleCustom", parent=styles["Title"], fontSize=20, textColor=colors.HexColor("#C0392B"), spaceAfter=4)
-    h2 = ParagraphStyle("HeadingCustom", parent=styles["Heading2"], fontSize=13, textColor=colors.HexColor("#2C3E50"), spaceBefore=14, spaceAfter=4)
-    body = ParagraphStyle("BodyCustom", parent=styles["Normal"], fontSize=10, leading=15, spaceAfter=3)
-    meta = ParagraphStyle("MetaCustom", parent=styles["Normal"], fontSize=8, textColor=colors.grey)
-    story = [
-        Paragraph("Threat Intelligence Report", title),
-        Paragraph(
-            f"Generated: {_artifact_timestamp(report, session_payload)}",
-            meta,
-        ),
-        HRFlowable(width="100%", thickness=2, color=colors.HexColor("#C0392B"), spaceAfter=12),
-        Paragraph("Executive Summary", h2),
-        Paragraph(
-            escape(
-                str(
-                    "Canonical behavioral findings and falsifiable alternatives are listed below."
-                    if report.get("schema_version") == "session_assessment.v4"
-                    else (report.get("presentation") or {}).get("summary")
-                    or report.get("executive_summary")
-                    or report.get("summary")
-                    or "No summary available."
-                )
-            ),
-            body,
-        ),
-        Spacer(1, 8),
+    title = ParagraphStyle(
+        "FormalTitle", parent=styles["Title"], fontName="Helvetica-Bold",
+        fontSize=22, leading=27, textColor=colors.HexColor("#17365D"),
+        alignment=0, spaceAfter=8,
+    )
+    subtitle = ParagraphStyle(
+        "FormalSubtitle", parent=styles["Normal"], fontSize=12, leading=16,
+        textColor=colors.HexColor("#5B6573"), spaceAfter=4,
+    )
+    h1 = ParagraphStyle(
+        "FormalHeading1", parent=styles["Heading1"], fontName="Helvetica-Bold",
+        fontSize=16, leading=20, textColor=colors.HexColor("#17365D"),
+        spaceBefore=4, spaceAfter=8, keepWithNext=True,
+    )
+    h2 = ParagraphStyle(
+        "FormalHeading2", parent=styles["Heading2"], fontName="Helvetica-Bold",
+        fontSize=11.5, leading=14, textColor=colors.HexColor("#2F5597"),
+        spaceBefore=9, spaceAfter=4, keepWithNext=True,
+    )
+    body = ParagraphStyle(
+        "FormalBody", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=9.2, leading=13, spaceAfter=5,
+    )
+    small = ParagraphStyle(
+        "FormalSmall", parent=styles["Normal"], fontName="Helvetica",
+        fontSize=7.6, leading=9.5, textColor=colors.HexColor("#4F5965"),
+        spaceAfter=3,
+    )
+    table_body = ParagraphStyle(
+        "FormalTableBody", parent=body, fontSize=7.6, leading=9.2,
+        spaceAfter=0,
+    )
+    table_header = ParagraphStyle(
+        "FormalTableHeader", parent=table_body, fontName="Helvetica-Bold",
+        textColor=colors.white,
+    )
+    bullet = ParagraphStyle(
+        "FormalBullet", parent=body, leftIndent=12, firstLineIndent=-8,
+        bulletIndent=0, spaceAfter=3,
+    )
+
+    def _value(value: Any, default: str = "not recorded", limit: int = 512) -> str:
+        if value is None or value == "":
+            return default
+        if isinstance(value, bool):
+            return "YES" if value else "NO"
+        text = str(value)
+        if len(text) > limit:
+            return text[: limit - 1] + "…"
+        return text
+
+    def _p(value: Any, style: ParagraphStyle = body, *, limit: int = 512) -> Paragraph:
+        text = escape(_value(value, limit=limit)).replace("\n", "<br/>")
+        return Paragraph(text, style)
+
+    def _table(rows: List[List[Any]], widths: List[float]) -> Table:
+        converted = []
+        for row_index, row in enumerate(rows):
+            cell_style = table_header if row_index == 0 else table_body
+            converted.append([_p(cell, cell_style, limit=4096) for cell in row])
+        table = Table(converted, colWidths=widths, repeatRows=1, hAlign="LEFT")
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#C9D2DC")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F4F7FA")]),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return table
+
+    def _main_technique(value: Any) -> str:
+        text = _value(value, "not recorded", 80).strip()
+        return text.split(".", 1)[0] if text else "not recorded"
+
+    session_status = (
+        "CLOSED" if session_payload.get("is_ended") is True
+        else "ACTIVE" if session_payload.get("is_ended") is False
+        else _value(session_payload.get("status"), "NOT_RECORDED", 40).upper()
+    )
+    command_count = session_payload.get("command_count")
+    if not isinstance(command_count, int):
+        commands = session_payload.get("commands")
+        command_count = len(commands) if isinstance(commands, list) else 0
+    source_ip = session_payload.get("src_ip") or session_payload.get("source_ip")
+    sensor = session_payload.get("sensor_id") or session_payload.get("sensor")
+    report_map = [
+        ["Section", "Contents"],
+        ["1", "Executive summary and decision boundary"],
+        ["2", "Session identity, collection context, and data quality"],
+        ["3", "Evidence layers and observed ATT&CK techniques"],
+        ["4", "Behavioral findings and falsifiable alternatives"],
+        ["5", "Model1 + Model2 advisory evidence"],
+        ["6", "External threat-intelligence context and operator guidance"],
+        ["7", "Indicators, provenance, limitations, and integrity"],
+    ]
+    overview_rows = [
+        ["Document control", "Value"],
+        ["Session ID", session_id],
+        ["Artifact version", version],
+        ["Report schema", report.get("schema_version")],
+        ["Evidence timestamp", generated_at],
+        ["Session status", session_status],
+        ["Source", source_ip],
+        ["Sensor", sensor],
+        ["Command events", command_count],
+        ["Decision authority", "Evidence-bounded advisory; not an automatic enforcement decision"],
     ]
 
-    if report.get("schema_version") == "session_assessment.v4":
-        story.append(Paragraph("Behavioral Findings", h2))
-        if report.get("behavioral_findings"):
-            for finding in report.get("behavioral_findings") or []:
-                story.append(Paragraph(escape(
-                    f"[{finding.get('status', '')}] {finding.get('statement', '')} "
-                    f"(finding {finding.get('finding_id', '')}; evidence "
-                    f"{', '.join(finding.get('evidence_refs') or [])})"
-                ), body))
-        else:
-            story.append(Paragraph("No policy-supported behavioral finding.", body))
-        story.append(Paragraph("Falsifiable Hypothesis Alternatives", h2))
-        if report.get("hypothesis_sets"):
-            for hypothesis_set in report.get("hypothesis_sets") or []:
-                story.append(Paragraph(escape(str(hypothesis_set.get("question") or "")), body))
-                for hypothesis in hypothesis_set.get("hypotheses") or []:
-                    story.append(Paragraph(escape(
-                        f"{hypothesis.get('statement', '')} ({hypothesis.get('hypothesis_id', '')})"
-                    ), body))
-        else:
-            story.append(Paragraph("No evidence-bounded alternative set was warranted.", body))
-        provenance = report.get("provenance") or {}
-        story.extend([
-            Paragraph("Canonical Provenance", h2),
-            Paragraph(escape(
-                f"Evidence SHA-256: {provenance.get('evidence_sha256', '')}<br/>"
-                f"Behavior policy SHA-256: {(provenance.get('behavior_policy') or {}).get('sha256', '')}<br/>"
-                f"Classification policy SHA-256: {(provenance.get('classification_policy') or {}).get('sha256', '')}<br/>"
-                f"Evaluator Git revision: {provenance.get('evaluator_git_revision', '')}"
-            ), body),
-        ])
+    story = [
+        _p("Threat Intelligence Session Report", title),
+        _p("Per-session evidence assessment, model corroboration, and response guidance", subtitle),
+        Spacer(1, 0.35 * cm),
+        HRFlowable(width="100%", thickness=2.2, color=colors.HexColor("#2F5597"), spaceAfter=12),
+        _p("CONFIDENTIAL — AUTHORIZED RECIPIENTS", h2),
+        _p(
+            "This document summarizes one monitored session using the evidence and policy state recorded for that session. "
+            "It is intended for analyst triage and audit review; it does not establish attribution or authorize an automatic response.",
+            body,
+        ),
+        _table(overview_rows, [4.5 * cm, 12.5 * cm]),
+        Spacer(1, 0.35 * cm),
+        _p("Report map", h2),
+        _table(report_map, [1.6 * cm, 15.4 * cm]),
+        Spacer(1, 0.35 * cm),
+        _p(
+            "Privacy boundary: command text and raw event payloads are intentionally excluded from this downloadable report. "
+            "The authenticated session view remains the source for detailed event review.",
+            small,
+        ),
+        PageBreak(),
+    ]
 
-    ttp_rows = [["TTP ID", "Source"]]
-    sources = session_payload.get("ttp_sources", {})
-    for tid in _trusted_ttp_ids(report, session_payload):
-        ttp_rows.append([tid, ", ".join(sources.get(tid, []))])
-    if len(ttp_rows) > 1:
-        table = Table(ttp_rows, colWidths=[4 * cm, 12 * cm])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DEE2E6")),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ]))
-        story.extend([Paragraph("Detected Techniques", h2), table, Spacer(1, 8)])
+    summary = (
+        "Canonical behavioral findings and falsifiable alternatives are listed below."
+        if report.get("schema_version") == "session_assessment.v4"
+        else (report.get("presentation") or {}).get("summary")
+        or report.get("executive_summary")
+        or report.get("summary")
+        or "No summary available."
+    )
+    story.extend([
+        _p("1. Executive Summary", h1),
+        _p(summary, body),
+        _p(
+            "Interpretation rule: direct observations are separated from session correlations and prediction-only hypotheses. "
+            "Model outputs are corroborative and non-authoritative; numeric scores are native model values, not calibrated probabilities.",
+            body,
+        ),
+        _p("2. Session and Collection Context", h1),
+        _table([
+            ["Context field", "Recorded value"],
+            ["Session lifecycle", session_status],
+            ["Session start", session_payload.get("start_time")],
+            ["Last update", session_payload.get("updated_at")],
+            ["Session end", session_payload.get("end_time")],
+            ["Source address", source_ip],
+            ["Sensor identifier", sensor],
+            ["Protocol / listener", session_payload.get("protocol") or session_payload.get("service")],
+            ["Command events", command_count],
+            ["Data quality", "Recorded fields only; unavailable values are not imputed"],
+        ], [5.0 * cm, 12.0 * cm]),
+        Spacer(1, 0.25 * cm),
+        _p("3. Evidence Assessment", h1),
+        _p(
+            "The evidence model is deliberately layered. A direct command observation is stronger than a session correlation, "
+            "and a prediction-only hypothesis is not presented as an observed technique.", body,
+        ),
+    ])
 
     evidence_lines = _evidence_layer_summary_lines(report)
     if evidence_lines:
-        story.extend([
-            Paragraph("Evidence Layers", h2),
-            Paragraph("Direct command TTPs, session-correlated TTPs, and prediction-only hypotheses are separated so facts, correlations, and forecasts are not mixed.", body),
-        ])
-        layer_rows = [["Layer", "Count"]]
+        layer_rows = [["Evidence layer", "Count", "Meaning"]]
+        meanings = {
+            "Direct command TTPs": "Directly supported by trusted command evidence",
+            "Session-correlated TTPs": "Policy-bounded session correlation; not a probability",
+            "Prediction-only hypotheses": "Forecast only; not an observation",
+        }
         for line in evidence_lines:
             label, _, value = line.partition(":")
-            layer_rows.append([label, value.strip()])
-        table = Table(layer_rows, colWidths=[8 * cm, 8 * cm])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DEE2E6")),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ]))
-        story.extend([table, Spacer(1, 8)])
+            layer_rows.append([label, value.strip(), meanings.get(label, "Recorded evidence layer")])
+        story.append(_table(layer_rows, [5.0 * cm, 2.2 * cm, 9.8 * cm]))
+    else:
+        story.append(_p("No evidence-layer summary was recorded for this session.", body))
+
+    story.append(_p("3.1 Observed Techniques", h2))
+    sources = session_payload.get("ttp_sources", {})
+    technique_rows = [["Main technique", "Tactic", "Evidence source"]]
+    canonical_evidence = report.get("canonical_evidence") or {}
+    observed_records = canonical_evidence.get("observed_trusted_ttps") or []
+    if not observed_records:
+        observed_records = session_payload.get("observed_trusted_ttps") or []
+    record_by_id = {}
+    for item in observed_records:
+        if isinstance(item, dict):
+            record_by_id.setdefault(_main_technique(item.get("technique_id") or item.get("main_ttp")), item)
+    for technique_id in _trusted_ttp_ids(report, session_payload):
+        main_id = _main_technique(technique_id)
+        item = record_by_id.get(main_id, {})
+        raw_sources = item.get("sources") or sources.get(technique_id) or sources.get(main_id) or []
+        if not isinstance(raw_sources, list):
+            raw_sources = [raw_sources]
+        technique_rows.append([
+            main_id,
+            item.get("tactic") or item.get("predicted_tactic") or "not recorded",
+            ", ".join(_value(value, limit=100) for value in raw_sources) or "not recorded",
+        ])
+    if len(technique_rows) == 1:
+        technique_rows.append(["None recorded", "—", "No trusted observed technique in the report"])
+    story.append(_table(technique_rows, [4.0 * cm, 4.0 * cm, 9.0 * cm]))
+    story.append(_p(
+        "Technique identifiers are shown at the main-technique level. This report does not introduce or infer ATT&CK sub-techniques.",
+        small,
+    ))
+
+    story.extend([_p("4. Behavioral Findings and Alternatives", h1)])
+    if report.get("schema_version") == "session_assessment.v4":
+        findings = report.get("behavioral_findings") or []
+        finding_rows = [["Status", "Finding", "Evidence references"]]
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            refs = finding.get("evidence_refs") or []
+            finding_rows.append([
+                finding.get("status"),
+                f"{finding.get('statement', '')} [{finding.get('finding_id', 'unidentified')}]",
+                ", ".join(str(ref) for ref in refs) or "not recorded",
+            ])
+        if len(finding_rows) == 1:
+            finding_rows.append(["None", "No policy-supported behavioral finding.", "—"])
+        story.append(_table(finding_rows, [2.8 * cm, 9.0 * cm, 5.2 * cm]))
+        hypothesis_rows = [["Question / hypothesis set", "Alternative hypotheses"]]
+        for hypothesis_set in report.get("hypothesis_sets") or []:
+            if not isinstance(hypothesis_set, dict):
+                continue
+            alternatives = []
+            for hypothesis in hypothesis_set.get("hypotheses") or []:
+                if isinstance(hypothesis, dict):
+                    alternatives.append(
+                        f"{hypothesis.get('statement', '')} [{hypothesis.get('hypothesis_id', 'unidentified')}]"
+                    )
+            hypothesis_rows.append([
+                f"{hypothesis_set.get('question', '')} [{hypothesis_set.get('hypothesis_set_id', 'unidentified')}]",
+                "\n".join(alternatives) or "No alternatives recorded",
+            ])
+        if len(hypothesis_rows) == 1:
+            hypothesis_rows.append(["None", "No evidence-bounded alternative set was warranted."])
+        story.extend([_p("4.1 Falsifiable Alternatives", h2), _table(hypothesis_rows, [7.5 * cm, 9.5 * cm])])
+    elif report.get("schema_version") == "threat_hypothesis.v2":
+        assessment = report.get("supported_assessment") or {}
+        story.append(_p(assessment.get("behavior_summary") or "No trusted behavioral evidence.", body))
+        objectives = assessment.get("possible_objectives") or []
+        if objectives:
+            for claim in objectives:
+                if isinstance(claim, dict):
+                    story.append(_p(f"• [{claim.get('evidence_status', 'insufficient_evidence')}] {claim.get('text', '')}", bullet))
+        else:
+            story.append(_p("• No attacker objective inferred from the observed evidence.", bullet))
+        follow_on = report.get("follow_on_hypothesis") or {}
+        story.append(_p("4.1 Post-session Follow-on Hypothesis", h2))
+        if follow_on.get("abstained"):
+            story.append(_p(f"Abstained: {follow_on.get('abstention_reason', '')}", body))
+        else:
+            claims = follow_on.get("claims") or []
+            story.extend(_p(f"• [{claim.get('evidence_status', '')}] {claim.get('text', '')}", bullet) for claim in claims if isinstance(claim, dict))
+    else:
+        story.append(_p("No version-specific behavioral assessment was recorded.", body))
+
+    story.append(PageBreak())
+    story.append(_p("5. Model1 + Model2 Advisory Evidence", h1))
+    ensemble = session_payload.get("ensemble_evidence") or report.get("ensemble_evidence") or {}
+    if not isinstance(ensemble, dict) or not ensemble:
+        story.append(_p("No session-bound ensemble evidence snapshot is available.", body))
+    else:
+        model1 = ensemble.get("model1") if isinstance(ensemble.get("model1"), dict) else {}
+        model2 = ensemble.get("model2") if isinstance(ensemble.get("model2"), dict) else {}
+        architecture = (
+            "UNIFIED_ONE_MODEL" if model2.get("one_model") is True
+            else "NOT_UNIFIED" if model2.get("one_model") is False
+            else "NOT_RECORDED"
+        )
+        model_rows = [
+            ["Model / binding field", "Recorded value"],
+            ["Model1 applicable", model1.get("applicable")],
+            ["Model1 score semantics", model1.get("score_type")],
+            ["Model2 availability", model2.get("available")],
+            ["Model2 status", model2.get("status")],
+            ["Model2 architecture", architecture],
+            ["One inference call", model2.get("one_inference_call")],
+            ["Independent binary heads", model2.get("independent_binary_heads")],
+            ["Model2 artifact", model2.get("artifact_id") or model2.get("model_version")],
+            ["Feature contract SHA-256", model2.get("feature_contract_sha256")],
+            ["Run ID", ensemble.get("run_id")],
+            ["Measurement / episode", f"{model2.get('measurement_id') or 'not recorded'} / {model2.get('episode_id') or 'not recorded'}"],
+            ["Binding", "BOUND" if model2.get("binding") else "NOT_RECORDED"],
+            ["Authority", ensemble.get("ensemble_authority") or "ADVISORY_ONLY"],
+        ]
+        story.append(_table(model_rows, [6.0 * cm, 11.0 * cm]))
+        story.append(_p(
+            "Model1 remains the primary classification evidence where applicable. Model2 is a session/run-bound corroborator. "
+            "No numeric score fusion is performed, and neither model authorizes automatic response.", body,
+        ))
+        result_rows = [["Technique", "Model1", "Model1 margin", "Model2", "Relation", "State"]]
+        for item in ensemble.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            result_rows.append([
+                _main_technique(item.get("technique_id")),
+                item.get("model1_result") or "NOT_APPLICABLE",
+                item.get("model1_margin") if item.get("model1_margin") is not None else "—",
+                item.get("model2_result") or "UNAVAILABLE",
+                item.get("model2_relation") or "—",
+                item.get("evidence_state") or "—",
+            ])
+        if len(result_rows) > 1:
+            story.extend([_p("5.1 Per-technique Advisory State", h2), _table(result_rows, [2.5 * cm, 2.5 * cm, 2.6 * cm, 2.5 * cm, 3.3 * cm, 3.6 * cm])])
+        else:
+            story.append(_p("No per-technique ensemble result rows were recorded.", body))
+
+    story.extend([_p("6. External Threat-Intelligence Context and Operator Guidance", h1)])
+    enrichment = session_payload.get("external_ti_summary") or session_payload.get("external_ti")
+    if isinstance(enrichment, dict) and enrichment:
+        ti_rows = [["Context field", "Recorded value"]]
+        for key in ("status", "provider", "available", "match_count", "observed_at", "source"):
+            if key in enrichment:
+                ti_rows.append([key, enrichment.get(key)])
+        if len(ti_rows) == 1:
+            ti_rows.append(["Status", "External TI context exists but has no printable summary fields"])
+        story.append(_table(ti_rows, [5.0 * cm, 12.0 * cm]))
+    else:
+        story.append(_p("No external threat-intelligence enrichment was recorded in this session payload.", body))
 
     actions = _trusted_recommendation_actions(report)
-    story.append(Paragraph("Policy-Approved Operator Actions", h2))
-    if actions:
-        for action in actions[:8]:
-            story.append(Paragraph(
-                escape(
-                    f"P{action.get('policy_order', 50)} {action.get('description', '')} "
-                    "(manual approval required)"
-                ),
-                body,
-            ))
-    else:
-        story.append(Paragraph("No policy-approved operator action matched the available evidence.", body))
+    action_rows = [["Priority", "Policy-approved action", "Evidence references", "Execution"]]
+    for action in actions[:20]:
+        if isinstance(action, dict):
+            action_rows.append([
+                f"P{action.get('policy_order', 50)}",
+                action.get("description"),
+                ", ".join(str(ref) for ref in action.get("evidence_refs") or []) or "not recorded",
+                "Manual approval required; automatic execution not implemented",
+            ])
+    if len(action_rows) == 1:
+        action_rows.append(["—", "No policy-approved operator action matched the available evidence.", "—", "No action"])
+    story.extend([_p("6.1 Policy-approved Operator Guidance", h2), _table(action_rows, [1.8 * cm, 7.0 * cm, 4.0 * cm, 4.2 * cm])])
 
     ioc_rows = [["Type", "Value", "Confidence"]]
-    for item in _ioc_items(report.get("ioc_summary") or session_payload.get("ioc_summary") or {}):
-        ioc_rows.append([item.get("type", ""), item.get("value", "")[:60], item.get("confidence", "")])
-    if len(ioc_rows) > 1:
-        table = Table(ioc_rows, colWidths=[3 * cm, 10 * cm, 3 * cm])
-        table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2C3E50")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DEE2E6")),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ]))
-        story.extend([Paragraph("Indicators of Compromise", h2), table, Spacer(1, 8)])
+    ioc_summary = report.get("ioc_summary") or session_payload.get("ioc_summary") or {}
+    for item in _ioc_items(ioc_summary):
+        if isinstance(item, dict):
+            ioc_rows.append([item.get("type"), item.get("value"), item.get("confidence") or "unknown"])
+    if len(ioc_rows) == 1:
+        ioc_rows.append(["—", "No indicators of compromise recorded.", "—"])
+    story.extend([_p("6.2 Indicators of Compromise", h2), _table(ioc_rows, [3.0 * cm, 10.0 * cm, 4.0 * cm])])
 
+    story.extend([PageBreak(), _p("7. Provenance, Limitations, and Integrity", h1)])
+    provenance = report.get("provenance") or {}
+    behavior_policy = provenance.get("behavior_policy") if isinstance(provenance.get("behavior_policy"), dict) else {}
+    classification_policy = provenance.get("classification_policy") if isinstance(provenance.get("classification_policy"), dict) else {}
+    provenance_rows = [
+        ["Integrity field", "Recorded value"],
+        ["Artifact version", version],
+        ["Evidence SHA-256", provenance.get("evidence_sha256")],
+        ["Behavior policy SHA-256", behavior_policy.get("sha256")],
+        ["Classification policy SHA-256", classification_policy.get("sha256")],
+        ["Evaluator revision", provenance.get("evaluator_git_revision")],
+        ["Model2 artifact SHA-256", model2.get("artifact_sha256") if isinstance(ensemble, dict) and isinstance(ensemble.get("model2"), dict) else "not recorded"],
+        ["Report generation", "Deterministic artifact rendering; source report/session remain authoritative"],
+    ]
+    story.append(_table(provenance_rows, [5.2 * cm, 11.8 * cm]))
+    story.append(_p("Limitations and interpretation boundaries", h2))
+    for limitation in (
+        "Confidence values and native model scores are not calibrated probabilities.",
+        "Model1 and Model2 are advisory evidence; the report does not authorize automatic enforcement.",
+        "Technique claims are limited to recorded evidence and policy-supported correlations.",
+        "Sub-technique inference is outside the configured scope and is not added by this report.",
+        "Absence of a value means unavailable or unrecorded data; the renderer never substitutes zero.",
+        "Attribution, intent, and actor identity are not established by this session report.",
+        "Command text and raw event payloads are omitted from the PDF privacy boundary.",
+    ):
+        story.append(_p(f"• {limitation}", bullet))
     story.extend([
-        Spacer(1, 20),
-        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#95A5A6")),
-        Paragraph("CONFIDENTIAL - For authorised recipients only. Do not redistribute.", meta),
+        Spacer(1, 0.45 * cm),
+        HRFlowable(width="100%", thickness=1, color=colors.HexColor("#8796A5")),
+        _p("CONFIDENTIAL — For authorized recipients only. Do not redistribute.", small),
     ])
+
+    document_title = f"Threat Intelligence Session Report — {session_id}"
+
+    def _decorate_page(canvas: Any, document: Any) -> None:
+        canvas.saveState()
+        width, height = A4
+        canvas.setTitle(document_title)
+        canvas.setAuthor("Threat Intelligence Monitoring System")
+        canvas.setSubject("Evidence-bounded per-session threat intelligence report")
+        canvas.setFont("Helvetica-Bold", 7.5)
+        canvas.setFillColor(colors.HexColor("#5B6573"))
+        canvas.drawString(2 * cm, height - 1.15 * cm, "THREAT INTELLIGENCE MONITORING SYSTEM")
+        canvas.setFont("Helvetica", 7.5)
+        canvas.drawRightString(width - 2 * cm, height - 1.15 * cm, "CONFIDENTIAL")
+        canvas.setStrokeColor(colors.HexColor("#C9D2DC"))
+        canvas.setLineWidth(0.45)
+        canvas.line(2 * cm, height - 1.35 * cm, width - 2 * cm, height - 1.35 * cm)
+        canvas.line(2 * cm, 1.35 * cm, width - 2 * cm, 1.35 * cm)
+        canvas.setFillColor(colors.HexColor("#5B6573"))
+        canvas.setFont("Helvetica", 7)
+        canvas.drawString(2 * cm, 0.95 * cm, f"Session {_value(session_id, limit=72)}")
+        canvas.drawRightString(width - 2 * cm, 0.95 * cm, f"Page {document.page}")
+        canvas.restoreState()
+
     with _reports_directory_handle(output_dir) as directory:
         with _private_artifact_path(directory, filename) as temporary_path:
             doc = SimpleDocTemplate(
@@ -1315,12 +1613,39 @@ def write_pdf_report(
                 pagesize=A4,
                 leftMargin=2 * cm,
                 rightMargin=2 * cm,
-                topMargin=2 * cm,
-                bottomMargin=2 * cm,
+                topMargin=1.8 * cm,
+                bottomMargin=1.8 * cm,
                 invariant=1,
+                title=document_title,
+                author="Threat Intelligence Monitoring System",
+                subject="Evidence-bounded per-session threat intelligence report",
             )
-            doc.build(story)
+            doc.build(story, onFirstPage=_decorate_page, onLaterPages=_decorate_page)
         return _verified_artifact_path(directory, filename)
+
+
+def render_pdf_report_bytes(
+    report: Dict[str, Any],
+    session_payload: Dict[str, Any],
+    *,
+    artifact_version: str = "",
+) -> bytes:
+    """Render one authenticated, deterministic PDF without persistent writes.
+
+    The session download endpoint uses this for existing reports that were
+    originally generated before the optional PDF renderer was installed. The
+    temporary directory is outside the configured artifact directory, so a
+    download cannot mutate the canonical report store or MongoDB.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="session-report-pdf-") as temporary_dir:
+        path = Path(write_pdf_report(
+            report,
+            session_payload,
+            Path(temporary_dir),
+            artifact_version=artifact_version,
+        ))
+        return path.read_bytes()
 
 
 def _artifact_file_record(
