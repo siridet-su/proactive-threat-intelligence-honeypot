@@ -1184,6 +1184,671 @@ describe("accessible combobox navigation helpers (FS-013)", () => {
         globalThis.fetch = originalFetch;
       }
     });
+
+    it("AuditSessionSelect: Full standalone pagination lifecycle (page 1 -> page 2 -> completion)", async () => {
+      vi.useFakeTimers();
+      const originalFetch = globalThis.fetch;
+
+      const page1Response = {
+        items: [
+          { sessionId: "sess-p1-1", sourceIp: "10.0.1.1", closedAt: "2026-09-17T00:00:00Z" },
+          { sessionId: "sess-p1-2", sourceIp: "10.0.1.2", closedAt: "2026-09-17T00:01:00Z" },
+        ],
+        nextCursor: "cursor-page-1",
+        totalItems: 3,
+      };
+
+      const page2Response = {
+        items: [
+          { sessionId: "sess-p1-2", sourceIp: "10.0.1.2", closedAt: "2026-09-17T00:01:00Z" },
+          { sessionId: "sess-p2-1", sourceIp: "10.0.2.1", closedAt: "2026-09-17T00:02:00Z" },
+        ],
+        nextCursor: null,
+        totalItems: 3,
+      };
+
+      let resolvePage1!: (res: Response) => void;
+      const page1Promise = new Promise<Response>((res) => {
+        resolvePage1 = res;
+      });
+
+      let resolvePage2!: (res: Response) => void;
+      const page2Promise = new Promise<Response>((res) => {
+        resolvePage2 = res;
+      });
+
+      const fetchUrls: string[] = [];
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        fetchUrls.push(url);
+        if (url.includes("cursor=cursor-page-1")) {
+          return page2Promise;
+        }
+        return page1Promise;
+      });
+
+      globalThis.fetch = mockFetch;
+
+      try {
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        await act(async () => {
+          fireClick(trigger);
+        });
+
+        const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+
+        // 1. Standalone query begins
+        await act(async () => {
+          fireInputChange(searchInput, "web-attack");
+        });
+
+        // Advance debounce
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(fetchUrls[0]).toContain("q=web-attack");
+        expect(fetchUrls[0]).not.toContain("cursor=");
+
+        // Loading state is visible (spinner in search input and searching message)
+        const searchInputWrapper = searchInput.parentElement;
+        expect(searchInputWrapper?.querySelector(".animate-spin")).not.toBeNull();
+        expect(container.textContent).toContain("Searching sessions…");
+
+        // 2. Page-one response resolves
+        await act(async () => {
+          resolvePage1(
+            new Response(JSON.stringify(page1Response), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        });
+
+        // Options for page 1 are rendered
+        const optionsPage1 = container.querySelectorAll('button[role="option"]');
+        expect(optionsPage1.length).toBe(2);
+        expect(optionsPage1[0].textContent).toContain("10.0.1.1");
+        expect(optionsPage1[1].textContent).toContain("10.0.1.2");
+
+        // "Load more matching sessions" button is rendered from nextCursor
+        const buttons = Array.from(container.querySelectorAll("button"));
+        const loadMoreBtn = buttons.find((b) => b.textContent?.includes("Load more matching sessions"));
+        expect(loadMoreBtn).toBeDefined();
+
+        // 3. Click Load more -> requests page 2 with expected cursor
+        await act(async () => {
+          fireClick(loadMoreBtn!);
+        });
+
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+        expect(fetchUrls[1]).toContain("cursor=cursor-page-1");
+
+        // Loading UI reflects loading state during page 2
+        expect(loadMoreBtn?.textContent).toContain("Loading search results…");
+        expect(loadMoreBtn?.getAttribute("disabled")).not.toBeNull();
+
+        // 4. Page-two response resolves
+        await act(async () => {
+          resolvePage2(
+            new Response(JSON.stringify(page2Response), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        });
+
+        // Page-two appends unique sessions (deduplicating sess-p1-2 -> 3 total items)
+        const finalOptions = container.querySelectorAll('button[role="option"]');
+        expect(finalOptions.length).toBe(3);
+        expect(finalOptions[2].textContent).toContain("10.0.2.1");
+
+        // Page-two completion removes Load more button and displays completion banner
+        const updatedButtons = Array.from(container.querySelectorAll("button"));
+        const remainingLoadMore = updatedButtons.find((b) => b.textContent?.includes("Load more matching sessions"));
+        expect(remainingLoadMore).toBeUndefined();
+        expect(container.textContent).toContain("All matching search results loaded (3)");
+      } finally {
+        globalThis.fetch = originalFetch;
+        vi.useRealTimers();
+      }
+    });
+
+    it("AuditSessionSelect: Parent-controlled mode uses parent state and performs no fallback fetch", async () => {
+      vi.useFakeTimers();
+      const originalFetch = globalThis.fetch;
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch;
+
+      const onSearch = vi.fn();
+      const onLoadMoreSearch = vi.fn();
+
+      try {
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+              onSearch,
+              onLoadMoreSearch,
+              searchResults: [
+                { sessionId: "parent-sess-1", sourceIp: "172.16.0.1", closedAt: "2026-09-17T00:00:00Z" },
+              ],
+              searchHasMore: true,
+              searchIsLoading: false,
+              searchIsComplete: false,
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        await act(async () => {
+          fireClick(trigger);
+        });
+
+        const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+        await act(async () => {
+          fireInputChange(searchInput, "parent-test");
+        });
+
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+
+        // onSearch was called with query
+        expect(onSearch).toHaveBeenCalledWith("parent-test");
+        // Standalone fallback fetch was NEVER called
+        expect(mockFetch).not.toHaveBeenCalled();
+
+        // Displays parent searchResults
+        const options = container.querySelectorAll('button[role="option"]');
+        expect(options.length).toBe(1);
+        expect(options[0].textContent).toContain("172.16.0.1");
+
+        // Displays load more button because searchHasMore is true
+        const buttons = Array.from(container.querySelectorAll("button"));
+        const loadMoreBtn = buttons.find((b) => b.textContent?.includes("Load more matching sessions"));
+        expect(loadMoreBtn).toBeDefined();
+
+        // Click load more triggers onLoadMoreSearch
+        await act(async () => {
+          fireClick(loadMoreBtn!);
+        });
+        expect(onLoadMoreSearch).toHaveBeenCalledTimes(1);
+        expect(mockFetch).not.toHaveBeenCalled();
+      } finally {
+        globalThis.fetch = originalFetch;
+        vi.useRealTimers();
+      }
+    });
+
+    it("AuditSessionSelect: Stale fetch ignoring AbortSignal and delayed json() cannot mutate state", async () => {
+      vi.useFakeTimers();
+      const originalFetch = globalThis.fetch;
+
+      let resolveStaleFetch!: (res: Response) => void;
+      const staleFetchPromise = new Promise<Response>((res) => {
+        resolveStaleFetch = res;
+      });
+
+      let resolveJsonDelayed!: (val: unknown) => void;
+      const jsonDelayedPromise = new Promise<unknown>((res) => {
+        resolveJsonDelayed = res;
+      });
+
+      let fetchCallCount = 0;
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        fetchCallCount++;
+        if (url.includes("q=stale-query")) {
+          // Intentionally ignore AbortSignal to verify generation guard
+          return staleFetchPromise;
+        }
+        if (url.includes("q=delayed-json")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => jsonDelayedPromise,
+          } as unknown as Response);
+        }
+        return Promise.resolve(new Response(JSON.stringify({ items: [], nextCursor: null }), { status: 200 }));
+      });
+
+      globalThis.fetch = mockFetch;
+
+      try {
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        await act(async () => {
+          fireClick(trigger);
+        });
+
+        const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+
+        // Start stale-query
+        await act(async () => {
+          fireInputChange(searchInput, "stale-query");
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+        expect(fetchCallCount).toBe(1);
+
+        // Before stale-query finishes, start delayed-json query
+        await act(async () => {
+          fireInputChange(searchInput, "delayed-json");
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+        expect(fetchCallCount).toBe(2);
+
+        // Now resolve the stale fetch (ignoring abort signal)
+        await act(async () => {
+          resolveStaleFetch(
+            new Response(
+              JSON.stringify({
+                items: [{ sessionId: "stale-sess", sourceIp: "9.9.9.9", closedAt: "2026-09-17T00:00:00Z" }],
+                nextCursor: null,
+              }),
+              { status: 200 },
+            ),
+          );
+        });
+
+        // Stale items MUST NOT be rendered
+        expect(container.textContent).not.toContain("9.9.9.9");
+
+        // Before delayed-json finishes parsing, user switches filter (incrementing generation)
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+              hideHomeOnly: true, // filter changed
+            }),
+          );
+        });
+
+        // Now resolve the delayed json parse
+        await act(async () => {
+          resolveJsonDelayed({
+            items: [{ sessionId: "delayed-sess", sourceIp: "8.8.8.8", closedAt: "2026-09-17T00:00:00Z" }],
+            nextCursor: null,
+          });
+        });
+
+        // Delayed items MUST NOT be rendered due to generation guard
+        expect(container.textContent).not.toContain("8.8.8.8");
+      } finally {
+        globalThis.fetch = originalFetch;
+        vi.useRealTimers();
+      }
+    });
+
+    it("AuditSessionSelect: Query change before page two completes cannot append results from prior scope", async () => {
+      vi.useFakeTimers();
+      const originalFetch = globalThis.fetch;
+
+      let resolvePage2Stale!: (res: Response) => void;
+      const page2StalePromise = new Promise<Response>((res) => {
+        resolvePage2Stale = res;
+      });
+
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("cursor=cursor-q1")) {
+          // Page 2 in-flight; ignores abort
+          return page2StalePromise;
+        }
+        if (url.includes("q=q1")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [{ sessionId: "q1-p1", sourceIp: "10.1.1.1", closedAt: "2026-09-17T00:00:00Z" }],
+                nextCursor: "cursor-q1",
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        if (url.includes("q=q2")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                items: [{ sessionId: "q2-p1", sourceIp: "10.2.2.2", closedAt: "2026-09-17T00:00:00Z" }],
+                nextCursor: null,
+              }),
+              { status: 200 },
+            ),
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      });
+
+      globalThis.fetch = mockFetch;
+
+      try {
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        await act(async () => {
+          fireClick(trigger);
+        });
+
+        const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+
+        // Query 1 page one
+        await act(async () => {
+          fireInputChange(searchInput, "q1");
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+
+        expect(container.textContent).toContain("10.1.1.1");
+        const loadMoreBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+          b.textContent?.includes("Load more matching sessions"),
+        );
+        expect(loadMoreBtn).toBeDefined();
+
+        // Request page 2
+        await act(async () => {
+          fireClick(loadMoreBtn!);
+        });
+
+        // Before page 2 returns, change query to "q2"
+        await act(async () => {
+          fireInputChange(searchInput, "q2");
+        });
+        await act(async () => {
+          vi.advanceTimersByTime(260);
+        });
+
+        expect(container.textContent).toContain("10.2.2.2");
+
+        // Now resolve late page 2 for q1
+        await act(async () => {
+          resolvePage2Stale(
+            new Response(
+              JSON.stringify({
+                items: [{ sessionId: "q1-p2", sourceIp: "10.1.1.2", closedAt: "2026-09-17T00:00:00Z" }],
+                nextCursor: null,
+              }),
+              { status: 200 },
+            ),
+          );
+        });
+
+        // Must NOT append q1 page 2 items
+        expect(container.textContent).not.toContain("10.1.1.2");
+        const options = container.querySelectorAll('button[role="option"]');
+        expect(options.length).toBe(1);
+        expect(options[0].textContent).toContain("10.2.2.2");
+      } finally {
+        globalThis.fetch = originalFetch;
+        vi.useRealTimers();
+      }
+    });
+
+    it("AuditSessionSelect: Replaces N options with N different options while focused (focus recovery by identity)", async () => {
+      const sessionsA: FilesystemTopologySession[] = [
+        { sessionId: "s-a1", sourceIp: "10.0.0.1", cwdState: { path: "/a1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+        { sessionId: "s-a2", sourceIp: "10.0.0.2", cwdState: { path: "/a2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+        { sessionId: "s-a3", sourceIp: "10.0.0.3", cwdState: { path: "/a3", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+      ];
+
+      const sessionsB: FilesystemTopologySession[] = [
+        { sessionId: "s-b1", sourceIp: "10.0.0.4", cwdState: { path: "/b1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+        { sessionId: "s-b2", sourceIp: "10.0.0.5", cwdState: { path: "/b2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+        { sessionId: "s-b3", sourceIp: "10.0.0.6", cwdState: { path: "/b3", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+      ];
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: sessionsA,
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      const options = container.querySelectorAll('button[role="option"]');
+      expect(document.activeElement).toBe(options[0]);
+
+      // Move to s-a2 (index 1)
+      await act(async () => {
+        fireKeyDown(options[0], "ArrowDown");
+      });
+      expect(document.activeElement?.textContent).toContain("10.0.0.2");
+
+      // Replace 3 options with 3 completely different options (same length = 3!)
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: sessionsB,
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      // s-a2 is gone: activeElement MUST NOT be body; moves to searchbox fallback
+      const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toBe(searchInput);
+    });
+
+    it("AuditFilterControls: Changes filtered results while preserving same item count (focus recovery by identity)", async () => {
+      const distinctPathsA = [
+        { path: "/dir-alpha", sessionCount: 2 },
+        { path: "/dir-beta", sessionCount: 1 },
+      ];
+
+      const distinctPathsB = [
+        { path: "/dir-gamma", sessionCount: 3 },
+        { path: "/dir-delta", sessionCount: 4 },
+      ];
+
+      await act(async () => {
+        root.render(
+          createElement(AuditFilterControls, {
+            hideHomeOnly: false,
+            onToggleHideHomeOnly: vi.fn(),
+            targetPath: null,
+            onSelectTargetPath: vi.fn(),
+            distinctPaths: distinctPathsA,
+            homeOnlyCount: 0,
+            filteredCount: 2,
+            totalCount: 2,
+            onResetFilters: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      // Focus is on option 0 ("All paths")
+      const options = container.querySelectorAll('button[role="option"]');
+      expect(document.activeElement).toBe(options[0]);
+
+      // Move down to /dir-alpha (index 1)
+      await act(async () => {
+        fireKeyDown(options[0], "ArrowDown");
+      });
+      expect(document.activeElement?.textContent).toContain("/dir-alpha");
+
+      // Replace distinct paths with distinctPathsB (same count: 2 paths, total options = 3)
+      await act(async () => {
+        root.render(
+          createElement(AuditFilterControls, {
+            hideHomeOnly: false,
+            onToggleHideHomeOnly: vi.fn(),
+            targetPath: null,
+            onSelectTargetPath: vi.fn(),
+            distinctPaths: distinctPathsB,
+            homeOnlyCount: 0,
+            filteredCount: 2,
+            totalCount: 2,
+            onResetFilters: vi.fn(),
+          }),
+        );
+      });
+
+      // /dir-alpha was removed: activeElement MUST NOT be body; moves to searchbox fallback
+      const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toBe(searchInput);
+    });
+
+    it("AuditSessionSelect: Reordering items preserves focus by identity rather than stale numeric index", async () => {
+      const s1: FilesystemTopologySession = { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+      const s2: FilesystemTopologySession = { sessionId: "s2", sourceIp: "10.0.0.2", cwdState: { path: "/p2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+      const s3: FilesystemTopologySession = { sessionId: "s3", sourceIp: "10.0.0.3", cwdState: { path: "/p3", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s1, s2, s3],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      const options = container.querySelectorAll('button[role="option"]');
+      // Navigate to s2 (currently index 1)
+      await act(async () => {
+        fireKeyDown(options[0], "ArrowDown");
+      });
+      expect(document.activeElement?.textContent).toContain("10.0.0.2");
+
+      // Reorder sessions so s2 moves to index 0: [s2, s3, s1]
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s2, s3, s1],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      // Focus MUST remain on s2 by identity (now at index 0, not jumping to s3 at index 1!)
+      expect(document.activeElement?.textContent).toContain("10.0.0.2");
+      expect(document.activeElement?.getAttribute("id")).toMatch(/-opt-0$/);
+    });
+
+    it("AuditFilterControls: Selected canvas path insertion preserves focus by identity", async () => {
+      const distinctPaths = [
+        { path: "/var/log", sessionCount: 2 },
+        { path: "/etc", sessionCount: 1 },
+      ];
+
+      await act(async () => {
+        root.render(
+          createElement(AuditFilterControls, {
+            hideHomeOnly: false,
+            onToggleHideHomeOnly: vi.fn(),
+            targetPath: null,
+            onSelectTargetPath: vi.fn(),
+            distinctPaths,
+            homeOnlyCount: 0,
+            filteredCount: 2,
+            totalCount: 2,
+            onResetFilters: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      const options = container.querySelectorAll('button[role="option"]');
+      // Navigate down to /var/log (index 1)
+      await act(async () => {
+        fireKeyDown(options[0], "ArrowDown");
+      });
+      expect(document.activeElement?.textContent).toContain("/var/log");
+
+      // Insert selectedCanvasPath="/tmp" -> inserts Canvas Selection at index 1, shifting /var/log to index 2
+      await act(async () => {
+        root.render(
+          createElement(AuditFilterControls, {
+            hideHomeOnly: false,
+            onToggleHideHomeOnly: vi.fn(),
+            targetPath: null,
+            onSelectTargetPath: vi.fn(),
+            distinctPaths,
+            homeOnlyCount: 0,
+            filteredCount: 2,
+            totalCount: 2,
+            onResetFilters: vi.fn(),
+            selectedCanvasPath: "/tmp",
+          }),
+        );
+      });
+
+      // Focus MUST remain on /var/log by identity (now at index 2, not stealing Canvas Selection at index 1!)
+      expect(document.activeElement?.textContent).toContain("/var/log");
+      expect(document.activeElement?.getAttribute("id")).toMatch(/-opt-2$/);
+    });
   });
 
   describe("ARIA ownership and markup structure (FA-007)", () => {

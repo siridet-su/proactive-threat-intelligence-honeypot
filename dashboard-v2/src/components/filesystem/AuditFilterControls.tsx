@@ -148,6 +148,7 @@ export function AuditFilterControls({
     onClose: (reason) => closeDropdown(reason),
     items: pathItems,
     getLabel: (item) => item.label,
+    getKey: (item) => `${item.type}:${item.path ?? ""}`,
     onSelect: (item) => handleSelectPath(item.path),
     triggerRef: pathTriggerRef,
     searchInputRef,
@@ -292,7 +293,7 @@ export function AuditFilterControls({
           >
             {/* Quick option: All paths (reset) */}
             <button
-              ref={registerOptionRef(0)}
+              ref={registerOptionRef(0, "all:")}
               type="button"
               role="option"
               id={`${pathListboxId}-opt-0`}
@@ -323,7 +324,7 @@ export function AuditFilterControls({
               selectedCanvasPath !== targetPath && (
                 <div className="mt-1 mb-1 px-1">
                   <button
-                    ref={registerOptionRef(1)}
+                    ref={registerOptionRef(1, `canvas:${selectedCanvasPath}`)}
                     type="button"
                     role="option"
                     id={`${pathListboxId}-opt-1`}
@@ -373,7 +374,7 @@ export function AuditFilterControls({
                     return (
                       <button
                         key={item.path}
-                        ref={registerOptionRef(globalIndex)}
+                        ref={registerOptionRef(globalIndex, `path:${item.path}`)}
                         type="button"
                         role="option"
                         id={`${pathListboxId}-opt-${globalIndex}`}

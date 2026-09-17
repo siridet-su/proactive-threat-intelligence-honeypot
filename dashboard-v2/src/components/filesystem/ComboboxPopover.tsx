@@ -113,10 +113,33 @@ export interface UseComboboxNavigationOptions<T> {
   onClose: (reason?: CloseReason) => void;
   items: readonly T[];
   getLabel: (item: T) => string;
+  getKey?: (item: T, index: number) => string;
   onSelect: (item: T, index: number) => void;
   triggerRef: React.RefObject<HTMLElement | null>;
   searchInputRef?: React.RefObject<HTMLInputElement | null>;
   selectedIndex?: number;
+}
+
+function defaultGetKey<T>(item: T, index: number): string {
+  if (item && typeof item === "object") {
+    if ("sessionId" in item && typeof (item as { sessionId: unknown }).sessionId === "string") {
+      return (item as { sessionId: string }).sessionId;
+    }
+    if ("path" in item && typeof (item as { path: unknown }).path === "string") {
+      const type =
+        "type" in item && typeof (item as { type: unknown }).type === "string"
+          ? (item as { type: string }).type
+          : "path";
+      return `${type}:${(item as { path: string }).path}`;
+    }
+    if ("id" in item && typeof (item as { id: unknown }).id === "string") {
+      return (item as { id: string }).id;
+    }
+    if ("key" in item && typeof (item as { key: unknown }).key === "string") {
+      return (item as { key: string }).key;
+    }
+  }
+  return String(index);
 }
 
 export function useComboboxNavigation<T>({
@@ -125,42 +148,67 @@ export function useComboboxNavigation<T>({
   onClose,
   items,
   getLabel,
+  getKey,
   onSelect,
   triggerRef,
   searchInputRef,
   selectedIndex = -1,
 }: UseComboboxNavigationOptions<T>) {
   const [navigatedIndex, setNavigatedIndex] = useState<number | null>(null);
+  const [navigatedKey, setNavigatedKey] = useState<string | null>(null);
   const pendingFocusTargetRef = useRef<ComboboxFocusTarget | null>(null);
-  const optionRefs = useRef<Array<HTMLElement | null>>([]);
+  const optionKeyRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const optionIndexRefs = useRef<Array<HTMLElement | null>>([]);
   const typeaheadBuffer = useRef("");
   const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const effectiveGetKey = useCallback(
+    (item: T, index: number): string => {
+      if (getKey) return getKey(item, index);
+      return defaultGetKey(item, index);
+    },
+    [getKey],
+  );
 
   // Compute activeIndex with safe bounds clamping; return -1 when search input is active
   const activeIndex = useMemo(() => {
     if (items.length === 0) return -1;
-    if (navigatedIndex === -1) return -1;
-    if (navigatedIndex !== null) {
-      return Math.max(0, Math.min(navigatedIndex, items.length - 1));
+    if (navigatedKey === "__search__" || navigatedIndex === -1) return -1;
+    if (navigatedKey !== null) {
+      const idx = items.findIndex((item, i) => effectiveGetKey(item, i) === navigatedKey);
+      if (idx !== -1) return idx;
+    }
+    if (navigatedIndex !== null && navigatedIndex >= 0 && navigatedIndex < items.length) {
+      return navigatedIndex;
     }
     if (selectedIndex >= 0 && selectedIndex < items.length) {
       return selectedIndex;
     }
     return -1;
-  }, [items.length, navigatedIndex, selectedIndex]);
+  }, [items, effectiveGetKey, navigatedKey, navigatedIndex, selectedIndex]);
 
-  // Truncate optionRefs to eliminate stale refs
+  // Truncate optionIndexRefs to eliminate stale refs
   useEffect(() => {
-    if (optionRefs.current.length > items.length) {
-      optionRefs.current.length = items.length;
+    if (optionIndexRefs.current.length > items.length) {
+      optionIndexRefs.current.length = items.length;
     }
   }, [items.length]);
 
-  const registerOptionRef = useCallback((index: number) => {
-    return (el: HTMLElement | null) => {
-      optionRefs.current[index] = el;
-    };
-  }, []);
+  const registerOptionRef = useCallback(
+    (index: number, explicitKey?: string) => {
+      return (el: HTMLElement | null) => {
+        const item = items[index];
+        const key = explicitKey ?? (item !== undefined ? effectiveGetKey(item, index) : String(index));
+        if (el) {
+          optionKeyRefs.current.set(key, el);
+        } else {
+          optionKeyRefs.current.delete(key);
+        }
+        optionIndexRefs.current[index] = el;
+      };
+    },
+    [items, effectiveGetKey],
+  );
 
   const openWithFocus = useCallback(
     (focusTarget: ComboboxFocusTarget = "search") => {
@@ -171,19 +219,26 @@ export function useComboboxNavigation<T>({
   );
 
   // Focus active option or search input
-  const focusOption = useCallback((index: number) => {
-    if (index === -1) {
-      setNavigatedIndex(-1);
-      searchInputRef?.current?.focus();
-      return;
-    }
-    if (index >= 0 && index < optionRefs.current.length) {
-      setNavigatedIndex(index);
-      const el = optionRefs.current[index];
-      el?.focus();
-      el?.scrollIntoView({ block: "nearest" });
-    }
-  }, [searchInputRef]);
+  const focusOption = useCallback(
+    (index: number) => {
+      if (index === -1) {
+        setNavigatedIndex(-1);
+        setNavigatedKey("__search__");
+        searchInputRef?.current?.focus();
+        return;
+      }
+      if (index >= 0 && index < items.length) {
+        const item = items[index];
+        const key = effectiveGetKey(item, index);
+        setNavigatedIndex(index);
+        setNavigatedKey(key);
+        const el = optionKeyRefs.current.get(key) ?? optionIndexRefs.current[index];
+        el?.focus();
+        el?.scrollIntoView({ block: "nearest" });
+      }
+    },
+    [items, effectiveGetKey, searchInputRef],
+  );
 
   // Apply pending focus synchronously once mounted in layout phase
   useIsomorphicLayoutEffect(() => {
@@ -197,18 +252,26 @@ export function useComboboxNavigation<T>({
     pendingFocusTargetRef.current = null;
 
     if (target === "first") {
-      if (items.length > 0 && optionRefs.current[0]) {
+      if (items.length > 0) {
+        const item = items[0];
+        const key = effectiveGetKey(item, 0);
         setNavigatedIndex(0);
-        optionRefs.current[0]?.focus();
-        optionRefs.current[0]?.scrollIntoView({ block: "nearest" });
+        setNavigatedKey(key);
+        const el = optionKeyRefs.current.get(key) ?? optionIndexRefs.current[0];
+        el?.focus();
+        el?.scrollIntoView({ block: "nearest" });
         return;
       }
     } else if (target === "last") {
       const lastIdx = items.length - 1;
-      if (lastIdx >= 0 && optionRefs.current[lastIdx]) {
+      if (lastIdx >= 0) {
+        const item = items[lastIdx];
+        const key = effectiveGetKey(item, lastIdx);
         setNavigatedIndex(lastIdx);
-        optionRefs.current[lastIdx]?.focus();
-        optionRefs.current[lastIdx]?.scrollIntoView({ block: "nearest" });
+        setNavigatedKey(key);
+        const el = optionKeyRefs.current.get(key) ?? optionIndexRefs.current[lastIdx];
+        el?.focus();
+        el?.scrollIntoView({ block: "nearest" });
         return;
       }
     }
@@ -216,28 +279,74 @@ export function useComboboxNavigation<T>({
     // Default "search" target or empty-list fallback
     if (searchInputRef?.current) {
       setNavigatedIndex(-1);
+      setNavigatedKey("__search__");
       searchInputRef.current.focus();
-    } else if (items.length > 0 && optionRefs.current[0]) {
+    } else if (items.length > 0) {
+      const item = items[0];
+      const key = effectiveGetKey(item, 0);
       setNavigatedIndex(0);
-      optionRefs.current[0]?.focus();
-      optionRefs.current[0]?.scrollIntoView({ block: "nearest" });
+      setNavigatedKey(key);
+      const el = optionKeyRefs.current.get(key) ?? optionIndexRefs.current[0];
+      el?.focus();
+      el?.scrollIntoView({ block: "nearest" });
     }
-  }, [isOpen, items.length, searchInputRef]);
+  }, [isOpen, items, effectiveGetKey, searchInputRef]);
 
-  // Safely clamp navigatedIndex when items shrink or empty to avoid resurrecting stale indices
+  // Identity-aware focus preservation & deterministic fallback on list change (FA-007)
   useIsomorphicLayoutEffect(() => {
-    if (!isOpen) return;
-    if (items.length === 0) {
-      if (navigatedIndex !== -1) {
-        setNavigatedIndex(-1);
-        searchInputRef?.current?.focus();
-      }
-    } else if (navigatedIndex !== null && navigatedIndex >= items.length) {
-      const clamped = items.length - 1;
-      setNavigatedIndex(clamped);
-      optionRefs.current[clamped]?.focus();
+    if (!isOpen) {
+      setNavigatedIndex(null);
+      setNavigatedKey(null);
+      optionKeyRefs.current.clear();
+      optionIndexRefs.current.length = 0;
+      return;
     }
-  }, [isOpen, items.length, navigatedIndex, searchInputRef]);
+
+    // If search input is focused, retain focus there
+    if (navigatedKey === "__search__" || navigatedIndex === -1) {
+      return;
+    }
+
+    // If an option was actively navigated:
+    if (navigatedKey !== null) {
+      const newIndex = items.findIndex((item, idx) => effectiveGetKey(item, idx) === navigatedKey);
+
+      if (newIndex !== -1) {
+        // Option STILL EXISTS by identity after list reorder/update
+        if (newIndex !== navigatedIndex) {
+          setNavigatedIndex(newIndex);
+        }
+        const el = optionKeyRefs.current.get(navigatedKey);
+        if (el && document.activeElement !== el) {
+          el.focus();
+        }
+        return;
+      }
+
+      // Option DISAPPEARED (filtered out, replaced with different items, etc.)
+      // Deterministic fallback:
+      if (searchInputRef?.current) {
+        // Fallback to search input
+        setNavigatedIndex(-1);
+        setNavigatedKey("__search__");
+        searchInputRef.current.focus();
+      } else if (items.length > 0) {
+        // Fallback to nearest valid neighbor
+        const fallbackIdx = Math.max(0, Math.min(navigatedIndex ?? 0, items.length - 1));
+        const fallbackItem = items[fallbackIdx];
+        const fallbackKey = effectiveGetKey(fallbackItem, fallbackIdx);
+        setNavigatedIndex(fallbackIdx);
+        setNavigatedKey(fallbackKey);
+        const fallbackEl = optionKeyRefs.current.get(fallbackKey) ?? optionIndexRefs.current[fallbackIdx];
+        fallbackEl?.focus();
+      } else {
+        // List is completely empty with no search input
+        setNavigatedIndex(-1);
+        setNavigatedKey(null);
+        triggerRef.current?.focus();
+      }
+    }
+  }, [isOpen, items, effectiveGetKey, navigatedKey, navigatedIndex, searchInputRef, triggerRef]);
 
   // Clear typeahead timer on close and unmount
   useEffect(() => {
@@ -379,6 +488,7 @@ export function useComboboxNavigation<T>({
 
   const handleSearchInputFocus = useCallback(() => {
     setNavigatedIndex(-1);
+    setNavigatedKey("__search__");
   }, []);
 
   return {

@@ -42,7 +42,6 @@ export interface AuditSessionSelectProps {
 
   // Directory pagination
   directoryHasMore?: boolean;
-  directoryCursor?: string | null;
   directoryIsLoading?: boolean;
   directoryIsComplete?: boolean;
   onLoadMoreDirectory?: () => Promise<void> | void;
@@ -50,7 +49,6 @@ export interface AuditSessionSelectProps {
   // Search pagination & callbacks
   searchResults?: readonly FilesystemClosedSession[];
   searchHasMore?: boolean;
-  searchCursor?: string | null;
   searchIsLoading?: boolean;
   searchIsComplete?: boolean;
   onSearch?: (query: string) => Promise<void> | void;
@@ -84,13 +82,13 @@ export function AuditSessionSelect({
   onClearSearch,
   onLoadMoreSearch,
   onLoadMoreDirectory,
-  directoryHasMore = false,
-  directoryIsLoading = false,
-  directoryIsComplete = false,
+  directoryHasMore,
+  directoryIsLoading,
+  directoryIsComplete,
   searchResults,
-  searchHasMore = false,
-  searchIsLoading = false,
-  searchIsComplete = false,
+  searchHasMore,
+  searchIsLoading,
+  searchIsComplete,
   errorMessage,
   onRetry,
 }: AuditSessionSelectProps) {
@@ -144,22 +142,32 @@ export function AuditSessionSelect({
   const searchErrorMessage = searchState.errorMessage;
 
   const isSearchActive = Boolean(searchQuery.trim());
+  const isParentSearch = typeof onSearch === "function";
+  const isParentDirectory = typeof onLoadMoreDirectory === "function";
 
   const effectiveHasMore = isSearchActive
-    ? searchHasMore !== undefined
-      ? searchHasMore
+    ? isParentSearch
+      ? Boolean(searchHasMore)
       : hasMoreRemote
-    : directoryHasMore !== undefined
-      ? directoryHasMore
-      : hasMoreRemote;
+    : isParentDirectory
+      ? Boolean(directoryHasMore)
+      : false;
 
   const effectiveIsLoading = isSearchActive
-    ? searchIsLoading !== undefined
-      ? searchIsLoading
+    ? isParentSearch
+      ? Boolean(searchIsLoading)
       : isLoadingRemote
-    : directoryIsLoading !== undefined
-      ? directoryIsLoading
-      : isLoadingRemote;
+    : isParentDirectory
+      ? Boolean(directoryIsLoading)
+      : false;
+
+  const effectiveIsComplete = isSearchActive
+    ? isParentSearch
+      ? Boolean(searchIsComplete)
+      : (!hasMoreRemote && !isLoadingRemote && remoteSessions.length > 0)
+    : isParentDirectory
+      ? Boolean(directoryIsComplete)
+      : true;
 
   const handleClearSearch = useCallback(() => {
     manager.clearSearch();
@@ -174,22 +182,20 @@ export function AuditSessionSelect({
     void manager.loadMore();
   }, [manager]);
 
-  // Combined closed sessions: prefer parent searchResults/recentClosedSessions, fallback to manager remote
+  // Combined closed sessions:
+  // - In search mode: parent searchResults if parent-controlled, otherwise manager remoteSessions
+  // - In non-search mode: recentClosedSessions from topology/directory
   const combinedClosedSessions = useMemo(() => {
     if (isSearchActive) {
-      if (searchResults && searchResults.length > 0) {
-        return searchResults;
+      if (isParentSearch) {
+        return searchResults ?? [];
       }
       return remoteSessions;
     }
+    return recentClosedSessions;
+  }, [isSearchActive, isParentSearch, searchResults, remoteSessions, recentClosedSessions]);
 
-    if (recentClosedSessions.length > 0) {
-      return recentClosedSessions;
-    }
-    return remoteSessions;
-  }, [isSearchActive, searchResults, remoteSessions, recentClosedSessions]);
-
-  // Filter sessions locally when searching without remote backend
+  // Filter active sessions locally using query
   const filteredActiveSessions = useMemo(() => {
     if (!searchQuery.trim()) return sessions;
     const query = searchQuery.trim().toLowerCase();
@@ -205,21 +211,14 @@ export function AuditSessionSelect({
   }, [sessions, searchQuery]);
 
   const filteredClosedSessions = useMemo(() => {
-    if (searchResults && searchResults.length > 0) {
-      return searchResults;
+    if (isSearchActive) {
+      if (isParentSearch) {
+        return searchResults ?? [];
+      }
+      return remoteSessions;
     }
-    if (!searchQuery.trim()) return combinedClosedSessions;
-    const query = searchQuery.trim().toLowerCase();
-    return combinedClosedSessions.filter((s) => {
-      const ipMatch = s.sourceIp.toLowerCase().includes(query);
-      const idMatch = s.sessionId.toLowerCase().includes(query);
-      const pathMatch = s.cwdState?.path?.toLowerCase().includes(query);
-      const auditPathMatch = s.auditSummary?.visitedPaths.some((p) =>
-        p.toLowerCase().includes(query),
-      );
-      return ipMatch || idMatch || pathMatch || auditPathMatch;
-    });
-  }, [combinedClosedSessions, searchQuery, searchResults]);
+    return combinedClosedSessions;
+  }, [isSearchActive, isParentSearch, searchResults, remoteSessions, combinedClosedSessions]);
 
   const allDisplaySessions = useMemo(
     () => [...filteredActiveSessions, ...filteredClosedSessions],
@@ -290,6 +289,7 @@ export function AuditSessionSelect({
     onClose: (reason) => closeMenu(reason),
     items: allDisplaySessions,
     getLabel: (s) => `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`,
+    getKey: (s) => s.sessionId,
     onSelect: (s) => handleSelect(s.sessionId, s),
     triggerRef,
     searchInputRef,
@@ -460,7 +460,7 @@ export function AuditSessionSelect({
                   return (
                     <button
                       key={s.sessionId}
-                      ref={registerOptionRef(globalIndex)}
+                      ref={registerOptionRef(globalIndex, s.sessionId)}
                       type="button"
                       role="option"
                       id={`${listboxId}-opt-${globalIndex}`}
@@ -531,7 +531,7 @@ export function AuditSessionSelect({
                   return (
                     <button
                       key={s.sessionId}
-                      ref={registerOptionRef(globalIndex)}
+                      ref={registerOptionRef(globalIndex, s.sessionId)}
                       type="button"
                       role="option"
                       id={`${listboxId}-opt-${globalIndex}`}
@@ -582,7 +582,7 @@ export function AuditSessionSelect({
             effectiveHasMore,
             effectiveIsLoading,
             hasItems: combinedClosedSessions.length > 0,
-            isComplete: isSearchActive ? Boolean(searchIsComplete) : Boolean(directoryIsComplete),
+            isComplete: effectiveIsComplete,
           });
 
           if (paginationState === "button") {
@@ -626,7 +626,12 @@ export function AuditSessionSelect({
         {/* Empty State (outside listbox) */}
         {allDisplaySessions.length === 0 && (
           <div className="px-3 py-4 text-center text-xs text-text-subtle font-mono">
-            {searchQuery ? (
+            {effectiveIsLoading ? (
+              <div className="flex items-center justify-center gap-1.5 text-text-subtle">
+                <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                <span>Searching sessions…</span>
+              </div>
+            ) : searchQuery ? (
               <div>No sessions match &ldquo;{searchQuery}&rdquo;</div>
             ) : hasActiveFilters ? (
               <div className="space-y-2">
