@@ -18,6 +18,7 @@ import {
   ComboboxPopover,
   determineFocusTarget,
   findTypeaheadIndex,
+  isMeaningfulFocusTarget,
 } from "../src/components/filesystem/ComboboxPopover";
 import type {
   FilesystemClosedSession,
@@ -190,6 +191,33 @@ describe("accessible combobox navigation helpers (FS-013)", () => {
       expect(determineFocusTarget("Escape", false)).toBeNull();
       expect(determineFocusTarget("Tab", false)).toBeNull();
       expect(determineFocusTarget("a", false)).toBeNull();
+    });
+  });
+
+  describe("isMeaningfulFocusTarget (FA-007)", () => {
+    it("returns false for null, document.body, and document.documentElement", () => {
+      expect(isMeaningfulFocusTarget(null)).toBe(false);
+      expect(isMeaningfulFocusTarget(document.body)).toBe(false);
+      expect(isMeaningfulFocusTarget(document.documentElement)).toBe(false);
+    });
+
+    it("returns false for disconnected DOM elements", () => {
+      const detachedBtn = document.createElement("button");
+      expect(isMeaningfulFocusTarget(detachedBtn)).toBe(false);
+    });
+
+    it("returns true for connected focusable controls", () => {
+      const btn = document.createElement("button");
+      const input = document.createElement("input");
+      document.body.appendChild(btn);
+      document.body.appendChild(input);
+      try {
+        expect(isMeaningfulFocusTarget(btn)).toBe(true);
+        expect(isMeaningfulFocusTarget(input)).toBe(true);
+      } finally {
+        btn.remove();
+        input.remove();
+      }
     });
   });
 
@@ -1848,6 +1876,311 @@ describe("accessible combobox navigation helpers (FS-013)", () => {
       // Focus MUST remain on /var/log by identity (now at index 2, not stealing Canvas Selection at index 1!)
       expect(document.activeElement?.textContent).toContain("/var/log");
       expect(document.activeElement?.getAttribute("id")).toMatch(/-opt-2$/);
+    });
+
+    it("AuditSessionSelect: Moving focus to Load more and loading page two preserves focus on Load more without focus stealing", async () => {
+      vi.useFakeTimers();
+      let resolvePage2: (value: Response) => void = () => {};
+      const page2Promise = new Promise<Response>((res) => {
+        resolvePage2 = res;
+      });
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("cursor=")) {
+          return page2Promise;
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [
+                { sessionId: "s-c1", sourceIp: "10.0.0.1", closedAt: "2026-09-17T00:00:00Z" },
+                { sessionId: "s-c2", sourceIp: "10.0.0.2", closedAt: "2026-09-17T00:00:00Z" },
+              ],
+              nextCursor: "cursor-page-2",
+            }),
+            { status: 200 },
+          ),
+        );
+      });
+
+      try {
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        trigger.focus();
+        await act(async () => {
+          fireKeyDown(trigger, "ArrowDown");
+        });
+
+        const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+        await act(async () => {
+          fireInputChange(searchInput, "10.0.0");
+          vi.advanceTimersByTime(250);
+        });
+
+        // Options loaded, focus option 0
+        const options = container.querySelectorAll('button[role="option"]');
+        expect(options.length).toBe(2);
+        await act(async () => {
+          fireKeyDown(searchInput, "ArrowDown");
+        });
+        expect(document.activeElement).toBe(options[0]);
+
+        // User moves focus to "Load more" button
+        const loadMoreBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+          b.textContent?.includes("Load more matching sessions"),
+        ) as HTMLButtonElement;
+        expect(loadMoreBtn).toBeDefined();
+
+        await act(async () => {
+          loadMoreBtn.focus();
+        });
+        expect(document.activeElement).toBe(loadMoreBtn);
+
+        // User clicks Load More, triggering page 2 fetch and rerender with spinner
+        await act(async () => {
+          fireClick(loadMoreBtn);
+        });
+
+        // Focus MUST remain on Load more (not stolen back to option 0!)
+        expect(document.activeElement).toBe(loadMoreBtn);
+
+        // Resolve page 2
+        await act(async () => {
+          resolvePage2(
+            new Response(
+              JSON.stringify({
+                items: [{ sessionId: "s-c3", sourceIp: "10.0.0.3", closedAt: "2026-09-17T00:00:00Z" }],
+                nextCursor: null,
+              }),
+              { status: 200 },
+            ),
+          );
+        });
+
+        // Page 2 items added
+        expect(container.textContent).toContain("10.0.0.3");
+      } finally {
+        globalThis.fetch = originalFetch;
+        vi.useRealTimers();
+      }
+    });
+
+    it("AuditSessionSelect: Moving focus to Retry or Reset does not steal focus back to options on rerender", async () => {
+      const onRetry = vi.fn();
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [
+              { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+            ],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+            status: "error",
+            errorMessage: "Network error",
+            onRetry,
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      // Focus option 0
+      const options = container.querySelectorAll('button[role="option"]');
+      expect(document.activeElement).toBe(options[0]);
+
+      // Focus Retry button
+      const retryBtn = Array.from(container.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Retry"),
+      ) as HTMLButtonElement;
+      expect(retryBtn).toBeDefined();
+
+      await act(async () => {
+        retryBtn.focus();
+      });
+      expect(document.activeElement).toBe(retryBtn);
+
+      // Rerender component (e.g. updating props)
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [
+              { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } },
+            ],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+            status: "error",
+            errorMessage: "Network error",
+            onRetry,
+          }),
+        );
+      });
+
+      // Focus must NOT be stolen back to option 0
+      expect(document.activeElement).toBe(retryBtn);
+    });
+
+    it("AuditSessionSelect: Option focused through Tab or direct .focus() updates navigation key so reordering tracks the actually focused option", async () => {
+      const s1: FilesystemTopologySession = { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+      const s2: FilesystemTopologySession = { sessionId: "s2", sourceIp: "10.0.0.2", cwdState: { path: "/p2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+      const s3: FilesystemTopologySession = { sessionId: "s3", sourceIp: "10.0.0.3", cwdState: { path: "/p3", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s1, s2, s3],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      const options = container.querySelectorAll('button[role="option"]');
+      // First option (s1) was arrow-navigated
+      expect(document.activeElement).toBe(options[0]);
+
+      // Now user moves focus to s3 (index 2) via direct .focus() / Tab
+      await act(async () => {
+        (options[2] as HTMLButtonElement).focus();
+      });
+      expect(document.activeElement).toBe(options[2]);
+
+      // Now reorder items so s3 moves to index 0: [s3, s1, s2]
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s3, s1, s2],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      // Reconciliation MUST follow s3 (the actually focused option), NOT s1 (the previously arrow-navigated option)!
+      expect(document.activeElement?.textContent).toContain("10.0.0.3");
+      expect(document.activeElement?.getAttribute("id")).toMatch(/-opt-0$/);
+    });
+
+    it("AuditSessionSelect: External button focus is never stolen when combobox items update", async () => {
+      const externalButton = document.createElement("button");
+      externalButton.id = "external-test-btn";
+      externalButton.textContent = "External Action";
+      document.body.appendChild(externalButton);
+
+      try {
+        const s1: FilesystemTopologySession = { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [s1],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+        trigger.focus();
+        await act(async () => {
+          fireKeyDown(trigger, "ArrowDown");
+        });
+
+        const options = container.querySelectorAll('button[role="option"]');
+        expect(document.activeElement).toBe(options[0]);
+
+        // Focus external button
+        await act(async () => {
+          externalButton.focus();
+        });
+        expect(document.activeElement).toBe(externalButton);
+
+        // Update items in combobox
+        const s2: FilesystemTopologySession = { sessionId: "s2", sourceIp: "10.0.0.2", cwdState: { path: "/p2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+        await act(async () => {
+          root.render(
+            createElement(AuditSessionSelect, {
+              sessions: [s2],
+              recentClosedSessions: [],
+              selectedSessionId: null,
+              onSelectSession: vi.fn(),
+            }),
+          );
+        });
+
+        // External focus MUST remain intact!
+        expect(document.activeElement).toBe(externalButton);
+      } finally {
+        externalButton.remove();
+      }
+    });
+
+    it("AuditSessionSelect: Removing the genuinely focused option while no other deliberate target owns focus falls back to search input", async () => {
+      const s1: FilesystemTopologySession = { sessionId: "s1", sourceIp: "10.0.0.1", cwdState: { path: "/p1", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+      const s2: FilesystemTopologySession = { sessionId: "s2", sourceIp: "10.0.0.2", cwdState: { path: "/p2", status: "confirmed", observedAt: "2026-09-17T00:00:00Z" } };
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s1, s2],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      trigger.focus();
+      await act(async () => {
+        fireKeyDown(trigger, "ArrowDown");
+      });
+
+      const options = container.querySelectorAll('button[role="option"]');
+      expect(document.activeElement).toBe(options[0]); // s1 has focus
+
+      // Rerender with s1 removed (only s2 remains)
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [s2],
+            recentClosedSessions: [],
+            selectedSessionId: null,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      // Focus was genuinely on s1 when it disappeared -> moves to search input fallback!
+      const searchInput = container.querySelector('input[role="searchbox"]') as HTMLInputElement;
+      expect(document.activeElement).not.toBe(document.body);
+      expect(document.activeElement).toBe(searchInput);
     });
   });
 

@@ -29,6 +29,18 @@ import { getPaginationRenderState } from "./useAuditDirectory";
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
+export function getSessionOptionKey(
+  session: FilesystemTopologySession | FilesystemClosedSession,
+): string {
+  return session.sessionId;
+}
+
+export function getSessionOptionLabel(
+  s: FilesystemTopologySession | FilesystemClosedSession,
+): string {
+  return `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`;
+}
+
 export interface AuditSessionSelectProps {
   sessions: readonly FilesystemTopologySession[];
   recentClosedSessions: readonly FilesystemClosedSession[];
@@ -283,13 +295,14 @@ export function AuditSessionSelect({
     handleInputKeyDown,
     handleOptionKeyDown,
     handleSearchInputFocus,
+    handleOptionFocus,
   } = useComboboxNavigation<FilesystemTopologySession | FilesystemClosedSession>({
     isOpen: open,
     onOpen: () => manager.open(),
     onClose: (reason) => closeMenu(reason),
     items: allDisplaySessions,
-    getLabel: (s) => `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`,
-    getKey: (s) => s.sessionId,
+    getLabel: getSessionOptionLabel,
+    getKey: getSessionOptionKey,
     onSelect: (s) => handleSelect(s.sessionId, s),
     triggerRef,
     searchInputRef,
@@ -451,6 +464,8 @@ export function AuditSessionSelect({
                 {filteredActiveSessions.map((s, idx) => {
                   const isSelected = s.sessionId === selectedSessionId;
                   const globalIndex = idx;
+                  const isOptionTabStop =
+                    activeIndex === globalIndex || (activeIndex === -1 && globalIndex === 0);
                   const isOutsideHome =
                     s.cwdState?.path &&
                     s.cwdState.path !== "/" &&
@@ -465,6 +480,8 @@ export function AuditSessionSelect({
                       role="option"
                       id={`${listboxId}-opt-${globalIndex}`}
                       aria-selected={isSelected}
+                      tabIndex={isOptionTabStop ? 0 : -1}
+                      onFocus={() => handleOptionFocus(globalIndex, s.sessionId)}
                       onClick={() => handleSelect(s.sessionId, s)}
                       onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
                       className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
@@ -522,6 +539,8 @@ export function AuditSessionSelect({
                 {filteredClosedSessions.map((s, idx) => {
                   const isSelected = s.sessionId === selectedSessionId;
                   const globalIndex = filteredActiveSessions.length + idx;
+                  const isOptionTabStop =
+                    activeIndex === globalIndex || (activeIndex === -1 && globalIndex === 0);
                   const isOutsideHome =
                     s.cwdState?.path &&
                     s.cwdState.path !== "/" &&
@@ -536,6 +555,8 @@ export function AuditSessionSelect({
                       role="option"
                       id={`${listboxId}-opt-${globalIndex}`}
                       aria-selected={isSelected}
+                      tabIndex={isOptionTabStop ? 0 : -1}
+                      onFocus={() => handleOptionFocus(globalIndex, s.sessionId)}
                       onClick={() => handleSelect(s.sessionId, s)}
                       onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
                       className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${

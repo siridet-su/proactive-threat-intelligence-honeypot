@@ -40,6 +40,21 @@ export interface AuditFilterControlsProps {
   className?: string;
 }
 
+export type PathOptionItem = {
+  type: "all" | "canvas" | "path";
+  path: string | null;
+  label: string;
+  count?: number;
+};
+
+export function getPathOptionItemKey(item: PathOptionItem): string {
+  return `${item.type}:${item.path ?? ""}`;
+}
+
+export function getPathOptionItemLabel(item: PathOptionItem): string {
+  return item.label;
+}
+
 export function AuditFilterControls({
   hideHomeOnly,
   onToggleHideHomeOnly,
@@ -88,14 +103,6 @@ export function AuditFilterControls({
     [onSelectTargetPath, closeDropdown],
   );
 
-
-  type PathOptionItem = {
-    type: "all" | "canvas" | "path";
-    path: string | null;
-    label: string;
-    count?: number;
-  };
-
   const pathItems = useMemo<PathOptionItem[]>(() => {
     const list: PathOptionItem[] = [
       {
@@ -142,13 +149,14 @@ export function AuditFilterControls({
     handleInputKeyDown,
     handleOptionKeyDown,
     handleSearchInputFocus,
+    handleOptionFocus,
   } = useComboboxNavigation<PathOptionItem>({
     isOpen: pathDropdownOpen,
     onOpen: () => setPathDropdownOpen(true),
     onClose: (reason) => closeDropdown(reason),
     items: pathItems,
-    getLabel: (item) => item.label,
-    getKey: (item) => `${item.type}:${item.path ?? ""}`,
+    getLabel: getPathOptionItemLabel,
+    getKey: getPathOptionItemKey,
     onSelect: (item) => handleSelectPath(item.path),
     triggerRef: pathTriggerRef,
     searchInputRef,
@@ -298,6 +306,8 @@ export function AuditFilterControls({
               role="option"
               id={`${pathListboxId}-opt-0`}
               aria-selected={targetPath === null}
+              tabIndex={activeIndex === 0 || activeIndex === -1 ? 0 : -1}
+              onFocus={() => handleOptionFocus(0, "all:")}
               onClick={() => handleSelectPath(null)}
               onKeyDown={(e) => handleOptionKeyDown(e, 0)}
               className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
@@ -329,6 +339,8 @@ export function AuditFilterControls({
                     role="option"
                     id={`${pathListboxId}-opt-1`}
                     aria-selected={targetPath === selectedCanvasPath}
+                    tabIndex={activeIndex === 1 ? 0 : -1}
+                    onFocus={() => handleOptionFocus(1, `canvas:${selectedCanvasPath}`)}
                     onClick={() => handleSelectPath(selectedCanvasPath)}
                     onKeyDown={(e) => handleOptionKeyDown(e, 1)}
                     className={`w-full flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1.5 text-left text-xs font-mono text-primary hover:bg-primary/20 transition-colors cursor-pointer ${
@@ -379,6 +391,8 @@ export function AuditFilterControls({
                         role="option"
                         id={`${pathListboxId}-opt-${globalIndex}`}
                         aria-selected={isSelected}
+                        tabIndex={isActive ? 0 : -1}
+                        onFocus={() => handleOptionFocus(globalIndex, `path:${item.path}`)}
                         onClick={() => handleSelectPath(item.path)}
                         onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
                         className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${

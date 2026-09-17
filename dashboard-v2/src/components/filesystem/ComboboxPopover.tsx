@@ -107,6 +107,20 @@ export function determineFocusTarget(
   return null;
 }
 
+/**
+ * Pure helper determining whether the given element is a deliberate user focus target
+ * (e.g. search input, Load more, Retry, Reset filters, trigger, another option, or an external control).
+ * Returns false when focus fell to document.body, document.documentElement, null, or a detached DOM node.
+ */
+export function isMeaningfulFocusTarget(el: Element | null): boolean {
+  if (!el) return false;
+  if (typeof document !== "undefined") {
+    if (el === document.body || el === document.documentElement) return false;
+  }
+  if ("isConnected" in el && !el.isConnected) return false;
+  return true;
+}
+
 export interface UseComboboxNavigationOptions<T> {
   isOpen: boolean;
   onOpen: (focusTarget?: ComboboxFocusTarget) => void;
@@ -168,6 +182,15 @@ export function useComboboxNavigation<T>({
       return defaultGetKey(item, index);
     },
     [getKey],
+  );
+
+  const handleClose = useCallback(
+    (reason: CloseReason = "escape") => {
+      setNavigatedIndex(null);
+      setNavigatedKey(null);
+      onClose(reason);
+    },
+    [onClose],
   );
 
   // Compute activeIndex with safe bounds clamping; return -1 when search input is active
@@ -238,6 +261,19 @@ export function useComboboxNavigation<T>({
       }
     },
     [items, effectiveGetKey, searchInputRef],
+  );
+
+  // Synchronize navigation state with actual option focus (Tab, pointer, assistive tech)
+  const handleOptionFocus = useCallback(
+    (index: number, explicitKey?: string) => {
+      if (index >= 0 && index < items.length) {
+        const item = items[index];
+        const key = explicitKey ?? (item !== undefined ? effectiveGetKey(item, index) : String(index));
+        setNavigatedIndex(index);
+        setNavigatedKey(key);
+      }
+    },
+    [items, effectiveGetKey],
   );
 
   // Apply pending focus synchronously once mounted in layout phase
@@ -312,26 +348,50 @@ export function useComboboxNavigation<T>({
       const newIndex = items.findIndex((item, idx) => effectiveGetKey(item, idx) === navigatedKey);
 
       if (newIndex !== -1) {
-        // Option STILL EXISTS by identity after list reorder/update
+        // 1. Option STILL EXISTS by identity after list reorder/update
         if (newIndex !== navigatedIndex) {
           setNavigatedIndex(newIndex);
         }
-        const el = optionKeyRefs.current.get(navigatedKey);
-        if (el && document.activeElement !== el) {
-          el.focus();
+
+        const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+        const optionEl = optionKeyRefs.current.get(navigatedKey) ?? optionIndexRefs.current[newIndex];
+
+        // If the option already has DOM focus, React preserved it on the keyed node.
+        if (activeEl && optionEl && activeEl === optionEl) {
+          return;
         }
+
+        // If document.activeElement is already a meaningful different control selected by the user
+        // (e.g. search input, Load more, Retry, Reset filters, trigger, another option, or an external element),
+        // NEVER steal focus from it!
+        if (isMeaningfulFocusTarget(activeEl)) {
+          return;
+        }
+
+        // Only call focus() when there is evidence that DOM focus was lost because the managed option
+        // was remounted, such as focus falling to body/null while managed-option ownership is still active.
+        optionEl?.focus();
         return;
       }
 
-      // Option DISAPPEARED (filtered out, replaced with different items, etc.)
-      // Deterministic fallback:
+      // 2. Option DISAPPEARED (filtered out, replaced with different items, etc.)
+      const activeEl = typeof document !== "undefined" ? document.activeElement : null;
+
+      // If focus is already on another deliberate target (e.g. Load more, Retry, Reset, Search, Trigger, external element),
+      // clear/update stale navigation state WITHOUT moving DOM focus.
+      if (isMeaningfulFocusTarget(activeEl)) {
+        setNavigatedIndex(null);
+        setNavigatedKey(null);
+        return;
+      }
+
+      // That option actually owned focus (evidence: focus fell to body/null because the focused element was removed).
+      // Move to the documented fallback:
       if (searchInputRef?.current) {
-        // Fallback to search input
         setNavigatedIndex(-1);
         setNavigatedKey("__search__");
         searchInputRef.current.focus();
       } else if (items.length > 0) {
-        // Fallback to nearest valid neighbor
         const fallbackIdx = Math.max(0, Math.min(navigatedIndex ?? 0, items.length - 1));
         const fallbackItem = items[fallbackIdx];
         const fallbackKey = effectiveGetKey(fallbackItem, fallbackIdx);
@@ -340,7 +400,6 @@ export function useComboboxNavigation<T>({
         const fallbackEl = optionKeyRefs.current.get(fallbackKey) ?? optionIndexRefs.current[fallbackIdx];
         fallbackEl?.focus();
       } else {
-        // List is completely empty with no search input
         setNavigatedIndex(-1);
         setNavigatedKey(null);
         triggerRef.current?.focus();
@@ -389,17 +448,17 @@ export function useComboboxNavigation<T>({
           focusOption(prev);
         } else if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onClose("escape");
+          handleClose("escape");
           triggerRef.current?.focus();
         } else if (event.key === "Escape") {
           event.preventDefault();
           event.stopPropagation();
-          onClose("escape");
+          handleClose("escape");
           triggerRef.current?.focus();
         }
       }
     },
-    [isOpen, openWithFocus, onClose, activeIndex, items.length, focusOption, triggerRef],
+    [isOpen, openWithFocus, handleClose, activeIndex, items.length, focusOption, triggerRef],
   );
 
   // Handle search input keydown
@@ -418,7 +477,7 @@ export function useComboboxNavigation<T>({
       } else if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose("escape");
+        handleClose("escape");
         triggerRef.current?.focus();
       } else if (event.key === "Enter") {
         // Only select if user actively navigated to an option (navigatedIndex !== -1)
@@ -431,7 +490,7 @@ export function useComboboxNavigation<T>({
         }
       }
     },
-    [activeIndex, focusOption, items, navigatedIndex, onClose, onSelect, triggerRef],
+    [activeIndex, focusOption, items, navigatedIndex, handleClose, onSelect, triggerRef],
   );
 
   // Handle option keydown
@@ -460,7 +519,7 @@ export function useComboboxNavigation<T>({
       } else if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose("escape");
+        handleClose("escape");
         triggerRef.current?.focus();
       } else if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -483,7 +542,7 @@ export function useComboboxNavigation<T>({
         }
       }
     },
-    [focusOption, getLabel, items, onClose, onSelect, searchInputRef, triggerRef],
+    [focusOption, getLabel, items, handleClose, onSelect, searchInputRef, triggerRef],
   );
 
   const handleSearchInputFocus = useCallback(() => {
@@ -500,6 +559,7 @@ export function useComboboxNavigation<T>({
     handleInputKeyDown,
     handleOptionKeyDown,
     handleSearchInputFocus,
+    handleOptionFocus,
   };
 }
 
