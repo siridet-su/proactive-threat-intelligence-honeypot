@@ -11,6 +11,10 @@ import React, {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 
+import type { CloseReason } from "./auditSessionSearchManager";
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
 /**
  * Pure calculation for next focused option index in combobox/listbox navigation.
@@ -106,7 +110,7 @@ export function determineFocusTarget(
 export interface UseComboboxNavigationOptions<T> {
   isOpen: boolean;
   onOpen: (focusTarget?: ComboboxFocusTarget) => void;
-  onClose: () => void;
+  onClose: (reason?: CloseReason) => void;
   items: readonly T[];
   getLabel: (item: T) => string;
   onSelect: (item: T, index: number) => void;
@@ -132,16 +136,17 @@ export function useComboboxNavigation<T>({
   const typeaheadBuffer = useRef("");
   const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Compute activeIndex with safe bounds clamping
+  // Compute activeIndex with safe bounds clamping; return -1 when search input is active
   const activeIndex = useMemo(() => {
     if (items.length === 0) return -1;
+    if (navigatedIndex === -1) return -1;
     if (navigatedIndex !== null) {
       return Math.max(0, Math.min(navigatedIndex, items.length - 1));
     }
     if (selectedIndex >= 0 && selectedIndex < items.length) {
       return selectedIndex;
     }
-    return 0;
+    return -1;
   }, [items.length, navigatedIndex, selectedIndex]);
 
   // Truncate optionRefs to eliminate stale refs
@@ -150,7 +155,6 @@ export function useComboboxNavigation<T>({
       optionRefs.current.length = items.length;
     }
   }, [items.length]);
-
 
   const registerOptionRef = useCallback((index: number) => {
     return (el: HTMLElement | null) => {
@@ -166,7 +170,7 @@ export function useComboboxNavigation<T>({
     [onOpen],
   );
 
-  // Focus active option or scroll it into view
+  // Focus active option or search input
   const focusOption = useCallback((index: number) => {
     if (index === -1) {
       setNavigatedIndex(-1);
@@ -181,8 +185,8 @@ export function useComboboxNavigation<T>({
     }
   }, [searchInputRef]);
 
-  // Apply pending focus synchronously once mounted
-  useEffect(() => {
+  // Apply pending focus synchronously once mounted in layout phase
+  useIsomorphicLayoutEffect(() => {
     if (!isOpen) {
       pendingFocusTargetRef.current = null;
       return;
@@ -220,37 +224,70 @@ export function useComboboxNavigation<T>({
     }
   }, [isOpen, items.length, searchInputRef]);
 
-  // Handle trigger keydown (ArrowDown/Up/Enter/Space to open or navigate)
+  // Safely clamp navigatedIndex when items shrink or empty to avoid resurrecting stale indices
+  useIsomorphicLayoutEffect(() => {
+    if (!isOpen) return;
+    if (items.length === 0) {
+      if (navigatedIndex !== -1) {
+        setNavigatedIndex(-1);
+        searchInputRef?.current?.focus();
+      }
+    } else if (navigatedIndex !== null && navigatedIndex >= items.length) {
+      const clamped = items.length - 1;
+      setNavigatedIndex(clamped);
+      optionRefs.current[clamped]?.focus();
+    }
+  }, [isOpen, items.length, navigatedIndex, searchInputRef]);
+
+  // Clear typeahead timer on close and unmount
+  useEffect(() => {
+    if (!isOpen) {
+      if (typeaheadTimer.current) {
+        clearTimeout(typeaheadTimer.current);
+        typeaheadTimer.current = null;
+      }
+      typeaheadBuffer.current = "";
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (typeaheadTimer.current) {
+        clearTimeout(typeaheadTimer.current);
+        typeaheadTimer.current = null;
+      }
+      typeaheadBuffer.current = "";
+    };
+  }, []);
+
+  // Handle trigger keydown (using determineFocusTarget)
   const handleTriggerKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLElement>) => {
-      if (event.key === "ArrowDown") {
+      const focusTarget = determineFocusTarget(event.key, isOpen);
+      if (focusTarget) {
         event.preventDefault();
-        if (!isOpen) {
-          openWithFocus("first");
-        } else {
+        openWithFocus(focusTarget);
+        return;
+      }
+      if (isOpen) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
           const next = calculateNextComboboxIndex(activeIndex, 1, items.length);
           focusOption(next);
-        }
-      } else if (event.key === "ArrowUp") {
-        event.preventDefault();
-        if (!isOpen) {
-          openWithFocus("last");
-        } else {
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
           const prev = calculateNextComboboxIndex(activeIndex, -1, items.length);
           focusOption(prev);
-        }
-      } else if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        if (!isOpen) {
-          openWithFocus("search");
-        } else {
-          onClose();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onClose("escape");
+          triggerRef.current?.focus();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          onClose("escape");
           triggerRef.current?.focus();
         }
-      } else if (event.key === "Escape" && isOpen) {
-        event.preventDefault();
-        onClose();
-        triggerRef.current?.focus();
       }
     },
     [isOpen, openWithFocus, onClose, activeIndex, items.length, focusOption, triggerRef],
@@ -271,21 +308,21 @@ export function useComboboxNavigation<T>({
         }
       } else if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        event.stopPropagation();
+        onClose("escape");
         triggerRef.current?.focus();
       } else if (event.key === "Enter") {
-        if (activeIndex >= 0 && activeIndex < items.length) {
+        // Only select if user actively navigated to an option (navigatedIndex !== -1)
+        if (navigatedIndex !== -1 && activeIndex >= 0 && activeIndex < items.length) {
           event.preventDefault();
           const targetItem = items[activeIndex];
           if (targetItem !== undefined) {
             onSelect(targetItem, activeIndex);
           }
-          onClose();
-          triggerRef.current?.focus();
         }
       }
     },
-    [activeIndex, focusOption, items, onClose, onSelect, triggerRef],
+    [activeIndex, focusOption, items, navigatedIndex, onClose, onSelect, triggerRef],
   );
 
   // Handle option keydown
@@ -313,7 +350,8 @@ export function useComboboxNavigation<T>({
         }
       } else if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        event.stopPropagation();
+        onClose("escape");
         triggerRef.current?.focus();
       } else if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -321,8 +359,6 @@ export function useComboboxNavigation<T>({
         if (targetItem !== undefined) {
           onSelect(targetItem, index);
         }
-        onClose();
-        triggerRef.current?.focus();
       } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
         // Typeahead jump
         if (typeaheadTimer.current) clearTimeout(typeaheadTimer.current);
@@ -341,6 +377,10 @@ export function useComboboxNavigation<T>({
     [focusOption, getLabel, items, onClose, onSelect, searchInputRef, triggerRef],
   );
 
+  const handleSearchInputFocus = useCallback(() => {
+    setNavigatedIndex(-1);
+  }, []);
+
   return {
     activeIndex,
     registerOptionRef,
@@ -349,15 +389,16 @@ export function useComboboxNavigation<T>({
     handleTriggerKeyDown,
     handleInputKeyDown,
     handleOptionKeyDown,
+    handleSearchInputFocus,
   };
 }
 
 export interface ComboboxPopoverProps {
   id: string;
   isOpen: boolean;
-  onClose: () => void;
+  onClose: (reason?: CloseReason) => void;
   triggerRef: React.RefObject<HTMLElement | null>;
-  ariaLabel: string;
+  ariaLabel?: string;
   children: React.ReactNode;
   className?: string;
   totalCount?: number;
@@ -388,7 +429,7 @@ export function ComboboxPopover({
         triggerRef.current &&
         !triggerRef.current.contains(target)
       ) {
-        onClose();
+        onClose("outside");
       }
     };
 
@@ -396,7 +437,7 @@ export function ComboboxPopover({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onClose("escape");
         triggerRef.current?.focus();
       }
     };
@@ -415,9 +456,6 @@ export function ComboboxPopover({
         <motion.div
           ref={popoverRef}
           id={id}
-          role="dialog"
-          aria-modal="false"
-          aria-label={ariaLabel}
           tabIndex={-1}
           initial={reducedMotion ? false : { opacity: 0, y: -6, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -427,7 +465,11 @@ export function ComboboxPopover({
         >
           {/* Screen reader live region announcing item counts */}
           <div role="status" aria-live="polite" className="sr-only">
-            {totalCount !== undefined ? `${totalCount} options available` : `${ariaLabel} opened`}
+            {totalCount !== undefined
+              ? `${totalCount} options available`
+              : ariaLabel
+                ? `${ariaLabel} opened`
+                : "Options opened"}
           </div>
           {children}
         </motion.div>
@@ -442,6 +484,7 @@ export interface ComboboxSearchInputProps {
   onChange: (value: string) => void;
   onClear: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onFocus?: () => void;
   placeholder?: string;
   isLoading?: boolean;
   ariaControls?: string;
@@ -454,6 +497,7 @@ export function ComboboxSearchInput({
   onChange,
   onClear,
   onKeyDown,
+  onFocus,
   placeholder = "Search...",
   isLoading = false,
   ariaControls,
@@ -470,6 +514,7 @@ export function ComboboxSearchInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={onKeyDown}
+        onFocus={onFocus}
         placeholder={placeholder}
         className="w-full rounded-lg border border-border bg-surface-subtle pl-8 pr-7 py-1.5 text-xs font-mono text-text placeholder:text-text-subtle focus:border-primary focus:outline-hidden focus:ring-1 focus:ring-primary/40"
       />
@@ -478,11 +523,14 @@ export function ComboboxSearchInput({
       ) : value ? (
         <button
           type="button"
-          onClick={onClear}
-          aria-label="Clear search text"
-          className="absolute right-3 top-3 text-text-subtle hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          onClick={() => {
+            onClear();
+            inputRef?.current?.focus();
+          }}
+          aria-label="Clear search input"
+          className="absolute right-2.5 top-2.5 rounded p-0.5 text-text-subtle hover:text-text hover:bg-surface-hover focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-focus-ring"
         >
-          <X className="h-3.5 w-3.5" aria-hidden="true" />
+          <X className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>

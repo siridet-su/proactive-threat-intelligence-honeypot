@@ -1,28 +1,33 @@
 "use client";
 
 import { Check, ChevronDown, Loader2, RotateCcw } from "lucide-react";
-import {
+import React, {
   useCallback,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
 import type {
-  AuditSessionsPage,
   FilesystemClosedSession,
   FilesystemTopologySession,
 } from "@/lib/dashboardTypes";
+import {
+  AuditSessionSearchManager,
+  type CloseReason,
+} from "./auditSessionSearchManager";
 import {
   ComboboxPopover,
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
-
-import { sessionTouchesPath } from "./filesystemUtils";
 import { getPaginationRenderState } from "./useAuditDirectory";
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
 
 export interface AuditSessionSelectProps {
   sessions: readonly FilesystemTopologySession[];
@@ -37,17 +42,19 @@ export interface AuditSessionSelectProps {
 
   // Directory pagination
   directoryHasMore?: boolean;
+  directoryCursor?: string | null;
   directoryIsLoading?: boolean;
   directoryIsComplete?: boolean;
-  onLoadMoreDirectory?: () => void;
+  onLoadMoreDirectory?: () => Promise<void> | void;
 
   // Search pagination & callbacks
   searchResults?: readonly FilesystemClosedSession[];
   searchHasMore?: boolean;
+  searchCursor?: string | null;
   searchIsLoading?: boolean;
   searchIsComplete?: boolean;
-  onSearch?: (query: string) => void;
-  onLoadMoreSearch?: () => void;
+  onSearch?: (query: string) => Promise<void> | void;
+  onLoadMoreSearch?: () => Promise<void> | void;
   onClearSearch?: () => void;
 
   // Active filters for scoped searching
@@ -55,7 +62,7 @@ export interface AuditSessionSelectProps {
   targetPathFilter?: string | null;
 
   // Error and retry state
-  status?: "idle" | "loading" | "success" | "error";
+  status?: "idle" | "loading" | "success" | "ready" | "stale" | "error";
   errorMessage?: string | null;
   onRetry?: () => void;
 }
@@ -65,46 +72,76 @@ export function AuditSessionSelect({
   recentClosedSessions,
   selectedSessionId,
   onSelectSession,
-  className,
+  className = "",
   totalCount,
   hasActiveFilters,
   onResetFilters,
   allSessionsList,
-  directoryHasMore,
-  directoryIsLoading,
-  directoryIsComplete,
-  onLoadMoreDirectory,
-  searchResults,
-  searchHasMore,
-  searchIsLoading,
-  searchIsComplete,
-  onSearch,
-  onLoadMoreSearch,
-  onClearSearch,
   hideHomeOnly = false,
   targetPathFilter = null,
-  status,
+  status = "idle",
+  onSearch,
+  onClearSearch,
+  onLoadMoreSearch,
+  onLoadMoreDirectory,
+  directoryHasMore = false,
+  directoryIsLoading = false,
+  directoryIsComplete = false,
+  searchResults,
+  searchHasMore = false,
+  searchIsLoading = false,
+  searchIsComplete = false,
   errorMessage,
   onRetry,
 }: AuditSessionSelectProps) {
-  const [open, setOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [remoteSessions, setRemoteSessions] = useState<FilesystemClosedSession[]>([]);
-  const [remoteCursor, setRemoteCursor] = useState<string | null>(null);
-  const [hasMoreRemote, setHasMoreRemote] = useState(false);
-  const [isLoadingRemote, setIsLoadingRemote] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const searchGenerationRef = useRef(0);
+
   const generatedId = useId();
   const triggerId = `audit-session-select-${generatedId}`;
   const popupId = `${triggerId}-popup`;
   const listboxId = `${triggerId}-listbox`;
-  const openRef = useRef(open);
+
+  // Authoritative lifecycle owner for search, debounce, requests, and close idempotency
+  const [manager] = useState(
+    () =>
+      new AuditSessionSearchManager({
+        onSearch,
+        onClearSearch,
+        onLoadMoreSearch,
+        onLoadMoreDirectory,
+        hideHomeOnly,
+        targetPathFilter,
+      }),
+  );
+
+  // Keep manager options fresh with latest props to prevent stale closures
+  useIsomorphicLayoutEffect(() => {
+    manager.updateOptions({
+      onSearch,
+      onClearSearch,
+      onLoadMoreSearch,
+      onLoadMoreDirectory,
+      hideHomeOnly,
+      targetPathFilter,
+    });
+  }, [manager, onSearch, onClearSearch, onLoadMoreSearch, onLoadMoreDirectory, hideHomeOnly, targetPathFilter]);
+
+  // Clean up timers, abort in-flight requests on unmount
   useEffect(() => {
-    openRef.current = open;
-  }, [open]);
+    return () => {
+      manager.dispose();
+    };
+  }, [manager]);
+
+  // Subscribe to search manager state via useSyncExternalStore
+  const searchState = useSyncExternalStore(manager.subscribe, manager.getSnapshot);
+  const open = searchState.isOpen;
+  const searchQuery = searchState.searchQuery;
+  const remoteSessions = searchState.remoteSessions;
+  const hasMoreRemote = searchState.hasMoreRemote;
+  const isLoadingRemote = searchState.isLoadingRemote;
+  const searchErrorMessage = searchState.errorMessage;
 
   const isSearchActive = Boolean(searchQuery.trim());
 
@@ -125,222 +162,91 @@ export function AuditSessionSelect({
       : isLoadingRemote;
 
   const handleClearSearch = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-    searchGenerationRef.current++;
-    setSearchQuery("");
-    setRemoteSessions([]);
-    setRemoteCursor(null);
-    setHasMoreRemote(false);
-    setIsLoadingRemote(false);
-    onClearSearch?.();
+    manager.clearSearch();
     searchInputRef.current?.focus();
-  }, [onClearSearch]);
+  }, [manager]);
 
   const handleSearchChange = useCallback((value: string) => {
-    setSearchQuery(value);
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-    const trimmed = value.trim();
-    if (!trimmed) {
-      searchGenerationRef.current++;
-      setRemoteSessions([]);
-      setRemoteCursor(null);
-      setHasMoreRemote(false);
-      setIsLoadingRemote(false);
-      onClearSearch?.();
-    } else if (onSearch && openRef.current) {
-      const currentGen = ++searchGenerationRef.current;
-      debounceTimerRef.current = setTimeout(() => {
-        if (openRef.current && searchGenerationRef.current === currentGen) {
-          onSearch(trimmed);
-        }
-      }, 250);
-    }
-  }, [onSearch, onClearSearch]);
+    manager.setSearchQuery(value);
+  }, [manager]);
 
-  useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-        debounceTimerRef.current = null;
-      }
-    };
-  }, []);
+  const handleLoadMore = useCallback(() => {
+    void manager.loadMore();
+  }, [manager]);
 
-
-  // Standalone fallback: Query remote audit directory when searching without parent onSearch
-  useEffect(() => {
-    if (!open) return;
-    if (onSearch) return; // parent handles search
-    const query = searchQuery.trim();
-    if (!query) return;
-
-    const timer = setTimeout(async () => {
-      if (!openRef.current) return;
-      setIsLoadingRemote(true);
-      try {
-        const params = new URLSearchParams();
-        params.set("q", query);
-        params.set("limit", "25");
-        if (hideHomeOnly) params.set("hideHome", "1");
-        if (targetPathFilter) params.set("targetPath", targetPathFilter);
-
-        const response = await fetch(
-          `/api/filesystem-topology/audit-sessions?${params.toString()}`,
-          { cache: "no-store" },
-        );
-        if (!response.ok) return;
-        const data: unknown = await response.json();
-        const page = data as Partial<AuditSessionsPage>;
-        if (Array.isArray(page.items)) {
-          setRemoteSessions(page.items);
-          setRemoteCursor(page.nextCursor ?? null);
-          setHasMoreRemote(Boolean(page.nextCursor));
-        }
-      } catch {
-        // preserve local results
-      } finally {
-        setIsLoadingRemote(false);
-      }
-    }, 250);
-
-    return () => clearTimeout(timer);
-  }, [open, searchQuery, onSearch, hideHomeOnly, targetPathFilter]);
-
-  const handleLoadMore = useCallback(async () => {
-    if (effectiveIsLoading) return;
-    if (isSearchActive) {
-      if (onLoadMoreSearch) {
-        onLoadMoreSearch();
-        return;
-      }
-    } else {
-      if (onLoadMoreDirectory) {
-        onLoadMoreDirectory();
-        return;
-      }
-    }
-
-    // Standalone fallback
-    setIsLoadingRemote(true);
-    try {
-      const q = searchQuery.trim();
-      const params = new URLSearchParams();
-      if (q) params.set("q", q);
-      if (remoteCursor) params.set("cursor", remoteCursor);
-      params.set("limit", "25");
-      if (hideHomeOnly) params.set("hideHome", "1");
-      if (targetPathFilter) params.set("targetPath", targetPathFilter);
-
-      const response = await fetch(
-        `/api/filesystem-topology/audit-sessions?${params.toString()}`,
-        { cache: "no-store" },
-      );
-      if (!response.ok) return;
-      const data: unknown = await response.json();
-      const page = data as Partial<AuditSessionsPage>;
-      if (Array.isArray(page.items)) {
-        setRemoteSessions((prev) => {
-          const seen = new Set(prev.map((s) => s.sessionId));
-          const additions = page.items?.filter((s) => !seen.has(s.sessionId)) ?? [];
-          return [...prev, ...additions];
-        });
-        setRemoteCursor(page.nextCursor ?? null);
-        setHasMoreRemote(Boolean(page.nextCursor));
-      }
-    } catch {
-      // ignore
-    } finally {
-      setIsLoadingRemote(false);
-    }
-  }, [
-    effectiveIsLoading,
-    isSearchActive,
-    onLoadMoreSearch,
-    onLoadMoreDirectory,
-    searchQuery,
-    remoteCursor,
-    hideHomeOnly,
-    targetPathFilter,
-  ]);
-
+  // Combined closed sessions: prefer parent searchResults/recentClosedSessions, fallback to manager remote
   const combinedClosedSessions = useMemo(() => {
     if (isSearchActive) {
-      const base = searchResults ?? remoteSessions;
-      return base.filter((s) => {
-        if (hasActiveFilters && hideHomeOnly && s.auditSummary?.homeOnly) return false;
-        if (hasActiveFilters && targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
-        return true;
-      });
+      if (searchResults && searchResults.length > 0) {
+        return searchResults;
+      }
+      return remoteSessions;
     }
-    return recentClosedSessions as FilesystemClosedSession[];
-  }, [
-    isSearchActive,
-    searchResults,
-    remoteSessions,
-    hasActiveFilters,
-    hideHomeOnly,
-    targetPathFilter,
-    recentClosedSessions,
-  ]);
 
-  const effectiveAllSessions = useMemo(
-    () => allSessionsList ?? [...sessions, ...combinedClosedSessions],
-    [allSessionsList, sessions, combinedClosedSessions],
-  );
+    if (recentClosedSessions.length > 0) {
+      return recentClosedSessions;
+    }
+    return remoteSessions;
+  }, [isSearchActive, searchResults, remoteSessions, recentClosedSessions]);
 
-  const selectedSession = useMemo(
-    () =>
-      effectiveAllSessions.find((s) => s.sessionId === selectedSessionId) ??
-      [...sessions, ...combinedClosedSessions].find((s) => s.sessionId === selectedSessionId) ??
-      null,
-    [effectiveAllSessions, sessions, combinedClosedSessions, selectedSessionId],
-  );
-
-  const isSelectedClosed = useMemo(
-    () =>
-      selectedSession
-        ? "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle)
-        : combinedClosedSessions.some((s) => s.sessionId === selectedSessionId),
-    [selectedSession, combinedClosedSessions, selectedSessionId],
-  );
-
-  const normalizedQuery = searchQuery.trim().toLowerCase();
-
+  // Filter sessions locally when searching without remote backend
   const filteredActiveSessions = useMemo(() => {
-    if (!normalizedQuery) return sessions;
-    return sessions.filter(
-      (s) =>
-        s.sourceIp.toLowerCase().includes(normalizedQuery) ||
-        s.sessionId.toLowerCase().includes(normalizedQuery) ||
-        (s.cwdState?.path && s.cwdState.path.toLowerCase().includes(normalizedQuery)),
-    );
-  }, [sessions, normalizedQuery]);
+    if (!searchQuery.trim()) return sessions;
+    const query = searchQuery.trim().toLowerCase();
+    return sessions.filter((s) => {
+      const ipMatch = s.sourceIp.toLowerCase().includes(query);
+      const idMatch = s.sessionId.toLowerCase().includes(query);
+      const pathMatch = s.cwdState?.path?.toLowerCase().includes(query);
+      const auditPathMatch = s.auditSummary?.visitedPaths.some((p) =>
+        p.toLowerCase().includes(query),
+      );
+      return ipMatch || idMatch || pathMatch || auditPathMatch;
+    });
+  }, [sessions, searchQuery]);
 
   const filteredClosedSessions = useMemo(() => {
-    if (!normalizedQuery) return combinedClosedSessions;
-    return combinedClosedSessions.filter(
-      (s) =>
-        s.sourceIp.toLowerCase().includes(normalizedQuery) ||
-        s.sessionId.toLowerCase().includes(normalizedQuery) ||
-        (s.cwdState?.path && s.cwdState.path.toLowerCase().includes(normalizedQuery)),
-    );
-  }, [combinedClosedSessions, normalizedQuery]);
+    if (searchResults && searchResults.length > 0) {
+      return searchResults;
+    }
+    if (!searchQuery.trim()) return combinedClosedSessions;
+    const query = searchQuery.trim().toLowerCase();
+    return combinedClosedSessions.filter((s) => {
+      const ipMatch = s.sourceIp.toLowerCase().includes(query);
+      const idMatch = s.sessionId.toLowerCase().includes(query);
+      const pathMatch = s.cwdState?.path?.toLowerCase().includes(query);
+      const auditPathMatch = s.auditSummary?.visitedPaths.some((p) =>
+        p.toLowerCase().includes(query),
+      );
+      return ipMatch || idMatch || pathMatch || auditPathMatch;
+    });
+  }, [combinedClosedSessions, searchQuery, searchResults]);
 
   const allDisplaySessions = useMemo(
     () => [...filteredActiveSessions, ...filteredClosedSessions],
     [filteredActiveSessions, filteredClosedSessions],
   );
 
-  const selectedIndex = useMemo(
-    () => allDisplaySessions.findIndex((s) => s.sessionId === selectedSessionId),
-    [allDisplaySessions, selectedSessionId],
-  );
+  const selectedIndex = useMemo(() => {
+    if (!selectedSessionId) return -1;
+    return allDisplaySessions.findIndex((s) => s.sessionId === selectedSessionId);
+  }, [allDisplaySessions, selectedSessionId]);
+
+  const selectedSession = useMemo(() => {
+    if (!selectedSessionId) return null;
+    const active = sessions.find((s) => s.sessionId === selectedSessionId);
+    if (active) return active;
+    const closed = combinedClosedSessions.find((s) => s.sessionId === selectedSessionId);
+    if (closed) return closed;
+    if (allSessionsList) {
+      return allSessionsList.find((s) => s.sessionId === selectedSessionId) ?? null;
+    }
+    return null;
+  }, [selectedSessionId, sessions, combinedClosedSessions, allSessionsList]);
+
+  const isSelectedClosed = useMemo(() => {
+    if (!selectedSession) return false;
+    return !sessions.some((s) => s.sessionId === selectedSession.sessionId);
+  }, [selectedSession, sessions]);
 
   const isSelectedFilteredOut = useMemo(
     () =>
@@ -352,26 +258,20 @@ export function AuditSessionSelect({
     [selectedSession, hasActiveFilters, allDisplaySessions, selectedSessionId],
   );
 
-  const closeMenu = useCallback(() => {
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-      debounceTimerRef.current = null;
-    }
-    searchGenerationRef.current++;
-    setOpen(false);
-    setSearchQuery("");
-    setRemoteSessions([]);
-    setRemoteCursor(null);
-    setHasMoreRemote(false);
-    setIsLoadingRemote(false);
-    onClearSearch?.();
-  }, [onClearSearch]);
+  const closeMenu = useCallback(
+    (reason: CloseReason = "escape") => {
+      const didClose = manager.close(reason);
+      if (didClose && reason !== "outside") {
+        triggerRef.current?.focus();
+      }
+    },
+    [manager],
+  );
 
   const handleSelect = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
       onSelectSession(sessionId, sessionObj);
-      closeMenu();
-      triggerRef.current?.focus();
+      closeMenu("select");
     },
     [onSelectSession, closeMenu],
   );
@@ -383,10 +283,11 @@ export function AuditSessionSelect({
     handleTriggerKeyDown,
     handleInputKeyDown,
     handleOptionKeyDown,
+    handleSearchInputFocus,
   } = useComboboxNavigation<FilesystemTopologySession | FilesystemClosedSession>({
     isOpen: open,
-    onOpen: () => setOpen(true),
-    onClose: closeMenu,
+    onOpen: () => manager.open(),
+    onClose: (reason) => closeMenu(reason),
     items: allDisplaySessions,
     getLabel: (s) => `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`,
     onSelect: (s) => handleSelect(s.sessionId, s),
@@ -397,13 +298,12 @@ export function AuditSessionSelect({
 
   const handleToggleOpen = useCallback(() => {
     if (open) {
-      closeMenu();
+      closeMenu("toggle");
     } else {
+      manager.open();
       openWithFocus("search");
-      setOpen(true);
     }
-  }, [open, closeMenu, openWithFocus]);
-
+  }, [open, closeMenu, manager, openWithFocus]);
 
   return (
     <div className={`relative inline-block text-left ${className ?? ""}`}>
@@ -448,30 +348,22 @@ export function AuditSessionSelect({
               <span className="text-text-subtle">·</span>
               <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
               <span className="truncate text-text-muted hidden sm:inline">
-                ({isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"})
+                ({isSelectedClosed ? "closed" : selectedSession.cwdState?.path ?? "/"})
               </span>
-              {isSelectedFilteredOut && (
-                <span
-                  className="h-[18px] rounded-full border border-warning-border bg-warning-subtle px-1.5 font-sans text-[10px] font-semibold leading-4 text-warning shadow-2xs inline"
-                  title="This session is pinned outside the active filter criteria"
-                >
-                  Outside filter
-                </span>
-              )}
             </>
           ) : (
-            <span className="text-text-muted">Select Session…</span>
+            <span className="text-text-subtle">Select session…</span>
           )}
         </div>
         <ChevronDown
-          className={`h-3.5 w-3.5 shrink-0 text-text-subtle transition-transform duration-200 ${
-            open ? "rotate-180 text-primary" : ""
+          className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform ${
+            open ? "rotate-180" : ""
           }`}
           aria-hidden="true"
         />
       </button>
 
-      {/* Animated Dropdown Menu using ComboboxPopover */}
+      {/* Popover Menu using ComboboxPopover */}
       <ComboboxPopover
         id={popupId}
         isOpen={open}
@@ -488,15 +380,18 @@ export function AuditSessionSelect({
           onChange={handleSearchChange}
           onClear={handleClearSearch}
           onKeyDown={handleInputKeyDown}
+          onFocus={handleSearchInputFocus}
           placeholder="Search IP, session ID, or path..."
           isLoading={effectiveIsLoading}
           ariaControls={listboxId}
         />
 
-        {/* Error banner if directory fetch failed (outside listbox) */}
-        {status === "error" && (
+        {/* Error banner if directory fetch or search failed (outside listbox) */}
+        {(status === "error" || searchErrorMessage) && (
           <div className="mx-2 mb-2 p-2 rounded-lg border border-danger-border bg-danger-subtle text-xs font-mono flex items-center justify-between gap-2">
-            <span className="text-danger truncate">{errorMessage ?? "Failed to load audit directory"}</span>
+            <span className="text-danger truncate">
+              {searchErrorMessage ?? errorMessage ?? "Failed to load audit directory"}
+            </span>
             {onRetry && (
               <button
                 type="button"
@@ -528,163 +423,158 @@ export function AuditSessionSelect({
           </div>
         )}
 
-        {/* Dedicated listbox for session options */}
-        {(filteredActiveSessions.length > 0 || filteredClosedSessions.length > 0) && (
-          <div
-            role="listbox"
-            id={listboxId}
-            aria-label="Select session to audit"
-            tabIndex={-1}
-          >
-            {/* Active Sessions Group */}
-            {filteredActiveSessions.length > 0 && (
-              <div role="group" aria-label={`Active Sessions (${filteredActiveSessions.length})`}>
-                <div
-                  className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none"
-                  aria-hidden="true"
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-1.5 rounded-full bg-success" />
-                    Active Sessions ({filteredActiveSessions.length})
-                  </div>
-                  {totalCount !== undefined && totalCount > allDisplaySessions.length && (
-                    <span className="text-xs font-mono text-primary/80 lowercase">
-                      filtered
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-0.5">
-                  {filteredActiveSessions.map((s, idx) => {
-                    const isSelected = s.sessionId === selectedSessionId;
-                    const globalIndex = idx;
-                    const isOutsideHome =
-                      s.cwdState?.path &&
-                      s.cwdState.path !== "/" &&
-                      s.cwdState.path !== "/home" &&
-                      !s.cwdState.path.startsWith("/home/");
-
-                    return (
-                      <button
-                        key={s.sessionId}
-                        ref={registerOptionRef(globalIndex)}
-                        type="button"
-                        role="option"
-                        id={`${listboxId}-opt-${globalIndex}`}
-                        aria-selected={isSelected}
-                        onClick={() => handleSelect(s.sessionId, s)}
-                        onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
-                          isSelected
-                            ? "bg-primary-subtle text-primary border border-primary-border/50"
-                            : activeIndex === globalIndex
-                              ? "bg-surface-hover text-text border border-border/50"
-                              : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
-                          <strong className={isSelected ? "text-primary" : "text-text"}>
-                            {s.sourceIp}
-                          </strong>
-                          <span className="text-text-subtle">·</span>
-                          <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
-                          {s.cwdState?.path && (
-                            <span
-                              className={`truncate px-1.5 py-0.2 rounded text-xs border ${
-                                isOutsideHome
-                                  ? "bg-primary/10 text-primary border-primary/30 font-semibold"
-                                  : "bg-surface-subtle text-text-subtle border-border/50"
-                              }`}
-                            >
-                              {s.cwdState.path}
-                            </span>
-                          )}
-                        </div>
-                        {isSelected && (
-                          <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Closed Sessions Group */}
-            {filteredClosedSessions.length > 0 && (
+        {/* Dedicated listbox for session options (always rendered when open) */}
+        <div
+          role="listbox"
+          id={listboxId}
+          aria-label="Select session to audit"
+          tabIndex={-1}
+        >
+          {/* Active Sessions Group */}
+          {filteredActiveSessions.length > 0 && (
+            <div role="group" aria-label={`Active Sessions (${filteredActiveSessions.length})`}>
               <div
-                role="group"
-                aria-label={`Closed Sessions (${filteredClosedSessions.length})`}
-                className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}
+                className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none"
+                aria-hidden="true"
               >
-                <div
-                  className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none"
-                  aria-hidden="true"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
-                  Closed Sessions ({filteredClosedSessions.length})
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-success" />
+                  Active Sessions ({filteredActiveSessions.length})
                 </div>
-                <div className="space-y-0.5">
-                  {filteredClosedSessions.map((s, idx) => {
-                    const isSelected = s.sessionId === selectedSessionId;
-                    const globalIndex = filteredActiveSessions.length + idx;
-                    const isOutsideHome =
-                      s.cwdState?.path &&
-                      s.cwdState.path !== "/" &&
-                      s.cwdState.path !== "/home" &&
-                      !s.cwdState.path.startsWith("/home/");
-
-                    return (
-                      <button
-                        key={s.sessionId}
-                        ref={registerOptionRef(globalIndex)}
-                        type="button"
-                        role="option"
-                        id={`${listboxId}-opt-${globalIndex}`}
-                        aria-selected={isSelected}
-                        onClick={() => handleSelect(s.sessionId, s)}
-                        onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                        className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
-                          isSelected
-                            ? "bg-primary-subtle text-primary border border-primary-border/50"
-                            : activeIndex === globalIndex
-                              ? "bg-surface-hover text-text border border-border/50"
-                              : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 truncate">
-                          <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50 shrink-0" />
-                          <strong className={isSelected ? "text-primary" : "text-text"}>
-                            {s.sourceIp}
-                          </strong>
-                          <span className="text-text-subtle">·</span>
-                          <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
-                          {s.cwdState?.path && (
-                            <span
-                              className={`truncate px-1.5 py-0.2 rounded text-xs border ${
-                                isOutsideHome
-                                  ? "bg-primary/10 text-primary border-primary/30 font-semibold"
-                                  : "bg-surface-subtle text-text-subtle border-border/50"
-                              }`}
-                            >
-                              {s.cwdState.path}
-                            </span>
-                          )}
-                          <span className="text-xs text-text-subtle font-sans px-1 rounded bg-surface-subtle border border-border shrink-0">
-                            Closed
-                          </span>
-                        </div>
-                        {isSelected && (
-                          <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+                {totalCount !== undefined && totalCount > allDisplaySessions.length && (
+                  <span className="text-xs font-mono text-primary/80 lowercase">
+                    filtered
+                  </span>
+                )}
               </div>
-            )}
-          </div>
-        )}
+              <div className="space-y-0.5">
+                {filteredActiveSessions.map((s, idx) => {
+                  const isSelected = s.sessionId === selectedSessionId;
+                  const globalIndex = idx;
+                  const isOutsideHome =
+                    s.cwdState?.path &&
+                    s.cwdState.path !== "/" &&
+                    s.cwdState.path !== "/home" &&
+                    !s.cwdState.path.startsWith("/home/");
+
+                  return (
+                    <button
+                      key={s.sessionId}
+                      ref={registerOptionRef(globalIndex)}
+                      type="button"
+                      role="option"
+                      id={`${listboxId}-opt-${globalIndex}`}
+                      aria-selected={isSelected}
+                      onClick={() => handleSelect(s.sessionId, s)}
+                      onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
+                      className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-primary-subtle text-primary border border-primary-border/50"
+                          : activeIndex === globalIndex
+                            ? "bg-surface-hover text-text border border-border/50"
+                            : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
+                        <strong className={isSelected ? "text-primary" : "text-text"}>
+                          {s.sourceIp}
+                        </strong>
+                        <span className="text-text-subtle">·</span>
+                        <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                        {s.cwdState?.path && (
+                          <span
+                            className={`truncate px-1.5 py-0.2 rounded text-xs border ${
+                              isOutsideHome
+                                ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                                : "bg-surface-subtle text-text-subtle border-border/50"
+                            }`}
+                          >
+                            {s.cwdState.path}
+                          </span>
+                        )}
+                      </div>
+                      {isSelected && (
+                        <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Closed Sessions Group */}
+          {filteredClosedSessions.length > 0 && (
+            <div
+              role="group"
+              aria-label={`Closed Sessions (${filteredClosedSessions.length})`}
+              className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}
+            >
+              <div
+                className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center gap-1.5 select-none"
+                aria-hidden="true"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
+                Closed Sessions ({filteredClosedSessions.length})
+              </div>
+              <div className="space-y-0.5">
+                {filteredClosedSessions.map((s, idx) => {
+                  const isSelected = s.sessionId === selectedSessionId;
+                  const globalIndex = filteredActiveSessions.length + idx;
+                  const isOutsideHome =
+                    s.cwdState?.path &&
+                    s.cwdState.path !== "/" &&
+                    s.cwdState.path !== "/home" &&
+                    !s.cwdState.path.startsWith("/home/");
+
+                  return (
+                    <button
+                      key={s.sessionId}
+                      ref={registerOptionRef(globalIndex)}
+                      type="button"
+                      role="option"
+                      id={`${listboxId}-opt-${globalIndex}`}
+                      aria-selected={isSelected}
+                      onClick={() => handleSelect(s.sessionId, s)}
+                      onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
+                      className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                        isSelected
+                          ? "bg-primary-subtle text-primary border border-primary-border/50"
+                          : activeIndex === globalIndex
+                            ? "bg-surface-hover text-text border border-border/50"
+                            : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                      }`}
+                    >
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
+                        <strong className={isSelected ? "text-primary" : "text-text"}>
+                          {s.sourceIp}
+                        </strong>
+                        <span className="text-text-subtle">·</span>
+                        <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                        {s.cwdState?.path && (
+                          <span
+                            className={`truncate px-1.5 py-0.2 rounded text-xs border ${
+                              isOutsideHome
+                                ? "bg-primary/10 text-primary border-primary/30 font-semibold"
+                                : "bg-surface-subtle text-text-subtle border-border/50"
+                            }`}
+                          >
+                            {s.cwdState.path}
+                          </span>
+                        )}
+                      </div>
+                      {isSelected && (
+                        <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Pagination / Remote Directory Retrieval (outside listbox) */}
         {(() => {
@@ -733,33 +623,33 @@ export function AuditSessionSelect({
           return null;
         })()}
 
-            {/* Empty State */}
-            {allDisplaySessions.length === 0 && (
-              <div className="px-3 py-4 text-center text-xs text-text-subtle font-mono">
-                {searchQuery ? (
-                  <div>No sessions match &ldquo;{searchQuery}&rdquo;</div>
-                ) : hasActiveFilters ? (
-                  <div className="space-y-2">
-                    <div>No sessions match current audit filters.</div>
-                    {onResetFilters && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onResetFilters();
-                          handleClearSearch();
-                        }}
-                        className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-subtle px-2 py-1 text-xs text-primary hover:bg-surface-hover hover:border-primary/40 transition-colors cursor-pointer"
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        Reset audit filters
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div>No sessions available for audit</div>
+        {/* Empty State (outside listbox) */}
+        {allDisplaySessions.length === 0 && (
+          <div className="px-3 py-4 text-center text-xs text-text-subtle font-mono">
+            {searchQuery ? (
+              <div>No sessions match &ldquo;{searchQuery}&rdquo;</div>
+            ) : hasActiveFilters ? (
+              <div className="space-y-2">
+                <div>No sessions match current audit filters.</div>
+                {onResetFilters && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onResetFilters();
+                      handleClearSearch();
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-subtle px-2 py-1 text-xs text-primary hover:bg-surface-hover hover:border-primary/40 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    Reset audit filters
+                  </button>
                 )}
               </div>
+            ) : (
+              <div>No sessions available for audit</div>
             )}
+          </div>
+        )}
       </ComboboxPopover>
     </div>
   );

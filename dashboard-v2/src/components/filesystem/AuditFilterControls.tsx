@@ -23,6 +23,7 @@ import {
   useComboboxNavigation,
 } from "./ComboboxPopover";
 
+import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
 
 export interface AuditFilterControlsProps {
@@ -71,19 +72,22 @@ export function AuditFilterControls({
     return distinctPaths.filter((item) => item.path.toLowerCase().includes(query));
   }, [distinctPaths, pathSearchQuery]);
 
-  const closeDropdown = useCallback(() => {
+  const closeDropdown = useCallback((reason: CloseReason = "escape") => {
     setPathDropdownOpen(false);
     setPathSearchQuery("");
+    if (reason !== "outside") {
+      pathTriggerRef.current?.focus();
+    }
   }, []);
 
   const handleSelectPath = useCallback(
     (path: string | null) => {
       onSelectTargetPath(path);
-      closeDropdown();
-      pathTriggerRef.current?.focus();
+      closeDropdown("select");
     },
     [onSelectTargetPath, closeDropdown],
   );
+
 
   type PathOptionItem = {
     type: "all" | "canvas" | "path";
@@ -137,10 +141,11 @@ export function AuditFilterControls({
     handleTriggerKeyDown,
     handleInputKeyDown,
     handleOptionKeyDown,
+    handleSearchInputFocus,
   } = useComboboxNavigation<PathOptionItem>({
     isOpen: pathDropdownOpen,
     onOpen: () => setPathDropdownOpen(true),
-    onClose: closeDropdown,
+    onClose: (reason) => closeDropdown(reason),
     items: pathItems,
     getLabel: (item) => item.label,
     onSelect: (item) => handleSelectPath(item.path),
@@ -151,12 +156,13 @@ export function AuditFilterControls({
 
   const handleToggleDropdown = useCallback(() => {
     if (pathDropdownOpen) {
-      closeDropdown();
+      closeDropdown("toggle");
     } else {
       openWithFocus("search");
       setPathDropdownOpen(true);
     }
   }, [pathDropdownOpen, closeDropdown, openWithFocus]);
+
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
@@ -271,9 +277,11 @@ export function AuditFilterControls({
             onChange={setPathSearchQuery}
             onClear={() => setPathSearchQuery("")}
             onKeyDown={handleInputKeyDown}
+            onFocus={handleSearchInputFocus}
             placeholder="Search directory path..."
             ariaControls={pathListboxId}
           />
+
 
           {/* Dedicated listbox for path options */}
           <div

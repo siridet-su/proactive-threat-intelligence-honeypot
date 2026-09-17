@@ -1460,8 +1460,11 @@ export {
 export {
   AuditSessionSearchManager,
   type AuditSessionSearchManagerOptions,
+  type AuditSessionSearchState,
   type CloseReason,
+  type StandaloneSearchScope,
 } from "./auditSessionSearchManager";
+
 
 export type ToolbarDomain =
   | "global-views"
