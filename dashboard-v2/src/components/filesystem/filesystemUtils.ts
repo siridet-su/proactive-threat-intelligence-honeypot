@@ -1457,6 +1457,12 @@ export {
   type RefreshStatus,
 } from "./filesystemRefreshManager";
 
+export {
+  AuditSessionSearchManager,
+  type AuditSessionSearchManagerOptions,
+  type CloseReason,
+} from "./auditSessionSearchManager";
+
 export type ToolbarDomain =
   | "global-views"
   | "canvas-navigation"

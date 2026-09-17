@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import {
   useCallback,
-  useEffect,
   useId,
   useMemo,
   useRef,
@@ -23,6 +22,7 @@ import {
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
+
 import type { DistinctPathOption } from "./filesystemUtils";
 
 export interface AuditFilterControlsProps {
@@ -58,8 +58,9 @@ export function AuditFilterControls({
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const generatedId = useId();
-  const pathMenuId = `audit-path-filter-menu-${generatedId}`;
   const pathTriggerId = `audit-path-filter-trigger-${generatedId}`;
+  const pathPopupId = `${pathTriggerId}-popup`;
+  const pathListboxId = `${pathTriggerId}-listbox`;
 
   const hasActiveFilters = hideHomeOnly || targetPath !== null;
 
@@ -132,25 +133,30 @@ export function AuditFilterControls({
   const {
     activeIndex,
     registerOptionRef,
+    openWithFocus,
     handleTriggerKeyDown,
     handleInputKeyDown,
     handleOptionKeyDown,
   } = useComboboxNavigation<PathOptionItem>({
+    isOpen: pathDropdownOpen,
+    onOpen: () => setPathDropdownOpen(true),
+    onClose: closeDropdown,
     items: pathItems,
     getLabel: (item) => item.label,
-    onClose: closeDropdown,
     onSelect: (item) => handleSelectPath(item.path),
     triggerRef: pathTriggerRef,
     searchInputRef,
     selectedIndex: selectedPathIndex,
   });
 
-  // Focus search input when dropdown opens
-  useEffect(() => {
-    if (!pathDropdownOpen) return;
-    const timer = setTimeout(() => searchInputRef.current?.focus(), 50);
-    return () => clearTimeout(timer);
-  }, [pathDropdownOpen]);
+  const handleToggleDropdown = useCallback(() => {
+    if (pathDropdownOpen) {
+      closeDropdown();
+    } else {
+      openWithFocus("search");
+      setPathDropdownOpen(true);
+    }
+  }, [pathDropdownOpen, closeDropdown, openWithFocus]);
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
@@ -201,8 +207,8 @@ export function AuditFilterControls({
             role="combobox"
             aria-haspopup="listbox"
             aria-expanded={pathDropdownOpen}
-            aria-controls={pathMenuId}
-            onClick={() => setPathDropdownOpen((prev) => !prev)}
+            aria-controls={pathListboxId}
+            onClick={handleToggleDropdown}
             onKeyDown={handleTriggerKeyDown}
             className={`h-9 min-h-9 max-w-[220px] sm:max-w-xs flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
               targetPath
@@ -250,7 +256,7 @@ export function AuditFilterControls({
 
         {/* Path Popover Menu */}
         <ComboboxPopover
-          id={pathMenuId}
+          id={pathPopupId}
           isOpen={pathDropdownOpen}
           onClose={closeDropdown}
           triggerRef={pathTriggerRef}
@@ -258,7 +264,7 @@ export function AuditFilterControls({
           totalCount={pathItems.length}
           className="min-w-[260px] sm:min-w-[320px] max-w-[90vw] sm:max-w-sm max-h-80 overflow-y-auto overscroll-contain"
         >
-          {/* Search Box */}
+          {/* Search Box (outside listbox) */}
           <ComboboxSearchInput
             inputRef={searchInputRef}
             value={pathSearchQuery}
@@ -266,122 +272,140 @@ export function AuditFilterControls({
             onClear={() => setPathSearchQuery("")}
             onKeyDown={handleInputKeyDown}
             placeholder="Search directory path..."
-            ariaControls={pathMenuId}
+            ariaControls={pathListboxId}
           />
 
-          {/* Quick option: All paths (reset) */}
-          <button
-            ref={registerOptionRef(0)}
-            type="button"
-            role="option"
-            id={`${pathMenuId}-opt-0`}
-            aria-selected={targetPath === null}
-            onClick={() => handleSelectPath(null)}
-            onKeyDown={(e) => handleOptionKeyDown(e, 0)}
-            className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
-              targetPath === null
-                ? "bg-primary-subtle text-primary border border-primary-border/50"
-                : activeIndex === 0
-                  ? "bg-surface-hover text-text border border-border/50"
-                  : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
-            }`}
+          {/* Dedicated listbox for path options */}
+          <div
+            role="listbox"
+            id={pathListboxId}
+            aria-label="Filter sessions by path"
+            tabIndex={-1}
           >
-            <div className="flex items-center gap-2">
-              <Folder className="h-3.5 w-3.5 text-text-subtle" />
-              <span className="font-sans font-medium">All paths</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-text-subtle">({totalCount} sessions)</span>
-              {targetPath === null && <Check className="h-3.5 w-3.5 text-primary" />}
-            </div>
-          </button>
-
-          {/* Quick shortcut if user clicked a node on canvas */}
-          {selectedCanvasPath &&
-            selectedCanvasPath !== "/" &&
-            selectedCanvasPath !== targetPath && (
-              <div className="mt-1 mb-1 px-1">
-                <button
-                  ref={registerOptionRef(1)}
-                  type="button"
-                  role="option"
-                  id={`${pathMenuId}-opt-1`}
-                  aria-selected={targetPath === selectedCanvasPath}
-                  onClick={() => handleSelectPath(selectedCanvasPath)}
-                  onKeyDown={(e) => handleOptionKeyDown(e, 1)}
-                  className={`w-full flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1.5 text-left text-xs font-mono text-primary hover:bg-primary/20 transition-colors cursor-pointer ${
-                    activeIndex === 1 ? "ring-2 ring-primary/40" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-1.5 truncate">
-                    <span className="text-xs font-sans font-semibold uppercase tracking-wider text-primary/80">
-                      Canvas Selection:
-                    </span>
-                    <strong className="truncate">{selectedCanvasPath}</strong>
-                  </div>
-                  <span className="text-xs underline font-sans shrink-0">Filter</span>
-                </button>
+            {/* Quick option: All paths (reset) */}
+            <button
+              ref={registerOptionRef(0)}
+              type="button"
+              role="option"
+              id={`${pathListboxId}-opt-0`}
+              aria-selected={targetPath === null}
+              onClick={() => handleSelectPath(null)}
+              onKeyDown={(e) => handleOptionKeyDown(e, 0)}
+              className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                targetPath === null
+                  ? "bg-primary-subtle text-primary border border-primary-border/50"
+                  : activeIndex === 0
+                    ? "bg-surface-hover text-text border border-border/50"
+                    : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <Folder className="h-3.5 w-3.5 text-text-subtle" />
+                <span className="font-sans font-medium">All paths</span>
               </div>
-            )}
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-text-subtle">({totalCount} sessions)</span>
+                {targetPath === null && <Check className="h-3.5 w-3.5 text-primary" />}
+              </div>
+            </button>
 
-          {/* Distinct Paths List */}
-          <div className="mt-1 pt-1 border-t border-border/60">
-            <div className="px-2 py-1 text-xs font-semibold text-text-subtle uppercase tracking-wider">
-              Observed Directories ({filteredPaths.length})
-            </div>
-            <div className="space-y-0.5">
-              {filteredPaths.map((item, idx) => {
-                const isSelected = targetPath === item.path;
-                const canvasOffset =
-                  selectedCanvasPath &&
-                  selectedCanvasPath !== "/" &&
-                  selectedCanvasPath !== targetPath
-                    ? 2
-                    : 1;
-                const globalIndex = canvasOffset + idx;
-                const isActive = activeIndex === globalIndex;
-
-                return (
+            {/* Quick shortcut if user clicked a node on canvas */}
+            {selectedCanvasPath &&
+              selectedCanvasPath !== "/" &&
+              selectedCanvasPath !== targetPath && (
+                <div className="mt-1 mb-1 px-1">
                   <button
-                    key={item.path}
-                    ref={registerOptionRef(globalIndex)}
+                    ref={registerOptionRef(1)}
                     type="button"
                     role="option"
-                    id={`${pathMenuId}-opt-${globalIndex}`}
-                    aria-selected={isSelected}
-                    onClick={() => handleSelectPath(item.path)}
-                    onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                    className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
-                      isSelected
-                        ? "bg-primary-subtle text-primary border border-primary-border/50"
-                        : isActive
-                          ? "bg-surface-hover text-text border border-border/50"
-                          : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                    id={`${pathListboxId}-opt-1`}
+                    aria-selected={targetPath === selectedCanvasPath}
+                    onClick={() => handleSelectPath(selectedCanvasPath)}
+                    onKeyDown={(e) => handleOptionKeyDown(e, 1)}
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/10 px-2 py-1.5 text-left text-xs font-mono text-primary hover:bg-primary/20 transition-colors cursor-pointer ${
+                      activeIndex === 1 ? "ring-2 ring-primary/40" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate">
-                      <Folder className={`h-3.5 w-3.5 shrink-0 ${isSelected ? "text-primary" : "text-text-subtle"}`} />
-                      <span className={`truncate ${isSelected ? "font-bold text-primary" : "text-text"}`}>
-                        {item.path}
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="text-xs font-sans font-semibold uppercase tracking-wider text-primary/80">
+                        Canvas Selection:
                       </span>
+                      <strong className="truncate">{selectedCanvasPath}</strong>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className="rounded bg-surface-subtle border border-border/60 px-1 py-0.2 text-xs text-text-subtle">
-                        {item.sessionCount} {item.sessionCount === 1 ? "session" : "sessions"}
-                      </span>
-                      {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
-                    </div>
+                    <span className="text-xs underline font-sans shrink-0">Filter</span>
                   </button>
-                );
-              })}
-
-              {filteredPaths.length === 0 && (
-                <div className="px-3 py-3 text-center text-xs text-text-subtle font-mono">
-                  No paths match &ldquo;{pathSearchQuery}&rdquo;
                 </div>
               )}
-            </div>
+
+            {/* Distinct Paths List Group */}
+            {filteredPaths.length > 0 && (
+              <div
+                role="group"
+                aria-label={`Observed Directories (${filteredPaths.length})`}
+                className="mt-1 pt-1 border-t border-border/60"
+              >
+                <div
+                  className="px-2 py-1 text-xs font-semibold text-text-subtle uppercase tracking-wider select-none"
+                  aria-hidden="true"
+                >
+                  Observed Directories ({filteredPaths.length})
+                </div>
+                <div className="space-y-0.5">
+                  {filteredPaths.map((item, idx) => {
+                    const isSelected = targetPath === item.path;
+                    const canvasOffset =
+                      selectedCanvasPath &&
+                      selectedCanvasPath !== "/" &&
+                      selectedCanvasPath !== targetPath
+                        ? 2
+                        : 1;
+                    const globalIndex = canvasOffset + idx;
+                    const isActive = activeIndex === globalIndex;
+
+                    return (
+                      <button
+                        key={item.path}
+                        ref={registerOptionRef(globalIndex)}
+                        type="button"
+                        role="option"
+                        id={`${pathListboxId}-opt-${globalIndex}`}
+                        aria-selected={isSelected}
+                        onClick={() => handleSelectPath(item.path)}
+                        onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
+                        className={`w-full flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                          isSelected
+                            ? "bg-primary-subtle text-primary border border-primary-border/50"
+                            : isActive
+                              ? "bg-surface-hover text-text border border-border/50"
+                              : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <Folder className={`h-3.5 w-3.5 shrink-0 ${isSelected ? "text-primary" : "text-text-subtle"}`} />
+                          <span className={`truncate ${isSelected ? "font-bold text-primary" : "text-text"}`}>
+                            {item.path}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="rounded bg-surface-subtle border border-border/60 px-1 py-0.2 text-xs text-text-subtle">
+                            {item.sessionCount} {item.sessionCount === 1 ? "session" : "sessions"}
+                          </span>
+                          {isSelected && <Check className="h-3.5 w-3.5 text-primary" />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* Empty state when 0 paths match (outside listbox) */}
+          {filteredPaths.length === 0 && (
+            <div className="px-3 py-3 text-center text-xs text-text-subtle font-mono">
+              No paths match &ldquo;{pathSearchQuery}&rdquo;
+            </div>
+          )}
         </ComboboxPopover>
       </div>
 
