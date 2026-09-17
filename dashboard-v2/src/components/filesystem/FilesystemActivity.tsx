@@ -188,7 +188,8 @@ export function FilesystemActivity() {
     regionStatus,
     streamState,
     isHydrated,
-    lastUpdateAgeMs,
+    telemetryAgeMs,
+    retrievalAgeMs,
     freshnessState,
     refresh,
     handleReconnect,
@@ -821,7 +822,12 @@ export function FilesystemActivity() {
               >
                 <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
                 <span>
-                  {freshnessState.label} · {formatUpdateAge(lastUpdateAgeMs)}
+                  {freshnessState.label}
+                  {freshnessState.telemetryAgeMs !== null && freshnessState.telemetryAgeMs !== undefined ? (
+                    <> · {formatUpdateAge(freshnessState.telemetryAgeMs)}</>
+                  ) : freshnessState.retrievalAgeMs !== undefined && freshnessState.label !== "Live · No activity" && freshnessState.label !== "Connecting" ? (
+                    <> · {formatUpdateAge(freshnessState.retrievalAgeMs)}</>
+                  ) : null}
                 </span>
               </span>
             )}
@@ -866,6 +872,9 @@ export function FilesystemActivity() {
               snapshot={snapshot}
               regionStatus={regionStatus}
               streamState={streamState}
+              freshnessState={freshnessState}
+              telemetryAgeMs={telemetryAgeMs}
+              retrievalAgeMs={retrievalAgeMs}
               selectedSessionId={selectedSessionId}
               selectedPath={selectedPath}
               onSelectSession={selectSession}
@@ -1171,6 +1180,9 @@ export function FilesystemActivity() {
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
                 streamState={streamState}
+                freshnessState={freshnessState}
+                telemetryAgeMs={telemetryAgeMs}
+                retrievalAgeMs={retrievalAgeMs}
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}
@@ -1497,6 +1509,9 @@ export function FilesystemActivity() {
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
                 streamState={streamState}
+                freshnessState={freshnessState}
+                telemetryAgeMs={telemetryAgeMs}
+                retrievalAgeMs={retrievalAgeMs}
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}

@@ -174,6 +174,11 @@ export interface FilesystemTopologySnapshot {
   /** True when a bounded live snapshot contains only the most recently observed sessions. */
   truncated: boolean;
   generatedAt: string;
+  /**
+   * Authoritative timestamp of the latest session observation or closure in this snapshot,
+   * or null if no session telemetry has been observed.
+   */
+  latestTelemetryAt?: string | null;
 }
 
 export interface SessionCwdHistoryEvent {

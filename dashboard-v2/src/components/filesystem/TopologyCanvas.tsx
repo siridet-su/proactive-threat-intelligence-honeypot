@@ -42,6 +42,7 @@ import {
   analyzeTopologyDensity,
   calloutsForGraph,
   compactDirectoryPath,
+  calculateTelemetryAge,
   DEFAULT_DENSITY_THRESHOLDS,
   DEFAULT_STALE_THRESHOLD_MS,
   directorySegment,
@@ -56,6 +57,7 @@ import {
   resolveCalloutPositions,
   sourceRailPositions,
   type ActiveHopRoute,
+  type FreshnessState,
   type GraphCallout,
   type GraphElementBounds,
   type LabelPosition,
@@ -91,6 +93,9 @@ interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
   streamState: StreamState;
+  freshnessState?: FreshnessState;
+  telemetryAgeMs?: number | null;
+  retrievalAgeMs?: number;
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
@@ -113,6 +118,9 @@ export function TopologyCanvas({
   snapshot,
   regionStatus,
   streamState,
+  freshnessState: propFreshnessState,
+  telemetryAgeMs: propTelemetryAgeMs,
+  retrievalAgeMs: propRetrievalAgeMs,
   selectedSessionId,
   selectedPath,
   activeHop,
@@ -144,27 +152,28 @@ export function TopologyCanvas({
     }
   }, [onToggleExpand]);
 
-  const [now, setNow] = useState(() => Date.now());
+  const [fallbackNow, setFallbackNow] = useState(() => Date.now());
   useEffect(() => {
+    if (propFreshnessState) return;
     const timer = window.setInterval(() => {
-      setNow(Date.now());
+      setFallbackNow(Date.now());
     }, 2_000);
     return () => window.clearInterval(timer);
-  }, []);
-
-  const lastUpdateAgeMs = snapshot?.generatedAt
-    ? Math.max(0, now - (Date.parse(snapshot.generatedAt) || 0))
-    : 0;
+  }, [propFreshnessState]);
 
   const freshnessState = useMemo(() => {
+    if (propFreshnessState) return propFreshnessState;
+    const telemetryAge = calculateTelemetryAge({ snapshot, now: fallbackNow });
     return getFreshnessState({
-      lastUpdateAgeMs,
+      telemetryAgeMs: propTelemetryAgeMs !== undefined ? propTelemetryAgeMs : telemetryAge.telemetryAgeMs,
+      retrievalAgeMs: propRetrievalAgeMs !== undefined ? propRetrievalAgeMs : telemetryAge.retrievalAgeMs,
+      hasTelemetry: telemetryAge.hasTelemetry,
       staleThresholdMs,
       streamState,
       regionStatus,
-      hasSnapshot: Boolean(snapshot && snapshot.nodes.length > 0),
+      hasSnapshot: Boolean(snapshot),
     });
-  }, [lastUpdateAgeMs, regionStatus, snapshot, staleThresholdMs, streamState]);
+  }, [propFreshnessState, propTelemetryAgeMs, propRetrievalAgeMs, snapshot, fallbackNow, staleThresholdMs, streamState, regionStatus]);
 
   // Scope layout persistence so audit session inspection never overrides live global topology
   const { labelStorageKey, nodeStorageKey } = useMemo(
@@ -1036,7 +1045,7 @@ export function TopologyCanvas({
                       <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
                       <span>
                         <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot from{" "}
-                        {formatUpdateAge(lastUpdateAgeMs)}.
+                        {formatUpdateAge(freshnessState.retrievalAgeMs ?? 0)}.
                       </span>
                       <span className="hidden sm:inline text-text-subtle text-[11px]">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
@@ -1755,11 +1764,15 @@ export function TopologyCanvas({
                   >
                     {freshnessState.isStale ? (
                       <span className="font-medium text-warning">
-                        Stale ({formatUpdateAge(lastUpdateAgeMs)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                        Stale ({formatUpdateAge(freshnessState.telemetryAgeMs ?? freshnessState.retrievalAgeMs ?? 0)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                      </span>
+                    ) : freshnessState.label === "Live · No activity" ? (
+                      <span>
+                        Live (no activity) · Snapshot {formatTimestamp(snapshot.generatedAt)}
                       </span>
                     ) : (
                       <span>
-                        Updated {formatUpdateAge(lastUpdateAgeMs)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                        Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? freshnessState.retrievalAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
                       </span>
                     )}
                   </span>

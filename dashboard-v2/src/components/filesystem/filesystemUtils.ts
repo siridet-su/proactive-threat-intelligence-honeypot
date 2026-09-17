@@ -64,7 +64,8 @@ export function isSnapshot(value: unknown): value is FilesystemTopologySnapshot 
   };
   return Array.isArray(candidate.nodes) && Array.isArray(candidate.sessions) && candidate.sessions.every(hasAuditSummary) &&
     Array.isArray(candidate.recentClosedSessions) && candidate.recentClosedSessions.every(hasAuditSummary) &&
-    typeof candidate.truncated === "boolean" && typeof candidate.generatedAt === "string";
+    typeof candidate.truncated === "boolean" && typeof candidate.generatedAt === "string" &&
+    (candidate.latestTelemetryAt === undefined || candidate.latestTelemetryAt === null || typeof candidate.latestTelemetryAt === "string");
 }
 
 export function isHistoryPage(value: unknown): value is SessionCwdHistoryPage {
@@ -1430,6 +1431,109 @@ export function formatUpdateAge(ageMs: number): string {
   return `${Math.floor(ageMs / 3_600_000)}h ago`;
 }
 
+/**
+ * Pure extraction function that derives the latest authoritative telemetry timestamp
+ * from a snapshot's active and recent closed sessions.
+ *
+ * Contributing fields:
+ * - active session `cwdState.observedAt`
+ * - retained/recent session `cwdState.observedAt`
+ * - `lifecycle.closedAt` where it represents newer authoritative session telemetry
+ *
+ * NOTE: Server snapshot-build time (`generatedAt`) is deliberately NOT counted as telemetry.
+ */
+export function deriveLatestTelemetryAt(snapshot: {
+  sessions?: Array<{ cwdState?: { observedAt?: string | null } | null }> | null;
+  recentClosedSessions?: Array<{
+    cwdState?: { observedAt?: string | null } | null;
+    lifecycle?: { closedAt?: string | null } | null;
+  }> | null;
+} | null | undefined): string | null {
+  if (!snapshot) return null;
+  let maxMs = -Infinity;
+  let latestIso: string | null = null;
+
+  const consider = (iso: string | null | undefined) => {
+    if (typeof iso !== "string" || !iso.trim()) return;
+    const ms = Date.parse(iso);
+    if (!Number.isNaN(ms) && ms > maxMs) {
+      maxMs = ms;
+      latestIso = iso;
+    }
+  };
+
+  if (Array.isArray(snapshot.sessions)) {
+    for (const session of snapshot.sessions) {
+      consider(session?.cwdState?.observedAt);
+    }
+  }
+
+  if (Array.isArray(snapshot.recentClosedSessions)) {
+    for (const session of snapshot.recentClosedSessions) {
+      consider(session?.cwdState?.observedAt);
+      consider(session?.lifecycle?.closedAt);
+    }
+  }
+
+  return latestIso;
+}
+
+export interface TelemetryAgeMetrics {
+  telemetryAt: string | null;
+  telemetryAgeMs: number | null;
+  retrievalAgeMs: number;
+  hasTelemetry: boolean;
+}
+
+/**
+ * Calculates separate telemetry and retrieval age metrics for a topology snapshot,
+ * safely clamping against client clock skew.
+ */
+export function calculateTelemetryAge(params: {
+  snapshot: FilesystemTopologySnapshot | null | undefined;
+  now?: number;
+}): TelemetryAgeMetrics {
+  const { snapshot, now = Date.now() } = params;
+  if (!snapshot) {
+    return {
+      telemetryAt: null,
+      telemetryAgeMs: null,
+      retrievalAgeMs: 0,
+      hasTelemetry: false,
+    };
+  }
+
+  const retrievalMs = Date.parse(snapshot.generatedAt);
+  const retrievalAgeMs = Number.isNaN(retrievalMs)
+    ? 0
+    : Math.max(0, now - Math.min(retrievalMs, now));
+
+  const telemetryAt = snapshot.latestTelemetryAt !== undefined
+    ? snapshot.latestTelemetryAt
+    : deriveLatestTelemetryAt(snapshot);
+
+  const hasSessions = Boolean(
+    (snapshot.sessions && snapshot.sessions.length > 0) ||
+    (snapshot.recentClosedSessions && snapshot.recentClosedSessions.length > 0),
+  );
+
+  let telemetryAgeMs: number | null = null;
+  if (typeof telemetryAt === "string" && telemetryAt.trim()) {
+    const parsed = Date.parse(telemetryAt);
+    if (!Number.isNaN(parsed)) {
+      const clamped = Math.min(parsed, now);
+      telemetryAgeMs = Math.max(0, now - clamped);
+    }
+  }
+
+  return {
+    telemetryAt,
+    telemetryAgeMs,
+    retrievalAgeMs,
+    hasTelemetry: hasSessions,
+  };
+}
+
 export type FreshnessClassification = "fresh" | "stale" | "degraded" | "offline";
 
 export interface FreshnessState {
@@ -1440,15 +1544,35 @@ export interface FreshnessState {
   dotClass: string;
   isDegraded: boolean;
   isStale: boolean;
+  telemetryAgeMs?: number | null;
+  retrievalAgeMs?: number;
 }
 
-export function getFreshnessState(params: {
-  lastUpdateAgeMs: number;
+export interface FreshnessStateParams {
+  /**
+   * Age in milliseconds since the latest authoritative telemetry observation (or null if no telemetry).
+   */
+  telemetryAgeMs?: number | null;
+  /**
+   * Age in milliseconds since snapshot generation / retrieval.
+   */
+  retrievalAgeMs?: number;
+  /**
+   * Legacy alias for retrieval/telemetry age during migration.
+   */
+  lastUpdateAgeMs?: number;
+  /**
+   * True if the snapshot contains active or recent closed sessions.
+   * If not provided, inferred from telemetryAgeMs !== undefined && telemetryAgeMs !== null.
+   */
+  hasTelemetry?: boolean;
   staleThresholdMs?: number;
   streamState: StreamState;
   regionStatus: RegionStatus;
   hasSnapshot: boolean;
-}): FreshnessState {
+}
+
+export function getFreshnessState(params: FreshnessStateParams): FreshnessState {
   const {
     lastUpdateAgeMs,
     staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
@@ -1456,6 +1580,22 @@ export function getFreshnessState(params: {
     regionStatus,
     hasSnapshot,
   } = params;
+
+  // Resolve retrieval age: explicit retrievalAgeMs -> fallback lastUpdateAgeMs -> 0
+  const effectiveRetrievalAgeMs = Math.max(0, params.retrievalAgeMs ?? lastUpdateAgeMs ?? 0);
+
+  // Resolve telemetry existence: explicit hasTelemetry -> inferred from telemetryAgeMs or lastUpdateAgeMs
+  const hasTelemetry = params.hasTelemetry !== undefined
+    ? params.hasTelemetry
+    : (params.telemetryAgeMs !== undefined ? params.telemetryAgeMs !== null : lastUpdateAgeMs !== undefined);
+
+  // Resolve telemetry age: explicit telemetryAgeMs -> fallback lastUpdateAgeMs (if hasTelemetry) -> null
+  const rawTelemetryAgeMs = params.telemetryAgeMs !== undefined
+    ? params.telemetryAgeMs
+    : (hasTelemetry && lastUpdateAgeMs !== undefined ? lastUpdateAgeMs : null);
+  const effectiveTelemetryAgeMs = rawTelemetryAgeMs !== null && !Number.isNaN(rawTelemetryAgeMs)
+    ? Math.max(0, rawTelemetryAgeMs)
+    : null;
 
   if (!hasSnapshot) {
     if (regionStatus === "loading" || streamState === "connecting") {
@@ -1467,6 +1607,8 @@ export function getFreshnessState(params: {
         dotClass: "bg-text-subtle animate-pulse",
         isDegraded: false,
         isStale: false,
+        telemetryAgeMs: effectiveTelemetryAgeMs,
+        retrievalAgeMs: effectiveRetrievalAgeMs,
       };
     }
     return {
@@ -1477,44 +1619,86 @@ export function getFreshnessState(params: {
       dotClass: "bg-danger",
       isDegraded: true,
       isStale: true,
+      telemetryAgeMs: effectiveTelemetryAgeMs,
+      retrievalAgeMs: effectiveRetrievalAgeMs,
     };
   }
 
-  const isTransportLive = streamState === "live";
-  const isTimeStale = lastUpdateAgeMs > staleThresholdMs;
+  const isTransportLive = streamState === "live" && regionStatus !== "error" && regionStatus !== "stale";
 
-  if (!isTransportLive || regionStatus === "stale" || regionStatus === "error") {
+  // Retained snapshot with degraded transport or error
+  if (!isTransportLive) {
+    const isStale = effectiveTelemetryAgeMs !== null ? effectiveTelemetryAgeMs > staleThresholdMs : hasTelemetry;
     return {
       classification: "degraded",
       label: "Degraded",
-      detail: `Reconnecting transport — displaying retained snapshot from ${formatUpdateAge(lastUpdateAgeMs)}.`,
+      detail: `Reconnecting transport — displaying retained snapshot from ${formatUpdateAge(effectiveRetrievalAgeMs)}.`,
       badgeClass: "border-warning-border bg-warning-subtle text-warning",
       dotClass: "bg-warning animate-pulse",
       isDegraded: true,
-      isStale: isTimeStale,
+      isStale,
+      telemetryAgeMs: effectiveTelemetryAgeMs,
+      retrievalAgeMs: effectiveRetrievalAgeMs,
     };
   }
 
-  if (isTimeStale) {
+  // Transport is live:
+  // Case 1: Valid empty snapshot (no telemetry/sessions recorded)
+  if (!hasTelemetry) {
+    return {
+      classification: "fresh",
+      label: "Live · No activity",
+      detail: "Live stream active · no session activity recorded.",
+      badgeClass: "border-border bg-surface-subtle text-text-muted",
+      dotClass: "bg-success",
+      isDegraded: false,
+      isStale: false,
+      telemetryAgeMs: null,
+      retrievalAgeMs: effectiveRetrievalAgeMs,
+    };
+  }
+
+  // Case 2: Sessions exist, but telemetry timestamp is unavailable or invalid
+  if (effectiveTelemetryAgeMs === null) {
     return {
       classification: "stale",
       label: "Stale",
-      detail: `Connected, but no new telemetry for ${formatUpdateAge(lastUpdateAgeMs)} (threshold: ${Math.round(staleThresholdMs / 1000)}s).`,
+      detail: "Connected, but telemetry timestamps are unavailable or invalid.",
       badgeClass: "border-warning-border bg-warning-subtle text-warning",
       dotClass: "bg-warning",
       isDegraded: false,
       isStale: true,
+      telemetryAgeMs: null,
+      retrievalAgeMs: effectiveRetrievalAgeMs,
     };
   }
 
+  // Case 3: Telemetry age exceeds stale threshold
+  if (effectiveTelemetryAgeMs > staleThresholdMs) {
+    return {
+      classification: "stale",
+      label: "Stale",
+      detail: `Connected, but no new telemetry for ${formatUpdateAge(effectiveTelemetryAgeMs)} (threshold: ${Math.round(staleThresholdMs / 1000)}s).`,
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning",
+      isDegraded: false,
+      isStale: true,
+      telemetryAgeMs: effectiveTelemetryAgeMs,
+      retrievalAgeMs: effectiveRetrievalAgeMs,
+    };
+  }
+
+  // Case 4: Live transport with fresh telemetry
   return {
     classification: "fresh",
     label: "Live & Fresh",
-    detail: `Live stream active · updated ${formatUpdateAge(lastUpdateAgeMs)}.`,
+    detail: `Live stream active · telemetry observed ${formatUpdateAge(effectiveTelemetryAgeMs)}.`,
     badgeClass: "border-success-border bg-success-subtle text-success",
     dotClass: "bg-success",
     isDegraded: false,
     isStale: false,
+    telemetryAgeMs: effectiveTelemetryAgeMs,
+    retrievalAgeMs: effectiveRetrievalAgeMs,
   };
 }
 

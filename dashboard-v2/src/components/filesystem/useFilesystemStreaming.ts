@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import {
+  calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   getFreshnessState,
   isSnapshot,
@@ -26,6 +27,9 @@ export interface UseFilesystemStreamingReturn {
   isHydrated: boolean;
   setIsHydrated: React.Dispatch<React.SetStateAction<boolean>>;
   lastUpdateAgeMs: number;
+  telemetryAgeMs: number | null;
+  retrievalAgeMs: number;
+  latestTelemetryAt: string | null;
   freshnessState: FreshnessState;
   refresh: () => Promise<void>;
   handleReconnect: () => void;
@@ -86,19 +90,26 @@ export function useFilesystemStreaming(
     return () => window.clearInterval(timer);
   }, []);
 
-  const lastUpdateAgeMs = snapshot?.generatedAt
-    ? Math.max(0, now - (Date.parse(snapshot.generatedAt) || 0))
-    : 0;
+  const {
+    telemetryAt,
+    telemetryAgeMs,
+    retrievalAgeMs,
+    hasTelemetry,
+  } = useMemo(() => {
+    return calculateTelemetryAge({ snapshot, now });
+  }, [snapshot, now]);
 
   const freshnessState = useMemo(() => {
     return getFreshnessState({
-      lastUpdateAgeMs,
+      telemetryAgeMs,
+      retrievalAgeMs,
+      hasTelemetry,
       staleThresholdMs: DEFAULT_STALE_THRESHOLD_MS,
       streamState,
       regionStatus,
-      hasSnapshot: Boolean(snapshot && snapshot.nodes.length > 0),
+      hasSnapshot: Boolean(snapshot),
     });
-  }, [lastUpdateAgeMs, regionStatus, snapshot, streamState]);
+  }, [telemetryAgeMs, retrievalAgeMs, hasTelemetry, streamState, regionStatus, snapshot]);
 
   // SSE Stream subscription with HTTP fallback
   useEffect(() => {
@@ -181,7 +192,10 @@ export function useFilesystemStreaming(
     setStreamState,
     isHydrated,
     setIsHydrated,
-    lastUpdateAgeMs,
+    lastUpdateAgeMs: telemetryAgeMs ?? retrievalAgeMs,
+    telemetryAgeMs,
+    retrievalAgeMs,
+    latestTelemetryAt: telemetryAt,
     freshnessState,
     refresh,
     handleReconnect,

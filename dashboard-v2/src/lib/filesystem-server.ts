@@ -25,6 +25,7 @@ import {
   normalizeHistoryEvent,
   normalizeSessionAuditSummary,
 } from "@/lib/filesystem-data";
+import { deriveLatestTelemetryAt } from "@/components/filesystem/filesystemUtils";
 import { getMongoClient } from "@/lib/mongodb";
 
 // CWD is operational Cowrie telemetry. It intentionally remains outside the
@@ -252,12 +253,15 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
     }
   }
 
+  const latestTelemetryAt = deriveLatestTelemetryAt({ sessions, recentClosedSessions });
+
   return {
     nodes: [...nodes.values()].sort((left, right) => left.path.localeCompare(right.path)),
     sessions,
     recentClosedSessions,
     truncated,
     generatedAt: new Date().toISOString(),
+    latestTelemetryAt,
   };
 }
 
