@@ -92,6 +92,7 @@ export function calculateNextHistoryEventId(
 export interface UseAuditReplayOptions {
   viewMode: "live" | "audit";
   history: SessionCwdHistoryEvent[];
+  anchoredHop?: SessionCwdHistoryEvent | null;
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
   showFailedAttempts: boolean;
@@ -114,6 +115,7 @@ export interface UseAuditReplayReturn {
   activeHop: ActiveHopRoute | null;
   hopTimeMetrics: HopTimeMetrics[];
   sessionTimeSummary: SessionReplayTimeSummary;
+  isAnchoredSelected: boolean;
   handlePrevHop: () => void;
   handleNextHop: () => void;
   handleTogglePlay: () => void;
@@ -126,6 +128,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   const {
     viewMode,
     history,
+    anchoredHop,
     historyTotalItems,
     historyTotalSuccessfulItems,
     showFailedAttempts,
@@ -145,13 +148,27 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     [chronologicalHistory, showFailedAttempts],
   );
 
+  const isAnchoredSelected = useMemo(() => {
+    return Boolean(
+      anchoredHop &&
+      selectedHistoryEventId === anchoredHop.id &&
+      !displayedHistory.some((event) => event.id === anchoredHop.id),
+    );
+  }, [anchoredHop, displayedHistory, selectedHistoryEventId]);
+
   const selectedHistoryIndex = useMemo(() => {
+    if (isAnchoredSelected) return -1;
     if (!displayedHistory.length) return -1;
     if (selectedHistoryEventId === null) return displayedHistory.length - 1;
     return displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
-  }, [displayedHistory, selectedHistoryEventId]);
+  }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
 
-  const currentEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
+  const currentEvent = isAnchoredSelected
+    ? anchoredHop
+    : selectedHistoryIndex >= 0
+      ? displayedHistory[selectedHistoryIndex]
+      : null;
+
   const explicitHopNumber = showFailedAttempts
     ? currentEvent?.hopNumber
     : currentEvent?.successfulHopNumber ?? currentEvent?.hopNumber;
@@ -174,34 +191,94 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     ],
   );
 
-  const activeHop: ActiveHopRoute | null = useMemo(
-    () => deriveActiveHopRoute(displayedHistory, selectedHistoryIndex, displayedHistoryMetrics),
-    [displayedHistory, displayedHistoryMetrics, selectedHistoryIndex],
-  );
+  const activeHop: ActiveHopRoute | null = useMemo(() => {
+    if (isAnchoredSelected && anchoredHop) {
+      const isFailed = anchoredHop.action === "failed_change";
+      const hopNum = explicitHopNumber ?? 1;
+      return {
+        eventId: anchoredHop.id,
+        fromPath: anchoredHop.fromPath,
+        toPath: isFailed ? anchoredHop.fromPath : anchoredHop.toPath,
+        action: anchoredHop.action,
+        status: anchoredHop.status,
+        at: anchoredHop.at,
+        stepIndex: hopNum - 1,
+        totalSteps: displayedHistoryMetrics.totalItems,
+        visitedPaths: anchoredHop.toPath ? [anchoredHop.toPath] : [],
+        visitedStepMap: anchoredHop.toPath ? { [anchoredHop.toPath]: hopNum } : {},
+        isFailedAttempt: isFailed,
+      };
+    }
+    return deriveActiveHopRoute(displayedHistory, selectedHistoryIndex, displayedHistoryMetrics);
+  }, [
+    anchoredHop,
+    displayedHistory,
+    displayedHistoryMetrics,
+    explicitHopNumber,
+    isAnchoredSelected,
+    selectedHistoryIndex,
+  ]);
 
-  const timeMetrics = useMemo(
-    () => calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex),
-    [displayedHistory, selectedHistoryIndex],
-  );
+  const timeMetrics = useMemo(() => {
+    if (isAnchoredSelected && anchoredHop) {
+      const hopNum = explicitHopNumber ?? 1;
+      const progressPercent =
+        displayedHistoryMetrics.totalItems > 0
+          ? Math.min(100, Math.max(0, (hopNum / displayedHistoryMetrics.totalItems) * 100))
+          : 0;
+      return {
+        hopMetrics: [],
+        summary: {
+          totalDurationMs: 0,
+          formattedTotalDuration: "Partial",
+          currentElapsedMs: 0,
+          formattedCurrentElapsed: "+00:00",
+          currentDeltaMs: 0,
+          formattedCurrentDelta: "Gap",
+          timeProgressPercent: progressPercent,
+        },
+      };
+    }
+    return calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex);
+  }, [
+    anchoredHop,
+    displayedHistory,
+    displayedHistoryMetrics.totalItems,
+    explicitHopNumber,
+    isAnchoredSelected,
+    selectedHistoryIndex,
+  ]);
 
   const handlePrevHop = useCallback(() => {
     setIsPlaying(false);
+    if (isAnchoredSelected) {
+      // Cannot cross unloaded gap into unknown earlier events
+      return;
+    }
     const nextId = calculateNextHistoryEventId(displayedHistory, selectedHistoryIndex, "prev");
     if (nextId) onSelectHistoryEventId(nextId);
-  }, [displayedHistory, onSelectHistoryEventId, selectedHistoryIndex]);
+  }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleNextHop = useCallback(() => {
     setIsPlaying(false);
+    if (isAnchoredSelected) {
+      // Cannot cross unloaded gap into unknown later events
+      return;
+    }
     const nextId = calculateNextHistoryEventId(displayedHistory, selectedHistoryIndex, "next");
     if (nextId) onSelectHistoryEventId(nextId);
-  }, [displayedHistory, onSelectHistoryEventId, selectedHistoryIndex]);
+  }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
+    if (isAnchoredSelected) {
+      // Cannot auto-play across an unloaded gap
+      return;
+    }
     if (selectedHistoryIndex >= displayedHistory.length - 1) {
       onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
     }
     setIsPlaying((prev) => !prev);
-  }, [displayedHistory, onSelectHistoryEventId, selectedHistoryIndex]);
+  }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handlePause = useCallback(() => {
     setIsPlaying(false);
@@ -217,7 +294,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   // Synchronized auto-play timer for audit mode with dynamic pacing support
   useEffect(() => {
-    if (viewMode !== "audit" || !isPlaying) return;
+    if (viewMode !== "audit" || !isPlaying || isAnchoredSelected) return;
 
     if (selectedHistoryIndex >= displayedHistory.length - 1) {
       return;
@@ -241,6 +318,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   }, [
     viewMode,
     isPlaying,
+    isAnchoredSelected,
     selectedHistoryIndex,
     displayedHistory,
     playbackSpeed,
@@ -263,6 +341,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     activeHop,
     hopTimeMetrics: timeMetrics.hopMetrics,
     sessionTimeSummary: timeMetrics.summary,
+    isAnchoredSelected,
     handlePrevHop,
     handleNextHop,
     handleTogglePlay,

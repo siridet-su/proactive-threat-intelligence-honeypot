@@ -19,7 +19,7 @@ export interface UseFilesystemUrlStateOptions {
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
   selectedSessionId: string | null;
   selectedSessionIdRef: React.MutableRefObject<string | null>;
-  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => void;
+  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
   lookupRemoteAuditSession: (targetId: string) => Promise<void>;
   setSelectedSessionId?: (id: string | null) => void;
   onExitFullscreenAndPlaying?: () => void;
@@ -147,7 +147,7 @@ export function useFilesystemUrlState(
             }
           } else {
             setExpiredSessionId(null);
-            if (resolution.sessionId) selectSession(resolution.sessionId);
+            if (resolution.sessionId) selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
           }
         } else {
           selectedSessionIdRef.current = parsed.sessionId;

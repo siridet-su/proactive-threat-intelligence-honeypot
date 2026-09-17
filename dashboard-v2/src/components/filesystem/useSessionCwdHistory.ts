@@ -6,7 +6,6 @@ import type { RegionStatus } from "@/components/ui/RegionState";
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import { isHistoryPage } from "./filesystemUtils";
 import {
-  mergeResolvedHistoryEvent,
   SessionHopLifecycleManager,
   type HopResolutionStatus,
   type SessionCwdHopPayload,
@@ -24,6 +23,7 @@ export interface UseSessionCwdHistoryOptions {
 export interface UseSessionCwdHistoryReturn {
   history: SessionCwdHistoryEvent[];
   setHistory: React.Dispatch<React.SetStateAction<SessionCwdHistoryEvent[]>>;
+  anchoredHop: SessionCwdHistoryEvent | null;
   historyCursor: string | null;
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
@@ -43,6 +43,7 @@ export function useSessionCwdHistory(
   const { requestedHopRef, onSelectHistoryEventId, viewMode = "live", fetchHop } = options;
 
   const [history, setHistory] = useState<SessionCwdHistoryEvent[]>([]);
+  const [anchoredHop, setAnchoredHop] = useState<SessionCwdHistoryEvent | null>(null);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [historyTotalItems, setHistoryTotalItems] = useState(0);
   const [historyTotalSuccessfulItems, setHistoryTotalSuccessfulItems] = useState(0);
@@ -79,6 +80,7 @@ export function useSessionCwdHistory(
     lastHistorySessionId.current = null;
     hopManagerRef.current?.destroy();
     setHistory([]);
+    setAnchoredHop(null);
     setHistoryCursor(null);
     setHistoryTotalItems(0);
     setHistoryTotalSuccessfulItems(0);
@@ -93,6 +95,7 @@ export function useSessionCwdHistory(
       requestedHopRef.current = null;
     }
     setRequestedHop(null);
+    setAnchoredHop(null);
     hopManagerRef.current?.destroy();
     setHopResolutionStatus("idle");
     onSelectHistoryEventId?.(null);
@@ -103,6 +106,7 @@ export function useSessionCwdHistory(
       requestedHopRef.current = null;
     }
     setRequestedHop(null);
+    setAnchoredHop(null);
     hopManagerRef.current?.destroy();
     setHopResolutionStatus("idle");
     const latestId = history[0]?.id ?? null;
@@ -122,6 +126,7 @@ export function useSessionCwdHistory(
 
       if (!append && isNewSession) {
         setHistory([]);
+        setAnchoredHop(null);
         setHistoryCursor(null);
         setHistoryTotalItems(0);
         setHistoryTotalSuccessfulItems(0);
@@ -161,11 +166,27 @@ export function useSessionCwdHistory(
         setHistoryComplete(data.complete);
         setHistoryStatus("ready");
 
+        if (append) {
+          // If earlier pages now include the anchored target, reconcile it
+          setAnchoredHop((prev) => {
+            if (!prev) return null;
+            if (data.items.some((item) => item.id === prev.id)) {
+              return null;
+            }
+            return prev;
+          });
+        }
+
         if (!append && currentHop) {
           setRequestedHop(currentHop);
           if (data.items.some((item) => item.id === currentHop)) {
-            // Found on page one
+            // Found on page one: clear one-shot request intent
             setHopResolutionStatus("resolved");
+            if (requestedHopRef) {
+              requestedHopRef.current = null;
+            }
+            setRequestedHop(null);
+            setAnchoredHop(null);
             onSelectHistoryEventId?.(currentHop);
           } else {
             // Older hop: trigger authoritative direct lookup
@@ -180,7 +201,13 @@ export function useSessionCwdHistory(
                 setHopResolutionStatus(status);
               },
               onResolved: (event) => {
-                setHistory((current) => mergeResolvedHistoryEvent(current, event));
+                // Resolved: clear one-shot request intent while keeping selection
+                if (requestedHopRef) {
+                  requestedHopRef.current = null;
+                }
+                setRequestedHop(null);
+                setHopResolutionStatus("resolved");
+                setAnchoredHop(event);
                 onSelectHistoryEventId?.(event.id);
               },
             });
@@ -197,6 +224,7 @@ export function useSessionCwdHistory(
   return {
     history,
     setHistory,
+    anchoredHop: viewMode === "audit" ? anchoredHop : null,
     historyCursor,
     historyTotalItems,
     historyTotalSuccessfulItems,

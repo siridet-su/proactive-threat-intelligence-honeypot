@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlertCircle,
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
@@ -56,6 +57,7 @@ const SIDEBAR_CONTENT_VARIANTS = {
 interface CwdRouteHistoryProps {
   selectedSession: FilesystemTopologySession | null;
   history: SessionCwdHistoryEvent[];
+  anchoredHop?: SessionCwdHistoryEvent | null;
   historyStatus: RegionStatus;
   historyCursor: string | null;
   historyTotalItems: number;
@@ -84,6 +86,7 @@ interface CwdRouteHistoryProps {
 export function CwdRouteHistory({
   selectedSession,
   history,
+  anchoredHop = null,
   historyStatus,
   historyCursor,
   historyTotalItems,
@@ -147,27 +150,63 @@ export function CwdRouteHistory({
     return chronologicalHistory.filter((e) => e.action !== "failed_change");
   }, [chronologicalHistory, showFailedAttempts]);
 
+  const isAnchoredSelected = Boolean(
+    anchoredHop &&
+    selectedHistoryEventId === anchoredHop.id &&
+    !displayedHistory.some((event) => event.id === anchoredHop.id),
+  );
+
   const selectedHistoryIndex = useMemo(() => {
+    if (isAnchoredSelected) return -1;
     if (!displayedHistory.length) return -1;
+    if (selectedHistoryEventId === null) return displayedHistory.length - 1;
     const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
     return index >= 0 ? index : displayedHistory.length - 1;
-  }, [displayedHistory, selectedHistoryEventId]);
+  }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
+
+  const selectedHistoryEvent = isAnchoredSelected
+    ? anchoredHop
+    : selectedHistoryIndex >= 0
+      ? displayedHistory[selectedHistoryIndex]
+      : null;
+
+  const explicitHopNumber = showFailedAttempts
+    ? selectedHistoryEvent?.hopNumber
+    : (selectedHistoryEvent?.successfulHopNumber ?? selectedHistoryEvent?.hopNumber);
 
   const displayedHistoryMetrics = useMemo(
     () => getHistoryWindowMetrics(
       displayedHistory.length,
       showFailedAttempts ? historyTotalItems : historyTotalSuccessfulItems,
       selectedHistoryIndex,
+      explicitHopNumber,
     ),
-    [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts],
+    [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts, explicitHopNumber],
   );
 
-  const timeMetrics = useMemo(
-    () => calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex),
-    [displayedHistory, selectedHistoryIndex],
-  );
+  const timeMetrics = useMemo(() => {
+    if (isAnchoredSelected && anchoredHop) {
+      const hopNum = explicitHopNumber ?? 1;
+      const progressPercent =
+        displayedHistoryMetrics.totalItems > 0
+          ? Math.min(100, Math.max(0, (hopNum / displayedHistoryMetrics.totalItems) * 100))
+          : 0;
+      return {
+        hopMetrics: [],
+        summary: {
+          totalDurationMs: 0,
+          formattedTotalDuration: "Partial",
+          currentElapsedMs: 0,
+          formattedCurrentElapsed: "+00:00",
+          currentDeltaMs: 0,
+          formattedCurrentDelta: "Gap",
+          timeProgressPercent: progressPercent,
+        },
+      };
+    }
+    return calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex);
+  }, [displayedHistory, selectedHistoryIndex, isAnchoredSelected, anchoredHop, explicitHopNumber, displayedHistoryMetrics.totalItems]);
 
-  const selectedHistoryEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
 
@@ -439,140 +478,164 @@ export function CwdRouteHistory({
               </div>
             )}
                 </div>
-              ) : historyStatus === "error" && !history.length ? (
-                <RegionState
-                  kind="error"
-                  title="Session history unavailable"
-                  description="Route Replay is unavailable, but Command data and Response remain independent."
-                />
-              ) : historyStatus === "loading" && !history.length ? (
-                <RegionState kind="loading" title="Loading session history" />
-              ) : !history.length ? (
-                <RegionState
-                  kind="empty"
-                  title="No verified directory transitions"
-                  description="This session has a known observed path, but Cowrie has not recorded a directory move. Command data and Response remain available from their tabs."
-                />
               ) : (
-                /* Tab 1: Sleek Compact Route Replay */
+                /* Tab 1: Route Replay with alert support */
                 <>
-            {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
-            {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
-              <div
-                role="alert"
-                className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
-                data-testid="hop-resolution-alert"
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-amber-100">
-                      {hopResolutionStatus === "not-found"
-                        ? "Requested hop unavailable"
-                        : "Error resolving requested hop"}
-                    </p>
-                    <p className="mt-0.5 text-amber-200/80">
-                      {hopResolutionStatus === "not-found"
-                        ? `The requested hop "${requestedHop}" could not be found or has expired.`
-                        : `Could not retrieve hop "${requestedHop}".`}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    {onShowLatestHop && (
-                      <button
-                        type="button"
-                        onClick={onShowLatestHop}
-                        className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
-                      >
-                        Show latest hop
-                      </button>
-                    )}
-                    {onClearHop && (
-                      <button
-                        type="button"
-                        onClick={onClearHop}
-                        className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
-                      >
-                        Clear hop
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+                  {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
+                  {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
+                    <div
+                      role="alert"
+                      className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+                      data-testid="hop-resolution-alert"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <p className="font-semibold text-amber-100">
+                            {hopResolutionStatus === "not-found"
+                              ? "Requested hop unavailable"
+                              : "Error resolving requested hop"}
+                          </p>
+                          <p className="mt-0.5 text-amber-200/80">
+                            {hopResolutionStatus === "not-found"
+                              ? `The requested hop "${requestedHop}" could not be found or has expired.`
+                              : `Could not retrieve hop "${requestedHop}".`}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 gap-1.5">
+                          {onShowLatestHop && history.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={onShowLatestHop}
+                              className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
+                            >
+                              Show latest hop
+                            </button>
+                          )}
+                          {onClearHop && (
+                            <button
+                              type="button"
+                              onClick={onClearHop}
+                              className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
+                            >
+                              Clear hop
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
-            {/* Sleek Compact Hop Deck */}
-            <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
-              {/* Controls & Scrubber Row */}
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="ui-button h-9 w-9 p-0 shrink-0"
-                    title="Jump to first hop"
-                    aria-label="First hop"
-                    disabled={selectedHistoryIndex <= 0}
-                    onClick={() => {
-                      handlePause();
-                      onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-                    }}
-                  >
-                    <Rewind className="h-3 w-3" />
-                  </button>
+                  {historyStatus === "error" && !history.length ? (
+                    <RegionState
+                      kind="error"
+                      title="Session history unavailable"
+                      description="Route Replay is unavailable, but Command data and Response remain independent."
+                    />
+                  ) : historyStatus === "loading" && !history.length ? (
+                    <RegionState kind="loading" title="Loading session history" />
+                  ) : !history.length ? (
+                    <RegionState
+                      kind="empty"
+                      title="No verified directory transitions"
+                      description="This session has a known observed path, but Cowrie has not recorded a directory move. Command data and Response remain available from their tabs."
+                    />
+                  ) : (
+                    <>
+                      {/* Sleek Compact Hop Deck */}
+                      <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
+                        {isAnchoredSelected && (
+                          <div
+                            role="note"
+                            className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200"
+                            data-testid="anchored-hop-banner"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span>Anchored deep hop: intervening events are unloaded. Replay and adjacent stepping are paused across this gap.</span>
+                              {onLoadEarlier && !historyComplete && (
+                                <button
+                                  type="button"
+                                  onClick={onLoadEarlier}
+                                  className="shrink-0 rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
+                                >
+                                  Load earlier hops
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
 
-                  <button
-                    type="button"
-                    className="ui-button h-9 w-9 p-0 shrink-0"
-                    title="Previous hop"
-                    aria-label="Previous hop"
-                    disabled={selectedHistoryIndex <= 0}
-                    onClick={() => {
-                      handlePause();
-                      onSelectHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
-                    }}
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
+                        {/* Controls & Scrubber Row */}
+                        <div className="flex items-center justify-between gap-1.5">
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              className="ui-button h-9 w-9 p-0 shrink-0"
+                              title="Jump to first hop"
+                              aria-label="First hop"
+                              disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
+                              onClick={() => {
+                                handlePause();
+                                onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
+                              }}
+                            >
+                              <Rewind className="h-3 w-3" />
+                            </button>
 
-                  <button
-                    type="button"
-                    onClick={handleTogglePlay}
-                    className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 shrink-0 ${
-                      isPlaying ? "border-primary bg-primary text-surface" : ""
-                    }`}
-                    title={isPlaying ? "Pause playback" : "Play route trajectory"}
-                    aria-label={isPlaying ? "Pause" : "Play"}
-                  >
-                    {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                    <span>{isPlaying ? "Pause" : "Play"}</span>
-                  </button>
+                            <button
+                              type="button"
+                              className="ui-button h-9 w-9 p-0 shrink-0"
+                              title="Previous hop"
+                              aria-label="Previous hop"
+                              disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
+                              onClick={() => {
+                                handlePause();
+                                onSelectHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
+                              }}
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
 
-                  <button
-                    type="button"
-                    className="ui-button h-9 w-9 p-0 shrink-0"
-                    title="Next hop"
-                    aria-label="Next hop"
-                    disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                    onClick={() => {
-                      handlePause();
-                      onSelectHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
-                    }}
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
+                            <button
+                              type="button"
+                              onClick={handleTogglePlay}
+                              disabled={isAnchoredSelected}
+                              className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 shrink-0 ${
+                                isPlaying ? "border-primary bg-primary text-surface" : ""
+                              } ${isAnchoredSelected ? "opacity-40 cursor-not-allowed" : ""}`}
+                              title={isPlaying ? "Pause playback" : "Play route trajectory"}
+                              aria-label={isPlaying ? "Pause" : "Play"}
+                            >
+                              {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                              <span>{isPlaying ? "Pause" : "Play"}</span>
+                            </button>
 
-                  <button
-                    type="button"
-                    className="ui-button h-9 w-9 p-0 shrink-0"
-                    title="Jump to latest hop"
-                    aria-label="Latest hop"
-                    disabled={selectedHistoryIndex === displayedHistory.length - 1}
-                    onClick={() => {
-                      handlePause();
-                      onSelectHistoryEventId(displayedHistory.at(-1)?.id ?? null);
-                    }}
-                  >
-                    <FastForward className="h-3 w-3" />
-                  </button>
+                            <button
+                              type="button"
+                              className="ui-button h-9 w-9 p-0 shrink-0"
+                              title="Next hop"
+                              aria-label="Next hop"
+                              disabled={isAnchoredSelected || selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
+                              onClick={() => {
+                                handlePause();
+                                onSelectHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
+                              }}
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              className="ui-button h-9 w-9 p-0 shrink-0"
+                              title="Jump to latest hop"
+                              aria-label="Latest hop"
+                              disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistory.length - 1}
+                              onClick={() => {
+                                handlePause();
+                                onSelectHistoryEventId(displayedHistory.at(-1)?.id ?? null);
+                              }}
+                            >
+                              <FastForward className="h-3 w-3" />
+                            </button>
 
                   <button
                     type="button"
@@ -633,8 +696,13 @@ export function CwdRouteHistory({
                     </label>
                   )}
 
-                  <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs font-semibold text-primary border border-primary-border shrink-0">
-                    Hop {displayedHistoryMetrics.selectedNumber}/{displayedHistoryMetrics.totalItems}
+                  <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs font-semibold text-primary border border-primary-border shrink-0 flex items-center gap-1">
+                    <span>Hop {displayedHistoryMetrics.selectedNumber}/{displayedHistoryMetrics.totalItems}</span>
+                    {isAnchoredSelected && (
+                      <span className="rounded bg-amber-500/20 px-1 py-0.2 text-[9px] uppercase font-bold text-amber-300">
+                        Anchored
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>
@@ -662,8 +730,9 @@ export function CwdRouteHistory({
                     min={0}
                     max={Math.max(0, displayedHistory.length - 1)}
                     value={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
-                    disabled={displayedHistory.length <= 1}
+                    disabled={isAnchoredSelected || displayedHistory.length <= 1}
                     onChange={(e) => {
+                      if (isAnchoredSelected) return;
                       handlePause();
                       const targetIndex = Number(e.target.value);
                       const targetEvent = displayedHistory[targetIndex];
@@ -675,7 +744,11 @@ export function CwdRouteHistory({
                     aria-valuemin={0}
                     aria-valuemax={Math.max(0, displayedHistory.length - 1)}
                     aria-valuenow={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
-                    aria-valuetext={`Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`}
+                    aria-valuetext={
+                      isAnchoredSelected
+                        ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems} (Anchored deep target, replay scrubber paused across unloaded gap)`
+                        : `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`
+                    }
                     className="w-full h-1.5 bg-border/60 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 disabled:cursor-not-allowed"
                   />
                 </div>
@@ -893,11 +966,78 @@ export function CwdRouteHistory({
                     </li>
                   );
                 })}
+
+                {/* Explicit unloaded gap & anchored hop target */}
+                {anchoredHop && !displayedHistory.some((e) => e.id === anchoredHop.id) && (
+                  <>
+                    <li className="relative my-3 pl-2" data-testid="unloaded-gap-callout">
+                      <div className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-200/90 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 font-mono">
+                          <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                          <span>Unloaded history gap</span>
+                        </div>
+                        {onLoadEarlier && !historyComplete && (
+                          <button
+                            type="button"
+                            onClick={onLoadEarlier}
+                            className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
+                          >
+                            Load earlier
+                          </button>
+                        )}
+                      </div>
+                    </li>
+
+                    <li key={anchoredHop.id} className="relative pb-2.5 last:pb-0" data-testid="anchored-hop-card">
+                      <span
+                        className={`absolute -left-[27px] top-2.5 flex h-2.5 w-2.5 rounded-full border-2 border-surface ${
+                          isAnchoredSelected ? "bg-primary ring-2 ring-primary/40" : "bg-border-strong"
+                        }`}
+                        aria-hidden="true"
+                      />
+                      <button
+                        type="button"
+                        aria-current={isAnchoredSelected ? "step" : undefined}
+                        onClick={() => {
+                          handlePause();
+                          onSelectHistoryEventId(anchoredHop.id);
+                        }}
+                        className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors duration-150 ${
+                          isAnchoredSelected
+                            ? "border-primary-border bg-primary-subtle"
+                            : "border-transparent hover:border-border hover:bg-surface-hover"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1.5 min-w-0">
+                          <p className="truncate font-medium text-xs text-text min-w-0">
+                            <span className="mr-1.5 font-mono text-xs text-text-subtle">
+                              {String(explicitHopNumber ?? anchoredHop.hopNumber ?? 1).padStart(2, "0")}
+                            </span>
+                            {actionLabel(anchoredHop)}
+                            <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-[10px] text-amber-300 font-sans">
+                              Anchored
+                            </span>
+                          </p>
+                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1">
+                            {formatTimestamp(anchoredHop.at)}
+                          </time>
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
+                          <span>{formatFromPath(anchoredHop)}</span>
+                          <span>→</span>
+                          <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
+                        </div>
+                      </button>
+                    </li>
+                  </>
+                )}
               </ol>
             </div>
-                </>
-              )}
-            </motion.div>
+          </>
+        )}
+      </>
+    )}
+  </motion.div>
           </AnimatePresence>
         )}
       </div>

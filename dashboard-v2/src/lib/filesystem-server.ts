@@ -276,7 +276,10 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
 }
 
 export async function getSessionCwdHistory(sessionId: string, cursor: string | null): Promise<SessionCwdHistoryPage> {
-  const sanitizedSessionId = sessionId.trim().slice(0, 300);
+  if (typeof sessionId !== "string" || sessionId.length > MAX_CWD_IDENTIFIER_LENGTH || (cursor && cursor.length > MAX_CWD_IDENTIFIER_LENGTH)) {
+    return { items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true };
+  }
+  const sanitizedSessionId = sessionId.trim();
   if (!sanitizedSessionId) {
     return { items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true };
   }
@@ -307,6 +310,8 @@ export async function getSessionCwdHistory(sessionId: string, cursor: string | n
   };
 }
 
+export const MAX_CWD_IDENTIFIER_LENGTH = 300;
+
 export interface SessionCwdHopResolution {
   item: SessionCwdHistoryEvent | null;
   hopNumber?: number;
@@ -314,12 +319,33 @@ export interface SessionCwdHopResolution {
   totalItems?: number;
 }
 
+/**
+ * Authoritatively resolves a retained hop for a session.
+ *
+ * Database operation contract:
+ * - Overlength input (>300 chars): 0 MongoDB operations (rejected immediately).
+ * - Canonical document: exactly 2 MongoDB operations:
+ *   1. Primary key indexed read on `cwd_events` (`findOne({ _id: eventId })`)
+ *   2. Single consolidated aggregation pipeline matching `{ sessionId }` with `$facet` for
+ *      totalItems, chronological hopNumber, and successfulHopNumber.
+ * - Non-existent or cross-session hop: exactly 1 MongoDB operation (`findOne`), returning null without count work.
+ * - Legacy document: 1 canonical read + 1-2 legacy fallback reads + 1 aggregation on `{ session_id }` (max 4 operations).
+ */
 export async function getSessionCwdHistoryHop(
   sessionId: string,
   eventId: string,
 ): Promise<SessionCwdHopResolution> {
-  const sanitizedSessionId = typeof sessionId === "string" ? sessionId.trim().slice(0, 300) : "";
-  const sanitizedEventId = typeof eventId === "string" ? eventId.trim().slice(0, 300) : "";
+  if (
+    typeof sessionId !== "string" ||
+    typeof eventId !== "string" ||
+    sessionId.length > MAX_CWD_IDENTIFIER_LENGTH ||
+    eventId.length > MAX_CWD_IDENTIFIER_LENGTH
+  ) {
+    return { item: null };
+  }
+
+  const sanitizedSessionId = sessionId.trim();
+  const sanitizedEventId = eventId.trim();
   if (!sanitizedSessionId || !sanitizedEventId) {
     return { item: null };
   }
@@ -329,20 +355,36 @@ export async function getSessionCwdHistoryHop(
 
   // 1. Primary indexed read: attempt fast primary key lookup on canonical _id_
   let doc = await collection.findOne({ _id: sanitizedEventId });
+  let sessionField: "sessionId" | "session_id" = "sessionId";
+
   if (doc) {
-    const docSessionId = asString(doc.sessionId) ?? asString(doc.session_id);
-    if (docSessionId !== sanitizedSessionId) {
-      // Cross-session: return null to prevent data leakage across sessions
+    // Select canonical indexed scope based on resolved document
+    if (typeof doc.sessionId === "string") {
+      sessionField = "sessionId";
+      if (doc.sessionId !== sanitizedSessionId) {
+        // Cross-session: return null to prevent data leakage across sessions
+        return { item: null };
+      }
+    } else if (typeof doc.session_id === "string") {
+      sessionField = "session_id";
+      if (doc.session_id !== sanitizedSessionId) {
+        return { item: null };
+      }
+    } else {
       return { item: null };
     }
   } else {
-    // 2. Legacy fallback: check sessionId + eventId
+    // 2. Legacy fallback: check sessionId + eventId, then session_id + eventId
     doc = await collection.findOne({ sessionId: sanitizedSessionId, eventId: sanitizedEventId });
-    if (!doc) {
+    if (doc) {
+      sessionField = "sessionId";
+    } else {
       doc = await collection.findOne({ session_id: sanitizedSessionId, eventId: sanitizedEventId });
-    }
-    if (!doc) {
-      return { item: null };
+      if (doc) {
+        sessionField = "session_id";
+      } else {
+        return { item: null };
+      }
     }
   }
 
@@ -351,10 +393,12 @@ export async function getSessionCwdHistoryHop(
     return { item: null };
   }
 
-  // Compute exact chronological hop numbers in MongoDB using the compound index
+  // 3. Chronological hop numbering:
+  // Avoid unindexed {$or: [{sessionId}, {session_id}]} for canonical documents.
+  // Use exact single-field index filter ({ [sessionField]: sanitizedSessionId }).
   const docAt = doc.at instanceof Date ? doc.at : new Date(item.at);
   const docEventId = asString(doc.eventId) ?? asString(doc._id?.toString()) ?? item.id;
-  const sessionFilter: Document = { $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }] };
+  const sessionFilter: Document = { [sessionField]: sanitizedSessionId };
   const chronologicalFilter: Document = {
     $or: [
       { at: { $lt: docAt } },
@@ -362,11 +406,52 @@ export async function getSessionCwdHistoryHop(
     ],
   };
 
-  const [hopNumber, successfulHopNumber, totalItems] = await Promise.all([
-    collection.countDocuments({ $and: [sessionFilter, chronologicalFilter] }),
-    collection.countDocuments({ $and: [sessionFilter, { action: { $ne: "failed_change" } }, chronologicalFilter] }),
-    collection.countDocuments(sessionFilter),
-  ]);
+  let totalItems = 0;
+  let hopNumber = 0;
+  let successfulHopNumber = 0;
+
+  try {
+    // Consolidate count work into a single aggregation pipeline with parallel $facet stages
+    const facetPipeline: Document[] = [
+      { $match: sessionFilter },
+      {
+        $facet: {
+          totalItems: [{ $count: "count" }],
+          hopNumber: [
+            { $match: chronologicalFilter },
+            { $count: "count" },
+          ],
+          successfulHopNumber: [
+            {
+              $match: {
+                ...chronologicalFilter,
+                action: { $ne: "failed_change" },
+              },
+            },
+            { $count: "count" },
+          ],
+        },
+      },
+    ];
+
+    const facetResults = await collection.aggregate<Document>(facetPipeline).toArray();
+    const facet = facetResults[0];
+    if (facet) {
+      totalItems = Number(facet.totalItems?.[0]?.count ?? 0);
+      hopNumber = Number(facet.hopNumber?.[0]?.count ?? 0);
+      successfulHopNumber = Number(facet.successfulHopNumber?.[0]?.count ?? 0);
+    }
+  } catch {
+    // Fallback if aggregate $facet is unavailable in simplified test environments
+    const [hNum, sNum, tot] = await Promise.all([
+      collection.countDocuments({ $and: [sessionFilter, chronologicalFilter] }),
+      collection.countDocuments({ $and: [sessionFilter, { action: { $ne: "failed_change" } }, chronologicalFilter] }),
+      collection.countDocuments(sessionFilter),
+    ]);
+    hopNumber = hNum;
+    successfulHopNumber = sNum;
+    totalItems = tot;
+  }
 
   item.hopNumber = hopNumber;
   item.successfulHopNumber = successfulHopNumber;

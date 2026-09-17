@@ -86,7 +86,7 @@ export function FilesystemActivity() {
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
   const auditLookupInFlightRef = useRef<string | null>(null);
   const lookupRemoteAuditSessionRef = useRef<((targetId: string) => Promise<void>) | null>(null);
-  const selectSessionRef = useRef<((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => void) | null>(null);
+  const selectSessionRef = useRef<((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void) | null>(null);
   const handleSnapshotAppliedRef = useRef<((data: FilesystemTopologySnapshot) => void) | null>(null);
 
   useEffect(() => {
@@ -172,8 +172,8 @@ export function FilesystemActivity() {
     onSnapshotApplied: (data) => handleSnapshotAppliedRef.current?.(data),
   });
 
-  const dispatchSelectSession = useCallback((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
-    selectSessionRef.current?.(sessionId, sessionObj);
+  const dispatchSelectSession = useCallback((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => {
+    selectSessionRef.current?.(sessionId, sessionObj, targetHopId);
   }, []);
 
   const dispatchLookupRemoteAuditSession = useCallback(async (targetId: string) => {
@@ -212,6 +212,7 @@ export function FilesystemActivity() {
   // Session CWD history keyset pagination hook
   const {
     history,
+    anchoredHop,
     historyCursor,
     historyTotalItems,
     historyTotalSuccessfulItems,
@@ -248,6 +249,7 @@ export function FilesystemActivity() {
   } = useAuditReplay({
     viewMode,
     history,
+    anchoredHop,
     historyTotalItems,
     historyTotalSuccessfulItems,
     showFailedAttempts,
@@ -441,7 +443,11 @@ export function FilesystemActivity() {
   }, [loadHistory, selectedSession?.cwdState.sourceEventId, selectedSessionId]);
 
   const selectSession = useCallback(
-    (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
+    (
+      sessionId: string,
+      sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
+      targetHopId?: string | null,
+    ) => {
       if (sessionObj) {
         setExtraAuditSessions((prev) => {
           if (prev.has(sessionId)) return prev;
@@ -455,7 +461,11 @@ export function FilesystemActivity() {
       setExpiredSessionId(null);
       if (isDifferentSession) {
         resetHistory();
-        if (requestedHopRef.current === null) {
+        if (targetHopId !== undefined) {
+          requestedHopRef.current = targetHopId;
+          setSelectedHistoryEventId(targetHopId);
+        } else {
+          requestedHopRef.current = null;
           setSelectedHistoryEventId(null);
         }
       }
@@ -519,9 +529,11 @@ export function FilesystemActivity() {
   const handleUserSelectSession = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
       isUserNavigatingRef.current = true;
+      requestedHopRef.current = null;
+      setSelectedHistoryEventId(null);
       selectSession(sessionId, sessionObj);
     },
-    [selectSession, isUserNavigatingRef],
+    [selectSession, isUserNavigatingRef, requestedHopRef, setSelectedHistoryEventId],
   );
 
   const handleToggleHideHomeOnly = useCallback(() => {
@@ -1182,6 +1194,7 @@ export function FilesystemActivity() {
                   selectedSession={selectedSession}
                   sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
+                  anchoredHop={anchoredHop}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}
                   historyTotalItems={historyTotalItems}
@@ -1510,6 +1523,7 @@ export function FilesystemActivity() {
                   selectedSession={selectedSession}
                   sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
+                  anchoredHop={anchoredHop}
                   historyStatus={historyStatus}
                   historyCursor={historyCursor}
                   historyTotalItems={historyTotalItems}

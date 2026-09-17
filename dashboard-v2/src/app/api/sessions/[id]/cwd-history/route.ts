@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getSessionCwdHistory, getSessionCwdHistoryHop } from "@/lib/filesystem-server";
+import { getSessionCwdHistory, getSessionCwdHistoryHop, MAX_CWD_IDENTIFIER_LENGTH } from "@/lib/filesystem-server";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const url = new URL(request.url);
     const hop = url.searchParams.get("hop");
+    const cursor = url.searchParams.get("cursor");
+
+    if (
+      id.length > MAX_CWD_IDENTIFIER_LENGTH ||
+      (hop && hop.length > MAX_CWD_IDENTIFIER_LENGTH) ||
+      (cursor && cursor.length > MAX_CWD_IDENTIFIER_LENGTH)
+    ) {
+      return NextResponse.json({ error: "Identifier length exceeds limit" }, { status: 400 });
+    }
+
     if (hop) {
       const result = await getSessionCwdHistoryHop(id, hop);
       if (!result.item) {
@@ -24,7 +34,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       });
     }
 
-    const cursor = url.searchParams.get("cursor");
     return NextResponse.json(await getSessionCwdHistory(id, cursor), {
       headers: { "Cache-Control": "no-store" },
     });
