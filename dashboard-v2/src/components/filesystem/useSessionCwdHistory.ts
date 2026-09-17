@@ -15,7 +15,7 @@ export type { HopResolutionStatus };
 
 export interface UseSessionCwdHistoryOptions {
   requestedHopRef?: React.MutableRefObject<string | null>;
-  onSelectHistoryEventId?: (id: string | null) => void;
+  onSelectHistoryEventId?: (id: string | null, source?: "user" | "playback" | "sync") => void;
   viewMode?: "live" | "audit";
   fetchHop?: (sessionId: string, hopId: string, signal: AbortSignal) => Promise<SessionCwdHopPayload>;
 }
@@ -98,7 +98,7 @@ export function useSessionCwdHistory(
     setAnchoredHop(null);
     hopManagerRef.current?.destroy();
     setHopResolutionStatus("idle");
-    onSelectHistoryEventId?.(null);
+    onSelectHistoryEventId?.(null, "user");
   }, [onSelectHistoryEventId, requestedHopRef]);
 
   const selectLatestHop = useCallback(() => {
@@ -110,7 +110,7 @@ export function useSessionCwdHistory(
     hopManagerRef.current?.destroy();
     setHopResolutionStatus("idle");
     const latestId = history[0]?.id ?? null;
-    onSelectHistoryEventId?.(latestId);
+    onSelectHistoryEventId?.(latestId, "user");
   }, [history, onSelectHistoryEventId, requestedHopRef]);
 
   const loadHistory = useCallback(
@@ -132,7 +132,7 @@ export function useSessionCwdHistory(
         setHistoryTotalSuccessfulItems(0);
         setHistoryComplete(true);
         if (!currentHop) {
-          onSelectHistoryEventId?.(null);
+          onSelectHistoryEventId?.(null, "sync");
         }
       }
 
@@ -187,7 +187,7 @@ export function useSessionCwdHistory(
             }
             setRequestedHop(null);
             setAnchoredHop(null);
-            onSelectHistoryEventId?.(currentHop);
+            onSelectHistoryEventId?.(currentHop, "sync");
           } else {
             // Older hop: delegate resolution state strictly to hopManager
             hopManagerRef.current?.sync({
@@ -207,7 +207,7 @@ export function useSessionCwdHistory(
                 setRequestedHop(null);
                 setHopResolutionStatus("resolved");
                 setAnchoredHop(event);
-                onSelectHistoryEventId?.(event.id);
+                onSelectHistoryEventId?.(event.id, "sync");
               },
             });
           }

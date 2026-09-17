@@ -1266,7 +1266,7 @@ export function buildAuditSnapshot(
 export function isHomeOnlySession(
   session: FilesystemTopologySession | FilesystemClosedSession,
 ): boolean {
-  return session.auditSummary.homeOnly;
+  return session.auditSummary?.homeOnly ?? false;
 }
 
 /**
@@ -1295,7 +1295,16 @@ export function sessionTouchesPath(
     return norm === normTarget || norm.startsWith(`${normTarget}/`);
   };
 
-  return session.auditSummary.visitedPaths.some(matches);
+  const visitedPaths = session.auditSummary?.visitedPaths;
+  if (Array.isArray(visitedPaths)) {
+    return visitedPaths.some(matches);
+  }
+
+  if (session.cwdState?.path) {
+    return matches(session.cwdState.path);
+  }
+
+  return false;
 }
 
 export interface DistinctPathOption {
@@ -1382,6 +1391,119 @@ export function buildAuditUrlSearch(params: AuditUrlParams): string {
 
   const str = sp.toString();
   return str ? `?${str}` : "";
+}
+
+/**
+ * Compares two audit URL parameter sets for semantic equality.
+ * In live view, parameters are considered equal (clean URL without params).
+ * In audit view, checks view, sessionId, hideHome, targetPath, and hop.
+ */
+export function areAuditUrlParamsEqual(
+  a: AuditUrlParams,
+  b: AuditUrlParams,
+): boolean {
+  const aView = a.view ?? "live";
+  const bView = b.view ?? "live";
+  if (aView !== bView) return false;
+  if (aView !== "audit") {
+    // Both are live mode. Canonical search is clean empty string for both.
+    return true;
+  }
+  return (
+    (a.sessionId ?? null) === (b.sessionId ?? null) &&
+    Boolean(a.hideHome) === Boolean(b.hideHome) &&
+    (a.targetPath ?? null) === (b.targetPath ?? null) &&
+    (a.hop ?? null) === (b.hop ?? null)
+  );
+}
+
+/**
+ * Builds the complete target URL combining pathname, canonical search, and hash.
+ */
+export function buildAuditTargetUrl(
+  params: AuditUrlParams,
+  pathname: string = typeof window !== "undefined" ? window.location.pathname : "",
+  hash: string = typeof window !== "undefined" ? window.location.hash : "",
+): string {
+  const search = buildAuditUrlSearch(params);
+  return `${pathname}${search}${hash}`;
+}
+
+export interface FilterSessionFallbackParams {
+  filterType: "hideHome" | "targetPath";
+  proposedTargetPath?: string | null;
+  hideHomeOnly: boolean;
+  targetPathFilter: string | null;
+  selectedSessionId: string | null;
+  allSessions: readonly (FilesystemTopologySession | FilesystemClosedSession)[];
+  sessionById: Map<string, FilesystemTopologySession | FilesystemClosedSession>;
+}
+
+export interface FilterSessionFallbackResult {
+  nextHideHome: boolean;
+  nextTargetPath: string | null;
+  nextSessionId: string | null;
+  sessionChanged: boolean;
+}
+
+/**
+ * Resolves filter changes and computes atomic session fallback before URL commitment.
+ * If toggling hideHome or changing targetPath filters out the currently selected session,
+ * finds the first matching session from allSessions.
+ */
+export function resolveFilterChangeWithFallback(
+  params: FilterSessionFallbackParams,
+): FilterSessionFallbackResult {
+  const {
+    filterType,
+    proposedTargetPath,
+    hideHomeOnly,
+    targetPathFilter,
+    selectedSessionId,
+    allSessions,
+    sessionById,
+  } = params;
+
+  const nextHideHome = filterType === "hideHome" ? !hideHomeOnly : hideHomeOnly;
+  const nextTargetPath =
+    filterType === "targetPath"
+      ? (proposedTargetPath !== undefined ? proposedTargetPath : null)
+      : targetPathFilter;
+
+  let nextSessionId = selectedSessionId;
+  let sessionChanged = false;
+
+  if (selectedSessionId) {
+    const currentSession = sessionById.get(selectedSessionId);
+    if (currentSession) {
+      let isFilteredOut = false;
+      if (nextHideHome && isHomeOnlySession(currentSession)) {
+        isFilteredOut = true;
+      }
+      if (nextTargetPath && !sessionTouchesPath(currentSession, nextTargetPath)) {
+        isFilteredOut = true;
+      }
+
+      if (isFilteredOut) {
+        const firstMatching = allSessions.find((s) => {
+          if (nextHideHome && isHomeOnlySession(s)) return false;
+          if (nextTargetPath && !sessionTouchesPath(s, nextTargetPath)) return false;
+          return true;
+        });
+        if (firstMatching && firstMatching.sessionId !== selectedSessionId) {
+          nextSessionId = firstMatching.sessionId;
+          sessionChanged = true;
+        }
+      }
+    }
+  }
+
+  return {
+    nextHideHome,
+    nextTargetPath,
+    nextSessionId,
+    sessionChanged,
+  };
 }
 
 export interface SessionResolutionResult {

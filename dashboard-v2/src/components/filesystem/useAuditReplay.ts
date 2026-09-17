@@ -124,7 +124,7 @@ export interface UseAuditReplayOptions {
   historyTotalSuccessfulItems: number;
   showFailedAttempts: boolean;
   selectedHistoryEventId: string | null;
-  onSelectHistoryEventId: (id: string | null) => void;
+  onSelectHistoryEventId: (id: string | null, source?: "user" | "playback") => void;
   initialPacingMode?: ReplayPacingMode;
 }
 
@@ -279,19 +279,19 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   const handlePrevHop = useCallback(() => {
     setIsPlaying(false);
     const nextId = computeNextReplayEventId(displayedHistory, selectedHistoryIndex, "prev", isAnchoredSelected);
-    if (nextId) onSelectHistoryEventId(nextId);
+    if (nextId) onSelectHistoryEventId(nextId, "user");
   }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleNextHop = useCallback(() => {
     setIsPlaying(false);
     const nextId = computeNextReplayEventId(displayedHistory, selectedHistoryIndex, "next", isAnchoredSelected);
-    if (nextId) onSelectHistoryEventId(nextId);
+    if (nextId) onSelectHistoryEventId(nextId, "user");
   }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
     const nextState = computeTogglePlayState(isPlaying, displayedHistory, selectedHistoryIndex, isAnchoredSelected);
     if (nextState.targetEventId !== undefined) {
-      onSelectHistoryEventId(nextState.targetEventId);
+      onSelectHistoryEventId(nextState.targetEventId, "user");
     }
     setIsPlaying(nextState.isPlaying);
   }, [displayedHistory, isAnchoredSelected, isPlaying, onSelectHistoryEventId, selectedHistoryIndex]);
@@ -324,7 +324,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     const delay = calculateReplayPacingDelay(nextMetric?.deltaMs ?? 0, playbackSpeed, pacingMode);
 
     const timer = setTimeout(() => {
-      onSelectHistoryEventId(nextEvent.id);
+      onSelectHistoryEventId(nextEvent.id, "playback");
       if (nextIndex >= displayedHistory.length - 1) {
         setIsPlaying(false);
       }

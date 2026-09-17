@@ -70,7 +70,7 @@ interface CwdRouteHistoryProps {
   requestedHop?: string | null;
   onClearHop?: () => void;
   onShowLatestHop?: () => void;
-  onSelectHistoryEventId: (eventId: string | null) => void;
+  onSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
   onLoadEarlier: () => void;
   isPlaying?: boolean;
   onTogglePlay?: () => void;

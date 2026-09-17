@@ -35,9 +35,8 @@ import {
   buildAuditSnapshot,
   clampTimelineSidebarWidth,
   formatPageBadgeText,
-  isHomeOnlySession,
   parseAuditUrlParams,
-  sessionTouchesPath,
+  resolveFilterChangeWithFallback,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { useFilesystemStreaming } from "./useFilesystemStreaming";
@@ -222,6 +221,8 @@ export function FilesystemActivity() {
     requestedHopRef,
     requestedSessionIdRef,
     isUserNavigatingRef,
+    commitUserNavigation,
+    commitPlaybackNavigation,
   } = useFilesystemUrlState({
     isHydrated,
     snapshot,
@@ -236,6 +237,32 @@ export function FilesystemActivity() {
       setIsAuditFullscreen(false);
     },
   });
+
+  const handleSelectHistoryEventId = useCallback(
+    (eventId: string | null, source: "user" | "playback" | "sync" = "user") => {
+      if (source === "user") {
+        if (viewModeRef.current === "audit") {
+          commitUserNavigation({
+            view: "audit",
+            sessionId: selectedSessionIdRef.current,
+            hop: eventId,
+          });
+        }
+        requestedHopRef.current = eventId;
+        setSelectedHistoryEventId(eventId);
+      } else if (source === "playback") {
+        if (viewModeRef.current === "audit") {
+          commitPlaybackNavigation(eventId);
+        }
+        requestedHopRef.current = eventId;
+        setSelectedHistoryEventId(eventId);
+      } else {
+        requestedHopRef.current = eventId;
+        setSelectedHistoryEventId(eventId);
+      }
+    },
+    [commitPlaybackNavigation, commitUserNavigation, requestedHopRef, selectedSessionIdRef, setSelectedHistoryEventId, viewModeRef],
+  );
 
   useEffect(() => {
     remoteAuditLookupManager.notifyViewModeChanged(viewMode);
@@ -258,7 +285,7 @@ export function FilesystemActivity() {
     resetHistory,
   } = useSessionCwdHistory({
     requestedHopRef,
-    onSelectHistoryEventId: setSelectedHistoryEventId,
+    onSelectHistoryEventId: handleSelectHistoryEventId,
     viewMode,
   });
 
@@ -286,7 +313,7 @@ export function FilesystemActivity() {
     historyTotalSuccessfulItems,
     showFailedAttempts,
     selectedHistoryEventId,
-    onSelectHistoryEventId: setSelectedHistoryEventId,
+    onSelectHistoryEventId: handleSelectHistoryEventId,
   });
 
   const handleSnapshotApplied = useCallback((data: FilesystemTopologySnapshot) => {
@@ -564,49 +591,96 @@ export function FilesystemActivity() {
       });
       clearRequestedHop();
       setSelectedHistoryEventId(null);
+      commitUserNavigation({
+        view: currentMode,
+        sessionId,
+        hop: null,
+      });
       selectSession(sessionId, sessionObj, null);
     },
-    [clearRequestedHop, isUserNavigatingRef, remoteAuditLookupManager, selectSession, setSelectedHistoryEventId, viewModeRef],
+    [clearRequestedHop, commitUserNavigation, isUserNavigatingRef, remoteAuditLookupManager, selectSession, setSelectedHistoryEventId, viewModeRef],
   );
 
   const handleToggleHideHomeOnly = useCallback(() => {
-    setHideHomeOnly((prev) => {
-      const next = !prev;
-      if (next && selectedSessionId) {
-        const currentSession = sessionById.get(selectedSessionId);
-        if (currentSession && isHomeOnlySession(currentSession)) {
-          const firstNonHome = allSessions.find((s) => {
-            if (isHomeOnlySession(s)) return false;
-            if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
-            return true;
-          });
-          if (firstNonHome) {
-            selectSession(firstNonHome.sessionId);
-          }
-        }
-      }
-      return next;
+    const result = resolveFilterChangeWithFallback({
+      filterType: "hideHome",
+      hideHomeOnly,
+      targetPathFilter,
+      selectedSessionId,
+      allSessions,
+      sessionById,
     });
-  }, [selectedSessionId, sessionById, allSessions, targetPathFilter, selectSession, setHideHomeOnly]);
+
+    commitUserNavigation({
+      view: "audit",
+      sessionId: result.nextSessionId,
+      hideHome: result.nextHideHome,
+      targetPath: targetPathFilter,
+      hop: result.sessionChanged ? null : (selectedHistoryEventId ?? requestedHopRef.current),
+    });
+
+    setHideHomeOnly(result.nextHideHome);
+    if (result.sessionChanged && result.nextSessionId) {
+      clearRequestedHop();
+      setSelectedHistoryEventId(null);
+      selectSession(result.nextSessionId);
+    }
+  }, [
+    allSessions,
+    clearRequestedHop,
+    commitUserNavigation,
+    hideHomeOnly,
+    requestedHopRef,
+    selectSession,
+    selectedHistoryEventId,
+    selectedSessionId,
+    sessionById,
+    setHideHomeOnly,
+    setSelectedHistoryEventId,
+    targetPathFilter,
+  ]);
 
   const handleSelectTargetPath = useCallback(
     (path: string | null) => {
-      setTargetPathFilter(path);
-      if (path && selectedSessionId) {
-        const currentSession = sessionById.get(selectedSessionId);
-        if (currentSession && !sessionTouchesPath(currentSession, path)) {
-          const firstMatching = allSessions.find((s) => {
-            if (hideHomeOnly && isHomeOnlySession(s)) return false;
-            if (!sessionTouchesPath(s, path)) return false;
-            return true;
-          });
-          if (firstMatching) {
-            selectSession(firstMatching.sessionId);
-          }
-        }
+      const result = resolveFilterChangeWithFallback({
+        filterType: "targetPath",
+        proposedTargetPath: path,
+        hideHomeOnly,
+        targetPathFilter,
+        selectedSessionId,
+        allSessions,
+        sessionById,
+      });
+
+      commitUserNavigation({
+        view: "audit",
+        sessionId: result.nextSessionId,
+        hideHome: hideHomeOnly,
+        targetPath: result.nextTargetPath,
+        hop: result.sessionChanged ? null : (selectedHistoryEventId ?? requestedHopRef.current),
+      });
+
+      setTargetPathFilter(result.nextTargetPath);
+      if (result.sessionChanged && result.nextSessionId) {
+        clearRequestedHop();
+        setSelectedHistoryEventId(null);
+        selectSession(result.nextSessionId);
       }
     },
-    [selectedSessionId, sessionById, allSessions, hideHomeOnly, selectSession, setTargetPathFilter],
+    [
+      allSessions,
+      clearRequestedHop,
+      commitUserNavigation,
+      hideHomeOnly,
+      requestedHopRef,
+      selectSession,
+      selectedHistoryEventId,
+      selectedSessionId,
+      sessionById,
+      setSelectedHistoryEventId,
+      setTargetPathFilter,
+      targetPathFilter,
+    ],
   );
 
   // Decoupled directory selection: inspects directory metadata without destroying the currently audited session
@@ -1092,8 +1166,7 @@ export function FilesystemActivity() {
                           const first = allSessions[0];
                           setExpiredSessionId(null);
                           if (first) {
-                            isUserNavigatingRef.current = true;
-                            selectSession(first.sessionId);
+                            handleUserSelectSession(first.sessionId);
                           }
                         }}
                         className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
@@ -1142,7 +1215,7 @@ export function FilesystemActivity() {
                         type="button"
                         onClick={() => {
                           const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) selectSession(first.sessionId);
+                          if (first) handleUserSelectSession(first.sessionId);
                         }}
                         className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
                       >
@@ -1185,7 +1258,7 @@ export function FilesystemActivity() {
                 hopDurationMs={playbackSpeed}
                 title={auditCanvasTitle}
                 subtitle={auditCanvasSubtitle}
-                onSelectSession={selectSession}
+                onSelectSession={handleUserSelectSession}
                 onSelectPath={selectPath}
                 isExpanded={isAuditFullscreen}
                 onToggleExpand={() => setIsAuditFullscreen(false)}
@@ -1245,7 +1318,7 @@ export function FilesystemActivity() {
                   requestedHop={requestedHop}
                   onClearHop={clearRequestedHop}
                   onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={setSelectedHistoryEventId}
+                  onSelectHistoryEventId={handleSelectHistoryEventId}
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
                   }}
@@ -1422,8 +1495,7 @@ export function FilesystemActivity() {
                           const first = allSessions[0];
                           setExpiredSessionId(null);
                           if (first) {
-                            isUserNavigatingRef.current = true;
-                            selectSession(first.sessionId);
+                            handleUserSelectSession(first.sessionId);
                           }
                         }}
                         className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
@@ -1472,7 +1544,7 @@ export function FilesystemActivity() {
                         type="button"
                         onClick={() => {
                           const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) selectSession(first.sessionId);
+                          if (first) handleUserSelectSession(first.sessionId);
                         }}
                         className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
                       >
@@ -1515,7 +1587,7 @@ export function FilesystemActivity() {
                 hopDurationMs={playbackSpeed}
                 title={auditCanvasTitle}
                 subtitle={auditCanvasSubtitle}
-                onSelectSession={selectSession}
+                onSelectSession={handleUserSelectSession}
                 onSelectPath={selectPath}
                 isExpanded={false}
                 onToggleExpand={enterAuditFullscreen}
@@ -1578,7 +1650,7 @@ export function FilesystemActivity() {
                   requestedHop={requestedHop}
                   onClearHop={clearRequestedHop}
                   onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={setSelectedHistoryEventId}
+                  onSelectHistoryEventId={handleSelectHistoryEventId}
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
                   }}
