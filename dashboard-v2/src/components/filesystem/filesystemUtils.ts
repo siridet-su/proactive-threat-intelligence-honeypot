@@ -1424,11 +1424,13 @@ export {
   calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   deriveLatestTelemetryAt,
+  evaluateTelemetryTrust,
   formatPageBadgeText,
   formatUpdateAge,
   getFreshnessState,
   MAX_FUTURE_TELEMETRY_SKEW_MS,
   processSnapshotTransition,
+  SnapshotIngestionCoordinator,
   TelemetryFreshnessTracker,
   type CalculateTelemetryAgeParams,
   type FilesystemRegionStatus,
@@ -1441,6 +1443,7 @@ export {
   type SnapshotTransitionState,
   type TelemetryAgeMetrics,
   type TelemetryStatus,
+  type TelemetryTrustMarker,
 } from "@/lib/filesystem-freshness";
 
 export {

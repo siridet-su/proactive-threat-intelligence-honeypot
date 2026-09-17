@@ -8,8 +8,7 @@ import {
   calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   getFreshnessState,
-  processSnapshotTransition,
-  TelemetryFreshnessTracker,
+  SnapshotIngestionCoordinator,
   type FreshnessState,
   type SnapshotTransitionState,
 } from "@/lib/filesystem-freshness";
@@ -47,6 +46,15 @@ export interface UseFilesystemStreamingReturn {
   applySnapshot: (data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number) => boolean;
 }
 
+const INITIAL_TRANSITION_STATE: SnapshotTransitionState = {
+  envelope: {
+    snapshot: null,
+    snapshotReceivedAtMs: null,
+  },
+  latestSnapshotAt: 0,
+  trustMarker: null,
+};
+
 export function useFilesystemStreaming(
   options: UseFilesystemStreamingOptions = {},
 ): UseFilesystemStreamingReturn {
@@ -57,13 +65,12 @@ export function useFilesystemStreaming(
     getNowRef.current = getNow;
   }, [getNow]);
 
-  const [transitionState, setTransitionState] = useState<SnapshotTransitionState>({
-    envelope: {
-      snapshot: null,
-      snapshotReceivedAtMs: null,
-    },
-    latestSnapshotAt: 0,
-  });
+  const coordinatorRef = useRef<SnapshotIngestionCoordinator | null>(null);
+  if (coordinatorRef.current === null) {
+    coordinatorRef.current = new SnapshotIngestionCoordinator(INITIAL_TRANSITION_STATE);
+  }
+
+  const [transitionState, setTransitionState] = useState<SnapshotTransitionState>(INITIAL_TRANSITION_STATE);
   const snapshot = transitionState.envelope.snapshot;
   const snapshotReceivedAtMs = transitionState.envelope.snapshotReceivedAtMs;
 
@@ -73,30 +80,27 @@ export function useFilesystemStreaming(
 
   const reconnectStreamRef = useRef<(() => void) | null>(null);
   const onSnapshotAppliedRef = useRef(onSnapshotApplied);
-  const [freshnessTracker] = useState(() => new TelemetryFreshnessTracker());
 
   useEffect(() => {
     onSnapshotAppliedRef.current = onSnapshotApplied;
   }, [onSnapshotApplied]);
 
   // applySnapshot has stable identity (empty dependency array)
+  // Evaluates acceptance synchronously against coordinatorRef, deterministically
+  // updating state and firing side effects only on genuine acceptance
   const applySnapshot = useCallback((data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number): boolean => {
     const receivedAtMs = typeof explicitReceivedAtMs === "number"
       ? explicitReceivedAtMs
       : (getNowRef.current ? getNowRef.current() : Date.now());
 
-    let wasAccepted = false;
-    setTransitionState((prev) => {
-      const result = processSnapshotTransition(prev, data, receivedAtMs);
-      wasAccepted = result.accepted;
-      return result.accepted ? result.state : prev;
-    });
-
-    if (wasAccepted) {
+    const result = coordinatorRef.current!.ingest(data, receivedAtMs);
+    if (result.accepted) {
+      setTransitionState(result.state);
       setRegionStatus("ready");
       onSnapshotAppliedRef.current?.(data);
+      return true;
     }
-    return wasAccepted;
+    return false;
   }, []);
 
   const applySnapshotRef = useRef(applySnapshot);
@@ -105,7 +109,8 @@ export function useFilesystemStreaming(
   }, [applySnapshot]);
 
   const refresh = useCallback(async () => {
-    setRegionStatus((current) => (transitionState.envelope.snapshot ? "refreshing" : current === "error" ? "loading" : current));
+    const hasSnapshot = Boolean(coordinatorRef.current?.getState().envelope.snapshot);
+    setRegionStatus((current) => (hasSnapshot ? "refreshing" : current === "error" ? "loading" : current));
     try {
       const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
       if (!response.ok) throw new Error("Topology request failed");
@@ -115,7 +120,7 @@ export function useFilesystemStreaming(
     } catch {
       setRegionStatus((current) => (current === "refreshing" || current === "ready" ? "stale" : "error"));
     }
-  }, [transitionState.envelope.snapshot]);
+  }, []);
 
   const handleReconnect = useCallback(() => {
     reconnectStreamRef.current?.();
@@ -144,9 +149,9 @@ export function useFilesystemStreaming(
       snapshot,
       snapshotReceivedAtMs,
       now,
-      freshnessTracker,
+      trustMarker: transitionState.trustMarker,
     });
-  }, [snapshot, snapshotReceivedAtMs, now, freshnessTracker]);
+  }, [snapshot, snapshotReceivedAtMs, now, transitionState.trustMarker]);
 
   const freshnessState = useMemo(() => {
     return getFreshnessState({

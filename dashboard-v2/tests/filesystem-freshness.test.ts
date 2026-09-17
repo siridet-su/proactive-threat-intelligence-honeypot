@@ -4,12 +4,15 @@ import type { FilesystemTopologySnapshot } from "../src/lib/dashboardTypes";
 import {
   calculateTelemetryAge,
   deriveLatestTelemetryAt,
+  evaluateTelemetryTrust,
   formatPageBadgeText,
   getFreshnessState,
   MAX_FUTURE_TELEMETRY_SKEW_MS,
   processSnapshotTransition,
+  SnapshotIngestionCoordinator,
   TelemetryFreshnessTracker,
   type SnapshotTransitionState,
+  type TelemetryTrustMarker,
 } from "../src/lib/filesystem-freshness";
 import {
   FilesystemStreamLifecycleManager,
@@ -239,6 +242,286 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       expect(createdSources[1].closed).toBe(true);
       expect(manager.getCleanupCount()).toBe(2);
     });
+
+    it("scopes connection lifecycle by generation, ignoring callbacks from superseded connections", () => {
+      const createdSources: MockEventSource[] = [];
+      const streamStates: string[] = [];
+      const snapshots: FilesystemTopologySnapshot[] = [];
+
+      const manager = new FilesystemStreamLifecycleManager({
+        createEventSource: (url) => {
+          const s = new MockEventSource(url);
+          createdSources.push(s);
+          return s as unknown as EventSource;
+        },
+        onSnapshot: (snap) => snapshots.push(snap),
+        onStreamState: (st) => streamStates.push(st),
+        onHydrated: vi.fn(),
+      });
+
+      manager.connect();
+      expect(manager.getCurrentGeneration()).toBe(1);
+      const sourceGen1 = createdSources[0];
+
+      // Reconnect increments generation to 2
+      manager.reconnect();
+      expect(manager.getCurrentGeneration()).toBe(2);
+      const sourceGen2 = createdSources[1];
+      expect(manager.getActiveSource()).toBe(sourceGen2 as unknown as EventSource);
+
+      // Now stale callback from superseded generation 1 fires
+      sourceGen1.onerror?.();
+
+      // Generation 2 must remain completely intact!
+      expect(manager.getActiveSource()).toBe(sourceGen2 as unknown as EventSource);
+      expect(sourceGen2.closed).toBe(false);
+      // streamStates should NOT have added "stale" from the old source
+      expect(streamStates).toEqual(["connecting", "connecting"]);
+
+      // Old message from superseded generation 1 is also ignored
+      const oldEvent = {
+        data: JSON.stringify({
+          data: {
+            ...baseEmptySnapshot,
+            generatedAt: "2026-09-17T10:00:00.000Z",
+          },
+        }),
+      } as MessageEvent<string>;
+      sourceGen1.listeners["snapshot"]?.forEach((l) => l(oldEvent));
+      expect(snapshots.length).toBe(0);
+
+      // Valid message from current generation 2 is processed
+      const currentEvent = {
+        data: JSON.stringify({
+          data: {
+            ...baseEmptySnapshot,
+            generatedAt: "2026-09-17T10:05:00.000Z",
+          },
+        }),
+      } as MessageEvent<string>;
+      sourceGen2.listeners["snapshot"]?.forEach((l) => l(currentEvent));
+      expect(snapshots.length).toBe(1);
+      expect(snapshots[0].generatedAt).toBe("2026-09-17T10:05:00.000Z");
+
+      manager.dispose();
+    });
+
+    it("aborts in-flight fallback fetch when reconnected or disposed", () => {
+      const createdSources: MockEventSource[] = [];
+      const abortedSignals: boolean[] = [];
+
+      let resolveFetch: ((res: Response) => void) | null = null;
+      const fetchFallback = vi.fn((_url: string, init?: RequestInit) => {
+        if (init?.signal) {
+          init.signal.addEventListener("abort", () => {
+            abortedSignals.push(true);
+          });
+        }
+        return new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        });
+      });
+
+      const manager = new FilesystemStreamLifecycleManager({
+        createEventSource: (url) => {
+          const s = new MockEventSource(url);
+          createdSources.push(s);
+          return s as unknown as EventSource;
+        },
+        fetchFallback,
+        onSnapshot: vi.fn(),
+        onStreamState: vi.fn(),
+        onHydrated: vi.fn(),
+      });
+
+      manager.connect();
+      const source1 = createdSources[0];
+
+      // Trigger error to start fallback fetch
+      source1.onerror?.();
+      expect(fetchFallback).toHaveBeenCalledTimes(1);
+
+      // Reconnect immediately while fetch is in-flight
+      manager.reconnect();
+      expect(abortedSignals.length).toBe(1);
+      expect(abortedSignals[0]).toBe(true);
+
+      // Resolving the late fetch after abort must not throw or affect manager
+      if (resolveFetch) {
+        (resolveFetch as (res: Response) => void)(new Response(JSON.stringify({ data: baseEmptySnapshot })));
+      }
+
+      manager.dispose();
+    });
+  });
+
+  describe("SnapshotIngestionCoordinator (Synchronous & Deterministic Acceptance)", () => {
+    it("synchronously commits accepted snapshot, receivedAtMs, and trust marker atomically", () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const initialTime = Date.parse("2026-09-17T10:00:00.000Z");
+      const snap1: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T10:00:00.000Z",
+      };
+
+      const res1 = coordinator.ingest(snap1, initialTime);
+      expect(res1.accepted).toBe(true);
+      expect(coordinator.getState().envelope.snapshot).toBe(snap1);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(initialTime);
+      expect(coordinator.getState().latestSnapshotAt).toBe(initialTime);
+
+      // Out-of-order snapshot arrives synchronously
+      const staleTime = Date.parse("2026-09-17T10:00:05.000Z");
+      const snapOld: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T09:55:00.000Z",
+      };
+      const resOld = coordinator.ingest(snapOld, staleTime);
+      expect(resOld.accepted).toBe(false);
+      // State remains completely unchanged
+      expect(coordinator.getState().envelope.snapshot).toBe(snap1);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(initialTime);
+      expect(coordinator.getState().latestSnapshotAt).toBe(initialTime);
+
+      // Rapid newer snapshot arrives
+      const snapNewer: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T10:02:00.000Z",
+      };
+      const newerTime = Date.parse("2026-09-17T10:02:01.000Z");
+      const resNewer = coordinator.ingest(snapNewer, newerTime);
+      expect(resNewer.accepted).toBe(true);
+      expect(coordinator.getState().envelope.snapshot).toBe(snapNewer);
+      expect(coordinator.getState().envelope.snapshotReceivedAtMs).toBe(newerTime);
+      expect(coordinator.getState().latestSnapshotAt).toBe(Date.parse("2026-09-17T10:02:00.000Z"));
+    });
+
+    it("evaluates trust marker atomically on ingestion and keeps state bounded O(1)", () => {
+      const coordinator = new SnapshotIngestionCoordinator();
+      const receivedAt = Date.parse("2026-09-17T12:00:00.000Z");
+      const futureTime = "2026-09-17T12:00:20.000Z"; // 20s in future (> 5s tolerance)
+
+      const skewedSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:00.000Z",
+        latestTelemetryAt: futureTime,
+      };
+
+      const res = coordinator.ingest(skewedSnapshot, receivedAt);
+      expect(res.accepted).toBe(true);
+      expect(res.state.trustMarker).toEqual({
+        telemetryAt: futureTime,
+        isFutureSkew: true,
+      });
+
+      // Manual refresh with same telemetryAt preserves future_skew
+      const refreshedSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:10.000Z",
+        latestTelemetryAt: futureTime,
+      };
+      const resRefresh = coordinator.ingest(refreshedSnapshot, receivedAt + 10_000);
+      expect(resRefresh.accepted).toBe(true);
+      expect(resRefresh.state.trustMarker).toEqual({
+        telemetryAt: futureTime,
+        isFutureSkew: true,
+      });
+
+      // Valid new timestamp replaces the marker
+      const validTime = "2026-09-17T12:00:12.000Z";
+      const validSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:15.000Z",
+        latestTelemetryAt: validTime,
+      };
+      const resValid = coordinator.ingest(validSnapshot, receivedAt + 15_000);
+      expect(resValid.accepted).toBe(true);
+      expect(resValid.state.trustMarker).toEqual({
+        telemetryAt: validTime,
+        isFutureSkew: false,
+      });
+    });
+  });
+
+  describe("Pure Freshness Calculation (Zero Mutation During Render)", () => {
+    it("is strictly pure and idempotent during React render", () => {
+      const now = Date.parse("2026-09-17T12:00:00.000Z");
+      const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T12:00:00.000Z",
+        latestTelemetryAt: "2026-09-17T12:00:20.000Z",
+        sessions: [
+          {
+            sessionId: "s1",
+            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
+            cwdState: { path: "/", observedAt: "2026-09-17T12:00:20.000Z", status: "confirmed" },
+            sourceIp: "10.0.0.1",
+            sourceGeo: null,
+            lifecycle: { status: "active", startedAt: null, closedAt: null },
+            nodeIds: ["/"],
+          },
+        ],
+      };
+
+      const trustMarker: TelemetryTrustMarker = {
+        telemetryAt: "2026-09-17T12:00:20.000Z",
+        isFutureSkew: true,
+      };
+
+      const snapshotCopy = JSON.parse(JSON.stringify(snapshot));
+      const markerCopy = { ...trustMarker };
+
+      const res1 = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now,
+        now,
+        trustMarker,
+      });
+
+      const res2 = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now,
+        now,
+        trustMarker,
+      });
+
+      expect(res1).toEqual(res2);
+      expect(snapshot).toEqual(snapshotCopy);
+      expect(trustMarker).toEqual(markerCopy);
+    });
+
+    it("evaluates telemetry trust purely with evaluateTelemetryTrust and TelemetryFreshnessTracker", () => {
+      const now = Date.parse("2026-09-17T12:00:00.000Z");
+      const futureTime = "2026-09-17T12:00:15.000Z";
+
+      // Null / empty input
+      expect(evaluateTelemetryTrust(null, null, now)).toBeNull();
+      expect(evaluateTelemetryTrust(null, "", now)).toBeNull();
+      expect(evaluateTelemetryTrust(null, "invalid-date", now)).toBeNull();
+
+      // Excessive future skew
+      const skewed = evaluateTelemetryTrust(null, futureTime, now, 5_000);
+      expect(skewed).toEqual({
+        telemetryAt: futureTime,
+        isFutureSkew: true,
+      });
+
+      // Preserve trust if same timestamp
+      const preserved = evaluateTelemetryTrust(skewed, futureTime, now + 10_000, 5_000);
+      expect(preserved).toBe(skewed);
+
+      // Tracker wrapper
+      const tracker = new TelemetryFreshnessTracker();
+      expect(tracker.getTrustMarker()).toBeNull();
+      tracker.ingestObservation(futureTime, now);
+      expect(tracker.isKnownSkewed(futureTime)).toBe(true);
+      expect(tracker.isSkewed(futureTime)).toBe(true);
+      expect(tracker.isSkewed("other-time")).toBe(false);
+
+      tracker.clear();
+      expect(tracker.getTrustMarker()).toBeNull();
+      expect(tracker.isSkewed(futureTime)).toBe(false);
+    });
   });
 
   describe("Persistent Excessive Future-Skew Timeline & Trust Invariants", () => {
@@ -264,14 +547,18 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         ],
       };
 
-      const tracker = new TelemetryFreshnessTracker();
+      const coordinator = new SnapshotIngestionCoordinator();
+      const transition1 = coordinator.ingest(snapshot, baseReceiptTime);
+      expect(transition1.accepted).toBe(true);
+      expect(transition1.state.trustMarker?.isFutureSkew).toBe(true);
+      expect(transition1.state.trustMarker?.telemetryAt).toBe(excessiveFutureTime);
 
       // Stage 1: Initial receipt at t = 12:00:00 (skew is 20s > 5s tolerance)
       const metrics1 = calculateTelemetryAge({
         snapshot,
         snapshotReceivedAtMs: baseReceiptTime,
         now: baseReceiptTime,
-        freshnessTracker: tracker,
+        trustMarker: transition1.state.trustMarker,
       });
       const state1 = getFreshnessState({
         telemetryAgeMs: metrics1.telemetryAgeMs,
@@ -286,7 +573,6 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       expect(state1.classification).toBe("stale");
       expect(state1.label).toBe("Stale");
       expect(formatPageBadgeText(state1)).toBe("Stale · Clock skew");
-      expect(tracker.isKnownSkewed(excessiveFutureTime)).toBe(true);
 
       // Stage 2: Before entering tolerance window at t = 12:00:10 (skew is 10s > 5s tolerance)
       const nowStage2 = Date.parse("2026-09-17T12:00:10.000Z");
@@ -294,7 +580,7 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         snapshot,
         snapshotReceivedAtMs: baseReceiptTime,
         now: nowStage2,
-        freshnessTracker: tracker,
+        trustMarker: transition1.state.trustMarker,
       });
       const state2 = getFreshnessState({
         telemetryAgeMs: metrics2.telemetryAgeMs,
@@ -315,7 +601,7 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         snapshot,
         snapshotReceivedAtMs: baseReceiptTime,
         now: nowStage3,
-        freshnessTracker: tracker,
+        trustMarker: transition1.state.trustMarker,
       });
       const state3 = getFreshnessState({
         telemetryAgeMs: metrics3.telemetryAgeMs,
@@ -338,7 +624,7 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         snapshot,
         snapshotReceivedAtMs: baseReceiptTime,
         now: nowStage4,
-        freshnessTracker: tracker,
+        trustMarker: transition1.state.trustMarker,
       });
       const state4 = getFreshnessState({
         telemetryAgeMs: metrics4.telemetryAgeMs,
@@ -358,7 +644,7 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         snapshot,
         snapshotReceivedAtMs: baseReceiptTime,
         now: nowStage5,
-        freshnessTracker: tracker,
+        trustMarker: transition1.state.trustMarker,
       });
       const state5 = getFreshnessState({
         telemetryAgeMs: metrics5.telemetryAgeMs,
@@ -379,11 +665,15 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         generatedAt: "2026-09-17T12:01:05.000Z", // Server generated newly
         latestTelemetryAt: excessiveFutureTime,     // Telemetry timestamp is UNCHANGED
       };
+      const transition6 = coordinator.ingest(refreshedSameSnapshot, nowStage6);
+      expect(transition6.accepted).toBe(true);
+      expect(transition6.state.trustMarker?.isFutureSkew).toBe(true);
+
       const metrics6 = calculateTelemetryAge({
         snapshot: refreshedSameSnapshot,
         snapshotReceivedAtMs: nowStage6,
         now: nowStage6,
-        freshnessTracker: tracker,
+        trustMarker: transition6.state.trustMarker,
       });
       const state6 = getFreshnessState({
         telemetryAgeMs: metrics6.telemetryAgeMs,
@@ -417,11 +707,15 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
           },
         ],
       };
+      const transition7 = coordinator.ingest(recoveredSnapshot, nowStage7);
+      expect(transition7.accepted).toBe(true);
+      expect(transition7.state.trustMarker?.isFutureSkew).toBe(false);
+
       const metrics7 = calculateTelemetryAge({
         snapshot: recoveredSnapshot,
         snapshotReceivedAtMs: nowStage7,
         now: nowStage7,
-        freshnessTracker: tracker,
+        trustMarker: transition7.state.trustMarker,
       });
       const state7 = getFreshnessState({
         telemetryAgeMs: metrics7.telemetryAgeMs,

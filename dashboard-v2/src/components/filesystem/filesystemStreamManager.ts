@@ -6,7 +6,7 @@ export interface StreamLifecycleOptions {
   streamUrl?: string;
   fallbackUrl?: string;
   createEventSource?: (url: string) => EventSource;
-  fetchFallback?: (url: string) => Promise<Response>;
+  fetchFallback?: (url: string, init?: RequestInit) => Promise<Response>;
   onSnapshot: (snapshot: FilesystemTopologySnapshot) => void;
   onStreamState: (state: StreamState) => void;
   onRegionStatus?: (statusUpdater: (current: RegionStatus) => RegionStatus) => void;
@@ -18,15 +18,18 @@ export interface StreamLifecycleOptions {
  * and HTTP fallback fetching for the filesystem topology.
  *
  * Guarantees:
- * 1. Connecting -> live transitions never tear down or reconnect the active stream.
- * 2. Ordinary parent/component rerenders never recreate or re-register listeners.
- * 3. Connection retry timers are bounded (5s) and cleaned up strictly on disposal.
- * 4. Explicit reconnect() cleanly closes prior connection before starting a new one.
+ * 1. Monotonically incrementing generation scopes every connection attempt.
+ * 2. Stale onerror/onmessage/onopen callbacks from superseded connections are discarded.
+ * 3. In-flight fallback requests are aborted on reconnection or disposal via AbortController.
+ * 4. At most one active EventSource exists at any time.
+ * 5. Ordinary parent/component rerenders never recreate or re-register listeners.
  */
 export class FilesystemStreamLifecycleManager {
   private disposed = false;
+  private currentGeneration = 0;
   private source: EventSource | null = null;
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private fallbackAbortController: AbortController | null = null;
   private connectionCount = 0;
   private cleanupCount = 0;
 
@@ -35,9 +38,17 @@ export class FilesystemStreamLifecycleManager {
   public connect(): void {
     if (this.disposed) return;
 
+    this.currentGeneration++;
+    const generation = this.currentGeneration;
+
     if (this.retryTimeout !== null) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
+    }
+
+    if (this.fallbackAbortController) {
+      this.fallbackAbortController.abort();
+      this.fallbackAbortController = null;
     }
 
     if (this.source) {
@@ -56,11 +67,14 @@ export class FilesystemStreamLifecycleManager {
     this.source = source;
 
     const onMessage = (event: MessageEvent<string>) => {
+      if (this.disposed || this.currentGeneration !== generation || this.source !== source) {
+        return;
+      }
       try {
         const message: unknown = JSON.parse(event.data);
         if (!message || typeof message !== "object") return;
         const data = (message as { data?: unknown }).data;
-        if (!isSnapshot(data) || this.disposed) return;
+        if (!isSnapshot(data)) return;
         this.options.onSnapshot(data);
         this.options.onStreamState("live");
       } catch {
@@ -72,40 +86,60 @@ export class FilesystemStreamLifecycleManager {
     source.addEventListener("topology.update", onMessage as EventListener);
 
     source.onopen = () => {
-      if (this.disposed) return;
+      if (this.disposed || this.currentGeneration !== generation || this.source !== source) {
+        return;
+      }
       this.options.onHydrated();
       this.options.onStreamState("live");
     };
 
     source.onerror = () => {
-      if (this.disposed || this.source === null) return;
+      if (this.disposed || this.currentGeneration !== generation || this.source !== source) {
+        return;
+      }
       this.options.onHydrated();
       this.options.onStreamState("stale");
       this.cleanupCount++;
       source.close();
       this.source = null;
-      void this.fetchFallbackSnapshot();
+      void this.fetchFallbackSnapshot(generation);
       this.retryTimeout = setTimeout(() => {
-        if (!this.disposed) {
+        if (!this.disposed && this.currentGeneration === generation) {
           this.connect();
         }
       }, 5_000);
     };
   }
 
-  private async fetchFallbackSnapshot(): Promise<void> {
-    if (this.disposed) return;
-    const fetchFn = this.options.fetchFallback ?? ((u) => fetch(u, { cache: "no-store" }));
+  private async fetchFallbackSnapshot(generation: number): Promise<void> {
+    if (this.disposed || this.currentGeneration !== generation) return;
+
+    if (this.fallbackAbortController) {
+      this.fallbackAbortController.abort();
+    }
+    const abortController = new AbortController();
+    this.fallbackAbortController = abortController;
+
+    const fetchFn = this.options.fetchFallback ?? ((u, init) => fetch(u, { cache: "no-store", ...init }));
     const fallbackUrl = this.options.fallbackUrl ?? "/api/filesystem-topology";
     try {
-      const response = await fetchFn(fallbackUrl);
+      const response = await fetchFn(fallbackUrl, { signal: abortController.signal });
+      if (this.disposed || this.currentGeneration !== generation) return;
       if (!response.ok) throw new Error("Fallback request failed");
       const data: unknown = await response.json();
-      if (!isSnapshot(data) || this.disposed) return;
+      if (this.disposed || this.currentGeneration !== generation) return;
+      if (!isSnapshot(data)) return;
       this.options.onSnapshot(data);
     } catch {
-      if (!this.disposed && this.options.onRegionStatus) {
+      if (abortController.signal.aborted || this.disposed || this.currentGeneration !== generation) {
+        return;
+      }
+      if (this.options.onRegionStatus) {
         this.options.onRegionStatus((curr) => (curr === "ready" ? "stale" : "error"));
+      }
+    } finally {
+      if (this.fallbackAbortController === abortController) {
+        this.fallbackAbortController = null;
       }
     }
   }
@@ -118,15 +152,24 @@ export class FilesystemStreamLifecycleManager {
 
   public dispose(): void {
     this.disposed = true;
+    this.currentGeneration++;
     if (this.retryTimeout !== null) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
+    }
+    if (this.fallbackAbortController) {
+      this.fallbackAbortController.abort();
+      this.fallbackAbortController = null;
     }
     if (this.source) {
       this.cleanupCount++;
       this.source.close();
       this.source = null;
     }
+  }
+
+  public getCurrentGeneration(): number {
+    return this.currentGeneration;
   }
 
   public getConnectionCount(): number {

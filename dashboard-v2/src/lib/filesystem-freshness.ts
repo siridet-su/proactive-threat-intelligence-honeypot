@@ -101,9 +101,48 @@ export interface SnapshotEnvelope {
   snapshotReceivedAtMs: number | null;
 }
 
+export interface TelemetryTrustMarker {
+  telemetryAt: string;
+  isFutureSkew: boolean;
+}
+
+/**
+ * Pure evaluation helper that updates the telemetry trust marker upon snapshot ingestion.
+ * Preserves existing future_skew trust classification when the incoming telemetry timestamp
+ * matches the current observation (e.g. manual refresh returning the same telemetry time).
+ * Re-evaluates against the arrival timestamp when a genuinely different timestamp is observed.
+ */
+export function evaluateTelemetryTrust(
+  currentTrust: TelemetryTrustMarker | null,
+  telemetryAt: string | null,
+  receivedAtMs: number,
+  toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+): TelemetryTrustMarker | null {
+  if (!telemetryAt || typeof telemetryAt !== "string" || !telemetryAt.trim()) {
+    return null;
+  }
+
+  // Preserve trust classification if the observation timestamp has not changed
+  if (currentTrust && currentTrust.telemetryAt === telemetryAt) {
+    return currentTrust;
+  }
+
+  const parsedMs = Date.parse(telemetryAt);
+  if (Number.isNaN(parsedMs)) {
+    return null;
+  }
+
+  const isFutureSkew = parsedMs > receivedAtMs + toleranceMs;
+  return {
+    telemetryAt,
+    isFutureSkew,
+  };
+}
+
 export interface SnapshotTransitionState {
   envelope: SnapshotEnvelope;
   latestSnapshotAt: number;
+  trustMarker: TelemetryTrustMarker | null;
 }
 
 export interface SnapshotTransitionResult {
@@ -113,13 +152,14 @@ export interface SnapshotTransitionResult {
 
 /**
  * Pure transition helper that processes incoming snapshots against monotonic generation ordering.
- * Enforces atomic updates to snapshot and snapshotReceivedAtMs, and rejects out-of-order snapshots
- * without mutating or resetting existing receipt timestamps.
+ * Enforces atomic updates to snapshot, snapshotReceivedAtMs, and trustMarker, and rejects out-of-order
+ * snapshots without mutating or resetting existing receipt timestamps or trust state.
  */
 export function processSnapshotTransition(
   current: SnapshotTransitionState,
   incoming: FilesystemTopologySnapshot,
   receivedAtMs: number,
+  toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
 ): SnapshotTransitionResult {
   const timestamp = Date.parse(incoming.generatedAt) || 0;
   if (timestamp && timestamp < current.latestSnapshotAt) {
@@ -129,6 +169,17 @@ export function processSnapshotTransition(
     };
   }
 
+  const telemetryAt = incoming.latestTelemetryAt !== undefined
+    ? incoming.latestTelemetryAt
+    : deriveLatestTelemetryAt(incoming);
+
+  const trustMarker = evaluateTelemetryTrust(
+    current.trustMarker,
+    telemetryAt,
+    receivedAtMs,
+    toleranceMs,
+  );
+
   return {
     accepted: true,
     state: {
@@ -137,42 +188,99 @@ export function processSnapshotTransition(
         snapshotReceivedAtMs: receivedAtMs,
       },
       latestSnapshotAt: Math.max(current.latestSnapshotAt, timestamp),
+      trustMarker,
     },
   };
 }
 
 /**
- * Tracks telemetry observations that have been classified as future_skew because they exceeded
- * configured clock skew tolerance.
- * Ensures that an untrusted observation never later becomes valid/fresh merely because the client clock catches up.
+ * Authoritative, synchronous coordinator for snapshot ingestion.
+ * Determines acceptance synchronously against an atomic transition state, preventing React state
+ * batching races and ensuring side effects fire exactly once per accepted snapshot.
+ */
+export class SnapshotIngestionCoordinator {
+  private state: SnapshotTransitionState;
+
+  constructor(initialState?: SnapshotTransitionState) {
+    this.state = initialState ?? {
+      envelope: { snapshot: null, snapshotReceivedAtMs: null },
+      latestSnapshotAt: 0,
+      trustMarker: null,
+    };
+  }
+
+  getState(): SnapshotTransitionState {
+    return this.state;
+  }
+
+  ingest(
+    snapshot: FilesystemTopologySnapshot,
+    receivedAtMs: number,
+    toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+  ): SnapshotTransitionResult {
+    const result = processSnapshotTransition(this.state, snapshot, receivedAtMs, toleranceMs);
+    if (result.accepted) {
+      this.state = result.state;
+    }
+    return result;
+  }
+}
+
+/**
+ * Lightweight, bounded O(1) tracker managing the single current telemetry observation trust marker.
  */
 export class TelemetryFreshnessTracker {
-  private knownSkewedTimestamps: Set<string>;
+  private currentMarker: TelemetryTrustMarker | null = null;
 
-  constructor(initialSkewed?: Iterable<string>) {
-    this.knownSkewedTimestamps = new Set(initialSkewed);
+  constructor(initialMarker?: TelemetryTrustMarker | null) {
+    this.currentMarker = initialMarker ?? null;
+  }
+
+  getTrustMarker(): TelemetryTrustMarker | null {
+    return this.currentMarker;
   }
 
   isKnownSkewed(timestamp: string): boolean {
-    return this.knownSkewedTimestamps.has(timestamp);
+    return this.isSkewed(timestamp);
+  }
+
+  isSkewed(timestamp: string): boolean {
+    return Boolean(
+      this.currentMarker &&
+      this.currentMarker.telemetryAt === timestamp &&
+      this.currentMarker.isFutureSkew,
+    );
   }
 
   recordSkew(timestamp: string): void {
-    this.knownSkewedTimestamps.add(timestamp);
+    this.currentMarker = {
+      telemetryAt: timestamp,
+      isFutureSkew: true,
+    };
+  }
+
+  ingestObservation(
+    telemetryAt: string | null,
+    receivedAtMs: number,
+    toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+  ): TelemetryTrustMarker | null {
+    this.currentMarker = evaluateTelemetryTrust(
+      this.currentMarker,
+      telemetryAt,
+      receivedAtMs,
+      toleranceMs,
+    );
+    return this.currentMarker;
   }
 
   clear(): void {
-    this.knownSkewedTimestamps.clear();
+    this.currentMarker = null;
   }
 
-  getKnownSkewedTimestamps(): Set<string> {
-    return new Set(this.knownSkewedTimestamps);
-  }
-
-  calculateTelemetryAge(params: Omit<CalculateTelemetryAgeParams, "freshnessTracker">): TelemetryAgeMetrics {
+  calculateTelemetryAge(params: Omit<CalculateTelemetryAgeParams, "trustMarker">): TelemetryAgeMetrics {
     return calculateTelemetryAge({
       ...params,
-      freshnessTracker: this,
+      trustMarker: this.currentMarker,
     });
   }
 }
@@ -188,15 +296,15 @@ export interface CalculateTelemetryAgeParams {
   now?: number;
   /** Maximum acceptable future clock skew tolerance in ms (defaults to 5,000ms). */
   futureSkewToleranceMs?: number;
-  /** Persistent tracker ensuring skewed observations do not become fresh upon clock advance. */
+  /** Trust marker established at snapshot ingestion time. */
+  trustMarker?: TelemetryTrustMarker | null;
+  /** Optional tracker instance for compatibility. */
   freshnessTracker?: TelemetryFreshnessTracker;
-  /** Optional set of known skewed timestamps for ad-hoc validation. */
-  knownSkewedTimestamps?: Set<string>;
 }
 
 /**
- * Calculates separate telemetry, client receipt, and server generation ages for a topology snapshot,
- * enforcing a bounded future clock-skew policy.
+ * Calculates separate telemetry, client receipt, and server generation ages for a topology snapshot.
+ * This is a completely PURE function during React render with zero side effects or state mutations.
  */
 export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): TelemetryAgeMetrics {
   const {
@@ -204,8 +312,8 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     snapshotReceivedAtMs,
     now = Date.now(),
     futureSkewToleranceMs = MAX_FUTURE_TELEMETRY_SKEW_MS,
+    trustMarker,
     freshnessTracker,
-    knownSkewedTimestamps,
   } = params;
 
   if (!snapshot) {
@@ -226,7 +334,7 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     ? 0
     : Math.max(0, now - Math.min(serverGenMs, now));
 
-  // 2. Client snapshot receipt age: derived from snapshotReceivedAtMs!
+  // 2. Client snapshot receipt age: derived from snapshotReceivedAtMs
   const effectiveReceiptMs = typeof snapshotReceivedAtMs === "number" && Number.isFinite(snapshotReceivedAtMs)
     ? snapshotReceivedAtMs
     : (Number.isNaN(serverGenMs) ? now : serverGenMs);
@@ -280,14 +388,14 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     };
   }
 
-  // Check if this specific telemetry observation has already been classified as future_skew.
-  // Once classified as future_skew, it must NEVER later become valid/fresh merely because the client clock catches up.
-  const isAlreadySkewed = Boolean(
-    (freshnessTracker && freshnessTracker.isKnownSkewed(telemetryAt)) ||
-    (knownSkewedTimestamps && knownSkewedTimestamps.has(telemetryAt)),
+  // Pure trust check: if this observation was classified as future_skew at ingestion, fail closed.
+  // Never mutates state or sets during render!
+  const isMarkedFutureSkew = Boolean(
+    (trustMarker && trustMarker.telemetryAt === telemetryAt && trustMarker.isFutureSkew) ||
+    (freshnessTracker && freshnessTracker.isSkewed(telemetryAt)),
   );
 
-  if (isAlreadySkewed) {
+  if (isMarkedFutureSkew) {
     return {
       telemetryAt,
       telemetryAgeMs: null,
@@ -299,7 +407,7 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     };
   }
 
-  // Check future skew
+  // Pure clock comparison
   if (parsedTelemetryMs > now) {
     const futureSkewMs = parsedTelemetryMs - now;
     if (futureSkewMs <= futureSkewToleranceMs) {
@@ -315,11 +423,7 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
       };
     }
 
-    // Beyond tolerance: excessive clock skew! Untrusted / fail-closed.
-    // Record into persistent tracker so this same observation remains future_skew even if the clock catches up.
-    freshnessTracker?.recordSkew(telemetryAt);
-    knownSkewedTimestamps?.add(telemetryAt);
-
+    // Beyond tolerance: excessive clock skew
     return {
       telemetryAt,
       telemetryAgeMs: null,
