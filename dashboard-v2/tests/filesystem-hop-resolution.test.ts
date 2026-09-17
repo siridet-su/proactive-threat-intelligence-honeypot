@@ -8,6 +8,7 @@ import type { FilesystemClosedSession, SessionCwdHistoryEvent } from "@/lib/dash
 import {
   RemoteAuditLookupCoordinator,
   SessionHopLifecycleManager,
+  adoptLocalSessionScope,
   createRemoteAuditLookupCallbacks,
   processSnapshotSessionResolution,
   type HopResolutionStatus,
@@ -145,8 +146,11 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
 
     let extraAuditSessions = new Map<string, FilesystemClosedSession>();
 
-    const lookupRemoteAuditSession = async (intent: { sessionId: string; targetHopId?: string | null }) => {
-      await coordinator.lookup(intent, authoritativeCallbacks, fetchSession);
+    let inFlightLookupPromise: Promise<unknown> | null = null;
+    const lookupRemoteAuditSession = (intent: { sessionId: string; targetHopId?: string | null }) => {
+      const p = coordinator.lookup(intent, authoritativeCallbacks, fetchSession);
+      inFlightLookupPromise = p;
+      return p;
     };
 
     const snapshot = {
@@ -189,8 +193,8 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
       },
     });
 
-    // Wait for the asynchronous lookup to settle
-    await new Promise((r) => setTimeout(r, 10));
+    // Wait for the asynchronous lookup to settle deterministically
+    await inFlightLookupPromise;
 
     // Production popstate path invoked authoritative callbacks and selected returned session and hop
     expect(fetchSession).toHaveBeenCalledTimes(1);
@@ -309,7 +313,8 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
 
     // Now late response arrives from server with 404 (not found)
     resolveFetchA(null);
-    await new Promise((r) => setTimeout(r, 10));
+    await slowPromiseA;
+    await Promise.resolve();
 
     // Late not-found CANNOT clear sess-retained-A
     expect(selectedSessionId).toBe("sess-retained-A");
@@ -385,51 +390,186 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     expect(fetchSession).toHaveBeenCalledWith("sess-missing-A", expect.any(AbortSignal));
   });
 
-  // 1b-4. Live topology session selection keeps coordinator in Live mode with null hop
-  it("live topology session selection keeps coordinator in Live mode with null hop", () => {
+  // 1b-4. Exported production helper adoptLocalSessionScope enforces null hop in Live mode and preserves hop in Audit mode
+  it("adopts locally authoritative session scope via production helper enforcing null hop in live mode and preserving hop in audit mode", () => {
     const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "live" });
-    const viewModeRef = { current: "live" as "live" | "audit" };
+
+    // In Live mode: targetHopId is strictly forced to null regardless of what is passed
+    const liveHop = adoptLocalSessionScope({
+      coordinator,
+      viewMode: "live",
+      sessionId: "sess-live-99",
+      targetHopId: "attempted-hop-in-live",
+    });
+
+    expect(liveHop).toBeNull();
+    expect(coordinator.getNavigationScope()).toEqual({
+      viewMode: "live",
+      sessionId: "sess-live-99",
+      targetHopId: null,
+      generation: expect.any(Number),
+    });
+
+    // In Audit mode: valid targetHopId is preserved
+    const auditHop = adoptLocalSessionScope({
+      coordinator,
+      viewMode: "audit",
+      sessionId: "sess-audit-1",
+      targetHopId: "cwd:audit-hop-10",
+    });
+
+    expect(auditHop).toBe("cwd:audit-hop-10");
+    expect(coordinator.getNavigationScope()).toEqual({
+      viewMode: "audit",
+      sessionId: "sess-audit-1",
+      targetHopId: "cwd:audit-hop-10",
+      generation: expect.any(Number),
+    });
+  });
+
+  // 1b-5. Resolves a session from a Live snapshot via processSnapshotSessionResolution enforcing targetHopId === null even when requestedHopRef has an old audit hop
+  it("resolves a session from a Live snapshot enforcing targetHopId === null when requestedHopRef has an old audit hop", () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "live" });
+    const requestedHopRef = { current: "old-audit-hop" as string | null };
+    const requestedSessionIdRef = { current: "sess-live-1" as string | null };
+    const selectedSessionIdRef = { current: null as string | null };
     let selectedSessionId: string | null = null;
-    const requestedHopRef = { current: null as string | null };
+    let expiredSessionId: string | null = "stale-expired";
 
-    // Simulating selectSession in FilesystemActivity in Live mode
-    const selectSession = (sessionId: string, targetHopId?: string | null) => {
-      const currentMode = viewModeRef.current;
-      const effectiveHop = currentMode === "live" ? null : (targetHopId ?? null);
-
-      coordinator.notifyNavigationScope({
-        viewMode: currentMode,
-        sessionId,
-        targetHopId: effectiveHop,
-      });
-      coordinator.notifySessionResolvedLocally(sessionId, effectiveHop);
-      selectedSessionId = sessionId;
-      if (effectiveHop !== null) {
-        requestedHopRef.current = effectiveHop;
-      } else {
-        requestedHopRef.current = null;
-      }
+    const snapshot = {
+      sessions: [makeClosedSession({ sessionId: "sess-live-1" })],
+      recentClosedSessions: [],
+      nodes: [],
     };
 
-    // User in Live mode selects a node in TopologyCanvas
-    selectSession("sess-live-99", "attempted-hop-in-live");
+    const resolution = processSnapshotSessionResolution({
+      snapshot,
+      extraAuditSessions: new Map(),
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "live",
+      lookupRemoteAuditSession: vi.fn(),
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      coordinator,
+    });
 
-    const scope = coordinator.getNavigationScope();
-    expect(scope.viewMode).toBe("live");
-    expect(scope.sessionId).toBe("sess-live-99");
-    expect(scope.targetHopId).toBeNull();
+    expect(resolution.sessionId).toBe("sess-live-1");
+    expect(resolution.expiredSessionId).toBeNull();
+    expect(selectedSessionId).toBe("sess-live-1");
+    expect(selectedSessionIdRef.current).toBe("sess-live-1");
+    expect(expiredSessionId).toBeNull();
+
+    // Invariant: Live navigation/local resolution must have targetHopId === null and clear requestedHopRef
+    expect(coordinator.getNavigationScope()).toEqual({
+      viewMode: "live",
+      sessionId: "sess-live-1",
+      targetHopId: null,
+      generation: expect.any(Number),
+    });
     expect(requestedHopRef.current).toBeNull();
-    expect(selectedSessionId).toBe("sess-live-99");
+  });
 
-    // Switching back to Audit establishes audit mode and hop scope
-    viewModeRef.current = "audit";
-    selectSession("sess-audit-1", "cwd:audit-hop-10");
+  // 1b-6. Live fallback from a missing previously selected audit session establishes live scope with null hop
+  it("covers Live fallback from a missing previously selected audit session establishing live scope with null hop", () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "live" });
+    const requestedHopRef = { current: "old-audit-hop" as string | null };
+    const requestedSessionIdRef = { current: null as string | null };
+    const selectedSessionIdRef = { current: "sess-missing-audit" as string | null };
+    let selectedSessionId: string | null = null;
+    let expiredSessionId: string | null = null;
 
-    const auditScope = coordinator.getNavigationScope();
-    expect(auditScope.viewMode).toBe("audit");
-    expect(auditScope.sessionId).toBe("sess-audit-1");
-    expect(auditScope.targetHopId).toBe("cwd:audit-hop-10");
-    expect(requestedHopRef.current).toBe("cwd:audit-hop-10");
+    const snapshot = {
+      sessions: [makeClosedSession({ sessionId: "sess-live-fallback" })],
+      recentClosedSessions: [],
+      nodes: [],
+    };
+
+    const resolution = processSnapshotSessionResolution({
+      snapshot,
+      extraAuditSessions: new Map(),
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "live",
+      lookupRemoteAuditSession: vi.fn(),
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      coordinator,
+    });
+
+    // Fallback to first available live session
+    expect(resolution.sessionId).toBe("sess-live-fallback");
+    expect(resolution.expiredSessionId).toBeNull();
+    expect(selectedSessionId).toBe("sess-live-fallback");
+    expect(selectedSessionIdRef.current).toBe("sess-live-fallback");
+    expect(expiredSessionId).toBeNull();
+
+    // Invariant: Live scope is established with targetHopId === null
+    expect(coordinator.getNavigationScope()).toEqual({
+      viewMode: "live",
+      sessionId: "sess-live-fallback",
+      targetHopId: null,
+      generation: expect.any(Number),
+    });
+    expect(requestedHopRef.current).toBeNull();
+  });
+
+  // 1b-7. Audit snapshot resolution still preserves its requested hop
+  it("confirms Audit snapshot resolution still preserves its requested hop", () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const requestedHopRef = { current: "cwd:audit-hop-77" as string | null };
+    const requestedSessionIdRef = { current: "sess-closed-1" as string | null };
+    const selectedSessionIdRef = { current: null as string | null };
+    let selectedSessionId: string | null = null;
+    let expiredSessionId: string | null = null;
+
+    const snapshot = {
+      sessions: [],
+      recentClosedSessions: [makeClosedSession({ sessionId: "sess-closed-1" })],
+      nodes: [],
+    };
+
+    const resolution = processSnapshotSessionResolution({
+      snapshot,
+      extraAuditSessions: new Map(),
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession: vi.fn(),
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      coordinator,
+    });
+
+    expect(resolution.sessionId).toBe("sess-closed-1");
+    expect(resolution.expiredSessionId).toBeNull();
+    expect(selectedSessionId).toBe("sess-closed-1");
+    expect(selectedSessionIdRef.current).toBe("sess-closed-1");
+    expect(expiredSessionId).toBeNull();
+
+    // Invariant: Audit scope preserves requested hop
+    expect(coordinator.getNavigationScope()).toEqual({
+      viewMode: "audit",
+      sessionId: "sess-closed-1",
+      targetHopId: "cwd:audit-hop-77",
+      generation: expect.any(Number),
+    });
+    expect(requestedHopRef.current).toBe("cwd:audit-hop-77");
   });
 
   // 1c. In-flight A/H1 followed by navigation to A/H2 aborts/discards H1 and applies H2

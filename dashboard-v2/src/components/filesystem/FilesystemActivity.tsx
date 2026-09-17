@@ -50,6 +50,7 @@ import {
 } from "./useAuditDirectory";
 import {
   RemoteAuditLookupCoordinator,
+  adoptLocalSessionScope,
   createRemoteAuditLookupCallbacks,
   processSnapshotSessionResolution,
   type RemoteAuditLookupIntent,
@@ -463,14 +464,12 @@ export function FilesystemActivity() {
       targetHopId?: string | null,
     ) => {
       const currentMode = viewModeRef.current;
-      const effectiveHop = currentMode === "live" ? null : (targetHopId ?? null);
-
-      remoteAuditLookupManager.notifyNavigationScope({
+      const effectiveHop = adoptLocalSessionScope({
+        coordinator: remoteAuditLookupManager,
         viewMode: currentMode,
         sessionId,
-        targetHopId: effectiveHop,
+        targetHopId,
       });
-      remoteAuditLookupManager.notifySessionResolvedLocally(sessionId, effectiveHop);
 
       if (sessionObj) {
         setExtraAuditSessions((prev) => {

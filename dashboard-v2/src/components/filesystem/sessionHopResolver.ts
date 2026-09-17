@@ -455,22 +455,42 @@ export class RemoteAuditLookupCoordinator {
   }
 
   /**
+   * Adopts a locally authoritative session scope (e.g. from snapshot or local selection).
+   * Enforces the invariant:
+   * - Live mode always forces targetHopId to null.
+   * - Audit mode preserves the normalized targetHopId.
+   * Updates navigation scope and cancels any active in-flight lookup.
+   */
+  adoptLocalSessionScope(
+    sessionId: string,
+    targetHopId?: string | null,
+    viewMode?: "live" | "audit",
+  ): string | null {
+    if (viewMode !== undefined) {
+      this.viewMode = viewMode;
+    }
+    const effectiveHop = this.viewMode === "live" ? null : normalizeHop(targetHopId);
+    this.currentSessionId = sessionId;
+    this.currentTargetHopId = effectiveHop;
+
+    if (this.inFlightIntent) {
+      this.abort();
+    }
+    return effectiveHop;
+  }
+
+  /**
    * Notifies the coordinator that a session has become authoritative locally
    * (e.g. found in snapshot.sessions, snapshot.recentClosedSessions, or authoritative directory).
    *
-   * Cancels and invalidates any matching in-flight remote lookup for this session
-   * even when sessionId and targetHopId are unchanged, while adopting the session
-   * and preserving the requested hop in the navigation scope.
-   * Late found, not-found, or error callbacks from the canceled lookup are discarded.
+   * Backwards-compatible alias for adoptLocalSessionScope.
    */
-  notifySessionResolvedLocally(sessionId: string, targetHopId?: string | null): void {
-    const normHop = targetHopId !== undefined ? normalizeHop(targetHopId) : this.currentTargetHopId;
-    this.currentSessionId = sessionId;
-    this.currentTargetHopId = normHop;
-
-    if (this.inFlightIntent && this.inFlightIntent.sessionId === sessionId) {
-      this.abort();
-    }
+  notifySessionResolvedLocally(
+    sessionId: string,
+    targetHopId?: string | null,
+    viewMode?: "live" | "audit",
+  ): void {
+    this.adoptLocalSessionScope(sessionId, targetHopId, viewMode);
   }
 
   /**
@@ -652,6 +672,24 @@ export function createRemoteAuditLookupCallbacks(
   };
 }
 
+export interface AdoptLocalSessionScopeParams {
+  coordinator?: RemoteAuditLookupCoordinator | null;
+  viewMode: "live" | "audit";
+  sessionId: string;
+  targetHopId?: string | null;
+}
+
+export function adoptLocalSessionScope(params: AdoptLocalSessionScopeParams): string | null {
+  const { coordinator, viewMode, sessionId, targetHopId } = params;
+  const effectiveHop = viewMode === "live" ? null : normalizeHop(targetHopId);
+
+  if (coordinator) {
+    coordinator.adoptLocalSessionScope(sessionId, effectiveHop, viewMode);
+  }
+
+  return effectiveHop;
+}
+
 export interface ProcessSnapshotSessionResolutionParams {
   snapshot: FilesystemTopologySnapshot;
   extraAuditSessions: Map<string, FilesystemTopologySession | FilesystemClosedSession>;
@@ -698,10 +736,24 @@ export function processSnapshotSessionResolution(
     params.selectedSessionIdRef.current = resolution.sessionId;
     params.setSelectedSessionId(resolution.sessionId);
     if (resolution.sessionId) {
-      params.coordinator?.notifySessionResolvedLocally(
-        resolution.sessionId,
-        params.requestedHopRef.current,
-      );
+      const effectiveHop = adoptLocalSessionScope({
+        coordinator: params.coordinator,
+        viewMode: params.viewMode,
+        sessionId: resolution.sessionId,
+        targetHopId: params.requestedHopRef.current,
+      });
+      if (params.viewMode === "live") {
+        params.requestedHopRef.current = null;
+      } else if (effectiveHop !== null) {
+        params.requestedHopRef.current = effectiveHop;
+      }
+    } else if (params.viewMode === "live") {
+      params.requestedHopRef.current = null;
+      params.coordinator?.notifyNavigationScope({
+        viewMode: "live",
+        sessionId: null,
+        targetHopId: null,
+      });
     }
   }
 
