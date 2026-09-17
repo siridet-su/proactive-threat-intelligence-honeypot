@@ -1424,18 +1424,29 @@ export {
   calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   deriveLatestTelemetryAt,
+  formatPageBadgeText,
   formatUpdateAge,
   getFreshnessState,
   MAX_FUTURE_TELEMETRY_SKEW_MS,
+  processSnapshotTransition,
+  TelemetryFreshnessTracker,
   type CalculateTelemetryAgeParams,
   type FilesystemRegionStatus,
   type FilesystemStreamState,
   type FreshnessClassification,
   type FreshnessState,
   type FreshnessStateParams,
+  type SnapshotEnvelope,
+  type SnapshotTransitionResult,
+  type SnapshotTransitionState,
   type TelemetryAgeMetrics,
   type TelemetryStatus,
 } from "@/lib/filesystem-freshness";
+
+export {
+  FilesystemStreamLifecycleManager,
+  type StreamLifecycleOptions,
+} from "./filesystemStreamManager";
 
 export type ToolbarDomain =
   | "global-views"

@@ -8,19 +8,22 @@ import {
   calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   getFreshnessState,
-  isSnapshot,
+  processSnapshotTransition,
+  TelemetryFreshnessTracker,
   type FreshnessState,
+  type SnapshotTransitionState,
+} from "@/lib/filesystem-freshness";
+import {
+  isSnapshot,
   type StreamState,
 } from "./filesystemUtils";
+import { FilesystemStreamLifecycleManager } from "./filesystemStreamManager";
+
+const defaultGetNow = () => Date.now();
 
 export interface UseFilesystemStreamingOptions {
   onSnapshotApplied?: (snapshot: FilesystemTopologySnapshot) => void;
   getNow?: () => number;
-}
-
-interface SnapshotEnvelope {
-  snapshot: FilesystemTopologySnapshot | null;
-  snapshotReceivedAtMs: number | null;
 }
 
 export interface UseFilesystemStreamingReturn {
@@ -47,67 +50,86 @@ export interface UseFilesystemStreamingReturn {
 export function useFilesystemStreaming(
   options: UseFilesystemStreamingOptions = {},
 ): UseFilesystemStreamingReturn {
-  const { onSnapshotApplied, getNow = () => Date.now() } = options;
+  const { onSnapshotApplied, getNow = defaultGetNow } = options;
 
-  const [envelope, setEnvelope] = useState<SnapshotEnvelope>({
-    snapshot: null,
-    snapshotReceivedAtMs: null,
+  const getNowRef = useRef(getNow);
+  useEffect(() => {
+    getNowRef.current = getNow;
+  }, [getNow]);
+
+  const [transitionState, setTransitionState] = useState<SnapshotTransitionState>({
+    envelope: {
+      snapshot: null,
+      snapshotReceivedAtMs: null,
+    },
+    latestSnapshotAt: 0,
   });
-  const snapshot = envelope.snapshot;
-  const snapshotReceivedAtMs = envelope.snapshotReceivedAtMs;
+  const snapshot = transitionState.envelope.snapshot;
+  const snapshotReceivedAtMs = transitionState.envelope.snapshotReceivedAtMs;
 
   const [regionStatus, setRegionStatus] = useState<RegionStatus>("loading");
   const [streamState, setStreamState] = useState<StreamState>("connecting");
   const [isHydrated, setIsHydrated] = useState(false);
 
-  const latestSnapshotAt = useRef(0);
   const reconnectStreamRef = useRef<(() => void) | null>(null);
   const onSnapshotAppliedRef = useRef(onSnapshotApplied);
+  const [freshnessTracker] = useState(() => new TelemetryFreshnessTracker());
 
   useEffect(() => {
     onSnapshotAppliedRef.current = onSnapshotApplied;
   }, [onSnapshotApplied]);
 
+  // applySnapshot has stable identity (empty dependency array)
   const applySnapshot = useCallback((data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number): boolean => {
-    const timestamp = Date.parse(data.generatedAt) || 0;
-    if (timestamp && timestamp < latestSnapshotAt.current) return false;
-    latestSnapshotAt.current = Math.max(latestSnapshotAt.current, timestamp);
+    const receivedAtMs = typeof explicitReceivedAtMs === "number"
+      ? explicitReceivedAtMs
+      : (getNowRef.current ? getNowRef.current() : Date.now());
 
-    const receivedAtMs = typeof explicitReceivedAtMs === "number" ? explicitReceivedAtMs : getNow();
-    setEnvelope({
-      snapshot: data,
-      snapshotReceivedAtMs: receivedAtMs,
+    let wasAccepted = false;
+    setTransitionState((prev) => {
+      const result = processSnapshotTransition(prev, data, receivedAtMs);
+      wasAccepted = result.accepted;
+      return result.accepted ? result.state : prev;
     });
-    setRegionStatus("ready");
-    onSnapshotAppliedRef.current?.(data);
-    return true;
-  }, [getNow]);
+
+    if (wasAccepted) {
+      setRegionStatus("ready");
+      onSnapshotAppliedRef.current?.(data);
+    }
+    return wasAccepted;
+  }, []);
+
+  const applySnapshotRef = useRef(applySnapshot);
+  useEffect(() => {
+    applySnapshotRef.current = applySnapshot;
+  }, [applySnapshot]);
 
   const refresh = useCallback(async () => {
-    setRegionStatus((current) => (snapshot ? "refreshing" : current === "error" ? "loading" : current));
+    setRegionStatus((current) => (transitionState.envelope.snapshot ? "refreshing" : current === "error" ? "loading" : current));
     try {
       const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
       if (!response.ok) throw new Error("Topology request failed");
       const data: unknown = await response.json();
       if (!isSnapshot(data)) throw new Error("Topology response unavailable");
-      applySnapshot(data);
+      applySnapshotRef.current(data);
     } catch {
-      setRegionStatus(snapshot ? "stale" : "error");
+      setRegionStatus((current) => (current === "refreshing" || current === "ready" ? "stale" : "error"));
     }
-  }, [applySnapshot, snapshot]);
+  }, [transitionState.envelope.snapshot]);
 
   const handleReconnect = useCallback(() => {
     reconnectStreamRef.current?.();
     void refresh();
   }, [refresh]);
 
-  const [now, setNow] = useState(() => getNow());
+  // Stable 1-second interval timer that does not re-subscribe or restart when getNow changes
+  const [now, setNow] = useState(() => (getNow ? getNow() : Date.now()));
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setNow(getNow());
+      setNow(getNowRef.current ? getNowRef.current() : Date.now());
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, [getNow]);
+  }, []);
 
   const {
     telemetryAt,
@@ -122,8 +144,9 @@ export function useFilesystemStreaming(
       snapshot,
       snapshotReceivedAtMs,
       now,
+      freshnessTracker,
     });
-  }, [snapshot, snapshotReceivedAtMs, now]);
+  }, [snapshot, snapshotReceivedAtMs, now, freshnessTracker]);
 
   const freshnessState = useMemo(() => {
     return getFreshnessState({
@@ -139,77 +162,24 @@ export function useFilesystemStreaming(
     });
   }, [telemetryAgeMs, telemetryStatus, snapshotReceiptAgeMs, retrievalAgeMs, hasTelemetry, streamState, regionStatus, snapshot]);
 
-  // SSE Stream subscription with HTTP fallback
+  // SSE Stream subscription managed by lifecycle manager;
+  // Does not restart across connecting -> live transitions, getNow identity shifts, or age timer ticks
   useEffect(() => {
-    let disposed = false;
-    let source: EventSource | null = null;
-    let retry: number | null = null;
+    const manager = new FilesystemStreamLifecycleManager({
+      onSnapshot: (data) => applySnapshotRef.current(data),
+      onStreamState: setStreamState,
+      onRegionStatus: (updater) => setRegionStatus(updater),
+      onHydrated: () => setIsHydrated(true),
+    });
 
-    const fetchSnapshot = async () => {
-      try {
-        const response = await fetch("/api/filesystem-topology", { cache: "no-store" });
-        if (!response.ok) throw new Error("Topology fallback failed");
-        const data: unknown = await response.json();
-        if (!isSnapshot(data) || disposed) return;
-        applySnapshot(data);
-      } catch {
-        if (!disposed) setRegionStatus((current) => (current === "ready" ? "stale" : "error"));
-      }
-    };
+    reconnectStreamRef.current = () => manager.reconnect();
+    manager.connect();
 
-    const onMessage = (event: MessageEvent<string>) => {
-      try {
-        const message: unknown = JSON.parse(event.data);
-        if (!message || typeof message !== "object") return;
-        const data = (message as { data?: unknown }).data;
-        if (!isSnapshot(data)) return;
-        applySnapshot(data);
-        setStreamState("live");
-      } catch {
-        /* retain the last valid topology */
-      }
-    };
-
-    const connect = () => {
-      if (retry !== null) {
-        window.clearTimeout(retry);
-        retry = null;
-      }
-      source?.close();
-      setStreamState("connecting");
-      source = new EventSource("/api/filesystem-topology/stream");
-      source.addEventListener("snapshot", onMessage as EventListener);
-      source.addEventListener("topology.update", onMessage as EventListener);
-      source.onopen = () => {
-        if (disposed) return;
-        setIsHydrated(true);
-        setStreamState("live");
-      };
-      source.onerror = () => {
-        if (disposed || source === null) return;
-        setIsHydrated(true);
-        setStreamState("stale");
-        source.close();
-        source = null;
-        void fetchSnapshot();
-        retry = window.setTimeout(connect, 5_000);
-      };
-    };
-
-    reconnectStreamRef.current = () => {
-      if (!disposed) {
-        connect();
-      }
-    };
-
-    connect();
     return () => {
-      disposed = true;
       reconnectStreamRef.current = null;
-      source?.close();
-      if (retry !== null) window.clearTimeout(retry);
+      manager.dispose();
     };
-  }, [applySnapshot]);
+  }, []);
 
   return {
     snapshot,

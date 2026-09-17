@@ -34,7 +34,7 @@ import {
   TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
   clampTimelineSidebarWidth,
-  formatUpdateAge,
+  formatPageBadgeText,
   isHomeOnlySession,
   parseAuditUrlParams,
   sessionTouchesPath,
@@ -822,18 +822,7 @@ export function FilesystemActivity() {
                 title={freshnessState.detail}
               >
                 <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
-                <span>
-                  {freshnessState.label}
-                  {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
-                    <> · {formatUpdateAge(freshnessState.telemetryAgeMs)}</>
-                  ) : freshnessState.telemetryStatus === "future_skew" ? (
-                    <> · Clock skew</>
-                  ) : freshnessState.telemetryStatus === "invalid" ? (
-                    <> · No timestamp</>
-                  ) : freshnessState.isDegraded ? (
-                    <> · Retained snapshot</>
-                  ) : null}
-                </span>
+                <span>{formatPageBadgeText(freshnessState)}</span>
               </span>
             )}
 

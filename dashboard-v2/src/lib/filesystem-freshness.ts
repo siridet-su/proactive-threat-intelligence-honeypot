@@ -96,6 +96,87 @@ export interface TelemetryAgeMetrics {
   hasTelemetry: boolean;
 }
 
+export interface SnapshotEnvelope {
+  snapshot: FilesystemTopologySnapshot | null;
+  snapshotReceivedAtMs: number | null;
+}
+
+export interface SnapshotTransitionState {
+  envelope: SnapshotEnvelope;
+  latestSnapshotAt: number;
+}
+
+export interface SnapshotTransitionResult {
+  accepted: boolean;
+  state: SnapshotTransitionState;
+}
+
+/**
+ * Pure transition helper that processes incoming snapshots against monotonic generation ordering.
+ * Enforces atomic updates to snapshot and snapshotReceivedAtMs, and rejects out-of-order snapshots
+ * without mutating or resetting existing receipt timestamps.
+ */
+export function processSnapshotTransition(
+  current: SnapshotTransitionState,
+  incoming: FilesystemTopologySnapshot,
+  receivedAtMs: number,
+): SnapshotTransitionResult {
+  const timestamp = Date.parse(incoming.generatedAt) || 0;
+  if (timestamp && timestamp < current.latestSnapshotAt) {
+    return {
+      accepted: false,
+      state: current,
+    };
+  }
+
+  return {
+    accepted: true,
+    state: {
+      envelope: {
+        snapshot: incoming,
+        snapshotReceivedAtMs: receivedAtMs,
+      },
+      latestSnapshotAt: Math.max(current.latestSnapshotAt, timestamp),
+    },
+  };
+}
+
+/**
+ * Tracks telemetry observations that have been classified as future_skew because they exceeded
+ * configured clock skew tolerance.
+ * Ensures that an untrusted observation never later becomes valid/fresh merely because the client clock catches up.
+ */
+export class TelemetryFreshnessTracker {
+  private knownSkewedTimestamps: Set<string>;
+
+  constructor(initialSkewed?: Iterable<string>) {
+    this.knownSkewedTimestamps = new Set(initialSkewed);
+  }
+
+  isKnownSkewed(timestamp: string): boolean {
+    return this.knownSkewedTimestamps.has(timestamp);
+  }
+
+  recordSkew(timestamp: string): void {
+    this.knownSkewedTimestamps.add(timestamp);
+  }
+
+  clear(): void {
+    this.knownSkewedTimestamps.clear();
+  }
+
+  getKnownSkewedTimestamps(): Set<string> {
+    return new Set(this.knownSkewedTimestamps);
+  }
+
+  calculateTelemetryAge(params: Omit<CalculateTelemetryAgeParams, "freshnessTracker">): TelemetryAgeMetrics {
+    return calculateTelemetryAge({
+      ...params,
+      freshnessTracker: this,
+    });
+  }
+}
+
 export interface CalculateTelemetryAgeParams {
   snapshot: FilesystemTopologySnapshot | null | undefined;
   /**
@@ -107,6 +188,10 @@ export interface CalculateTelemetryAgeParams {
   now?: number;
   /** Maximum acceptable future clock skew tolerance in ms (defaults to 5,000ms). */
   futureSkewToleranceMs?: number;
+  /** Persistent tracker ensuring skewed observations do not become fresh upon clock advance. */
+  freshnessTracker?: TelemetryFreshnessTracker;
+  /** Optional set of known skewed timestamps for ad-hoc validation. */
+  knownSkewedTimestamps?: Set<string>;
 }
 
 /**
@@ -119,6 +204,8 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     snapshotReceivedAtMs,
     now = Date.now(),
     futureSkewToleranceMs = MAX_FUTURE_TELEMETRY_SKEW_MS,
+    freshnessTracker,
+    knownSkewedTimestamps,
   } = params;
 
   if (!snapshot) {
@@ -193,6 +280,25 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
     };
   }
 
+  // Check if this specific telemetry observation has already been classified as future_skew.
+  // Once classified as future_skew, it must NEVER later become valid/fresh merely because the client clock catches up.
+  const isAlreadySkewed = Boolean(
+    (freshnessTracker && freshnessTracker.isKnownSkewed(telemetryAt)) ||
+    (knownSkewedTimestamps && knownSkewedTimestamps.has(telemetryAt)),
+  );
+
+  if (isAlreadySkewed) {
+    return {
+      telemetryAt,
+      telemetryAgeMs: null,
+      telemetryStatus: "future_skew",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: true,
+    };
+  }
+
   // Check future skew
   if (parsedTelemetryMs > now) {
     const futureSkewMs = parsedTelemetryMs - now;
@@ -209,7 +315,11 @@ export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): Tele
       };
     }
 
-    // Beyond tolerance: excessive clock skew! Untrusted / fail-closed
+    // Beyond tolerance: excessive clock skew! Untrusted / fail-closed.
+    // Record into persistent tracker so this same observation remains future_skew even if the clock catches up.
+    freshnessTracker?.recordSkew(telemetryAt);
+    knownSkewedTimestamps?.add(telemetryAt);
+
     return {
       telemetryAt,
       telemetryAgeMs: null,
@@ -443,4 +553,28 @@ export function getFreshnessState(params: FreshnessStateParams): FreshnessState 
     retrievalAgeMs: effectiveReceiptAgeMs,
     telemetryStatus: "valid",
   };
+}
+
+/**
+ * Truthfully formats the page badge display text adhering to strict precedence:
+ * 1. Degraded transport with retained snapshot -> "Degraded · Retained snapshot"
+ * 2. Live transport with valid telemetry -> "Live & Fresh · Xs ago" or "Stale · Xs ago"
+ * 3. Live transport with clock skew -> "Stale · Clock skew"
+ * 4. Live transport with missing timestamp -> "Stale · No timestamp"
+ * 5. Other states (e.g. "Live · No activity", "Connecting", "Offline") -> label
+ */
+export function formatPageBadgeText(freshnessState: FreshnessState): string {
+  if (freshnessState.classification === "degraded") {
+    return `${freshnessState.label} · Retained snapshot`;
+  }
+  if (freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null) {
+    return `${freshnessState.label} · ${formatUpdateAge(freshnessState.telemetryAgeMs)}`;
+  }
+  if (freshnessState.telemetryStatus === "future_skew") {
+    return `${freshnessState.label} · Clock skew`;
+  }
+  if (freshnessState.telemetryStatus === "invalid") {
+    return `${freshnessState.label} · No timestamp`;
+  }
+  return freshnessState.label;
 }
