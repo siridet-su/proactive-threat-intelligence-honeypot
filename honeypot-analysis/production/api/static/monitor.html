@@ -519,10 +519,20 @@
         const advisory = result.advisory || {};
         const rendered = advisory.rendered_advisory || {};
         const validation = advisory.validation || {};
+        const provenance = advisory.provenance || {};
         const status = document.createElement('p');
         status.className = 'text-xs text-zinc-400 mb-3';
         status.textContent = `Status: ${String(advisory.status || result.status || 'unknown')} · validation: ${String(validation.status || 'unknown')}`;
         panel.appendChild(status);
+
+        const providerId = String(provenance.provider_id || '').trim();
+        const modelId = String(provenance.model_id || '').trim();
+        if (providerId || modelId) {
+            const identity = document.createElement('p');
+            identity.className = 'text-[11px] text-zinc-500 font-mono mb-3';
+            identity.textContent = `Provider: ${providerId || '—'} · model: ${modelId || '—'}`;
+            panel.appendChild(identity);
+        }
 
         for (const paragraph of arrayMaybe(rendered.paragraphs)) {
             const item = document.createElement('p');
@@ -548,6 +558,34 @@
             item.textContent = `${String(candidate?.candidate_type || 'unknown')} · ${String(candidate?.status || 'unverified_ai_candidate')} · ${String(candidate?.candidate_id || '')}`;
             panel.appendChild(item);
         }
+    }
+
+    function renderEnsembleEvidenceCard(evidence) {
+        const value = evidence && typeof evidence === 'object' ? evidence : {};
+        const model2 = value.model2 && typeof value.model2 === 'object' ? value.model2 : {};
+        const boolLabel = flag => flag === true ? 'YES' : flag === false ? 'NO' : '—';
+        const architecture = model2.one_model === true
+            ? 'UNIFIED_ONE_MODEL'
+            : model2.one_model === false
+                ? 'NOT_UNIFIED'
+                : '—';
+        const unified = model2.one_model === true;
+        const note = unified
+            ? 'Model2 is one unified multi-output model in one inference call. It is a shadow corroborator only; it does not replace Model1 and numeric scores are not fused.'
+            : 'This session does not attest the unified one-model Model2 contract. Model1 remains primary; Model2 is corroborating, contradicting, or unavailable, and numeric scores are not fused.';
+        const rows = arrayMaybe(value.results).filter(row => row && typeof row === 'object');
+        const resultTable = rows.length
+            ? `<div class="overflow-x-auto mt-4"><table class="w-full text-left"><thead style="border-bottom:1px solid #27272a"><tr class="text-zinc-600 text-[10px] uppercase tracking-widest"><th class="px-2 py-2">Technique</th><th class="px-2 py-2">Model1</th><th class="px-2 py-2">Model1 margin</th><th class="px-2 py-2">Model2</th><th class="px-2 py-2">State</th></tr></thead><tbody>${rows.map(row => `<tr class="data-row"><td class="px-2 py-2 font-mono text-[11px] text-zinc-300">${escapeHtmlString(row.technique_id || '—')}</td><td class="px-2 py-2 text-[11px] text-zinc-400">${escapeHtmlString(row.model1_result || 'NOT_APPLICABLE')}</td><td class="px-2 py-2 text-[11px] font-mono text-zinc-500">${escapeHtmlString(row.model1_margin ?? '—')}</td><td class="px-2 py-2 text-[11px] text-zinc-400">${escapeHtmlString(row.model2_result || 'UNAVAILABLE')}</td><td class="px-2 py-2 text-[11px] text-zinc-500">${escapeHtmlString(row.evidence_state || '—')}</td></tr>`).join('')}</tbody></table></div>`
+            : `<p class="text-xs text-zinc-600 italic mt-3">${Object.keys(value).length ? 'No shared-technique ensemble rows.' : 'No stored ensemble evidence for this session.'}</p>`;
+        const fields = [
+            ['Model2 status', model2.status || '—'],
+            ['Model2 architecture', architecture],
+            ['One inference call', boolLabel(model2.one_inference_call)],
+            ['Independent binary heads', boolLabel(model2.independent_binary_heads)],
+            ['Model2 version', model2.model_version || model2.model_id || '—'],
+            ['Authority', value.ensemble_authority || 'ADVISORY_ONLY'],
+        ];
+        return `<div class="card p-5"><div class="flex items-center justify-between gap-3 mb-2"><h3 class="text-xs font-semibold text-cyan-300 uppercase tracking-wide">Model1 + Model2 Ensemble Evidence</h3><span class="chip">advisory only</span></div><p class="text-[11px] text-zinc-500 leading-relaxed mb-3">${escapeHtmlString(note)}</p><dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">${fields.map(([label, fieldValue]) => `<div class="flex justify-between gap-3 text-[11px]"><dt class="text-zinc-600">${escapeHtmlString(label)}</dt><dd class="font-mono text-zinc-400 text-right break-all">${escapeHtmlString(fieldValue)}</dd></div>`).join('')}</dl>${resultTable}</div>`;
     }
 
     async function loadInternalCommands(adminToken, requestedSessionId = state.detailSessionId) {
@@ -2213,6 +2251,7 @@
             payload: { ...(session.payload || {}), ...(detail?.session_payload || {}) },
             overview: ov,
         };
+        const ensembleEvidence = detail?.ensemble_evidence || {};
         // ``events`` is canonical; retain the legacy alias for older API
         // responses while the deployment rolls forward.
         const canonicalEvents = arrayMaybe(detail?.events);
@@ -2427,6 +2466,8 @@
                     <div id="ai-advisory-panel" class="card p-5" style="background:rgba(139,92,246,0.03);border-color:rgba(139,92,246,0.18)">
                         <p class="text-xs text-zinc-600 italic">Loading separate non-authoritative AI advisory…</p>
                     </div>
+
+                    ${renderEnsembleEvidenceCard(ensembleEvidence)}
 
 
                     <!-- Predictive alert inline (if not shown top) -->

@@ -31,6 +31,16 @@ REVIEWED_POLICY_FILE_SHA256 = (
 REVIEWED_POLICY_DOCUMENT_SHA256 = (
     "1424c0436950ecc2eb682038cfad9abf639c662ffc6da5f6e9c1d7b24cc183af"
 )
+# The original v4 registry remains valid for historical reports.  The current
+# policy carries an additive, content-bound reference manifest; accepting both
+# identities lets historical guidance remain readable while new guidance binds
+# to the reviewed provenance snapshot.
+REVIEWED_POLICY_REGISTRY = {
+    REVIEWED_POLICY_FILE_SHA256: REVIEWED_POLICY_DOCUMENT_SHA256,
+    "9c7804582467068511c19d30850ce092b94b760d8cf380d942af417489435345": (
+        "d8123fc287e0ad50517f7e9932a0b88fd00e0a0f5a180fecdc00020797be620b"
+    ),
+}
 _SAFETY = {
     "automatic_execution": False,
     "manual_approval_required": True,
@@ -279,10 +289,8 @@ def build_response_guidance_v4(
 ) -> dict[str, Any]:
     if validate_response_guidance_policy(dict(policy)):
         raise ResponseGuidanceV4Error("response guidance policy is invalid")
-    if (
-        _text(policy_sha256).lower() != REVIEWED_POLICY_FILE_SHA256
-        or _sha(policy) != REVIEWED_POLICY_DOCUMENT_SHA256
-    ):
+    bound_file_sha256 = _text(policy_sha256).lower()
+    if REVIEWED_POLICY_REGISTRY.get(bound_file_sha256) != _sha(policy):
         raise ResponseGuidanceV4Error(
             "response guidance policy is outside the reviewed v4 registry"
         )
@@ -390,11 +398,8 @@ def validate_response_guidance_v4(
     profile = profile_binding.get("document") or {}
     if _text(policy_binding.get("document_sha256")) != _sha(policy):
         errors.append("response guidance policy content hash mismatch")
-    if (
-        _text(policy_binding.get("file_sha256")).lower()
-        != REVIEWED_POLICY_FILE_SHA256
-        or _sha(policy) != REVIEWED_POLICY_DOCUMENT_SHA256
-    ):
+    bound_file_sha256 = _text(policy_binding.get("file_sha256")).lower()
+    if REVIEWED_POLICY_REGISTRY.get(bound_file_sha256) != _sha(policy):
         errors.append("response guidance policy registry binding mismatch")
     if validate_response_guidance_policy(policy):
         errors.append("response guidance embedded policy is invalid")

@@ -1,13 +1,5 @@
 export type IntelligenceRecord = Record<string, unknown>;
 
-export type EnsembleEvidenceState =
-  | "AGREE"
-  | "DISAGREE"
-  | "MODEL1_ONLY"
-  | "MODEL2_ONLY"
-  | "MODEL2_UNAVAILABLE"
-  | "MODEL1_NOT_APPLICABLE";
-
 export const SAFE_PROVIDER_CONTEXT_KEYS = new Set([
   "malicious",
   "suspicious",
@@ -91,35 +83,4 @@ export function selectedProviderFields(value: unknown): Array<readonly [string, 
     .filter(([key]) => SAFE_PROVIDER_CONTEXT_KEYS.has(key))
     .map(([key, item]) => [key, providerValue(item)] as const)
     .filter(([, rendered]) => rendered.length > 0);
-}
-
-export function ensembleEvidenceState(value: unknown): EnsembleEvidenceState {
-  const item = intelligenceRecord(value);
-  const model1 = intelligenceRecord(item.s1_advisory);
-  const model2 = intelligenceRecord(item.shadow_model);
-  const model1Technique = String(model1.predicted_technique || "").trim();
-  const model2Technique = String(model2.technique_id || "").trim();
-  const model1Status = String(model1.status || "").toLowerCase();
-  const model2Status = String(model2.status || "").toLowerCase();
-  const model1NotApplicable = ["not_applicable", "skipped", "short_input_skipped"].includes(model1Status);
-  const model2Unavailable = ["unavailable", "error", "missing"].includes(model2Status);
-
-  if (model1NotApplicable) return "MODEL1_NOT_APPLICABLE";
-  if (model1Technique && model2Technique) {
-    return model1Technique === model2Technique ? "AGREE" : "DISAGREE";
-  }
-  if (model1Technique) return model2Unavailable ? "MODEL2_UNAVAILABLE" : "MODEL1_ONLY";
-  if (model2Technique) return "MODEL2_ONLY";
-
-  // Compatibility for older stored classification records that predate the
-  // explicit per-model projection.
-  const agreement = String(item.agreement_status || "").toLowerCase();
-  const source = String(item.source || "").toLowerCase();
-
-  if (agreement === "not_applicable" || source === "shell_noise") return "MODEL1_NOT_APPLICABLE";
-  if (agreement === "exact_technique_agreement" || source === "both") return "AGREE";
-  if (agreement.includes("disagreement") || source === "rule_securebert_disagreement") return "DISAGREE";
-  if (source === "securebert_unavailable" || model2Unavailable) return "MODEL2_UNAVAILABLE";
-  if (agreement === "model_only" || source === "securebert") return "MODEL2_ONLY";
-  return "MODEL1_ONLY";
 }

@@ -21,6 +21,11 @@ export interface DashboardThreatEvent extends JsonRecord {
   typeColor: string;
   duration: string;
   geo: DashboardThreatGeo;
+  /** Explicit lifecycle signals used by the dashboard status renderer. */
+  is_ended?: boolean;
+  ended?: boolean;
+  end_time?: string | number | null;
+  session_status?: string;
   ip?: string;
   event_type?: string;
   protocol?: string;

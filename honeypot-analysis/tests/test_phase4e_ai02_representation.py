@@ -161,6 +161,36 @@ def test_prediction_feature_renderer_uses_same_semantics_without_changing_events
     assert events == before
 
 
+def test_prediction_panel_exposes_unified_model2_ensemble_contract() -> None:
+    html = _render_prediction_panel(
+        {
+            "ok": True,
+            "latest_prediction_snapshot": {
+                "payload": {
+                    "ensemble_evidence": {
+                        "ensemble_authority": "ADVISORY_ONLY",
+                        "model2": {
+                            "status": "VALID_SHADOW",
+                            "one_model": True,
+                            "one_inference_call": True,
+                            "independent_binary_heads": False,
+                            "model_version": "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE",
+                        },
+                        "results": [],
+                    }
+                }
+            },
+        }
+    )
+
+    assert "Model1 + Model2 Ensemble Evidence" in html
+    assert "UNIFIED_ONE_MODEL" in html
+    assert "One inference call" in html
+    assert "Independent binary heads</span><strong>NO" in html
+    assert "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE" in html
+    assert "numeric scores are not fused" in html
+
+
 def test_changed_classifier_output_contains_no_prohibited_probability_claims() -> None:
     html = _render_classifications(_selected(_classification_events())).lower()
     prohibited = (

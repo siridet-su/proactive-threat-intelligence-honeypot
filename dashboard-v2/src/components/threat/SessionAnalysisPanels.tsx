@@ -23,7 +23,6 @@ import {
 import {
   analystAttackerUsername,
   analystCommandText,
-  ensembleEvidenceState,
   selectedProviderFields,
 } from "@/lib/session-intelligence";
 
@@ -536,7 +535,7 @@ function TimelineList({ items }: { items: unknown[] }) {
   );
 }
 
-function ClassificationList({ items, trustedMappings }: { items: unknown[]; trustedMappings: unknown[] }) {
+export function ClassificationList({ items, trustedMappings }: { items: unknown[]; trustedMappings: unknown[] }) {
   if (!items.length) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No classification evidence is available for this exact session.</p>;
   }
@@ -566,11 +565,6 @@ function ClassificationList({ items, trustedMappings }: { items: unknown[]; trus
       })
       .filter(Boolean),
   );
-  const ensembleCounts = classificationRecords.reduce<Record<string, number>>((counts, item) => {
-    const state = ensembleEvidenceState(item);
-    counts[state] = (counts[state] || 0) + 1;
-    return counts;
-  }, {});
   return (
     <div className="space-y-3">
       <SummaryGrid fields={[
@@ -578,15 +572,13 @@ function ClassificationList({ items, trustedMappings }: { items: unknown[]; trus
         ["Classified command events", String(classifiedCommandKeys.size)],
         ["Trusted ATT&CK mappings", `${trustedMappings.length} records · ${uniqueAttackTechniques.size} techniques`],
       ]} />
-      <p className="text-xs text-text-muted">Model1 signed decision margin is not a calibrated probability. Model2 remains research/shadow evidence; scores are not combined and neither model authorizes response.</p>
+      <p className="text-xs text-text-muted">These command-level records contain reviewed classifier and Model1 advisory evidence. Model2 is shown only in the exact-session ensemble panel; it is not inferred from legacy command-level shadow fields. Scores are not combined and neither model authorizes response.</p>
       <ol className="space-y-2">
         {classificationRecords.slice(0, 50).map((mapping, index) => {
           const authority = record(mapping.authority_decision);
           const advisory = record(mapping.s1_advisory);
-          const shadow = record(mapping.shadow_model);
           const technique = mapping.ttp || mapping.technique_id || "NO_TECHNIQUE_ASSIGNED";
           const sourceCommand = commandText(mapping.source_command || mapping.command || mapping.original_command);
-          const evidenceState = ensembleEvidenceState(mapping);
           return (
             <li key={`${index}-${String(mapping.evidence_id || technique)}`} className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -595,7 +587,6 @@ function ClassificationList({ items, trustedMappings }: { items: unknown[]; trus
                   <span className="text-xs text-text-muted">{summaryValue(mapping.name, "Technique not assigned")}</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <span className="ui-badge text-[11px]">{evidenceState}</span>
                   <span className="ui-badge text-[11px]">{summaryValue(authority.decision || mapping.evidence_tier, "advisory")}</span>
                 </div>
               </div>
@@ -604,7 +595,6 @@ function ClassificationList({ items, trustedMappings }: { items: unknown[]; trus
                 ["Tactic", summaryValue(mapping.tactic, "Not recorded")],
                 ["Evidence / authority", `${summaryValue(mapping.evidence_type || mapping.evidence_tier, "observed event")} · ${summaryValue(authority.decision || mapping.authority, "advisory")}`],
                 ["Model1 advisory", advisory.decision_score === undefined ? "Not recorded" : `${summaryValue(advisory.predicted_technique, "unassigned")} · margin ${display(advisory.decision_score)}`],
-                ["Model2 shadow", `${summaryValue(shadow.technique_id, "no usable output")} · ${summaryValue(shadow.status, "unavailable")}`],
               ]} />
               <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
               <p className="mt-2 text-[11px] text-text-muted">source: {summaryValue(mapping.source || mapping.rule_id, "reviewed classifier")} · event <span className="font-mono text-text">{summaryValue(record(mapping.durable_evidence_order).event_id || mapping.evidence_id, "Unavailable")}</span> · {summaryValue(mapping.event_timestamp, "Timestamp unavailable")}</p>
@@ -633,14 +623,6 @@ function ClassificationList({ items, trustedMappings }: { items: unknown[]; trus
             })}
           </ol>
         ) : <p className="mt-2 text-xs text-text-muted">No trusted mapping was established.</p>}
-      </div>
-      <div className="rounded-lg border border-border bg-surface-subtle p-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Model evidence states</p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {Object.entries(ensembleCounts).map(([state, count]) => (
-            <span key={state} className="ui-badge text-[11px]">{state} · {count}</span>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -1228,6 +1210,71 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
   );
 }
 
+function booleanLabel(value: unknown): string {
+  if (value === true) return "YES";
+  if (value === false) return "NO";
+  return "Not reported";
+}
+
+export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
+  const ensemble = record(data.ensemble_evidence);
+  const model1 = record(ensemble.model1);
+  const model2 = record(ensemble.model2);
+  const binding = record(model2.binding);
+  const results = list(ensemble.results).map(record);
+  const model1Only = list(ensemble.model1_only_labels).map(record);
+
+  if (!hasMeaningfulRecord(ensemble)) {
+    return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
+  }
+
+  const architecture = model2.one_model === true
+    ? "UNIFIED_ONE_MODEL"
+    : model2.one_model === false
+      ? "NOT_UNIFIED"
+      : "Not reported";
+
+  return (
+    <>
+      <SummaryGrid fields={[
+        ["Authority", summaryValue(ensemble.ensemble_authority, "ADVISORY_ONLY")],
+        ["Model1", model1.applicable === true ? "APPLICABLE" : model1.applicable === false ? "NOT_APPLICABLE" : "Not reported"],
+        ["Model2 status", summaryValue(model2.status, "Unavailable")],
+        ["Model2 architecture", architecture],
+        ["One inference call", booleanLabel(model2.one_inference_call)],
+        ["Independent binary heads", booleanLabel(model2.independent_binary_heads)],
+        ["Model2 version", summaryValue(model2.model_version || model2.artifact_id, "Not reported")],
+        ["Run ID", summaryValue(ensemble.run_id, "Not reported")],
+        ["Measurement ID", summaryValue(model2.measurement_id || binding.measurement_id, "Not reported")],
+        ["Episode ID", summaryValue(model2.episode_id || binding.episode_id, "Not reported")],
+        ["Numeric score fusion", ensemble.fused_score === null ? "NONE" : display(ensemble.fused_score)],
+        ["Computed at", summaryValue(ensemble.ensemble_computed_at, "Not reported")],
+      ]} />
+      <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">
+        Model2 is one unified multi-output shadow model used for corroboration. Model1 remains the primary classifier; native scores are shown separately and are not numerically fused.
+      </p>
+      {results.length > 0 && (
+        <ol className="mt-3 space-y-2">
+          {results.map((item, index) => (
+            <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
+                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
+                <span>Model1: <span className="font-mono text-text">{summaryValue(item.model1_result, "NOT_APPLICABLE")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
+                <span>Model2: <span className="font-mono text-text">{summaryValue(item.model2_result, "UNAVAILABLE")}</span>{item.model2_score !== null && item.model2_score !== undefined ? ` · score ${display(item.model2_score)}` : ""}</span>
+              </div>
+              <p className="mt-1 text-text-muted">Relation: {summaryValue(item.model2_relation, "Not recorded")} · primary source: {summaryValue(item.primary_source, "NONE")}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+      {model1Only.length > 0 && <p className="mt-3 text-xs text-text-muted">Model1-only labels: {model1Only.map((item) => summaryValue(item.technique_id, "unknown")).join(", ")}</p>}
+    </>
+  );
+}
+
 function AiAdvisorySummary({ data }: { data: JsonRecord }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
@@ -1528,6 +1575,7 @@ export function SessionAnalysisPanels({
     "No Cowrie authentication attempts were recorded.",
   );
   const classificationResult = detailPanelResult(detailResult, classificationEvents.length > 0, "No classification evidence was established.");
+  const ensembleResult = detailPanelResult(detailResult, hasMeaningfulRecord(detail.ensemble_evidence), "No stored Model1 + Model2 ensemble evidence is available.");
   const filesResult = detailPanelResult(detailResult, analystObservables.length > 0, "No file or observable evidence is available.");
   const provenanceResult = detailPanelResult(detailResult, Object.values(provenance).some(hasMeaningfulValue), "No provenance record is available.");
   const aiAdvisory = get("ai-advisory");
@@ -1571,6 +1619,16 @@ export function SessionAnalysisPanels({
         </div>
         <Panel eyebrow="Trusted observations" title="Classification and ATT&CK mappings" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult}>
           <ClassificationList items={classificationEvents} trustedMappings={trustedTtps} />
+        </Panel>
+      </section>
+
+      <section aria-label="Model ensemble evidence">
+        <div className="mb-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Shadow corroboration</p>
+          <p className="mt-1 text-xs text-text-muted">The stored late-fusion evidence is read-only; Model1 remains primary and Model2 never authorizes response.</p>
+        </div>
+        <Panel eyebrow="Model evidence" title="Model1 + Model2 ensemble" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult}>
+          <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>
 
