@@ -1253,7 +1253,14 @@ def write_pdf_report(
         for row_index, row in enumerate(rows):
             cell_style = table_header if row_index == 0 else table_body
             converted.append([_p(cell, cell_style, limit=4096) for cell in row])
-        table = Table(converted, colWidths=widths, repeatRows=1, hAlign="LEFT")
+        # Allow long evidence/guidance cells to continue on the next page.
+        table = Table(
+            converted,
+            colWidths=widths,
+            repeatRows=1,
+            splitInRow=1,
+            hAlign="LEFT",
+        )
         table.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17365D")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
