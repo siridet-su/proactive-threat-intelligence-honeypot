@@ -189,8 +189,7 @@ export function useSessionCwdHistory(
             setAnchoredHop(null);
             onSelectHistoryEventId?.(currentHop);
           } else {
-            // Older hop: trigger authoritative direct lookup
-            setHopResolutionStatus("resolving");
+            // Older hop: delegate resolution state strictly to hopManager
             hopManagerRef.current?.sync({
               sessionId,
               hopId: currentHop,

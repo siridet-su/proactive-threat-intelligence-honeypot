@@ -323,13 +323,22 @@ export interface SessionCwdHopResolution {
  * Authoritatively resolves a retained hop for a session.
  *
  * Database operation contract:
- * - Overlength input (>300 chars): 0 MongoDB operations (rejected immediately).
- * - Canonical document: exactly 2 MongoDB operations:
+ * - Overlength input (>300 chars) / invalid input: 0 MongoDB operations (rejected before querying).
+ * - Canonical document success: exactly 2 MongoDB operations:
  *   1. Primary key indexed read on `cwd_events` (`findOne({ _id: eventId })`)
- *   2. Single consolidated aggregation pipeline matching `{ sessionId }` with `$facet` for
- *      totalItems, chronological hopNumber, and successfulHopNumber.
- * - Non-existent or cross-session hop: exactly 1 MongoDB operation (`findOne`), returning null without count work.
- * - Legacy document: 1 canonical read + 1-2 legacy fallback reads + 1 aggregation on `{ session_id }` (max 4 operations).
+ *   2. Single consolidated aggregation pipeline matching migration-compatible session scope
+ *      `{ $or: [{ sessionId }, { session_id }] }` with `$facet` for totalItems, chronological
+ *      hopNumber, and successfulHopNumber.
+ * - Canonical cross-session hop: exactly 1 MongoDB operation (`findOne({ _id })`), returning null without count work.
+ * - Unknown event: exactly 3 MongoDB operations:
+ *   1. Primary read `findOne({ _id: eventId })` -> null
+ *   2. Legacy fallback read 1 `findOne({ sessionId, eventId })` -> null
+ *   3. Legacy fallback read 2 `findOne({ session_id, eventId })` -> null
+ *   Returns { item: null } without aggregation.
+ * - Legacy document success: 3 to 4 MongoDB operations:
+ *   1. Primary read (null) + 1 or 2 legacy fallback reads + 1 `$facet` aggregation.
+ * - Database error path: throws without catch-and-retry fan-out (1 operation if primary read fails,
+ *   2 if canonical aggregation fails, up to 4 if legacy aggregation fails).
  */
 export async function getSessionCwdHistoryHop(
   sessionId: string,
@@ -355,34 +364,19 @@ export async function getSessionCwdHistoryHop(
 
   // 1. Primary indexed read: attempt fast primary key lookup on canonical _id_
   let doc = await collection.findOne({ _id: sanitizedEventId });
-  let sessionField: "sessionId" | "session_id" = "sessionId";
 
   if (doc) {
-    // Select canonical indexed scope based on resolved document
-    if (typeof doc.sessionId === "string") {
-      sessionField = "sessionId";
-      if (doc.sessionId !== sanitizedSessionId) {
-        // Cross-session: return null to prevent data leakage across sessions
-        return { item: null };
-      }
-    } else if (typeof doc.session_id === "string") {
-      sessionField = "session_id";
-      if (doc.session_id !== sanitizedSessionId) {
-        return { item: null };
-      }
-    } else {
+    const docSessionId = typeof doc.sessionId === "string" ? doc.sessionId : (typeof doc.session_id === "string" ? doc.session_id : null);
+    if (!docSessionId || docSessionId !== sanitizedSessionId) {
+      // Cross-session: return null to prevent data leakage across sessions
       return { item: null };
     }
   } else {
     // 2. Legacy fallback: check sessionId + eventId, then session_id + eventId
     doc = await collection.findOne({ sessionId: sanitizedSessionId, eventId: sanitizedEventId });
-    if (doc) {
-      sessionField = "sessionId";
-    } else {
+    if (!doc) {
       doc = await collection.findOne({ session_id: sanitizedSessionId, eventId: sanitizedEventId });
-      if (doc) {
-        sessionField = "session_id";
-      } else {
+      if (!doc) {
         return { item: null };
       }
     }
@@ -393,12 +387,13 @@ export async function getSessionCwdHistoryHop(
     return { item: null };
   }
 
-  // 3. Chronological hop numbering:
-  // Avoid unindexed {$or: [{sessionId}, {session_id}]} for canonical documents.
-  // Use exact single-field index filter ({ [sessionField]: sanitizedSessionId }).
+  // 3. Chronological hop numbering matching normal history pagination:
+  // Use migration-compatible query covering both sessionId and session_id
   const docAt = doc.at instanceof Date ? doc.at : new Date(item.at);
   const docEventId = asString(doc.eventId) ?? asString(doc._id?.toString()) ?? item.id;
-  const sessionFilter: Document = { [sessionField]: sanitizedSessionId };
+  const sessionFilter: Document = {
+    $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }],
+  };
   const chronologicalFilter: Document = {
     $or: [
       { at: { $lt: docAt } },
@@ -406,52 +401,35 @@ export async function getSessionCwdHistoryHop(
     ],
   };
 
-  let totalItems = 0;
-  let hopNumber = 0;
-  let successfulHopNumber = 0;
-
-  try {
-    // Consolidate count work into a single aggregation pipeline with parallel $facet stages
-    const facetPipeline: Document[] = [
-      { $match: sessionFilter },
-      {
-        $facet: {
-          totalItems: [{ $count: "count" }],
-          hopNumber: [
-            { $match: chronologicalFilter },
-            { $count: "count" },
-          ],
-          successfulHopNumber: [
-            {
-              $match: {
-                ...chronologicalFilter,
-                action: { $ne: "failed_change" },
-              },
+  // Consolidate count work into a single aggregation pipeline with parallel $facet stages
+  const facetPipeline: Document[] = [
+    { $match: sessionFilter },
+    {
+      $facet: {
+        totalItems: [{ $count: "count" }],
+        hopNumber: [
+          { $match: chronologicalFilter },
+          { $count: "count" },
+        ],
+        successfulHopNumber: [
+          {
+            $match: {
+              ...chronologicalFilter,
+              action: { $ne: "failed_change" },
             },
-            { $count: "count" },
-          ],
-        },
+          },
+          { $count: "count" },
+        ],
       },
-    ];
+    },
+  ];
 
-    const facetResults = await collection.aggregate<Document>(facetPipeline).toArray();
-    const facet = facetResults[0];
-    if (facet) {
-      totalItems = Number(facet.totalItems?.[0]?.count ?? 0);
-      hopNumber = Number(facet.hopNumber?.[0]?.count ?? 0);
-      successfulHopNumber = Number(facet.successfulHopNumber?.[0]?.count ?? 0);
-    }
-  } catch {
-    // Fallback if aggregate $facet is unavailable in simplified test environments
-    const [hNum, sNum, tot] = await Promise.all([
-      collection.countDocuments({ $and: [sessionFilter, chronologicalFilter] }),
-      collection.countDocuments({ $and: [sessionFilter, { action: { $ne: "failed_change" } }, chronologicalFilter] }),
-      collection.countDocuments(sessionFilter),
-    ]);
-    hopNumber = hNum;
-    successfulHopNumber = sNum;
-    totalItems = tot;
-  }
+  const facetResults = await collection.aggregate<Document>(facetPipeline).toArray();
+  const facet = facetResults[0];
+
+  const totalItems = Number(facet?.totalItems?.[0]?.count ?? 0);
+  const hopNumber = Number(facet?.hopNumber?.[0]?.count ?? 0);
+  const successfulHopNumber = Number(facet?.successfulHopNumber?.[0]?.count ?? 0);
 
   item.hopNumber = hopNumber;
   item.successfulHopNumber = successfulHopNumber;

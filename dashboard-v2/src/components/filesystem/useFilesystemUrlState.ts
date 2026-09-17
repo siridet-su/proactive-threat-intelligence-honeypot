@@ -12,6 +12,7 @@ import {
   parseAuditUrlParams,
   resolveSessionSelection,
 } from "./filesystemUtils";
+import type { RemoteAuditLookupIntent } from "./sessionHopResolver";
 
 export interface UseFilesystemUrlStateOptions {
   isHydrated: boolean;
@@ -20,7 +21,7 @@ export interface UseFilesystemUrlStateOptions {
   selectedSessionId: string | null;
   selectedSessionIdRef: React.MutableRefObject<string | null>;
   selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
-  lookupRemoteAuditSession: (targetId: string) => Promise<void>;
+  lookupRemoteAuditSession: (target: RemoteAuditLookupIntent | string, targetHopId?: string | null) => Promise<void> | void;
   setSelectedSessionId?: (id: string | null) => void;
   onExitFullscreenAndPlaying?: () => void;
 }
@@ -139,7 +140,10 @@ export function useFilesystemUrlState(
           const resolution = resolveSessionSelection(parsed.sessionId, null, known, parsed.view === "audit");
           if (resolution.expiredSessionId) {
             if (parsed.view === "audit") {
-              void lookupRemoteAuditSession(resolution.expiredSessionId);
+              void lookupRemoteAuditSession({
+                sessionId: resolution.expiredSessionId,
+                targetHopId: parsed.hop ?? null,
+              });
             } else {
               setExpiredSessionId(resolution.expiredSessionId);
               selectedSessionIdRef.current = null;

@@ -1,4 +1,8 @@
-import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
+import type {
+  AuditSessionsPage,
+  FilesystemClosedSession,
+  SessionCwdHistoryEvent,
+} from "@/lib/dashboardTypes";
 
 export type HopResolutionStatus = "idle" | "resolving" | "resolved" | "not-found" | "error";
 
@@ -179,6 +183,7 @@ export interface SessionHopLifecycleSyncParams {
   fetchHop?: (sessionId: string, hopId: string, signal: AbortSignal) => Promise<SessionCwdHopPayload>;
   onStatusChange: (status: HopResolutionStatus) => void;
   onResolved: (event: SessionCwdHistoryEvent) => void;
+  retryOnError?: boolean;
 }
 
 export class SessionHopLifecycleManager {
@@ -205,11 +210,27 @@ export class SessionHopLifecycleManager {
       this.activeResolver !== null;
 
     if (isSameIdentity) {
-      // Check if page items now include the hop
-      if (this.activeResolver!.getStatus() === "resolving" || this.activeResolver!.getStatus() === "idle") {
-        if (this.activeResolver!.checkPageItems(params.history)) {
+      const resolver = this.activeResolver!;
+      const currentStatus = resolver.getStatus();
+
+      // Check if newly loaded history items now include the hop
+      if (currentStatus === "resolving" || currentStatus === "idle") {
+        if (resolver.checkPageItems(params.history)) {
           return;
         }
+      }
+
+      // Authoritative re-emission: always re-emit state for the same identity on refresh
+      params.onStatusChange(currentStatus);
+
+      if (currentStatus === "resolved") {
+        const resolvedEvent = resolver.getResolvedEvent();
+        if (resolvedEvent) {
+          params.onResolved(resolvedEvent);
+        }
+      } else if (currentStatus === "error" && params.retryOnError) {
+        // Errors retry only on explicit retry action
+        void resolver.resolveDirect();
       }
       return;
     }
@@ -264,5 +285,96 @@ export class SessionHopLifecycleManager {
 
   getActiveResolver(): SessionHopResolver | null {
     return this.activeResolver;
+  }
+}
+
+export interface RemoteAuditLookupIntent {
+  sessionId: string;
+  targetHopId?: string | null;
+}
+
+export interface RemoteAuditLookupCallback {
+  onSessionFound: (session: FilesystemClosedSession, targetHopId?: string | null) => void;
+  onSessionNotFound: (sessionId: string) => void;
+}
+
+export class RemoteAuditLookupManager {
+  private inFlightSessionId: string | null = null;
+  private generation = 0;
+  private abortController: AbortController | null = null;
+
+  async lookup(
+    intent: RemoteAuditLookupIntent,
+    callbacks: RemoteAuditLookupCallback,
+    fetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
+  ): Promise<FilesystemClosedSession | null> {
+    const { sessionId, targetHopId } = intent;
+    if (!sessionId) return null;
+
+    // Invalidate prior in-flight lookup
+    this.abort();
+    this.generation += 1;
+    const currentGen = this.generation;
+    this.inFlightSessionId = sessionId;
+
+    const controller = new AbortController();
+    this.abortController = controller;
+
+    try {
+      let found: FilesystemClosedSession | null = null;
+      if (fetchSession) {
+        found = await fetchSession(sessionId, controller.signal);
+      } else {
+        const res = await fetch(
+          `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(sessionId)}&limit=1`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        if (res.ok) {
+          const data: unknown = await res.json();
+          const page = data as Partial<AuditSessionsPage>;
+          found = page.items?.find((s) => s.sessionId === sessionId) ?? null;
+        }
+      }
+
+      if (controller.signal.aborted || this.generation !== currentGen) {
+        return null;
+      }
+
+      if (found) {
+        callbacks.onSessionFound(found, targetHopId);
+        return found;
+      } else {
+        callbacks.onSessionNotFound(sessionId);
+        return null;
+      }
+    } catch {
+      if (controller.signal.aborted || this.generation !== currentGen) {
+        return null;
+      }
+      callbacks.onSessionNotFound(sessionId);
+      return null;
+    } finally {
+      if (this.generation === currentGen) {
+        this.inFlightSessionId = null;
+        this.abortController = null;
+      }
+    }
+  }
+
+  abort(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    this.inFlightSessionId = null;
+    this.generation += 1;
+  }
+
+  getInFlightSessionId(): string | null {
+    return this.inFlightSessionId;
+  }
+
+  getGeneration(): number {
+    return this.generation;
   }
 }

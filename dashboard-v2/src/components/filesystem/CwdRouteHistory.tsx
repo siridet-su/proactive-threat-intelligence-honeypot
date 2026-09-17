@@ -368,22 +368,68 @@ export function CwdRouteHistory({
             title="Select a session to inspect its path history"
             description="Choose a session from the topology or inspector."
           />
-        ) : !isSidebar && historyStatus === "error" && !history.length ? (
-          <RegionState
-            kind="error"
-            title="Session history unavailable"
-            description="The selected CWD history could not be loaded."
-          />
-        ) : !isSidebar && historyStatus === "loading" && !history.length ? (
-          <RegionState kind="loading" title="Loading session history" />
-        ) : !isSidebar && !history.length ? (
-          <RegionState
-            kind="empty"
-            title="No verified directory transitions"
-            description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
-          />
         ) : (
-          <AnimatePresence initial={false} mode="popLayout" custom={sidebarContentDirection}>
+          <>
+            {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
+            {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
+              <div
+                role="alert"
+                className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+                data-testid="hop-resolution-banner"
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-amber-100">
+                      {hopResolutionStatus === "not-found"
+                        ? "Requested hop unavailable"
+                        : "Error resolving requested hop"}
+                    </p>
+                    <p className="mt-0.5 text-amber-200/80">
+                      {hopResolutionStatus === "not-found"
+                        ? `The requested hop "${requestedHop}" could not be found or has expired.`
+                        : `Could not retrieve hop "${requestedHop}".`}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    {onShowLatestHop && history.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={onShowLatestHop}
+                        className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
+                      >
+                        Show latest hop
+                      </button>
+                    )}
+                    {onClearHop && (
+                      <button
+                        type="button"
+                        onClick={onClearHop}
+                        className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
+                      >
+                        Clear hop
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!isSidebar && historyStatus === "error" && !history.length ? (
+              <RegionState
+                kind="error"
+                title="Session history unavailable"
+                description="The selected CWD history could not be loaded."
+              />
+            ) : !isSidebar && historyStatus === "loading" && !history.length ? (
+              <RegionState kind="loading" title="Loading session history" />
+            ) : !isSidebar && !history.length ? (
+              <RegionState
+                kind="empty"
+                title="No verified directory transitions"
+                description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
+              />
+            ) : (
+              <AnimatePresence initial={false} mode="popLayout" custom={sidebarContentDirection}>
             <motion.div
               key={isSidebar ? sidebarTab : "route-history"}
               data-forensic-tab-panel={sidebarTab}
@@ -481,49 +527,6 @@ export function CwdRouteHistory({
               ) : (
                 /* Tab 1: Route Replay with alert support */
                 <>
-                  {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
-                  {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
-                    <div
-                      role="alert"
-                      className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
-                      data-testid="hop-resolution-alert"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div>
-                          <p className="font-semibold text-amber-100">
-                            {hopResolutionStatus === "not-found"
-                              ? "Requested hop unavailable"
-                              : "Error resolving requested hop"}
-                          </p>
-                          <p className="mt-0.5 text-amber-200/80">
-                            {hopResolutionStatus === "not-found"
-                              ? `The requested hop "${requestedHop}" could not be found or has expired.`
-                              : `Could not retrieve hop "${requestedHop}".`}
-                          </p>
-                        </div>
-                        <div className="flex shrink-0 gap-1.5">
-                          {onShowLatestHop && history.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={onShowLatestHop}
-                              className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
-                            >
-                              Show latest hop
-                            </button>
-                          )}
-                          {onClearHop && (
-                            <button
-                              type="button"
-                              onClick={onClearHop}
-                              className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
-                            >
-                              Clear hop
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
 
                   {historyStatus === "error" && !history.length ? (
                     <RegionState
@@ -1039,6 +1042,8 @@ export function CwdRouteHistory({
     )}
   </motion.div>
           </AnimatePresence>
+        )}
+          </>
         )}
       </div>
       <ConfirmDialog

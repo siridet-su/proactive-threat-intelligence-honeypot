@@ -89,6 +89,33 @@ export function calculateNextHistoryEventId(
   return null;
 }
 
+export function computeNextReplayEventId(
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedHistoryIndex: number,
+  direction: "prev" | "next",
+  isAnchoredSelected: boolean,
+): string | null {
+  if (isAnchoredSelected) return null;
+  return calculateNextHistoryEventId(displayedHistory, selectedHistoryIndex, direction);
+}
+
+export function computeTogglePlayState(
+  isPlaying: boolean,
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedHistoryIndex: number,
+  isAnchoredSelected: boolean,
+): { isPlaying: boolean; targetEventId?: string | null } {
+  if (isAnchoredSelected) {
+    return { isPlaying: false };
+  }
+  const willPlay = !isPlaying;
+  let targetEventId: string | null | undefined = undefined;
+  if (willPlay && selectedHistoryIndex >= displayedHistory.length - 1) {
+    targetEventId = displayedHistory[0]?.id ?? null;
+  }
+  return { isPlaying: willPlay, targetEventId };
+}
+
 export interface UseAuditReplayOptions {
   viewMode: "live" | "audit";
   history: SessionCwdHistoryEvent[];
@@ -251,34 +278,23 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   const handlePrevHop = useCallback(() => {
     setIsPlaying(false);
-    if (isAnchoredSelected) {
-      // Cannot cross unloaded gap into unknown earlier events
-      return;
-    }
-    const nextId = calculateNextHistoryEventId(displayedHistory, selectedHistoryIndex, "prev");
+    const nextId = computeNextReplayEventId(displayedHistory, selectedHistoryIndex, "prev", isAnchoredSelected);
     if (nextId) onSelectHistoryEventId(nextId);
   }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleNextHop = useCallback(() => {
     setIsPlaying(false);
-    if (isAnchoredSelected) {
-      // Cannot cross unloaded gap into unknown later events
-      return;
-    }
-    const nextId = calculateNextHistoryEventId(displayedHistory, selectedHistoryIndex, "next");
+    const nextId = computeNextReplayEventId(displayedHistory, selectedHistoryIndex, "next", isAnchoredSelected);
     if (nextId) onSelectHistoryEventId(nextId);
   }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
-    if (isAnchoredSelected) {
-      // Cannot auto-play across an unloaded gap
-      return;
+    const nextState = computeTogglePlayState(isPlaying, displayedHistory, selectedHistoryIndex, isAnchoredSelected);
+    if (nextState.targetEventId !== undefined) {
+      onSelectHistoryEventId(nextState.targetEventId);
     }
-    if (selectedHistoryIndex >= displayedHistory.length - 1) {
-      onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-    }
-    setIsPlaying((prev) => !prev);
-  }, [displayedHistory, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
+    setIsPlaying(nextState.isPlaying);
+  }, [displayedHistory, isAnchoredSelected, isPlaying, onSelectHistoryEventId, selectedHistoryIndex]);
 
   const handlePause = useCallback(() => {
     setIsPlaying(false);

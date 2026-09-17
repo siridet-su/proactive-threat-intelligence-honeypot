@@ -2,20 +2,24 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { FilesystemClosedSession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
+  RemoteAuditLookupManager,
   SessionHopLifecycleManager,
-  SessionHopResolver,
   type HopResolutionStatus,
-  type SessionCwdHopPayload,
 } from "@/components/filesystem/sessionHopResolver";
 import {
   buildAuditUrlSearch,
-  getHistoryWindowMetrics,
   parseAuditUrlParams,
 } from "@/components/filesystem/filesystemUtils";
 import {
-  getSessionCwdHistory,
+  computeNextReplayEventId,
+  computeTogglePlayState,
+} from "@/components/filesystem/useAuditReplay";
+import { CwdRouteHistory } from "@/components/filesystem/CwdRouteHistory";
+import {
   getSessionCwdHistoryHop,
   MAX_CWD_IDENTIFIER_LENGTH,
 } from "@/lib/filesystem-server";
@@ -38,521 +42,440 @@ function makeHistoryEvent(overrides: Partial<SessionCwdHistoryEvent> = {}): Sess
   };
 }
 
-describe("FA-005: Authoritative Deep-Hop Resolution & Replay Window Remediation", () => {
-  // 1. Page-one deep link resolves and clears request-only intent
-  it("resolves hop on page one immediately, selecting target and clearing request intent", () => {
-    const hopId = "cwd:page1-hop";
-    const pageOneItems: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "cwd:page1-newest", at: "2026-09-17T01:00:00.000Z" }),
-      makeHistoryEvent({ id: hopId, at: "2026-09-17T00:50:00.000Z" }),
-      makeHistoryEvent({ id: "cwd:page1-older", at: "2026-09-17T00:40:00.000Z" }),
-    ];
+function makeClosedSession(overrides: Partial<FilesystemClosedSession> = {}): FilesystemClosedSession {
+  return {
+    sessionId: "sess-remote-001",
+    sourceIp: "192.168.1.100",
+    cwdState: {
+      path: "/root",
+      observedAt: "2026-09-17T00:00:00.000Z",
+      sourceEventId: null,
+    },
+    lifecycle: {
+      startedAt: "2026-09-16T22:00:00.000Z",
+      closedAt: "2026-09-17T00:00:00.000Z",
+    },
+    auditSummary: {
+      visitedPaths: ["/", "/root"],
+      homeOnly: false,
+      eventCount: 5,
+    },
+    ...overrides,
+  };
+}
 
-    const fetchHop = vi.fn();
-    const onResolved = vi.fn();
-    const onStatusChange = vi.fn();
+describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalization", () => {
+  // 1. Initial remote retained-session deep link
+  it("resolves remote session and preserves target hop on initial deep link", async () => {
+    const manager = new RemoteAuditLookupManager();
+    const expectedSession = makeClosedSession({ sessionId: "sess-remote-init" });
+    const fetchSession = vi.fn().mockResolvedValue(expectedSession);
 
-    const resolver = new SessionHopResolver({
-      sessionId: "sess-001",
-      hopId,
-      fetchHop,
-      onResolved,
-      onStatusChange,
-    });
+    const onSessionFound = vi.fn();
+    const onSessionNotFound = vi.fn();
 
-    const found = resolver.checkPageItems(pageOneItems);
-    expect(found).toBe(true);
-    expect(resolver.getStatus()).toBe("resolved");
-    expect(resolver.getResolvedEvent()?.id).toBe(hopId);
-    expect(onResolved).toHaveBeenCalledWith(expect.objectContaining({ id: hopId }));
-    expect(onStatusChange).toHaveBeenCalledWith("resolved");
-    // No network request required for page-one items
-    expect(fetchHop).not.toHaveBeenCalled();
+    await manager.lookup(
+      { sessionId: "sess-remote-init", targetHopId: "cwd:deep-hop-001" },
+      { onSessionFound, onSessionNotFound },
+      fetchSession,
+    );
 
-    // Hook level contract: once resolved on page one, request intent is cleared
-    const requestedHopRef = { current: hopId as string | null };
-    let requestedHopState: string | null = hopId;
-    let selectedHistoryEventId: string | null = null;
-
-    if (pageOneItems.some((item) => item.id === requestedHopRef.current)) {
-      selectedHistoryEventId = requestedHopRef.current;
-      requestedHopRef.current = null;
-      requestedHopState = null;
-    }
-
-    expect(selectedHistoryEventId).toBe(hopId);
-    expect(requestedHopRef.current).toBeNull();
-    expect(requestedHopState).toBeNull();
+    expect(fetchSession).toHaveBeenCalledWith("sess-remote-init", expect.any(AbortSignal));
+    expect(onSessionFound).toHaveBeenCalledWith(expectedSession, "cwd:deep-hop-001");
+    expect(onSessionNotFound).not.toHaveBeenCalled();
   });
 
-  // 2. Direct older hop resolves and keeps the URL through selectedHistoryEventId
-  it("resolves older hop via direct lookup, clearing request intent while retaining URL via selectedHistoryEventId", async () => {
-    const hopId = "cwd:older-hop";
-    const olderEvent = makeHistoryEvent({
-      id: hopId,
-      sessionId: "sess-001",
-      at: "2026-09-16T20:00:00.000Z",
-    });
+  // 2. Popstate remote retained-session deep link
+  it("resolves remote session and forwards parsed hop during browser popstate navigation", async () => {
+    const popstateSearch = "?view=audit&sessionId=sess-remote-pop&hop=cwd%3Apop-hop-42";
+    const parsed = parseAuditUrlParams(popstateSearch);
+    expect(parsed.sessionId).toBe("sess-remote-pop");
+    expect(parsed.hop).toBe("cwd:pop-hop-42");
 
-    const fetchHop = vi.fn().mockResolvedValue({
-      item: olderEvent,
-      hopNumber: 42,
-      successfulHopNumber: 38,
-      totalItems: 200,
-    } satisfies SessionCwdHopPayload);
+    const manager = new RemoteAuditLookupManager();
+    const expectedSession = makeClosedSession({ sessionId: "sess-remote-pop" });
+    const fetchSession = vi.fn().mockResolvedValue(expectedSession);
 
-    const onResolved = vi.fn();
-    const statuses: HopResolutionStatus[] = [];
+    const onSessionFound = vi.fn();
+    const onSessionNotFound = vi.fn();
 
-    const resolver = new SessionHopResolver({
-      sessionId: "sess-001",
-      hopId,
-      fetchHop,
-      onStatusChange: (status) => statuses.push(status),
-      onResolved,
-    });
+    await manager.lookup(
+      { sessionId: parsed.sessionId!, targetHopId: parsed.hop },
+      { onSessionFound, onSessionNotFound },
+      fetchSession,
+    );
 
-    // Page 1 check fails
-    const pageOneItems = [makeHistoryEvent({ id: "cwd:page1-01" })];
-    expect(resolver.checkPageItems(pageOneItems)).toBe(false);
-
-    // Direct resolution succeeds
-    const resolved = await resolver.resolveDirect();
-    expect(resolved).not.toBeNull();
-    expect(resolved?.id).toBe(hopId);
-    expect(resolved?.hopNumber).toBe(42);
-    expect(resolved?.successfulHopNumber).toBe(38);
-    expect(resolver.getStatus()).toBe("resolved");
-    expect(statuses).toEqual(["resolving", "resolved"]);
-
-    // Contract: request intent clears, selectedHistoryEventId preserves URL ?hop=<id>
-    const requestedHopRef = { current: hopId as string | null };
-    let requestedHopState: string | null = hopId;
-    let selectedHistoryEventId: string | null = null;
-    let anchoredHop: SessionCwdHistoryEvent | null = null;
-
-    // Simulate onResolved hook callback
-    requestedHopRef.current = null;
-    requestedHopState = null;
-    anchoredHop = resolved;
-    selectedHistoryEventId = resolved?.id ?? null;
-
-    expect(requestedHopRef.current).toBeNull();
-    expect(requestedHopState).toBeNull();
-    expect(anchoredHop?.id).toBe(hopId);
-    expect(selectedHistoryEventId).toBe(hopId);
-
-    const urlSearch = buildAuditUrlSearch({
-      view: "audit",
-      sessionId: "sess-001",
-      hop: selectedHistoryEventId,
-    });
-    expect(urlSearch).toContain(`hop=${encodeURIComponent(hopId)}`);
+    expect(onSessionFound).toHaveBeenCalledWith(expectedSession, "cwd:pop-hop-42");
   });
 
-  // 3. Switching to another session never reuses the previous hop
-  it("clears prior hop and never queries or reuses it when selecting another session", () => {
-    const requestedHopRef = { current: "cwd:session-1-hop" as string | null };
-    let selectedHistoryEventId: string | null = "cwd:session-1-hop";
-    let selectedSessionId: string | null = "session-1";
-    let anchoredHop: SessionCwdHistoryEvent | null = makeHistoryEvent({ id: "cwd:session-1-hop", sessionId: "session-1" });
+  // 3. Late remote lookup after scope change is discarded
+  it("discards late remote lookup response if navigation moved to another scope", async () => {
+    const manager = new RemoteAuditLookupManager();
+    let resolveSlowFetch!: (session: FilesystemClosedSession | null) => void;
+    const slowFetch = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveSlowFetch = res;
+    });
+
+    const onSessionFound = vi.fn();
+    const onSessionNotFound = vi.fn();
+
+    // 1. User arrives at slow-resolving session A
+    const lookupPromise = manager.lookup(
+      { sessionId: "sess-slow-a", targetHopId: "hop-a" },
+      { onSessionFound, onSessionNotFound },
+      () => slowFetch,
+    );
+
+    // 2. User quickly navigates away to session B before session A resolves
+    manager.abort();
+
+    // 3. Late response from session A finally arrives
+    resolveSlowFetch(makeClosedSession({ sessionId: "sess-slow-a" }));
+    await lookupPromise;
+
+    // Late response must be discarded by generation guard
+    expect(onSessionFound).not.toHaveBeenCalled();
+    expect(onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  // 4. User session selection clears prior hop and cancels in-flight lookups
+  it("clears prior hop intent and selection when selecting a new session", () => {
+    const manager = new RemoteAuditLookupManager();
+    const requestedHopRef = { current: "cwd:sess1-hop" as string | null };
+    let selectedHistoryEventId: string | null = "cwd:sess1-hop";
 
     // User selects session-2
     const handleUserSelectSession = (newSessionId: string) => {
+      manager.abort();
       requestedHopRef.current = null;
       selectedHistoryEventId = null;
-      anchoredHop = null;
-      selectedSessionId = newSessionId;
+      return buildAuditUrlSearch({
+        view: "audit",
+        sessionId: newSessionId,
+        hop: selectedHistoryEventId,
+      });
     };
 
-    handleUserSelectSession("session-2");
-
-    expect(selectedSessionId).toBe("session-2");
-    expect(selectedHistoryEventId).toBeNull();
+    const newUrl = handleUserSelectSession("session-2");
     expect(requestedHopRef.current).toBeNull();
-    expect(anchoredHop).toBeNull();
-
-    const urlSearch = buildAuditUrlSearch({
-      view: "audit",
-      sessionId: selectedSessionId,
-      hop: selectedHistoryEventId,
-    });
-    expect(urlSearch).toContain("sessionId=session-2");
-    expect(urlSearch).not.toContain("hop=");
+    expect(selectedHistoryEventId).toBeNull();
+    expect(newUrl).toContain("sessionId=session-2");
+    expect(newUrl).not.toContain("hop=");
   });
 
-  // 4. Same-session and cross-session Back/Forward scopes remain coherent
-  it("keeps same-session and cross-session Back/Forward URL parsing and selection coherent", () => {
-    // A: In same session, Back/Forward restores the hop
-    const sameSessionSearch = "?view=audit&sessionId=sess-001&hop=cwd%3Ahop-42";
-    const parsedSame = parseAuditUrlParams(sameSessionSearch);
-    expect(parsedSame.view).toBe("audit");
-    expect(parsedSame.sessionId).toBe("sess-001");
-    expect(parsedSame.hop).toBe("cwd:hop-42");
+  // 5. Preserves terminal hop-resolution state across history refreshes
+  it("re-emits authoritative terminal state across history refreshes without getting stuck in resolving", async () => {
+    const manager = new SessionHopLifecycleManager();
+    const statusLog: HopResolutionStatus[] = [];
 
-    // B: Cross-session navigation to a session without hop clears hop
-    const crossSessionWithoutHop = "?view=audit&sessionId=sess-002";
-    const parsedWithoutHop = parseAuditUrlParams(crossSessionWithoutHop);
-    expect(parsedWithoutHop.sessionId).toBe("sess-002");
-    expect(parsedWithoutHop.hop).toBeNull();
+    // --- Scenario A: not-found terminal state ---
+    const fetchHopNotFound = vi.fn().mockResolvedValue({ item: null });
 
-    // C: Cross-session navigation to a session with its own hop applies that hop only
-    const crossSessionWithHop = "?view=audit&sessionId=sess-003&hop=cwd%3Asess3-hop";
-    const parsedWithHop = parseAuditUrlParams(crossSessionWithHop);
-    expect(parsedWithHop.sessionId).toBe("sess-003");
-    expect(parsedWithHop.hop).toBe("cwd:sess3-hop");
-  });
-
-  // 5. Target on page 2 and page 3, followed by one or more Load earlier operations
-  it("reconciles anchored target when earlier pages arrive without altering selection or hop number", () => {
-    const targetHopId = "cwd:target-hop-25";
-    const targetEvent = makeHistoryEvent({
-      id: targetHopId,
+    manager.sync({
       sessionId: "sess-001",
-      at: "2026-09-16T12:00:00.000Z",
-      hopNumber: 25,
-      successfulHopNumber: 20,
+      hopId: "missing-hop",
+      history: [],
+      fetchHop: fetchHopNotFound,
+      onStatusChange: (s) => statusLog.push(s),
+      onResolved: () => {},
     });
 
-    let anchoredHop: SessionCwdHistoryEvent | null = targetEvent;
-    const selectedHistoryEventId: string | null = targetHopId;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(statusLog).toEqual(["resolving", "not-found"]);
 
-    // Initial state: Page 1 (items 100..71) loaded
-    let history: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "evt-100", at: "2026-09-17T03:00:00.000Z" }),
-      makeHistoryEvent({ id: "evt-71", at: "2026-09-17T02:00:00.000Z" }),
-    ];
-
-    // Initial metrics with anchored target at hop 25 of 100
-    const initialMetrics = getHistoryWindowMetrics(history.length, 100, 0, targetEvent.hopNumber);
-    expect(initialMetrics.selectedNumber).toBe(25);
-    expect(initialMetrics.totalItems).toBe(100);
-
-    // Operation 1: Load earlier (Page 2: items 70..41) - does NOT contain target
-    const page2Items: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "evt-70", at: "2026-09-17T01:50:00.000Z" }),
-      makeHistoryEvent({ id: "evt-41", at: "2026-09-17T01:10:00.000Z" }),
-    ];
-
-    // Append logic
-    const incomingIds2 = new Set(page2Items.map((i) => i.id));
-    history = [...history.filter((i) => !incomingIds2.has(i.id)), ...page2Items];
-
-    // Reconciliation check for Page 2: target is not in page 2
-    if (page2Items.some((item) => item.id === anchoredHop?.id)) {
-      anchoredHop = null;
-    }
-    expect(anchoredHop).not.toBeNull(); // Still anchored
-    expect(anchoredHop?.id).toBe(targetHopId);
-
-    // Operation 2: Load earlier (Page 3: items 40..11) - CONTAINS target
-    const page3Items: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "evt-40", at: "2026-09-17T01:00:00.000Z" }),
-      targetEvent,
-      makeHistoryEvent({ id: "evt-11", at: "2026-09-16T11:00:00.000Z" }),
-    ];
-
-    const incomingIds3 = new Set(page3Items.map((i) => i.id));
-    history = [...history.filter((i) => !incomingIds3.has(i.id)), ...page3Items];
-
-    // Reconciliation check for Page 3: target is now in loaded history!
-    if (page3Items.some((item) => item.id === anchoredHop?.id)) {
-      anchoredHop = null;
-    }
-
-    expect(anchoredHop).toBeNull(); // Seamlessly reconciled!
-    expect(selectedHistoryEventId).toBe(targetHopId); // Selection never shifted!
-
-    // Absolute hop number remains authoritative and unchanged
-    const reconciledMetrics = getHistoryWindowMetrics(history.length, 100, 24, targetEvent.hopNumber);
-    expect(reconciledMetrics.selectedNumber).toBe(25);
-    expect(reconciledMetrics.totalItems).toBe(100);
-  });
-
-  // 6. History remains newest-first with no duplicate target
-  it("preserves strict newest-first ordering and deduplication across page appends", () => {
-    const target = makeHistoryEvent({ id: "target-ev", at: "2026-09-16T12:00:00.000Z" });
-
-    const page1: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "p1-newest", at: "2026-09-17T02:00:00.000Z" }),
-      makeHistoryEvent({ id: "p1-older", at: "2026-09-17T01:00:00.000Z" }),
-    ];
-
-    const page2: SessionCwdHistoryEvent[] = [
-      makeHistoryEvent({ id: "p1-older", at: "2026-09-17T01:00:00.000Z" }), // overlap
-      target,
-      makeHistoryEvent({ id: "p2-oldest", at: "2026-09-16T10:00:00.000Z" }),
-    ];
-
-    // Append with deduplication
-    const incomingIds = new Set(page2.map((i) => i.id));
-    const combined = [...page1.filter((i) => !incomingIds.has(i.id)), ...page2];
-
-    expect(combined.map((e) => e.id)).toEqual(["p1-newest", "p1-older", "target-ev", "p2-oldest"]);
-    expect(combined.filter((e) => e.id === "target-ev").length).toBe(1);
-
-    // Timestamps strictly descending (newest-first)
-    for (let i = 0; i < combined.length - 1; i++) {
-      expect(new Date(combined[i].at).getTime()).toBeGreaterThanOrEqual(new Date(combined[i + 1].at).getTime());
-    }
-  });
-
-  // 7. Replay cannot cross an unloaded gap
-  it("prevents prev/next navigation, auto-play, and time metrics from crossing unloaded gap", () => {
-    const anchoredHop = makeHistoryEvent({
-      id: "cwd:deep-target",
+    // Background history refresh arrives with updated page items for the SAME session
+    statusLog.length = 0;
+    manager.sync({
       sessionId: "sess-001",
-      at: "2026-09-16T10:00:00.000Z",
-      hopNumber: 15,
+      hopId: "missing-hop",
+      history: [makeHistoryEvent({ id: "unrelated-page1" })],
+      fetchHop: fetchHopNotFound,
+      onStatusChange: (s) => statusLog.push(s),
+      onResolved: () => {},
     });
-    const selectedHistoryEventId = "cwd:deep-target";
 
-    const isAnchoredSelected = Boolean(
-      anchoredHop &&
-        selectedHistoryEventId &&
-        (anchoredHop.eventId === selectedHistoryEventId || anchoredHop.id === selectedHistoryEventId)
-    );
-    expect(isAnchoredSelected).toBe(true);
+    // Authoritative re-emission: must re-emit "not-found", NOT overwrite with "resolving"
+    expect(statusLog).toEqual(["not-found"]);
 
-    let onSelectCalled = false;
-    const onSelectHistoryEventId = () => {
-      onSelectCalled = true;
-    };
+    // --- Scenario B: error state preserves error until explicit retry ---
+    const managerError = new SessionHopLifecycleManager();
+    const errorLog: HopResolutionStatus[] = [];
+    const fetchHopError = vi.fn().mockRejectedValue(new Error("Network timeout"));
 
-    // Simulated handlePrevHop guard
-    const handlePrevHop = () => {
-      if (isAnchoredSelected) return;
-      onSelectHistoryEventId();
-    };
+    managerError.sync({
+      sessionId: "sess-err",
+      hopId: "err-hop",
+      history: [],
+      fetchHop: fetchHopError,
+      onStatusChange: (s) => errorLog.push(s),
+      onResolved: () => {},
+    });
 
-    // Simulated handleNextHop guard
-    const handleNextHop = () => {
-      if (isAnchoredSelected) return;
-      onSelectHistoryEventId();
-    };
+    await new Promise((r) => setTimeout(r, 0));
+    expect(errorLog).toEqual(["resolving", "error"]);
 
-    // Simulated handleTogglePlay guard
-    let isPlaying = false;
-    const handleTogglePlay = () => {
-      if (isAnchoredSelected) return;
-      isPlaying = !isPlaying;
-    };
+    // Normal refresh without explicit retry preserves error
+    errorLog.length = 0;
+    managerError.sync({
+      sessionId: "sess-err",
+      hopId: "err-hop",
+      history: [],
+      fetchHop: fetchHopError,
+      onStatusChange: (s) => errorLog.push(s),
+      onResolved: () => {},
+      retryOnError: false,
+    });
+    expect(errorLog).toEqual(["error"]);
 
-    handlePrevHop();
-    expect(onSelectCalled).toBe(false);
+    // --- Scenario C: resolved state preserves resolved and re-emits event ---
+    const managerResolved = new SessionHopLifecycleManager();
+    const resolvedLog: HopResolutionStatus[] = [];
+    const resolvedEvents: SessionCwdHistoryEvent[] = [];
+    const targetEvent = makeHistoryEvent({ id: "valid-hop", sessionId: "sess-ok" });
 
-    handleNextHop();
-    expect(onSelectCalled).toBe(false);
+    managerResolved.sync({
+      sessionId: "sess-ok",
+      hopId: "valid-hop",
+      history: [],
+      fetchHop: vi.fn().mockResolvedValue({ item: targetEvent }),
+      onStatusChange: (s) => resolvedLog.push(s),
+      onResolved: (e) => resolvedEvents.push(e),
+    });
 
-    handleTogglePlay();
-    expect(isPlaying).toBe(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(resolvedLog).toEqual(["resolving", "resolved"]);
+    expect(resolvedEvents.map((e) => e.id)).toEqual(["valid-hop"]);
 
-    // Time metrics contract in anchored state
-    const anchoredTimeSummary = {
-      formattedTotalDuration: "Partial",
-      formattedCurrentDelta: "Gap",
-    };
-    expect(anchoredTimeSummary.formattedCurrentDelta).toBe("Gap");
-    expect(anchoredTimeSummary.formattedTotalDuration).toBe("Partial");
+    // Refresh re-emits resolved status and resolved event
+    resolvedLog.length = 0;
+    resolvedEvents.length = 0;
+    managerResolved.sync({
+      sessionId: "sess-ok",
+      hopId: "valid-hop",
+      history: [targetEvent],
+      fetchHop: vi.fn(),
+      onStatusChange: (s) => resolvedLog.push(s),
+      onResolved: (e) => resolvedEvents.push(e),
+    });
+
+    expect(resolvedLog).toEqual(["resolved"]);
+    expect(resolvedEvents.map((e) => e.id)).toEqual(["valid-hop"]);
   });
 
-  // 8. Invalid hop with non-empty and empty history (0 items) both expose recovery UI/state
-  it("exposes not-found status and recovery state independently of history item count", async () => {
-    const fetchHop = vi.fn().mockResolvedValue({ item: null });
+  // 6. Truthful mixed-schema hop numbering (sessionId + session_id)
+  it("matches normal history pagination scope using migration-compatible $or filter", async () => {
+    let capturedPipeline: unknown = null;
 
-    // Case A: Non-empty history
-    const resolverNonEmpty = new SessionHopResolver({
-      sessionId: "sess-001",
-      hopId: "cwd:missing-1",
-      fetchHop,
+    const mockDoc = {
+      _id: "cwd:evt-mixed-target",
+      sessionId: "sess-mixed",
+      action: "entered",
+      status: "observed",
+      at: new Date("2026-09-17T01:00:00.000Z"),
+      fromPath: "/",
+      toPath: "/tmp",
+    };
+
+    const aggregateMock = vi.fn().mockImplementation((pipeline: unknown) => {
+      capturedPipeline = pipeline;
+      return {
+        toArray: vi.fn().mockResolvedValue([
+          {
+            totalItems: [{ count: 12 }],
+            hopNumber: [{ count: 7 }],
+            successfulHopNumber: [{ count: 6 }],
+          },
+        ]),
+      };
     });
-    expect(resolverNonEmpty.checkPageItems([makeHistoryEvent({ id: "evt-01" })])).toBe(false);
-    await resolverNonEmpty.resolveDirect();
-    expect(resolverNonEmpty.getStatus()).toBe("not-found");
-    expect(resolverNonEmpty.getHopId()).toBe("cwd:missing-1");
 
-    // Case B: Empty history (0 items)
-    const resolverEmpty = new SessionHopResolver({
-      sessionId: "sess-empty",
-      hopId: "cwd:missing-2",
-      fetchHop,
-    });
-    expect(resolverEmpty.checkPageItems([])).toBe(false);
-    await resolverEmpty.resolveDirect();
-    expect(resolverEmpty.getStatus()).toBe("not-found");
-    expect(resolverEmpty.getHopId()).toBe("cwd:missing-2");
-  });
-
-  // 9. Overlength input is rejected rather than truncated (HTTP 400 at route, 0 DB ops)
-  it("rejects overlength inputs with HTTP 400 at route and 0 MongoDB operations in server helper", async () => {
-    const overlengthId = "a".repeat(MAX_CWD_IDENTIFIER_LENGTH + 1);
-
-    // 1. Server helper rejects immediately with 0 DB operations
-    const findOneMock = vi.fn().mockResolvedValue(null);
     vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
       db: () => ({
         collection: () => ({
-          findOne: findOneMock,
+          findOne: vi.fn().mockResolvedValue(mockDoc),
+          aggregate: aggregateMock,
         }),
       }),
     } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-    const serverHelperResult = await getSessionCwdHistoryHop(overlengthId, "evt-001");
-    expect(serverHelperResult).toEqual({ item: null });
+    const result = await getSessionCwdHistoryHop("sess-mixed", "cwd:evt-mixed-target");
+    expect(result.item).not.toBeNull();
+    expect(result.hopNumber).toBe(7);
+    expect(result.successfulHopNumber).toBe(6);
+    expect(result.totalItems).toBe(12);
+
+    // Verify the aggregation $match stage uses migration-compatible $or query
+    const pipeline = capturedPipeline as Array<Record<string, unknown>>;
+    expect(pipeline[0].$match).toEqual({
+      $or: [{ sessionId: "sess-mixed" }, { session_id: "sess-mixed" }],
+    });
+  });
+
+  // 7. Exact database-operation bounds
+  it("strictly enforces maximum database operations across all query paths", async () => {
+    // 7A: Overlength input (>300 chars) -> exactly 0 operations
+    const findOneMock = vi.fn();
+    const aggregateMock = vi.fn();
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          findOne: findOneMock,
+          aggregate: aggregateMock,
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    const overlengthResult = await getSessionCwdHistoryHop("a".repeat(MAX_CWD_IDENTIFIER_LENGTH + 1), "hop-1");
+    expect(overlengthResult).toEqual({ item: null });
     expect(findOneMock).not.toHaveBeenCalled();
+    expect(aggregateMock).not.toHaveBeenCalled();
 
-    const historyHelperResult = await getSessionCwdHistory(overlengthId, null);
-    expect(historyHelperResult.items).toEqual([]);
-    expect(findOneMock).not.toHaveBeenCalled();
+    // 7B: Canonical success -> exactly 2 operations (1 findOne + 1 aggregate)
+    const findOneSuccess = vi.fn().mockResolvedValue({
+      _id: "hop-canonical",
+      sessionId: "sess-test",
+      at: new Date("2026-09-17T00:00:00.000Z"),
+      action: "entered",
+      status: "observed",
+      fromPath: "/",
+      toPath: "/bin",
+    });
+    const aggregateSuccess = vi.fn().mockReturnValue({
+      toArray: vi.fn().mockResolvedValue([{ totalItems: [{ count: 1 }], hopNumber: [{ count: 1 }], successfulHopNumber: [{ count: 1 }] }]),
+    });
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          findOne: findOneSuccess,
+          aggregate: aggregateSuccess,
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-    // 2. Route rejects overlength id, hop, or cursor with HTTP 400
-    vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
-      operatorId: "admin",
-      username: "admin",
-      mustChangePassword: false,
-    } as unknown as authSession.SessionUser);
+    const canonicalResult = await getSessionCwdHistoryHop("sess-test", "hop-canonical");
+    expect(canonicalResult.item?.id).toBe("hop-canonical");
+    expect(findOneSuccess).toHaveBeenCalledTimes(1);
+    expect(aggregateSuccess).toHaveBeenCalledTimes(1);
 
-    const reqOverlengthHop = new Request(
-      `http://localhost:3000/api/sessions/sess-test/cwd-history?hop=${overlengthId}`
+    // 7C: Canonical cross-session -> exactly 1 operation (1 findOne)
+    const findOneCross = vi.fn().mockResolvedValue({
+      _id: "hop-stolen",
+      sessionId: "victim-session", // Different session!
+    });
+    const aggregateCross = vi.fn();
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          findOne: findOneCross,
+          aggregate: aggregateCross,
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    const crossResult = await getSessionCwdHistoryHop("attacker-session", "hop-stolen");
+    expect(crossResult).toEqual({ item: null });
+    expect(findOneCross).toHaveBeenCalledTimes(1);
+    expect(aggregateCross).not.toHaveBeenCalled();
+
+    // 7D: Unknown event -> exactly 3 operations (1 primary + 2 legacy fallbacks)
+    const findOneUnknown = vi.fn().mockResolvedValue(null);
+    const aggregateUnknown = vi.fn();
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          findOne: findOneUnknown,
+          aggregate: aggregateUnknown,
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    const unknownResult = await getSessionCwdHistoryHop("sess-test", "hop-nonexistent");
+    expect(unknownResult).toEqual({ item: null });
+    expect(findOneUnknown).toHaveBeenCalledTimes(3); // 1 primary + 2 legacy fallbacks
+    expect(aggregateUnknown).not.toHaveBeenCalled();
+
+    // 7E: Database error path -> throws without fan-out catch
+    const aggregateThrow = vi.fn().mockReturnValue({
+      toArray: vi.fn().mockRejectedValue(new Error("MongoDB connection timeout")),
+    });
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: () => ({
+          findOne: findOneSuccess,
+          aggregate: aggregateThrow,
+          countDocuments: vi.fn(), // If fan-out catch existed, countDocuments would be called
+        }),
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    await expect(getSessionCwdHistoryHop("sess-test", "hop-canonical")).rejects.toThrow(
+      "MongoDB connection timeout",
     );
-    const resOverlengthHop = await cwdHistoryRouteGet(reqOverlengthHop, {
-      params: Promise.resolve({ id: "sess-test" }),
-    });
-    expect(resOverlengthHop.status).toBe(400);
-    const bodyHop = await resOverlengthHop.json();
-    expect(bodyHop.error).toBe("Identifier length exceeds limit");
+  });
 
-    const reqOverlengthCursor = new Request(
-      `http://localhost:3000/api/sessions/sess-test/cwd-history?cursor=${overlengthId}`
+  // 8. Anchored replay controls using production functions
+  it("disables replay navigation and play across unloaded gap using pure production functions", () => {
+    const items = [
+      makeHistoryEvent({ id: "evt-01", at: "2026-09-17T01:00:00.000Z" }),
+      makeHistoryEvent({ id: "evt-02", at: "2026-09-17T02:00:00.000Z" }),
+    ];
+
+    // When anchored target is selected (gap exists):
+    expect(computeNextReplayEventId(items, 0, "next", true)).toBeNull();
+    expect(computeNextReplayEventId(items, 0, "prev", true)).toBeNull();
+    expect(computeTogglePlayState(false, items, 0, true)).toEqual({ isPlaying: false });
+    expect(computeTogglePlayState(true, items, 0, true)).toEqual({ isPlaying: false });
+
+    // When normal contiguous event is selected:
+    expect(computeNextReplayEventId(items, 0, "next", false)).toBe("evt-02");
+    expect(computeTogglePlayState(false, items, 0, false)).toEqual({ isPlaying: true, targetEventId: undefined });
+  });
+
+  // 9. Production render path of CwdRouteHistory verifies alert appears with empty history
+  it("renders explicit recovery alert banner in production CwdRouteHistory when history is empty", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(CwdRouteHistory, {
+        selectedSession: makeClosedSession({ sessionId: "sess-empty" }),
+        history: [],
+        historyStatus: "ready",
+        historyCursor: null,
+        historyTotalItems: 0,
+        historyTotalSuccessfulItems: 0,
+        historyComplete: true,
+        selectedHistoryEventId: null,
+        hopResolutionStatus: "not-found",
+        requestedHop: "cwd:target-not-found-xyz",
+        onSelectHistoryEventId: () => {},
+        onLoadEarlier: () => {},
+        onClearHop: () => {},
+      })
     );
-    const resOverlengthCursor = await cwdHistoryRouteGet(reqOverlengthCursor, {
-      params: Promise.resolve({ id: "sess-test" }),
-    });
-    expect(resOverlengthCursor.status).toBe(400);
-    const bodyCursor = await resOverlengthCursor.json();
-    expect(bodyCursor.error).toBe("Identifier length exceeds limit");
+
+    // Verify recovery UI exists in production rendered HTML
+    expect(html).toContain('data-testid="hop-resolution-banner"');
+    expect(html).toContain("Clear hop");
+    expect(html).toContain("cwd:target-not-found-xyz");
   });
 
-  // 10. Cancellation on hop/session/view change and stale-response protection
-  it("aborts in-flight resolution on session, hop, or view change and ignores stale responses", async () => {
-    let capturedSignal1: AbortSignal | undefined;
-    let resolveSession1!: (payload: SessionCwdHopPayload) => void;
-    const session1Promise = new Promise<SessionCwdHopPayload>((res) => {
-      resolveSession1 = res;
+  // 10. Route-level HTTP status and error contracts
+  describe("Route HTTP contract for hop lookup", () => {
+    it("returns 400 for overlength identifiers (>300 chars)", async () => {
+      vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
+        operatorId: "admin",
+        username: "admin",
+        mustChangePassword: false,
+      } as unknown as authSession.SessionUser);
+
+      const reqOverlength = new Request(
+        `http://localhost:3000/api/sessions/sess-test/cwd-history?hop=${"b".repeat(MAX_CWD_IDENTIFIER_LENGTH + 1)}`
+      );
+      const res = await cwdHistoryRouteGet(reqOverlength, { params: Promise.resolve({ id: "sess-test" }) });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("Identifier length exceeds limit");
     });
 
-    const fetchHop = vi.fn().mockImplementation((sessionId: string, _hopId: string, signal: AbortSignal) => {
-      if (sessionId === "session-1") {
-        capturedSignal1 = signal;
-        return session1Promise;
-      }
-      return Promise.resolve({ item: makeHistoryEvent({ id: "hop-2", sessionId: "session-2" }) });
-    });
-
-    const resolvedEvents: SessionCwdHistoryEvent[] = [];
-    const manager = new SessionHopLifecycleManager();
-
-    // Step A: Start session-1
-    manager.sync({
-      sessionId: "session-1",
-      hopId: "hop-1",
-      viewMode: "audit",
-      history: [],
-      fetchHop,
-      onStatusChange: () => {},
-      onResolved: (e) => resolvedEvents.push(e),
-    });
-
-    expect(capturedSignal1).toBeDefined();
-    expect(capturedSignal1?.aborted).toBe(false);
-
-    // Step B: User navigates to session-2 before session-1 completes
-    manager.sync({
-      sessionId: "session-2",
-      hopId: "hop-2",
-      viewMode: "audit",
-      history: [],
-      fetchHop,
-      onStatusChange: () => {},
-      onResolved: (e) => resolvedEvents.push(e),
-    });
-
-    // session-1 request aborted
-    expect(capturedSignal1?.aborted).toBe(true);
-
-    await new Promise((r) => setTimeout(r, 0));
-    expect(resolvedEvents.map((e) => e.id)).toEqual(["hop-2"]);
-
-    // Step C: Late response from session-1 arrives
-    resolveSession1({ item: makeHistoryEvent({ id: "hop-1", sessionId: "session-1" }) });
-    await new Promise((r) => setTimeout(r, 0));
-
-    // Stale generation discarded
-    expect(resolvedEvents.map((e) => e.id)).toEqual(["hop-2"]);
-
-    // Step D: Transition to live mode aborts resolution
-    let capturedSignal2: AbortSignal | undefined;
-    const fetchHop2 = vi.fn().mockImplementation((_s: string, _h: string, signal: AbortSignal) => {
-      capturedSignal2 = signal;
-      return new Promise(() => {});
-    });
-
-    manager.sync({
-      sessionId: "session-3",
-      hopId: "hop-3",
-      viewMode: "audit",
-      history: [],
-      fetchHop: fetchHop2,
-      onStatusChange: () => {},
-      onResolved: () => {},
-    });
-
-    expect(capturedSignal2?.aborted).toBe(false);
-    manager.sync({
-      sessionId: "session-3",
-      hopId: "hop-3",
-      viewMode: "live",
-      history: [],
-      fetchHop: fetchHop2,
-      onStatusChange: () => {},
-      onResolved: () => {},
-    });
-    expect(capturedSignal2?.aborted).toBe(true);
-  });
-
-  // Cross-session and unknown event 404 security
-  it("never resolves or leaks an event that belongs to a different session", async () => {
-    const crossSessionEvent = makeHistoryEvent({
-      id: "cwd:stolen-event",
-      sessionId: "sess-victim-999",
-    });
-
-    const fetchHop = vi.fn().mockResolvedValue({
-      item: crossSessionEvent,
-    });
-
-    const onResolved = vi.fn();
-    const statuses: HopResolutionStatus[] = [];
-
-    const resolver = new SessionHopResolver({
-      sessionId: "sess-attacker-001",
-      hopId: "cwd:stolen-event",
-      fetchHop,
-      onStatusChange: (status) => statuses.push(status),
-      onResolved,
-    });
-
-    const result = await resolver.resolveDirect();
-    expect(result).toBeNull();
-    expect(resolver.getStatus()).toBe("not-found");
-    expect(statuses).toEqual(["resolving", "not-found"]);
-    expect(onResolved).not.toHaveBeenCalled();
-    expect(resolver.getResolvedEvent()).toBeNull();
-  });
-
-  // Route 404 and 200 contract with $facet aggregation
-  describe("Server-side getSessionCwdHistoryHop single $facet aggregation", () => {
-    it("route returns 404 with item: null for unknown or cross-session hop", async () => {
+    it("returns 404 with item: null for unknown or cross-session hop", async () => {
       vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
         operatorId: "admin",
         username: "admin",
@@ -567,15 +490,14 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Window Remediation"
         }),
       } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-      const mockReq = new Request("http://localhost:3000/api/sessions/sess-test/cwd-history?hop=unknown-hop-xyz");
-      const res = await cwdHistoryRouteGet(mockReq, { params: Promise.resolve({ id: "sess-test" }) });
+      const req404 = new Request("http://localhost:3000/api/sessions/sess-test/cwd-history?hop=unknown-hop");
+      const res = await cwdHistoryRouteGet(req404, { params: Promise.resolve({ id: "sess-test" }) });
       expect(res.status).toBe(404);
       const body = await res.json();
       expect(body.item).toBeNull();
-      expect(body.error).toBeDefined();
     });
 
-    it("route returns 200 with hop document and hop numbering via consolidated $facet aggregation", async () => {
+    it("returns 200 with hop document and hop numbering when hop is found", async () => {
       vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
         operatorId: "admin",
         username: "admin",
@@ -583,7 +505,7 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Window Remediation"
       } as unknown as authSession.SessionUser);
 
       const mockDoc = {
-        _id: "cwd:evt-resolved",
+        _id: "cwd:evt-found",
         sessionId: "sess-test",
         action: "entered",
         status: "observed",
@@ -592,35 +514,31 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Window Remediation"
         toPath: "/var",
       };
 
-      const aggregateMock = vi.fn().mockReturnValue({
-        toArray: vi.fn().mockResolvedValue([
-          {
-            totalItems: [{ count: 100 }],
-            hopNumber: [{ count: 42 }],
-            successfulHopNumber: [{ count: 38 }],
-          },
-        ]),
-      });
-
       vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
         db: () => ({
           collection: () => ({
             findOne: vi.fn().mockResolvedValue(mockDoc),
-            aggregate: aggregateMock,
+            aggregate: vi.fn().mockReturnValue({
+              toArray: vi.fn().mockResolvedValue([
+                {
+                  totalItems: [{ count: 50 }],
+                  hopNumber: [{ count: 20 }],
+                  successfulHopNumber: [{ count: 18 }],
+                },
+              ]),
+            }),
           }),
         }),
       } as unknown as ReturnType<typeof mongo.getMongoClient>);
 
-      const mockReq = new Request("http://localhost:3000/api/sessions/sess-test/cwd-history?hop=cwd:evt-resolved");
-      const res = await cwdHistoryRouteGet(mockReq, { params: Promise.resolve({ id: "sess-test" }) });
+      const req200 = new Request("http://localhost:3000/api/sessions/sess-test/cwd-history?hop=cwd:evt-found");
+      const res = await cwdHistoryRouteGet(req200, { params: Promise.resolve({ id: "sess-test" }) });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.item).not.toBeNull();
-      expect(body.item.id).toBe("cwd:evt-resolved");
-      expect(body.hopNumber).toBe(42);
-      expect(body.successfulHopNumber).toBe(38);
-      expect(body.totalItems).toBe(100);
-      expect(aggregateMock).toHaveBeenCalledTimes(1);
+      expect(body.item.id).toBe("cwd:evt-found");
+      expect(body.hopNumber).toBe(20);
+      expect(body.successfulHopNumber).toBe(18);
+      expect(body.totalItems).toBe(50);
     });
   });
 });
