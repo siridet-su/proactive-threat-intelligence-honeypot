@@ -15,11 +15,17 @@ import {
 
 export interface UseFilesystemStreamingOptions {
   onSnapshotApplied?: (snapshot: FilesystemTopologySnapshot) => void;
+  getNow?: () => number;
+}
+
+interface SnapshotEnvelope {
+  snapshot: FilesystemTopologySnapshot | null;
+  snapshotReceivedAtMs: number | null;
 }
 
 export interface UseFilesystemStreamingReturn {
   snapshot: FilesystemTopologySnapshot | null;
-  setSnapshot: React.Dispatch<React.SetStateAction<FilesystemTopologySnapshot | null>>;
+  snapshotReceivedAtMs: number | null;
   regionStatus: RegionStatus;
   setRegionStatus: React.Dispatch<React.SetStateAction<RegionStatus>>;
   streamState: StreamState;
@@ -28,20 +34,28 @@ export interface UseFilesystemStreamingReturn {
   setIsHydrated: React.Dispatch<React.SetStateAction<boolean>>;
   lastUpdateAgeMs: number;
   telemetryAgeMs: number | null;
+  snapshotReceiptAgeMs: number;
   retrievalAgeMs: number;
+  serverGenerationAgeMs: number;
   latestTelemetryAt: string | null;
   freshnessState: FreshnessState;
   refresh: () => Promise<void>;
   handleReconnect: () => void;
-  applySnapshot: (data: FilesystemTopologySnapshot) => void;
+  applySnapshot: (data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number) => boolean;
 }
 
 export function useFilesystemStreaming(
   options: UseFilesystemStreamingOptions = {},
 ): UseFilesystemStreamingReturn {
-  const { onSnapshotApplied } = options;
+  const { onSnapshotApplied, getNow = () => Date.now() } = options;
 
-  const [snapshot, setSnapshot] = useState<FilesystemTopologySnapshot | null>(null);
+  const [envelope, setEnvelope] = useState<SnapshotEnvelope>({
+    snapshot: null,
+    snapshotReceivedAtMs: null,
+  });
+  const snapshot = envelope.snapshot;
+  const snapshotReceivedAtMs = envelope.snapshotReceivedAtMs;
+
   const [regionStatus, setRegionStatus] = useState<RegionStatus>("loading");
   const [streamState, setStreamState] = useState<StreamState>("connecting");
   const [isHydrated, setIsHydrated] = useState(false);
@@ -54,15 +68,20 @@ export function useFilesystemStreaming(
     onSnapshotAppliedRef.current = onSnapshotApplied;
   }, [onSnapshotApplied]);
 
-  const applySnapshot = useCallback((data: FilesystemTopologySnapshot) => {
+  const applySnapshot = useCallback((data: FilesystemTopologySnapshot, explicitReceivedAtMs?: number): boolean => {
     const timestamp = Date.parse(data.generatedAt) || 0;
-    if (timestamp && timestamp < latestSnapshotAt.current) return;
+    if (timestamp && timestamp < latestSnapshotAt.current) return false;
     latestSnapshotAt.current = Math.max(latestSnapshotAt.current, timestamp);
 
-    setSnapshot(data);
+    const receivedAtMs = typeof explicitReceivedAtMs === "number" ? explicitReceivedAtMs : getNow();
+    setEnvelope({
+      snapshot: data,
+      snapshotReceivedAtMs: receivedAtMs,
+    });
     setRegionStatus("ready");
     onSnapshotAppliedRef.current?.(data);
-  }, []);
+    return true;
+  }, [getNow]);
 
   const refresh = useCallback(async () => {
     setRegionStatus((current) => (snapshot ? "refreshing" : current === "error" ? "loading" : current));
@@ -82,26 +101,35 @@ export function useFilesystemStreaming(
     void refresh();
   }, [refresh]);
 
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => getNow());
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setNow(Date.now());
+      setNow(getNow());
     }, 1_000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [getNow]);
 
   const {
     telemetryAt,
     telemetryAgeMs,
+    telemetryStatus,
+    snapshotReceiptAgeMs,
     retrievalAgeMs,
+    serverGenerationAgeMs,
     hasTelemetry,
   } = useMemo(() => {
-    return calculateTelemetryAge({ snapshot, now });
-  }, [snapshot, now]);
+    return calculateTelemetryAge({
+      snapshot,
+      snapshotReceivedAtMs,
+      now,
+    });
+  }, [snapshot, snapshotReceivedAtMs, now]);
 
   const freshnessState = useMemo(() => {
     return getFreshnessState({
       telemetryAgeMs,
+      telemetryStatus,
+      snapshotReceiptAgeMs,
       retrievalAgeMs,
       hasTelemetry,
       staleThresholdMs: DEFAULT_STALE_THRESHOLD_MS,
@@ -109,7 +137,7 @@ export function useFilesystemStreaming(
       regionStatus,
       hasSnapshot: Boolean(snapshot),
     });
-  }, [telemetryAgeMs, retrievalAgeMs, hasTelemetry, streamState, regionStatus, snapshot]);
+  }, [telemetryAgeMs, telemetryStatus, snapshotReceiptAgeMs, retrievalAgeMs, hasTelemetry, streamState, regionStatus, snapshot]);
 
   // SSE Stream subscription with HTTP fallback
   useEffect(() => {
@@ -185,16 +213,18 @@ export function useFilesystemStreaming(
 
   return {
     snapshot,
-    setSnapshot,
+    snapshotReceivedAtMs,
     regionStatus,
     setRegionStatus,
     streamState,
     setStreamState,
     isHydrated,
     setIsHydrated,
-    lastUpdateAgeMs: telemetryAgeMs ?? retrievalAgeMs,
+    lastUpdateAgeMs: telemetryAgeMs ?? snapshotReceiptAgeMs,
     telemetryAgeMs,
+    snapshotReceiptAgeMs,
     retrievalAgeMs,
+    serverGenerationAgeMs,
     latestTelemetryAt: telemetryAt,
     freshnessState,
     refresh,

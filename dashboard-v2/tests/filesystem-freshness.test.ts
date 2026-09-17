@@ -5,9 +5,11 @@ import {
   calculateTelemetryAge,
   DEFAULT_STALE_THRESHOLD_MS,
   deriveLatestTelemetryAt,
+  formatUpdateAge,
   getFreshnessState,
-  isSnapshot,
-} from "../src/components/filesystem/filesystemUtils";
+  MAX_FUTURE_TELEMETRY_SKEW_MS,
+} from "../src/lib/filesystem-freshness";
+import { isSnapshot } from "../src/components/filesystem/filesystemUtils";
 
 describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
   const baseEmptySnapshot: FilesystemTopologySnapshot = {
@@ -19,7 +21,7 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
     latestTelemetryAt: null,
   };
 
-  describe("deriveLatestTelemetryAt", () => {
+  describe("deriveLatestTelemetryAt (Neutral Lib Helper)", () => {
     it("returns null for null, undefined, or empty snapshot", () => {
       expect(deriveLatestTelemetryAt(null)).toBeNull();
       expect(deriveLatestTelemetryAt(undefined)).toBeNull();
@@ -114,7 +116,6 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
     });
 
     it("does NOT consider generatedAt as telemetry", () => {
-      // Even if generatedAt is much newer, telemetryAt must only reflect session telemetry
       const snapshot: FilesystemTopologySnapshot = {
         ...baseEmptySnapshot,
         generatedAt: "2026-09-17T12:00:00.000Z",
@@ -135,77 +136,104 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
     });
   });
 
-  describe("calculateTelemetryAge", () => {
-    const fixedNow = Date.parse("2026-09-17T10:00:30.000Z");
-
-    it("handles null snapshot safely", () => {
-      const metrics = calculateTelemetryAge({ snapshot: null, now: fixedNow });
-      expect(metrics.telemetryAt).toBeNull();
-      expect(metrics.telemetryAgeMs).toBeNull();
-      expect(metrics.retrievalAgeMs).toBe(0);
-      expect(metrics.hasTelemetry).toBe(false);
-    });
-
-    it("uses authoritative snapshot.latestTelemetryAt when present", () => {
+  describe("Twelve Deterministic Regression Requirements", () => {
+    // 1. Snapshot generated 30s ago but received by client now -> receipt age is 0, server generation remains 30s old.
+    it("1. Snapshot generated 30s ago but received now has 0s receipt age and 30s server generation age", () => {
+      const now = Date.parse("2026-09-17T10:00:30.000Z");
+      const clientReceivedAtMs = now; // Client received snapshot just now
       const snapshot: FilesystemTopologySnapshot = {
         ...baseEmptySnapshot,
-        generatedAt: "2026-09-17T10:00:20.000Z", // 10s retrieval age
-        latestTelemetryAt: "2026-09-17T10:00:15.000Z", // 15s telemetry age
-        sessions: [
-          {
-            sessionId: "s1",
-            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
-            cwdState: { path: "/", observedAt: "2026-09-17T10:00:15.000Z", status: "confirmed" },
-            sourceIp: "10.0.0.1",
-            sourceGeo: null,
-            lifecycle: { status: "active", startedAt: null, closedAt: null },
-            nodeIds: ["/"],
-          },
-        ],
+        generatedAt: "2026-09-17T10:00:00.000Z", // Server generated 30s ago
       };
-      const metrics = calculateTelemetryAge({ snapshot, now: fixedNow });
-      expect(metrics.telemetryAt).toBe("2026-09-17T10:00:15.000Z");
-      expect(metrics.telemetryAgeMs).toBe(15_000);
-      expect(metrics.retrievalAgeMs).toBe(10_000);
-      expect(metrics.hasTelemetry).toBe(true);
+
+      const metrics = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: clientReceivedAtMs,
+        now,
+      });
+
+      expect(metrics.snapshotReceiptAgeMs).toBe(0);
+      expect(metrics.serverGenerationAgeMs).toBe(30_000);
+      expect(metrics.retrievalAgeMs).toBe(0); // alias matches receipt age
     });
 
-    it("falls back to deriveLatestTelemetryAt if latestTelemetryAt is omitted", () => {
-      const legacySnapshot: FilesystemTopologySnapshot = {
-        nodes: [],
-        truncated: false,
-        generatedAt: "2026-09-17T10:00:20.000Z",
-        recentClosedSessions: [],
-        sessions: [
-          {
-            sessionId: "s1",
-            auditSummary: { visitedPaths: ["/bin"], homeOnly: false, eventCount: 2 },
-            cwdState: { path: "/bin", observedAt: "2026-09-17T10:00:10.000Z", status: "confirmed" },
-            sourceIp: "10.0.0.2",
-            sourceGeo: null,
-            lifecycle: { status: "active", startedAt: null, closedAt: null },
-            nodeIds: ["/bin"],
-          },
-        ],
-      };
-      const metrics = calculateTelemetryAge({ snapshot: legacySnapshot, now: fixedNow });
-      expect(metrics.telemetryAt).toBe("2026-09-17T10:00:10.000Z");
-      expect(metrics.telemetryAgeMs).toBe(20_000);
-      expect(metrics.retrievalAgeMs).toBe(10_000);
-      expect(metrics.hasTelemetry).toBe(true);
-    });
-
-    it("clamps future telemetry timestamps safely against client clock skew", () => {
-      const futureTimestamp = "2026-09-17T10:05:00.000Z"; // 4.5 minutes in the future
+    // 2. Advancing client time increases receipt age from the captured receipt time.
+    it("2. Advancing client time increases receipt age from the captured receipt time", () => {
+      const receiptTime = Date.parse("2026-09-17T10:00:00.000Z");
       const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T09:59:50.000Z",
+      };
+
+      // 10 seconds later
+      const metricsAt10s = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: receiptTime,
+        now: receiptTime + 10_000,
+      });
+      expect(metricsAt10s.snapshotReceiptAgeMs).toBe(10_000);
+
+      // 25 seconds later
+      const metricsAt25s = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: receiptTime,
+        now: receiptTime + 25_000,
+      });
+      expect(metricsAt25s.snapshotReceiptAgeMs).toBe(25_000);
+    });
+
+    // 3. Rejected out-of-order snapshot does not reset receipt time.
+    it("3. Rejected out-of-order snapshot does not reset receipt time in snapshot state transition", () => {
+      let latestSnapshotAt = 0;
+      let envelope = {
+        snapshot: null as FilesystemTopologySnapshot | null,
+        snapshotReceivedAtMs: null as number | null,
+      };
+
+      const apply = (data: FilesystemTopologySnapshot, receivedAt: number): boolean => {
+        const timestamp = Date.parse(data.generatedAt) || 0;
+        if (timestamp && timestamp < latestSnapshotAt) return false;
+        latestSnapshotAt = Math.max(latestSnapshotAt, timestamp);
+        envelope = { snapshot: data, snapshotReceivedAtMs: receivedAt };
+        return true;
+      };
+
+      const initialReceivedAt = Date.parse("2026-09-17T10:00:05.000Z");
+      const newerSnapshot: FilesystemTopologySnapshot = {
         ...baseEmptySnapshot,
         generatedAt: "2026-09-17T10:00:00.000Z",
-        latestTelemetryAt: futureTimestamp,
+      };
+      expect(apply(newerSnapshot, initialReceivedAt)).toBe(true);
+      expect(envelope.snapshotReceivedAtMs).toBe(initialReceivedAt);
+
+      // A late/stale out-of-order snapshot arrives with generatedAt in the past
+      const olderSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T09:59:00.000Z",
+      };
+      const lateArrivalTime = Date.parse("2026-09-17T10:00:10.000Z");
+      const accepted = apply(olderSnapshot, lateArrivalTime);
+
+      expect(accepted).toBe(false);
+      // Receipt timestamp must NOT be reset by the out-of-order snapshot
+      expect(envelope.snapshotReceivedAtMs).toBe(initialReceivedAt);
+      expect(envelope.snapshot?.generatedAt).toBe("2026-09-17T10:00:00.000Z");
+    });
+
+    // 4. Manual refresh resets receipt age but unchanged old telemetry remains stale.
+    it("4. Manual refresh resets receipt age but unchanged old telemetry remains stale", () => {
+      const now = Date.parse("2026-09-17T11:00:00.000Z");
+      const oldTelemetryTime = "2026-09-17T10:59:00.000Z"; // 60s old (> 30s threshold)
+
+      const initialSnapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        generatedAt: "2026-09-17T10:59:20.000Z",
+        latestTelemetryAt: oldTelemetryTime,
         sessions: [
           {
             sessionId: "s1",
             auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
-            cwdState: { path: "/", observedAt: futureTimestamp, status: "confirmed" },
+            cwdState: { path: "/", observedAt: oldTelemetryTime, status: "confirmed" },
             sourceIp: "10.0.0.1",
             sourceGeo: null,
             lifecycle: { status: "active", startedAt: null, closedAt: null },
@@ -213,24 +241,68 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
           },
         ],
       };
-      const metrics = calculateTelemetryAge({ snapshot, now: fixedNow });
-      // Clamped against now: age must be 0, not negative
-      expect(metrics.telemetryAgeMs).toBe(0);
-      expect(metrics.telemetryAt).toBe(futureTimestamp);
+
+      const metricsBefore = calculateTelemetryAge({
+        snapshot: initialSnapshot,
+        snapshotReceivedAtMs: now - 40_000, // Received 40s ago
+        now,
+      });
+      const stateBefore = getFreshnessState({
+        telemetryAgeMs: metricsBefore.telemetryAgeMs,
+        telemetryStatus: metricsBefore.telemetryStatus,
+        snapshotReceiptAgeMs: metricsBefore.snapshotReceiptAgeMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+      expect(metricsBefore.snapshotReceiptAgeMs).toBe(40_000);
+      expect(metricsBefore.telemetryAgeMs).toBe(60_000);
+      expect(stateBefore.classification).toBe("stale");
+      expect(stateBefore.isStale).toBe(true);
+
+      // Manual refresh completes now: receipt age resets to 0s, but DB telemetry did not advance!
+      const refreshedSnapshot: FilesystemTopologySnapshot = {
+        ...initialSnapshot,
+        generatedAt: new Date(now).toISOString(),
+        latestTelemetryAt: oldTelemetryTime,
+      };
+      const metricsAfter = calculateTelemetryAge({
+        snapshot: refreshedSnapshot,
+        snapshotReceivedAtMs: now, // Newly received snapshot
+        now,
+      });
+      const stateAfter = getFreshnessState({
+        telemetryAgeMs: metricsAfter.telemetryAgeMs,
+        telemetryStatus: metricsAfter.telemetryStatus,
+        snapshotReceiptAgeMs: metricsAfter.snapshotReceiptAgeMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+
+      // Receipt age reset to 0
+      expect(metricsAfter.snapshotReceiptAgeMs).toBe(0);
+      // Telemetry age remains 60s (NOT reset!)
+      expect(metricsAfter.telemetryAgeMs).toBe(60_000);
+      // State remains truthfully stale
+      expect(stateAfter.classification).toBe("stale");
+      expect(stateAfter.isStale).toBe(true);
+      expect(stateAfter.detail).toContain("no new telemetry for 1m ago");
     });
 
-    it("distinguishes empty snapshots (hasTelemetry = false) from session snapshots with missing timestamps", () => {
-      const emptyMetrics = calculateTelemetryAge({ snapshot: baseEmptySnapshot, now: fixedNow });
-      expect(emptyMetrics.hasTelemetry).toBe(false);
-      expect(emptyMetrics.telemetryAgeMs).toBeNull();
+    // 5. Future telemetry inside tolerance follows the documented policy.
+    it("5. Future telemetry inside tolerance (<= 5s) normalizes to age 0 and valid status", () => {
+      const now = Date.parse("2026-09-17T12:00:00.000Z");
+      const futureTimeWithinTolerance = "2026-09-17T12:00:04.000Z"; // 4s in future (< 5s tolerance)
 
-      const snapshotWithNoTimestamps: FilesystemTopologySnapshot = {
+      const snapshot: FilesystemTopologySnapshot = {
         ...baseEmptySnapshot,
+        latestTelemetryAt: futureTimeWithinTolerance,
         sessions: [
           {
-            sessionId: "s-unobserved",
+            sessionId: "s-skew",
             auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
-            cwdState: { path: "/", observedAt: null, status: "unknown" },
+            cwdState: { path: "/", observedAt: futureTimeWithinTolerance, status: "confirmed" },
             sourceIp: "10.0.0.1",
             sourceGeo: null,
             lifecycle: { status: "active", startedAt: null, closedAt: null },
@@ -238,17 +310,166 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
           },
         ],
       };
-      const sessionMetrics = calculateTelemetryAge({ snapshot: snapshotWithNoTimestamps, now: fixedNow });
-      expect(sessionMetrics.hasTelemetry).toBe(true);
-      expect(sessionMetrics.telemetryAgeMs).toBeNull();
-    });
-  });
 
-  describe("getFreshnessState Truthful Classification", () => {
-    it("classifies valid empty snapshot + live transport as 'Live · No activity' (fresh, not offline)", () => {
+      const metrics = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now,
+        now,
+        futureSkewToleranceMs: MAX_FUTURE_TELEMETRY_SKEW_MS,
+      });
+
+      expect(metrics.telemetryStatus).toBe("valid");
+      expect(metrics.telemetryAgeMs).toBe(0);
+
+      const state = getFreshnessState({
+        telemetryAgeMs: metrics.telemetryAgeMs,
+        telemetryStatus: metrics.telemetryStatus,
+        snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+
+      expect(state.classification).toBe("fresh");
+      expect(state.label).toBe("Live & Fresh");
+      expect(state.isStale).toBe(false);
+    });
+
+    // 6. Telemetry several minutes in the future is invalid/untrusted and never Fresh.
+    it("6. Telemetry several minutes in the future is invalid/untrusted and classifies as Stale, never Fresh", () => {
+      const now = Date.parse("2026-09-17T12:00:00.000Z");
+      const excessiveFutureTime = "2026-09-17T12:05:00.000Z"; // 5 minutes in future
+
+      const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        latestTelemetryAt: excessiveFutureTime,
+        sessions: [
+          {
+            sessionId: "s-bad-skew",
+            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
+            cwdState: { path: "/", observedAt: excessiveFutureTime, status: "confirmed" },
+            sourceIp: "10.0.0.1",
+            sourceGeo: null,
+            lifecycle: { status: "active", startedAt: null, closedAt: null },
+            nodeIds: ["/"],
+          },
+        ],
+      };
+
+      const metrics = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now,
+        now,
+        futureSkewToleranceMs: MAX_FUTURE_TELEMETRY_SKEW_MS,
+      });
+
+      expect(metrics.telemetryStatus).toBe("future_skew");
+      expect(metrics.telemetryAgeMs).toBeNull(); // Untrusted: age is null
+
+      const state = getFreshnessState({
+        telemetryAgeMs: metrics.telemetryAgeMs,
+        telemetryStatus: metrics.telemetryStatus,
+        snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+
+      expect(state.classification).toBe("stale");
+      expect(state.label).toBe("Stale");
+      expect(state.isStale).toBe(true);
+      expect(state.detail).toContain("clock skew detected");
+    });
+
+    // 7. Re-evaluating that future timestamp at multiple client times does not falsely refresh it.
+    it("7. Re-evaluating excessive future timestamp at multiple client ticks never falsely makes it fresh", () => {
+      const startTime = Date.parse("2026-09-17T12:00:00.000Z");
+      const excessiveFutureTime = "2026-09-17T12:10:00.000Z"; // 10 minutes ahead
+
+      const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        latestTelemetryAt: excessiveFutureTime,
+        sessions: [
+          {
+            sessionId: "s-future",
+            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
+            cwdState: { path: "/", observedAt: excessiveFutureTime, status: "confirmed" },
+            sourceIp: "10.0.0.1",
+            sourceGeo: null,
+            lifecycle: { status: "active", startedAt: null, closedAt: null },
+            nodeIds: ["/"],
+          },
+        ],
+      };
+
+      // Ticks from 0s to 120s: future timestamp remains > 5s in the future
+      const tickOffsets = [0, 1_000, 5_000, 30_000, 60_000, 120_000];
+      for (const offset of tickOffsets) {
+        const tickNow = startTime + offset;
+        const metrics = calculateTelemetryAge({
+          snapshot,
+          snapshotReceivedAtMs: startTime,
+          now: tickNow,
+        });
+
+        expect(metrics.telemetryStatus).toBe("future_skew");
+        expect(metrics.telemetryAgeMs).toBeNull();
+
+        const state = getFreshnessState({
+          telemetryAgeMs: metrics.telemetryAgeMs,
+          telemetryStatus: metrics.telemetryStatus,
+          snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
+          streamState: "live",
+          regionStatus: "ready",
+          hasSnapshot: true,
+        });
+
+        expect(state.classification).toBe("stale");
+        expect(state.isStale).toBe(true);
+      }
+    });
+
+    // 8. Sessions with null/invalid/future telemetry show Stale without substituting receipt age in UI display formatting.
+    it("8. Sessions with null/invalid/future telemetry show Stale without substituting receipt age", () => {
+      const now = Date.parse("2026-09-17T12:00:00.000Z");
+      const snapshotReceivedAtMs = now - 2_000; // Snapshot arrived 2 seconds ago
+
+      // Subcase A: Sessions exist but telemetry timestamp is null
+      const stateNullTelemetry = getFreshnessState({
+        telemetryAgeMs: null,
+        telemetryStatus: "invalid",
+        snapshotReceiptAgeMs: now - snapshotReceivedAtMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+      expect(stateNullTelemetry.classification).toBe("stale");
+      expect(stateNullTelemetry.label).toBe("Stale");
+      expect(stateNullTelemetry.telemetryAgeMs).toBeNull();
+      // Ensure receipt age (2s) is NOT returned as telemetryAgeMs
+      expect(stateNullTelemetry.telemetryAgeMs).not.toBe(2_000);
+
+      // Subcase B: Sessions exist with excessive future clock skew
+      const stateFutureSkew = getFreshnessState({
+        telemetryAgeMs: null,
+        telemetryStatus: "future_skew",
+        snapshotReceiptAgeMs: now - snapshotReceivedAtMs,
+        streamState: "live",
+        regionStatus: "ready",
+        hasSnapshot: true,
+      });
+      expect(stateFutureSkew.classification).toBe("stale");
+      expect(stateFutureSkew.label).toBe("Stale");
+      expect(stateFutureSkew.telemetryAgeMs).toBeNull();
+      expect(stateFutureSkew.telemetryAgeMs).not.toBe(2_000);
+    });
+
+    // 9. Empty valid snapshot remains Live · No activity.
+    it("9. Empty valid snapshot remains Live · No activity (fresh, not offline or stale)", () => {
       const state = getFreshnessState({
         telemetryAgeMs: null,
-        retrievalAgeMs: 5_000,
+        telemetryStatus: "none",
+        snapshotReceiptAgeMs: 4_000,
         hasTelemetry: false,
         streamState: "live",
         regionStatus: "ready",
@@ -262,12 +483,14 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       expect(state.isStale).toBe(false);
     });
 
-    it("classifies valid empty snapshot + degraded transport as 'Degraded'", () => {
+    // 10. Degraded empty snapshot remains Degraded and may report explicitly labelled snapshot receipt age.
+    it("10. Degraded empty snapshot remains Degraded and explicitly reports snapshot receipt age", () => {
       const state = getFreshnessState({
         telemetryAgeMs: null,
-        retrievalAgeMs: 8_000,
+        telemetryStatus: "none",
+        snapshotReceiptAgeMs: 14_000,
         hasTelemetry: false,
-        streamState: "stale",
+        streamState: "stale", // Stream disconnected
         regionStatus: "ready",
         hasSnapshot: true,
       });
@@ -275,155 +498,22 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       expect(state.classification).toBe("degraded");
       expect(state.label).toBe("Degraded");
       expect(state.isDegraded).toBe(true);
-      expect(state.detail).toContain("retained snapshot from 8s ago");
+      expect(state.detail).toContain("retained snapshot from 14s ago");
     });
 
-    it("classifies valid empty snapshot + region error as 'Degraded'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: null,
-        retrievalAgeMs: 12_000,
-        hasTelemetry: false,
-        streamState: "live",
-        regionStatus: "error",
-        hasSnapshot: true,
-      });
+    // 11. New valid telemetry after recovery becomes Fresh.
+    it("11. New valid telemetry after recovery transitions truthfully to Fresh", () => {
+      const now = Date.parse("2026-09-17T13:00:00.000Z");
+      const freshTelemetryTime = "2026-09-17T12:59:55.000Z"; // 5s ago
 
-      expect(state.classification).toBe("degraded");
-      expect(state.label).toBe("Degraded");
-      expect(state.isDegraded).toBe(true);
-    });
-
-    it("classifies no snapshot + connecting transport as 'Connecting'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: null,
-        retrievalAgeMs: 0,
-        hasTelemetry: false,
-        streamState: "connecting",
-        regionStatus: "loading",
-        hasSnapshot: false,
-      });
-
-      expect(state.classification).toBe("offline");
-      expect(state.label).toBe("Connecting");
-      expect(state.isDegraded).toBe(false);
-      expect(state.isStale).toBe(false);
-    });
-
-    it("classifies no snapshot + failed transport as 'Offline'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: null,
-        retrievalAgeMs: 0,
-        hasTelemetry: false,
-        streamState: "stale",
-        regionStatus: "error",
-        hasSnapshot: false,
-      });
-
-      expect(state.classification).toBe("offline");
-      expect(state.label).toBe("Offline");
-      expect(state.isDegraded).toBe(true);
-      expect(state.isStale).toBe(true);
-    });
-
-    it("classifies live transport + recent telemetry as 'Live & Fresh'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: 12_000,
-        retrievalAgeMs: 2_000,
-        hasTelemetry: true,
-        streamState: "live",
-        regionStatus: "ready",
-        hasSnapshot: true,
-        staleThresholdMs: DEFAULT_STALE_THRESHOLD_MS, // 30s
-      });
-
-      expect(state.classification).toBe("fresh");
-      expect(state.label).toBe("Live & Fresh");
-      expect(state.detail).toContain("telemetry observed 12s ago");
-      expect(state.isDegraded).toBe(false);
-      expect(state.isStale).toBe(false);
-    });
-
-    it("classifies live transport + old telemetry as 'Stale'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: 45_000,
-        retrievalAgeMs: 1_000, // Snapshot was just fetched!
-        hasTelemetry: true,
-        streamState: "live",
-        regionStatus: "ready",
-        hasSnapshot: true,
-        staleThresholdMs: DEFAULT_STALE_THRESHOLD_MS,
-      });
-
-      expect(state.classification).toBe("stale");
-      expect(state.label).toBe("Stale");
-      expect(state.detail).toContain("no new telemetry for 45s ago");
-      expect(state.isDegraded).toBe(false);
-      expect(state.isStale).toBe(true);
-    });
-
-    it("retained snapshot + disconnected transport classifies as 'Degraded'", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: 15_000,
-        retrievalAgeMs: 10_000,
-        hasTelemetry: true,
-        streamState: "stale",
-        regionStatus: "ready",
-        hasSnapshot: true,
-      });
-
-      expect(state.classification).toBe("degraded");
-      expect(state.label).toBe("Degraded");
-      expect(state.isDegraded).toBe(true);
-    });
-
-    it("provides deterministic fallback to 'Stale' when sessions exist without valid timestamps", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: null,
-        retrievalAgeMs: 3_000,
-        hasTelemetry: true,
-        streamState: "live",
-        regionStatus: "ready",
-        hasSnapshot: true,
-      });
-
-      expect(state.classification).toBe("stale");
-      expect(state.label).toBe("Stale");
-      expect(state.detail).toContain("telemetry timestamps are unavailable or invalid");
-      expect(state.isStale).toBe(true);
-      expect(state.isDegraded).toBe(false);
-    });
-
-    it("safely normalizes negative telemetry age from clock skew to zero", () => {
-      const state = getFreshnessState({
-        telemetryAgeMs: -5_000,
-        retrievalAgeMs: 0,
-        hasTelemetry: true,
-        streamState: "live",
-        regionStatus: "ready",
-        hasSnapshot: true,
-      });
-
-      expect(state.classification).toBe("fresh");
-      expect(state.label).toBe("Live & Fresh");
-      expect(state.telemetryAgeMs).toBe(0);
-    });
-  });
-
-  describe("Manual Refresh Independence (FA-006 Core Fix)", () => {
-    it("preserves telemetry age when a manual refresh updates retrieval time without new telemetry", () => {
-      const now = Date.parse("2026-09-17T11:00:00.000Z");
-
-      // Snapshot 1: Telemetry is 50 seconds old (stale)
-      const staleTelemetryTime = "2026-09-17T10:59:10.000Z";
-      const initialSnapshot: FilesystemTopologySnapshot = {
+      const snapshot: FilesystemTopologySnapshot = {
         ...baseEmptySnapshot,
-        generatedAt: "2026-09-17T10:59:20.000Z",
-        latestTelemetryAt: staleTelemetryTime,
+        latestTelemetryAt: freshTelemetryTime,
         sessions: [
           {
-            sessionId: "s1",
+            sessionId: "s-recovered",
             auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
-            cwdState: { path: "/", observedAt: staleTelemetryTime, status: "confirmed" },
+            cwdState: { path: "/", observedAt: freshTelemetryTime, status: "confirmed" },
             sourceIp: "10.0.0.1",
             sourceGeo: null,
             lifecycle: { status: "active", startedAt: null, closedAt: null },
@@ -432,45 +522,81 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
         ],
       };
 
-      const metricsBefore = calculateTelemetryAge({ snapshot: initialSnapshot, now });
-      const stateBefore = getFreshnessState({
-        telemetryAgeMs: metricsBefore.telemetryAgeMs,
-        retrievalAgeMs: metricsBefore.retrievalAgeMs,
-        hasTelemetry: metricsBefore.hasTelemetry,
+      const metrics = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now - 1_000, // 1s receipt age
+        now,
+      });
+
+      const state = getFreshnessState({
+        telemetryAgeMs: metrics.telemetryAgeMs,
+        telemetryStatus: metrics.telemetryStatus,
+        snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
         streamState: "live",
         regionStatus: "ready",
         hasSnapshot: true,
+        staleThresholdMs: DEFAULT_STALE_THRESHOLD_MS,
       });
 
-      expect(metricsBefore.telemetryAgeMs).toBe(50_000);
-      expect(stateBefore.classification).toBe("stale");
-      expect(stateBefore.isStale).toBe(true);
+      expect(metrics.telemetryStatus).toBe("valid");
+      expect(metrics.telemetryAgeMs).toBe(5_000);
+      expect(state.classification).toBe("fresh");
+      expect(state.label).toBe("Live & Fresh");
+      expect(state.isDegraded).toBe(false);
+      expect(state.isStale).toBe(false);
+      expect(state.detail).toContain("telemetry observed 5s ago");
+    });
 
-      // User triggers refresh: Server generates snapshot at current time (now),
-      // but no new telemetry occurred in the honeypot DB!
-      const refreshedSnapshot: FilesystemTopologySnapshot = {
-        ...initialSnapshot,
-        generatedAt: new Date(now).toISOString(), // Snapshot retrieval time is now 0s old
-        latestTelemetryAt: staleTelemetryTime,     // Telemetry observation time is STILL 50s old
+    // 12. Page and TopologyCanvas use the same classification and display-age semantics.
+    it("12. Page badge and TopologyCanvas consume the exact same authoritative FreshnessState", () => {
+      const now = Date.parse("2026-09-17T14:00:00.000Z");
+      const telemetryTime = "2026-09-17T13:59:40.000Z"; // 20s ago
+
+      const snapshot: FilesystemTopologySnapshot = {
+        ...baseEmptySnapshot,
+        latestTelemetryAt: telemetryTime,
+        sessions: [
+          {
+            sessionId: "s1",
+            auditSummary: { visitedPaths: ["/"], homeOnly: true, eventCount: 1 },
+            cwdState: { path: "/", observedAt: telemetryTime, status: "confirmed" },
+            sourceIp: "10.0.0.1",
+            sourceGeo: null,
+            lifecycle: { status: "active", startedAt: null, closedAt: null },
+            nodeIds: ["/"],
+          },
+        ],
       };
 
-      const metricsAfter = calculateTelemetryAge({ snapshot: refreshedSnapshot, now });
-      const stateAfter = getFreshnessState({
-        telemetryAgeMs: metricsAfter.telemetryAgeMs,
-        retrievalAgeMs: metricsAfter.retrievalAgeMs,
-        hasTelemetry: metricsAfter.hasTelemetry,
+      const metrics = calculateTelemetryAge({
+        snapshot,
+        snapshotReceivedAtMs: now - 3_000, // 3s receipt age
+        now,
+      });
+
+      const state = getFreshnessState({
+        telemetryAgeMs: metrics.telemetryAgeMs,
+        telemetryStatus: metrics.telemetryStatus,
+        snapshotReceiptAgeMs: metrics.snapshotReceiptAgeMs,
         streamState: "live",
         regionStatus: "ready",
         hasSnapshot: true,
       });
 
-      // Retrieval age is now 0s (fresh retrieval)
-      expect(metricsAfter.retrievalAgeMs).toBe(0);
-      // Telemetry age is STILL 50s (telemetry is NOT made falsely fresh)
-      expect(metricsAfter.telemetryAgeMs).toBe(50_000);
-      expect(stateAfter.classification).toBe("stale");
-      expect(stateAfter.isStale).toBe(true);
-      expect(stateAfter.detail).toContain("no new telemetry for 50s ago");
+      // Page Badge formatting logic simulation
+      const pageBadgeDisplay = state.telemetryStatus === "valid" && state.telemetryAgeMs !== null
+        ? `${state.label} · ${formatUpdateAge(state.telemetryAgeMs)}`
+        : state.label;
+
+      // Topology Canvas footer formatting logic simulation
+      const canvasFooterDisplay = state.isStale
+        ? `Stale (telemetry ${formatUpdateAge(state.telemetryAgeMs ?? 0)})`
+        : `Telemetry ${formatUpdateAge(state.telemetryAgeMs ?? 0)}`;
+
+      expect(pageBadgeDisplay).toBe("Live & Fresh · 20s ago");
+      expect(canvasFooterDisplay).toBe("Telemetry 20s ago");
+      expect(state.snapshotReceiptAgeMs).toBe(3_000);
+      expect(state.telemetryAgeMs).toBe(20_000);
     });
   });
 

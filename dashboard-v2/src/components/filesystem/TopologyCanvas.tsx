@@ -95,6 +95,7 @@ interface TopologyCanvasProps {
   streamState: StreamState;
   freshnessState?: FreshnessState;
   telemetryAgeMs?: number | null;
+  snapshotReceiptAgeMs?: number;
   retrievalAgeMs?: number;
   selectedSessionId: string | null;
   selectedPath: string | null;
@@ -120,6 +121,7 @@ export function TopologyCanvas({
   streamState,
   freshnessState: propFreshnessState,
   telemetryAgeMs: propTelemetryAgeMs,
+  snapshotReceiptAgeMs: propSnapshotReceiptAgeMs,
   retrievalAgeMs: propRetrievalAgeMs,
   selectedSessionId,
   selectedPath,
@@ -166,6 +168,8 @@ export function TopologyCanvas({
     const telemetryAge = calculateTelemetryAge({ snapshot, now: fallbackNow });
     return getFreshnessState({
       telemetryAgeMs: propTelemetryAgeMs !== undefined ? propTelemetryAgeMs : telemetryAge.telemetryAgeMs,
+      telemetryStatus: telemetryAge.telemetryStatus,
+      snapshotReceiptAgeMs: propSnapshotReceiptAgeMs !== undefined ? propSnapshotReceiptAgeMs : telemetryAge.snapshotReceiptAgeMs,
       retrievalAgeMs: propRetrievalAgeMs !== undefined ? propRetrievalAgeMs : telemetryAge.retrievalAgeMs,
       hasTelemetry: telemetryAge.hasTelemetry,
       staleThresholdMs,
@@ -173,7 +177,7 @@ export function TopologyCanvas({
       regionStatus,
       hasSnapshot: Boolean(snapshot),
     });
-  }, [propFreshnessState, propTelemetryAgeMs, propRetrievalAgeMs, snapshot, fallbackNow, staleThresholdMs, streamState, regionStatus]);
+  }, [propFreshnessState, propTelemetryAgeMs, propSnapshotReceiptAgeMs, propRetrievalAgeMs, snapshot, fallbackNow, staleThresholdMs, streamState, regionStatus]);
 
   // Scope layout persistence so audit session inspection never overrides live global topology
   const { labelStorageKey, nodeStorageKey } = useMemo(
@@ -1044,8 +1048,8 @@ export function TopologyCanvas({
                     >
                       <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
                       <span>
-                        <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot from{" "}
-                        {formatUpdateAge(freshnessState.retrievalAgeMs ?? 0)}.
+                        <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot (received{" "}
+                        {formatUpdateAge(freshnessState.snapshotReceiptAgeMs)}).
                       </span>
                       <span className="hidden sm:inline text-text-subtle text-[11px]">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
@@ -1760,11 +1764,17 @@ export function TopologyCanvas({
                   <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
                   <span
                     className="hidden 2xl:inline truncate text-text-subtle"
-                    title={`Snapshot generated at ${formatTimestamp(snapshot.generatedAt)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
+                    title={`Snapshot generated at ${formatTimestamp(snapshot.generatedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
                   >
                     {freshnessState.isStale ? (
                       <span className="font-medium text-warning">
-                        Stale ({formatUpdateAge(freshnessState.telemetryAgeMs ?? freshnessState.retrievalAgeMs ?? 0)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                        {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
+                          <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        ) : freshnessState.telemetryStatus === "future_skew" ? (
+                          <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        ) : (
+                          <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        )}
                       </span>
                     ) : freshnessState.label === "Live · No activity" ? (
                       <span>
@@ -1772,7 +1782,7 @@ export function TopologyCanvas({
                       </span>
                     ) : (
                       <span>
-                        Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? freshnessState.retrievalAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                        Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
                       </span>
                     )}
                   </span>

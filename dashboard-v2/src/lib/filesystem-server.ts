@@ -25,7 +25,7 @@ import {
   normalizeHistoryEvent,
   normalizeSessionAuditSummary,
 } from "@/lib/filesystem-data";
-import { deriveLatestTelemetryAt } from "@/components/filesystem/filesystemUtils";
+import { deriveLatestTelemetryAt } from "@/lib/filesystem-freshness";
 import { getMongoClient } from "@/lib/mongodb";
 
 // CWD is operational Cowrie telemetry. It intentionally remains outside the
