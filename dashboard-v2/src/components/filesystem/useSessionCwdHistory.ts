@@ -32,6 +32,7 @@ export interface UseSessionCwdHistoryReturn {
   hopResolutionStatus: HopResolutionStatus;
   requestedHop: string | null;
   clearRequestedHop: () => void;
+  resetRequestedHopState: () => void;
   selectLatestHop: () => void;
   loadHistory: (sessionId: string, cursor: string | null, append?: boolean) => Promise<void>;
   resetHistory: () => void;
@@ -99,6 +100,17 @@ export function useSessionCwdHistory(
     hopManagerRef.current?.destroy();
     setHopResolutionStatus("idle");
     onSelectHistoryEventId?.(null, "user");
+  }, [onSelectHistoryEventId, requestedHopRef]);
+
+  const resetRequestedHopState = useCallback(() => {
+    if (requestedHopRef) {
+      requestedHopRef.current = null;
+    }
+    setRequestedHop(null);
+    setAnchoredHop(null);
+    hopManagerRef.current?.destroy();
+    setHopResolutionStatus("idle");
+    onSelectHistoryEventId?.(null, "sync");
   }, [onSelectHistoryEventId, requestedHopRef]);
 
   const selectLatestHop = useCallback(() => {
@@ -232,6 +244,7 @@ export function useSessionCwdHistory(
     hopResolutionStatus: viewMode === "audit" ? hopResolutionStatus : "idle",
     requestedHop: viewMode === "audit" ? requestedHop : null,
     clearRequestedHop,
+    resetRequestedHopState,
     selectLatestHop,
     loadHistory,
     resetHistory,

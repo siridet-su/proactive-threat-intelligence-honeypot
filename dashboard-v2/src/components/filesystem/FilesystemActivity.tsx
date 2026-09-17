@@ -36,7 +36,6 @@ import {
   clampTimelineSidebarWidth,
   formatPageBadgeText,
   parseAuditUrlParams,
-  resolveFilterChangeWithFallback,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { useFilesystemStreaming } from "./useFilesystemStreaming";
@@ -211,18 +210,14 @@ export function FilesystemActivity() {
     viewModeRef,
     switchViewMode,
     hideHomeOnly,
-    setHideHomeOnly,
     targetPathFilter,
-    setTargetPathFilter,
     selectedHistoryEventId,
     setSelectedHistoryEventId,
     expiredSessionId,
     setExpiredSessionId,
     requestedHopRef,
     requestedSessionIdRef,
-    isUserNavigatingRef,
-    commitUserNavigation,
-    commitPlaybackNavigation,
+    navigationCoordinator,
   } = useFilesystemUrlState({
     isHydrated,
     snapshot,
@@ -241,27 +236,15 @@ export function FilesystemActivity() {
   const handleSelectHistoryEventId = useCallback(
     (eventId: string | null, source: "user" | "playback" | "sync" = "user") => {
       if (source === "user") {
-        if (viewModeRef.current === "audit") {
-          commitUserNavigation({
-            view: "audit",
-            sessionId: selectedSessionIdRef.current,
-            hop: eventId,
-          });
-        }
-        requestedHopRef.current = eventId;
-        setSelectedHistoryEventId(eventId);
+        navigationCoordinator.userSelectHop(eventId);
       } else if (source === "playback") {
-        if (viewModeRef.current === "audit") {
-          commitPlaybackNavigation(eventId);
-        }
-        requestedHopRef.current = eventId;
-        setSelectedHistoryEventId(eventId);
+        navigationCoordinator.playbackSelectHop(eventId);
       } else {
         requestedHopRef.current = eventId;
         setSelectedHistoryEventId(eventId);
       }
     },
-    [commitPlaybackNavigation, commitUserNavigation, requestedHopRef, selectedSessionIdRef, setSelectedHistoryEventId, viewModeRef],
+    [navigationCoordinator, requestedHopRef, setSelectedHistoryEventId],
   );
 
   useEffect(() => {
@@ -280,6 +263,7 @@ export function FilesystemActivity() {
     hopResolutionStatus,
     requestedHop,
     clearRequestedHop,
+    resetRequestedHopState,
     selectLatestHop,
     loadHistory,
     resetHistory,
@@ -452,9 +436,8 @@ export function FilesystemActivity() {
   const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
 
   const handleResetAuditFilters = useCallback(() => {
-    setHideHomeOnly(false);
-    setTargetPathFilter(null);
-  }, [setHideHomeOnly, setTargetPathFilter]);
+    navigationCoordinator.userResetFilters();
+  }, [navigationCoordinator]);
 
   const auditCanvasTitle = useMemo(() => {
     if (!selectedSession) return "No Session Selected";
@@ -580,108 +563,72 @@ export function FilesystemActivity() {
     lookupRemoteAuditSessionRef.current = lookupRemoteAuditSession;
   }, [lookupRemoteAuditSession]);
 
+  useEffect(() => {
+    navigationCoordinator.updateOptions({
+      getViewMode: () => viewModeRef.current,
+      getSelectedSessionId: () => selectedSessionIdRef.current,
+      getHideHomeOnly: () => hideHomeOnly,
+      getTargetPathFilter: () => targetPathFilter,
+      getSelectedHistoryEventId: () => selectedHistoryEventId,
+      getRequestedHop: () => requestedHopRef.current,
+      getExpiredSessionId: () => expiredSessionId,
+      getSnapshot: () => snapshot,
+      getExtraAuditSessions: () => extraAuditSessions,
+      getAllSessions: () => allSessions,
+      getSessionById: () => sessionById,
+
+      selectSession,
+      resetHistory,
+      resetRequestedHopState,
+      onExitFullscreenAndPlaying: () => {
+        setIsPlaying(false);
+        setIsAuditFullscreen(false);
+      },
+
+      coordinator: remoteAuditLookupManager,
+      lookupRemoteAuditSession: (intent) => lookupRemoteAuditSessionRef.current?.(intent),
+    });
+  }, [
+    allSessions,
+    sessionById,
+    expiredSessionId,
+    extraAuditSessions,
+    hideHomeOnly,
+    navigationCoordinator,
+    remoteAuditLookupManager,
+    resetHistory,
+    resetRequestedHopState,
+    selectSession,
+    selectedHistoryEventId,
+    setIsPlaying,
+    snapshot,
+    targetPathFilter,
+    viewModeRef,
+    selectedSessionIdRef,
+    requestedHopRef,
+  ]);
+
   const handleUserSelectSession = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
-      isUserNavigatingRef.current = true;
-      const currentMode = viewModeRef.current;
-      remoteAuditLookupManager.notifyNavigationScope({
-        viewMode: currentMode,
-        sessionId,
-        targetHopId: null,
-      });
-      clearRequestedHop();
-      setSelectedHistoryEventId(null);
-      commitUserNavigation({
-        view: currentMode,
-        sessionId,
-        hop: null,
-      });
-      selectSession(sessionId, sessionObj, null);
+      navigationCoordinator.userSelectSession(sessionId, sessionObj);
     },
-    [clearRequestedHop, commitUserNavigation, isUserNavigatingRef, remoteAuditLookupManager, selectSession, setSelectedHistoryEventId, viewModeRef],
+    [navigationCoordinator],
   );
 
   const handleToggleHideHomeOnly = useCallback(() => {
-    const result = resolveFilterChangeWithFallback({
-      filterType: "hideHome",
-      hideHomeOnly,
-      targetPathFilter,
-      selectedSessionId,
-      allSessions,
-      sessionById,
-    });
-
-    commitUserNavigation({
-      view: "audit",
-      sessionId: result.nextSessionId,
-      hideHome: result.nextHideHome,
-      targetPath: targetPathFilter,
-      hop: result.sessionChanged ? null : (selectedHistoryEventId ?? requestedHopRef.current),
-    });
-
-    setHideHomeOnly(result.nextHideHome);
-    if (result.sessionChanged && result.nextSessionId) {
-      clearRequestedHop();
-      setSelectedHistoryEventId(null);
-      selectSession(result.nextSessionId);
-    }
-  }, [
-    allSessions,
-    clearRequestedHop,
-    commitUserNavigation,
-    hideHomeOnly,
-    requestedHopRef,
-    selectSession,
-    selectedHistoryEventId,
-    selectedSessionId,
-    sessionById,
-    setHideHomeOnly,
-    setSelectedHistoryEventId,
-    targetPathFilter,
-  ]);
+    navigationCoordinator.userToggleHideHome();
+  }, [navigationCoordinator]);
 
   const handleSelectTargetPath = useCallback(
     (path: string | null) => {
-      const result = resolveFilterChangeWithFallback({
-        filterType: "targetPath",
-        proposedTargetPath: path,
-        hideHomeOnly,
-        targetPathFilter,
-        selectedSessionId,
-        allSessions,
-        sessionById,
-      });
-
-      commitUserNavigation({
-        view: "audit",
-        sessionId: result.nextSessionId,
-        hideHome: hideHomeOnly,
-        targetPath: result.nextTargetPath,
-        hop: result.sessionChanged ? null : (selectedHistoryEventId ?? requestedHopRef.current),
-      });
-
-      setTargetPathFilter(result.nextTargetPath);
-      if (result.sessionChanged && result.nextSessionId) {
-        clearRequestedHop();
-        setSelectedHistoryEventId(null);
-        selectSession(result.nextSessionId);
-      }
+      navigationCoordinator.userSelectTargetPath(path);
     },
-    [
-      allSessions,
-      clearRequestedHop,
-      commitUserNavigation,
-      hideHomeOnly,
-      requestedHopRef,
-      selectSession,
-      selectedHistoryEventId,
-      selectedSessionId,
-      sessionById,
-      setSelectedHistoryEventId,
-      setTargetPathFilter,
-      targetPathFilter,
-    ],
+    [navigationCoordinator],
   );
+
+  const handleClearSelection = useCallback(() => {
+    navigationCoordinator.userClearSelection();
+  }, [navigationCoordinator]);
 
   // Decoupled directory selection: inspects directory metadata without destroying the currently audited session
   const selectPath = (path: string | null) => {
@@ -1232,10 +1179,7 @@ export function FilesystemActivity() {
                     {selectedSession && filteredSessionsCount === 0 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          selectedSessionIdRef.current = null;
-                          setSelectedSessionId(null);
-                        }}
+                        onClick={handleClearSelection}
                         className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
                       >
                         Clear selection
@@ -1561,10 +1505,7 @@ export function FilesystemActivity() {
                     {selectedSession && filteredSessionsCount === 0 && (
                       <button
                         type="button"
-                        onClick={() => {
-                          selectedSessionIdRef.current = null;
-                          setSelectedSessionId(null);
-                        }}
+                        onClick={handleClearSelection}
                         className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
                       >
                         Clear selection

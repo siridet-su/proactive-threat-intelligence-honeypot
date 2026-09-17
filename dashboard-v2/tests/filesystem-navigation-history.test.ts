@@ -13,14 +13,10 @@ import type {
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
 import {
-  areAuditUrlParamsEqual,
-  buildAuditTargetUrl,
-  buildAuditUrlSearch,
-  parseAuditUrlParams,
-  resolveFilterChangeWithFallback,
-} from "@/components/filesystem/filesystemUtils";
+  FilesystemNavigationCoordinator,
+  type FilesystemNavigationCoordinatorOptions,
+} from "@/components/filesystem/filesystemNavigationCoordinator";
 import {
-  processAuditPopState,
   useFilesystemUrlState,
   type UseFilesystemUrlStateReturn,
 } from "@/components/filesystem/useFilesystemUrlState";
@@ -87,581 +83,34 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     vi.restoreAllMocks();
   });
 
-  // =========================================================================
-  // Scenario 1: User view change pushes 1 entry
-  // =========================================================================
-  it("Scenario 1: User view change pushes exactly 1 history entry", () => {
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const coordinator = new RemoteAuditLookupCoordinator();
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-    const selectSession = vi.fn();
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession,
-        lookupRemoteAuditSession: vi.fn(),
-        coordinator,
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    expect(hookResult.viewMode).toBe("live");
-    expect(pushStateSpy).not.toHaveBeenCalled();
-
-    // User switches view to audit
-    act(() => {
-      hookResult.switchViewMode("audit", "sess-1");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1");
-    expect(hookResult.viewMode).toBe("audit");
-
-    // User switches view back to live
-    act(() => {
-      hookResult.switchViewMode("live");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(2);
-    expect(pushStateSpy.mock.calls[1]?.[2]).toBe("/filesystem-activity");
-    expect(hookResult.viewMode).toBe("live");
-  });
-
-  // =========================================================================
-  // Scenario 2: User session selection pushes 1 entry
-  // =========================================================================
-  it("Scenario 2: User session selection pushes 1 entry with hop cleared", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: (sid) => {
-          selectedSessionIdRef.current = sid;
-        },
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    expect(hookResult.viewMode).toBe("audit");
-
-    // User selects a different session
-    act(() => {
-      hookResult.commitUserNavigation({
-        view: "audit",
-        sessionId: "sess-2",
-        hop: null,
-      });
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-2");
-  });
-
-  // =========================================================================
-  // Scenario 3: Hide-home toggle and target-path changes are individually traversable
-  // =========================================================================
-  it("Scenario 3: Hide-home toggle and target-path changes are individually traversable", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    // 1. User toggles hideHome ON
-    act(() => {
-      hookResult.commitUserNavigation({ hideHome: true });
-      hookResult.setHideHomeOnly(true);
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hideHome=1");
-
-    // 2. User sets targetPath filter to /etc
-    act(() => {
-      hookResult.commitUserNavigation({ targetPath: "/etc" });
-      hookResult.setTargetPathFilter("/etc");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(2);
-    expect(pushStateSpy.mock.calls[1]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hideHome=1&targetPath=%2Fetc");
-
-    // 3. User clears targetPath filter
-    act(() => {
-      hookResult.commitUserNavigation({ targetPath: null });
-      hookResult.setTargetPathFilter(null);
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(3);
-    expect(pushStateSpy.mock.calls[2]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hideHome=1");
-
-    // 4. User toggles hideHome OFF
-    act(() => {
-      hookResult.commitUserNavigation({ hideHome: false });
-      hookResult.setHideHomeOnly(false);
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(4);
-    expect(pushStateSpy.mock.calls[3]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1");
-  });
-
-  // =========================================================================
-  // Scenario 4: Manual hop selection, clearing, Prev, Next are traversable
-  // =========================================================================
-  it("Scenario 4: Manual hop selection, clearing, Prev, Next are traversable", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    // 1. User selects hop A
-    act(() => {
-      hookResult.commitUserNavigation({ hop: "hop-A" });
-      hookResult.setSelectedHistoryEventId("hop-A");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-A");
-
-    // 2. User clicks Next hop -> hop B
-    act(() => {
-      hookResult.commitUserNavigation({ hop: "hop-B" });
-      hookResult.setSelectedHistoryEventId("hop-B");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(2);
-    expect(pushStateSpy.mock.calls[1]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-B");
-
-    // 3. User clicks Prev hop -> hop A
-    act(() => {
-      hookResult.commitUserNavigation({ hop: "hop-A" });
-      hookResult.setSelectedHistoryEventId("hop-A");
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(3);
-    expect(pushStateSpy.mock.calls[2]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-A");
-
-    // 4. User clears hop
-    act(() => {
-      hookResult.commitUserNavigation({ hop: null });
-      hookResult.setSelectedHistoryEventId(null);
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(4);
-    expect(pushStateSpy.mock.calls[3]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1");
-  });
-
-  // =========================================================================
-  // Scenario 5: Replay autoplay does not increase history length per tick
-  // =========================================================================
-  it("Scenario 5: Replay autoplay does not increase history length per tick", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1");
+  function setupCoordinatorHarness(
+    initialUrl = "/filesystem-activity?view=audit&sessionId=sess-1",
+    optionsOverride: Partial<FilesystemNavigationCoordinatorOptions> = {},
+  ) {
+    const rawReplaceState = window.history.replaceState.bind(window.history);
+    rawReplaceState(null, "", initialUrl);
     const pushStateSpy = vi.spyOn(window.history, "pushState");
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
 
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
+    let viewMode: "live" | "audit" = initialUrl.includes("view=live") ? "live" : "audit";
+    let selectedSessionId: string | null = initialUrl.includes("sessionId=sess-")
+      ? (new URLSearchParams(initialUrl.split("?")[1]).get("sessionId"))
+      : null;
+    let hideHomeOnly = initialUrl.includes("hideHome=1");
+    let targetPathFilter: string | null = new URLSearchParams(initialUrl.split("?")[1] || "").get("targetPath");
+    let selectedHistoryEventId: string | null = new URLSearchParams(initialUrl.split("?")[1] || "").get("hop");
+    let requestedHop: string | null = selectedHistoryEventId;
+    let requestedSessionId: string | null = selectedSessionId;
+    let expiredSessionId: string | null = null;
 
-    act(() => {
-      root.render(createElement(TestComponent));
+    const session1 = makeSession("sess-1", {
+      cwdState: { path: "/root", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/root"], homeOnly: false, eventCount: 1 },
     });
-
-    // Tick 1
-    act(() => {
-      hookResult.commitPlaybackNavigation("hop-1");
-      hookResult.setSelectedHistoryEventId("hop-1");
-    });
-
-    // Tick 2
-    act(() => {
-      hookResult.commitPlaybackNavigation("hop-2");
-      hookResult.setSelectedHistoryEventId("hop-2");
-    });
-
-    // Tick 3
-    act(() => {
-      hookResult.commitPlaybackNavigation("hop-3");
-      hookResult.setSelectedHistoryEventId("hop-3");
-    });
-
-    // Crucial invariant: pushState was NEVER called during playback ticks!
-    expect(pushStateSpy).not.toHaveBeenCalled();
-
-    // Instead, replaceState kept the URL in sync without growing history length
-    expect(replaceStateSpy).toHaveBeenCalledTimes(3);
-    expect(replaceStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1");
-    expect(replaceStateSpy.mock.calls[1]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-2");
-    expect(replaceStateSpy.mock.calls[2]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-3");
-  });
-
-  // =========================================================================
-  // Scenario 6: Back/Forward restores complete view/session/filter/hop state
-  // =========================================================================
-  it("Scenario 6: Back/Forward restores complete view/session/filter/hop state", () => {
-    const popUrl = "?view=audit&sessionId=sess-retained&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-42";
-
-    let restoredView: string | null = null;
-    let restoredHideHome: boolean | null = null;
-    let restoredTargetPath: string | null = null;
-    let restoredHop: string | null = null;
-    let restoredSession: string | null = null;
-    const requestedHopRef = { current: null as string | null };
-    const requestedSessionIdRef = { current: null as string | null };
-    const selectedSessionIdRef = { current: null as string | null };
-    const lookupRemoteAuditSession = vi.fn();
-    const selectSession = vi.fn((sid) => {
-      restoredSession = sid;
-    });
-
-    const knownSession = makeSession("sess-retained", {
+    const session2 = makeSession("sess-2", {
       cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
     });
-    const snapshot: FilesystemTopologySnapshot = {
-      sessions: [knownSession],
-      recentClosedSessions: [],
-      nodes: [],
-      truncated: false,
-      generatedAt: "2026-09-17T00:00:00.000Z",
-    };
-
-    processAuditPopState({
-      search: popUrl,
-      snapshot,
-      extraAuditSessions: new Map(),
-      lookupRemoteAuditSession,
-      selectSession,
-      setViewMode: (v) => {
-        restoredView = v;
-      },
-      setHideHomeOnly: (h) => {
-        restoredHideHome = h;
-      },
-      setTargetPathFilter: (p) => {
-        restoredTargetPath = p;
-      },
-      setSelectedHistoryEventId: (id) => {
-        restoredHop = id;
-      },
-      setExpiredSessionId: vi.fn(),
-      requestedHopRef,
-      requestedSessionIdRef,
-      selectedSessionIdRef,
-    });
-
-    expect(restoredView).toBe("audit");
-    expect(restoredHideHome).toBe(true);
-    expect(restoredTargetPath).toBe("/var/log");
-    expect(restoredHop).toBe("hop-42");
-    expect(requestedHopRef.current).toBe("hop-42");
-    expect(restoredSession).toBe("sess-retained");
-    expect(selectSession).toHaveBeenCalledWith("sess-retained", undefined, "hop-42");
-  });
-
-  // =========================================================================
-  // Scenario 7: Popstate application performs no feedback loop
-  // =========================================================================
-  it("Scenario 7: Popstate application performs no feedback loop", async () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    function TestComponent() {
-      useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    // Reset spy call records after initial mount
-    pushStateSpy.mockClear();
-    replaceStateSpy.mockClear();
-
-    // Simulate browser popstate event
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-2&hideHome=1");
-    replaceStateSpy.mockClear();
-
-    act(() => {
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    });
-
-    // Give any microtasks/effects time to flush
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // No pushState or replaceState was fired as a feedback loop from popstate!
-    expect(pushStateSpy).not.toHaveBeenCalled();
-    expect(replaceStateSpy).not.toHaveBeenCalled();
-  });
-
-  // =========================================================================
-  // Scenario 8: Rapid Back/Forward discards stale in-flight lookups
-  // =========================================================================
-  it("Scenario 8: Rapid Back/Forward discards stale in-flight lookups", async () => {
-    let resolveLookupA!: (val: FilesystemClosedSession | null) => void;
-    let resolveLookupB!: (val: FilesystemClosedSession | null) => void;
-
-    const fetchSession = vi.fn().mockImplementation((id: string) => {
-      if (id === "sess-A") {
-        return new Promise<FilesystemClosedSession | null>((resolve) => {
-          resolveLookupA = resolve;
-        });
-      }
-      return new Promise<FilesystemClosedSession | null>((resolve) => {
-        resolveLookupB = resolve;
-      });
-    });
-
-    const onSessionFound = vi.fn();
-    const onSessionNotFound = vi.fn();
-
-    const coordinator = new RemoteAuditLookupCoordinator({
-      initialViewMode: "audit",
-      fetchSession,
-      callbacks: {
-        onSessionFound,
-        onSessionNotFound,
-      },
-    });
-
-    // Popstate 1: navigation to sess-A
-    coordinator.notifyNavigationScope({
-      viewMode: "audit",
-      sessionId: "sess-A",
-      targetHopId: "hop-A",
-    });
-    const promiseA = coordinator.lookup({ sessionId: "sess-A", targetHopId: "hop-A" });
-
-    // Rapid Popstate 2: navigation immediately changes to sess-B
-    coordinator.notifyNavigationScope({
-      viewMode: "audit",
-      sessionId: "sess-B",
-      targetHopId: "hop-B",
-    });
-    const promiseB = coordinator.lookup({ sessionId: "sess-B", targetHopId: "hop-B" });
-
-    // Lookup A finishes late
-    resolveLookupA(makeSession("sess-A"));
-    const resultA = await promiseA;
-
-    // Lookup B finishes
-    const sessionB = makeSession("sess-B");
-    resolveLookupB(sessionB);
-    const resultB = await promiseB;
-
-    // Lookup A was aborted/discarded due to generation change
-    expect(resultA).toBeNull();
-    // Lookup B succeeded
-    expect(resultB).toBe(sessionB);
-    // onSessionFound was only called for B
-    expect(onSessionFound).toHaveBeenCalledTimes(1);
-    expect(onSessionFound).toHaveBeenCalledWith(sessionB, "hop-B");
-    // Active scope in coordinator is sess-B
-    expect(coordinator.getNavigationScope().sessionId).toBe("sess-B");
-  });
-
-  // =========================================================================
-  // Scenario 9: Switching to Live clears hop without intermediate entry
-  // =========================================================================
-  it("Scenario 9: Switching to Live clears hop without intermediate entry", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-99");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    expect(hookResult.viewMode).toBe("audit");
-    expect(hookResult.selectedHistoryEventId).toBe("hop-99");
-
-    // User switches to live mode
-    act(() => {
-      hookResult.switchViewMode("live");
-    });
-
-    // Pushed exactly once to clean live URL
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity");
-
-    // Hop state and requested hop ref were cleared synchronously
-    expect(hookResult.viewMode).toBe("live");
-    expect(hookResult.selectedHistoryEventId).toBeNull();
-    expect(hookResult.requestedHopRef.current).toBeNull();
-  });
-
-  // =========================================================================
-  // Scenario 10: Snapshot-driven fallback and initial hydration do not push entries
-  // =========================================================================
-  it("Scenario 10: Snapshot-driven fallback and initial hydration do not push entries", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=live&sessionId=old-closed");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
-    const selectedSessionIdRef = { current: "fallback-sess" as string | null };
-
-    function TestComponent() {
-      useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "fallback-sess",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    // In live mode, canonical URL is clean "/filesystem-activity".
-    // Initial canonicalization replaces state, NEVER pushes state!
-    expect(pushStateSpy).not.toHaveBeenCalled();
-    expect(replaceStateSpy).toHaveBeenCalledWith(null, "", "/filesystem-activity");
-  });
-
-  // =========================================================================
-  // Scenario 11: Selecting identical canonical state does not create duplicate entries
-  // =========================================================================
-  it("Scenario 11: Selecting identical canonical state does not create duplicate entries", () => {
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-1&hideHome=1");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-1" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-1",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    expect(hookResult.hideHomeOnly).toBe(true);
-
-    // User attempts to commit identical state
-    act(() => {
-      hookResult.commitUserNavigation({
-        view: "audit",
-        sessionId: "sess-1",
-        hideHome: true,
-        targetPath: null,
-        hop: null,
-      });
-    });
-
-    // Identical canonical state does not push
-    expect(pushStateSpy).not.toHaveBeenCalled();
-  });
-
-  // =========================================================================
-  // Scenario 12: Filter change + session fallback produces one atomic history entry
-  // =========================================================================
-  it("Scenario 12: Filter change + session fallback produces one atomic history entry", () => {
     const homeOnlySession = makeSession("sess-home", {
       cwdState: { path: "/home/user", status: "confirmed", sourceEventId: null, observedAt: "" },
       auditSummary: { visitedPaths: ["/home/user"], homeOnly: true, eventCount: 1 },
@@ -670,65 +119,6 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
       cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
       auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
     });
-
-    const allSessions = [homeOnlySession, nonHomeSession];
-    const sessionById = new Map([
-      ["sess-home", homeOnlySession],
-      ["sess-nonhome", nonHomeSession],
-    ]);
-
-    // Test resolveFilterChangeWithFallback pure computation
-    const resultHideHome = resolveFilterChangeWithFallback({
-      filterType: "hideHome",
-      hideHomeOnly: false,
-      targetPathFilter: null,
-      selectedSessionId: "sess-home",
-      allSessions,
-      sessionById,
-    });
-
-    expect(resultHideHome.nextHideHome).toBe(true);
-    expect(resultHideHome.nextSessionId).toBe("sess-nonhome");
-    expect(resultHideHome.sessionChanged).toBe(true);
-
-    // Verify commit creates exactly ONE pushState containing both new filter and new session
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-home");
-    const pushStateSpy = vi.spyOn(window.history, "pushState");
-    const selectedSessionIdRef = { current: "sess-home" as string | null };
-
-    let hookResult!: UseFilesystemUrlStateReturn;
-    function TestComponent() {
-      hookResult = useFilesystemUrlState({
-        isHydrated: true,
-        snapshot: null,
-        extraAuditSessions: new Map(),
-        selectedSessionId: "sess-home",
-        selectedSessionIdRef,
-        selectSession: vi.fn(),
-        lookupRemoteAuditSession: vi.fn(),
-      });
-      return null;
-    }
-
-    act(() => {
-      root.render(createElement(TestComponent));
-    });
-
-    act(() => {
-      hookResult.commitUserNavigation({
-        view: "audit",
-        sessionId: resultHideHome.nextSessionId,
-        hideHome: resultHideHome.nextHideHome,
-        targetPath: null,
-        hop: null,
-      });
-    });
-
-    expect(pushStateSpy).toHaveBeenCalledTimes(1);
-    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-nonhome&hideHome=1");
-
-    // Test targetPath filter with fallback:
-    // Session touching only /etc vs session touching /var
     const etcSession = makeSession("sess-etc", {
       cwdState: { path: "/etc", status: "confirmed", sourceEventId: null, observedAt: "" },
       auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
@@ -738,86 +128,599 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
       auditSummary: { visitedPaths: ["/var"], homeOnly: false, eventCount: 1 },
     });
 
-    const pathSessions = [etcSession, varSession];
-    const pathSessionById = new Map([
-      ["sess-etc", etcSession],
-      ["sess-var", varSession],
-    ]);
+    const allSessions = [session1, session2, homeOnlySession, nonHomeSession, etcSession, varSession];
+    const sessionById = new Map(allSessions.map((s) => [s.sessionId, s]));
 
-    const resultTargetPath = resolveFilterChangeWithFallback({
-      filterType: "targetPath",
-      proposedTargetPath: "/var",
-      hideHomeOnly: false,
-      targetPathFilter: null,
-      selectedSessionId: "sess-etc",
-      allSessions: pathSessions,
-      sessionById: pathSessionById,
+    const snapshot: FilesystemTopologySnapshot = {
+      sessions: allSessions,
+      recentClosedSessions: [],
+      nodes: [],
+      truncated: false,
+      generatedAt: "2026-09-17T00:00:00.000Z",
+    };
+
+    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: viewMode,
+      initialSessionId: selectedSessionId,
     });
 
-    expect(resultTargetPath.nextTargetPath).toBe("/var");
-    expect(resultTargetPath.nextSessionId).toBe("sess-var");
-    expect(resultTargetPath.sessionChanged).toBe(true);
-
-    act(() => {
-      hookResult.commitUserNavigation({
-        view: "audit",
-        sessionId: resultTargetPath.nextSessionId,
-        hideHome: false,
-        targetPath: resultTargetPath.nextTargetPath,
-        hop: null,
-      });
+    const resetRequestedHopState = vi.fn(() => {
+      requestedHop = null;
+      selectedHistoryEventId = null;
     });
 
-    expect(pushStateSpy).toHaveBeenCalledTimes(2);
-    expect(pushStateSpy.mock.calls[1]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-var&targetPath=%2Fvar");
+    const selectSession = vi.fn(
+      (
+        sid: string,
+        _sObj?: FilesystemTopologySession | FilesystemClosedSession,
+        hop?: string | null,
+      ) => {
+        selectedSessionId = sid;
+        if (hop !== undefined) {
+          requestedHop = hop;
+          selectedHistoryEventId = hop;
+        }
+      },
+    );
+
+    const resetHistory = vi.fn();
+
+    const navCoordinator = new FilesystemNavigationCoordinator({
+      getViewMode: () => viewMode,
+      getSelectedSessionId: () => selectedSessionId,
+      getHideHomeOnly: () => hideHomeOnly,
+      getTargetPathFilter: () => targetPathFilter,
+      getSelectedHistoryEventId: () => selectedHistoryEventId,
+      getRequestedHop: () => requestedHop,
+      getExpiredSessionId: () => expiredSessionId,
+      getSnapshot: () => snapshot,
+      getExtraAuditSessions: () => extraAuditSessions,
+      getAllSessions: () => allSessions,
+      getSessionById: () => sessionById,
+
+      setViewMode: (v) => { viewMode = v; },
+      setHideHomeOnly: (h) => { hideHomeOnly = h; },
+      setTargetPathFilter: (p) => { targetPathFilter = p; },
+      setSelectedHistoryEventId: (id) => { selectedHistoryEventId = id; },
+      setExpiredSessionId: (id) => { expiredSessionId = id; },
+      setSelectedSessionId: (id) => { selectedSessionId = id; },
+      setRequestedHop: (hop) => { requestedHop = hop; },
+      setRequestedSessionId: (sid) => { requestedSessionId = sid; },
+
+      selectSession,
+      resetHistory,
+      resetRequestedHopState,
+
+      coordinator,
+      ...optionsOverride,
+    });
+
+    const originalHandlePopState = navCoordinator.handlePopState.bind(navCoordinator);
+    navCoordinator.handlePopState = (searchString: string) => {
+      const fullUrl = searchString.startsWith("/")
+        ? searchString
+        : `/filesystem-activity${searchString.startsWith("?") ? searchString : "?" + searchString}`;
+      rawReplaceState(null, "", fullUrl);
+      originalHandlePopState(searchString);
+    };
+
+    return {
+      navCoordinator,
+      coordinator,
+      pushStateSpy,
+      replaceStateSpy,
+      selectSession,
+      resetRequestedHopState,
+      resetHistory,
+      getState: () => ({
+        viewMode,
+        selectedSessionId,
+        hideHomeOnly,
+        targetPathFilter,
+        selectedHistoryEventId,
+        requestedHop,
+        requestedSessionId,
+        expiredSessionId,
+      }),
+      snapshot,
+      extraAuditSessions,
+      sessionById,
+    };
+  }
+
+  // =========================================================================
+  // Scenario 1: Selecting another session while the current URL has a hop creates exactly one push
+  // =========================================================================
+  it("Scenario 1: Selecting another session while the current URL has a hop creates exactly one push", () => {
+    const { navCoordinator, pushStateSpy, resetRequestedHopState, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-123",
+    );
+
+    // User selects session 2
+    navCoordinator.userSelectSession("sess-2");
+
+    // Exactly one pushState call
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-2");
+
+    // Internal hop state was cleaned up without additional history writes
+    expect(resetRequestedHopState).toHaveBeenCalledTimes(1);
+    expect(getState().selectedSessionId).toBe("sess-2");
+    expect(getState().selectedHistoryEventId).toBeNull();
   });
 
   // =========================================================================
-  // Scenario 13: Encoded and Unicode target paths round-trip correctly
+  // Scenario 2: One Back restores the prior session and hop
   // =========================================================================
-  it("Scenario 13: Encoded and Unicode target paths round-trip correctly", () => {
-    const unicodePath = "/var/log/ทดสอบ/ไฟล์.log";
-    const spacedPath = "/var/log/my test path/sample.txt";
+  it("Scenario 2: One Back restores the prior session and hop", () => {
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-123",
+    );
 
-    // Unicode test
-    const unicodeSearch = buildAuditUrlSearch({
-      view: "audit",
-      sessionId: "sess-unicode",
-      targetPath: unicodePath,
+    // 1. User selects sess-2
+    navCoordinator.userSelectSession("sess-2");
+    expect(getState().selectedSessionId).toBe("sess-2");
+
+    pushStateSpy.mockClear();
+
+    // 2. User presses browser Back
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-1&hop=hop-123");
+
+    // Immediately restores session 1 and hop-123 in one step
+    expect(getState().selectedSessionId).toBe("sess-1");
+    expect(getState().selectedHistoryEventId).toBe("hop-123");
+
+    // Popstate execution does not emit feedback pushState calls
+    expect(pushStateSpy).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Scenario 3: Hide-home fallback to another session creates exactly one push
+  // =========================================================================
+  it("Scenario 3: Hide-home fallback to another session creates exactly one push", () => {
+    const homeOnly = makeSession("sess-home", {
+      cwdState: { path: "/home/user", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/home/user"], homeOnly: true, eventCount: 1 },
     });
-    const parsedUnicode = parseAuditUrlParams(unicodeSearch);
-    expect(parsedUnicode.targetPath).toBe(unicodePath);
-
-    const targetUrlUnicode = buildAuditTargetUrl({
-      view: "audit",
-      sessionId: "sess-unicode",
-      targetPath: unicodePath,
-    }, "/filesystem-activity");
-
-    expect(targetUrlUnicode).toContain("/filesystem-activity?view=audit&sessionId=sess-unicode&targetPath=");
-
-    // Equality check returns true for identical decoded paths regardless of encoding
-    expect(
-      areAuditUrlParamsEqual(
-        { view: "audit", sessionId: "sess-unicode", targetPath: unicodePath },
-        parsedUnicode,
-      ),
-    ).toBe(true);
-
-    // Spaced path test
-    const spacedSearch = buildAuditUrlSearch({
-      view: "audit",
-      sessionId: "sess-space",
-      targetPath: spacedPath,
+    const nonHome = makeSession("sess-nonhome", {
+      cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
     });
-    const parsedSpaced = parseAuditUrlParams(spacedSearch);
-    expect(parsedSpaced.targetPath).toBe(spacedPath);
+    const sessions = [homeOnly, nonHome];
 
-    expect(
-      areAuditUrlParamsEqual(
-        { view: "audit", sessionId: "sess-space", targetPath: spacedPath },
-        parsedSpaced,
-      ),
-    ).toBe(true);
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-home",
+      {
+        getAllSessions: () => sessions,
+        getSessionById: () => new Map(sessions.map((s) => [s.sessionId, s])),
+      },
+    );
+
+    // Toggle hideHome -> sess-home is filtered out, fall back to sess-nonhome
+    navCoordinator.userToggleHideHome();
+
+    // Exactly 1 pushState containing BOTH new filter and fallback session
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-nonhome&hideHome=1",
+    );
+    expect(getState().hideHomeOnly).toBe(true);
+    expect(getState().selectedSessionId).toBe("sess-nonhome");
+  });
+
+  // =========================================================================
+  // Scenario 4: Target-path fallback to another session creates exactly one push
+  // =========================================================================
+  it("Scenario 4: Target-path fallback to another session creates exactly one push", () => {
+    const etcSess = makeSession("sess-etc", {
+      cwdState: { path: "/etc", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+    });
+    const varSess = makeSession("sess-var", {
+      cwdState: { path: "/var", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var"], homeOnly: false, eventCount: 1 },
+    });
+    const sessions = [etcSess, varSess];
+
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-etc",
+      {
+        getAllSessions: () => sessions,
+        getSessionById: () => new Map(sessions.map((s) => [s.sessionId, s])),
+      },
+    );
+
+    // Select target path "/var" -> sess-etc is filtered out, fall back to sess-var
+    navCoordinator.userSelectTargetPath("/var");
+
+    // Exactly 1 pushState containing BOTH new targetPath and fallback session
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-var&targetPath=%2Fvar",
+    );
+    expect(getState().targetPathFilter).toBe("/var");
+    expect(getState().selectedSessionId).toBe("sess-var");
+  });
+
+  // =========================================================================
+  // Scenario 5: One Back from either fallback restores the complete prior filter/session/hop state
+  // =========================================================================
+  it("Scenario 5: One Back from either fallback restores the complete prior filter/session/hop state", () => {
+    const homeOnly = makeSession("sess-home", {
+      cwdState: { path: "/home/user", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/home/user"], homeOnly: true, eventCount: 1 },
+    });
+    const nonHome = makeSession("sess-nonhome", {
+      cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
+    });
+    const sessions = [homeOnly, nonHome];
+
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-home&hop=hop-initial",
+      {
+        getAllSessions: () => sessions,
+        getSessionById: () => new Map(sessions.map((s) => [s.sessionId, s])),
+      },
+    );
+
+    // Trigger fallback push
+    navCoordinator.userToggleHideHome();
+    expect(getState().selectedSessionId).toBe("sess-nonhome");
+    expect(getState().hideHomeOnly).toBe(true);
+
+    pushStateSpy.mockClear();
+
+    // Browser Back to original state
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-home&hop=hop-initial");
+
+    // Complete prior state is restored in one single step
+    expect(getState().selectedSessionId).toBe("sess-home");
+    expect(getState().hideHomeOnly).toBe(false);
+    expect(getState().selectedHistoryEventId).toBe("hop-initial");
+    expect(pushStateSpy).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Scenario 6: Reset filters creates exactly one push and is traversable
+  // =========================================================================
+  it("Scenario 6: Reset filters creates exactly one push and is traversable", () => {
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hideHome=1&targetPath=%2Fvar&hop=hop-42",
+    );
+
+    // User clicks "Reset filters"
+    navCoordinator.userResetFilters();
+
+    // Pushes exactly once, clearing filters while preserving session & hop
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-42",
+    );
+    expect(getState().hideHomeOnly).toBe(false);
+    expect(getState().targetPathFilter).toBeNull();
+    expect(getState().selectedSessionId).toBe("sess-1");
+
+    // Back restores filters
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-1&hideHome=1&targetPath=%2Fvar&hop=hop-42");
+    expect(getState().hideHomeOnly).toBe(true);
+    expect(getState().targetPathFilter).toBe("/var");
+
+    // Repeating reset when already reset does not push
+    pushStateSpy.mockClear();
+    navCoordinator.userResetFilters();
+    expect(pushStateSpy).toHaveBeenCalledTimes(1); // from non-reset state
+    navCoordinator.userResetFilters();
+    expect(pushStateSpy).toHaveBeenCalledTimes(1); // deduplicated!
+  });
+
+  // =========================================================================
+  // Scenario 7: Clear selection creates exactly one push and is traversable
+  // =========================================================================
+  it("Scenario 7: Clear selection creates exactly one push and is traversable", () => {
+    const { navCoordinator, coordinator, pushStateSpy, resetHistory, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1&hideHome=1",
+    );
+
+    // User clicks "Clear selection"
+    navCoordinator.userClearSelection();
+
+    // Exactly 1 push clearing session and hop, while preserving active filter
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&hideHome=1");
+
+    // Coordinator scope cleared, work aborted, history reset
+    expect(coordinator.getNavigationScope().sessionId).toBeNull();
+    expect(coordinator.getNavigationScope().targetHopId).toBeNull();
+    expect(getState().selectedSessionId).toBeNull();
+    expect(getState().selectedHistoryEventId).toBeNull();
+    expect(resetHistory).toHaveBeenCalled();
+
+    // Back restores selection
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-1&hop=hop-1&hideHome=1");
+    expect(getState().selectedSessionId).toBe("sess-1");
+    expect(getState().selectedHistoryEventId).toBe("hop-1");
+
+    // Repeating clear selection when already cleared does not push
+    pushStateSpy.mockClear();
+    navCoordinator.userClearSelection();
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    navCoordinator.userClearSelection();
+    expect(pushStateSpy).toHaveBeenCalledTimes(1); // deduplicated!
+  });
+
+  // =========================================================================
+  // Scenario 8: The explicit Clear hop button creates exactly one push
+  // =========================================================================
+  it("Scenario 8: The explicit Clear hop button creates exactly one push", () => {
+    const { navCoordinator, pushStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1",
+    );
+
+    // User clicks the explicit "Clear hop" button
+    navCoordinator.userClearHop();
+
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-1");
+    expect(getState().selectedHistoryEventId).toBeNull();
+
+    // Back restores hop
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-1&hop=hop-1");
+    expect(getState().selectedHistoryEventId).toBe("hop-1");
+  });
+
+  // =========================================================================
+  // Scenario 9: Internal session/filter cleanup performs no additional push
+  // =========================================================================
+  it("Scenario 9: Internal session/filter cleanup performs no additional push", () => {
+    const { navCoordinator, pushStateSpy, resetRequestedHopState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1",
+    );
+
+    // Selecting a session performs internal hop cleanup
+    navCoordinator.userSelectSession("sess-2");
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(resetRequestedHopState).toHaveBeenCalledTimes(1);
+
+    // Toggling filter performs internal hop cleanup
+    navCoordinator.userToggleHideHome();
+    expect(pushStateSpy).toHaveBeenCalledTimes(2);
+
+    // Zero extra or nested pushes were emitted
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-2");
+  });
+
+  // =========================================================================
+  // Scenario 10: Popstate to a delayed retained-session lookup keeps the popped URL unchanged while the request is pending
+  // =========================================================================
+  it("Scenario 10: Popstate to a delayed retained-session lookup keeps the popped URL unchanged while the request is pending", async () => {
+    let resolveRemoteLookup!: (val: FilesystemClosedSession | null) => void;
+    const fetchSession = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveRemoteLookup = resolve;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      initialSessionId: "sess-1",
+      fetchSession,
+    });
+
+    const { navCoordinator, replaceStateSpy } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1",
+      { coordinator },
+    );
+
+    // Browser navigates via popstate to an unhydrated retained session
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-delayed-retained");
+
+    // Transaction is pending!
+    expect(navCoordinator.isPopStatePending()).toBe(true);
+
+    // Simulate passive React effect trying to sync URL while selectedSessionId is still sess-1
+    navCoordinator.synchronizeUrlState();
+
+    // Passive sync MUST NOT overwrite the popped URL with sess-1!
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?view=audit&sessionId=sess-delayed-retained");
+
+    // Clean up unresolved promise
+    resolveRemoteLookup(null);
+  });
+
+  // =========================================================================
+  // Scenario 11: The delayed lookup success and not-found paths do not produce pushState or replaceState feedback
+  // =========================================================================
+  it("Scenario 11: The delayed lookup success and not-found paths do not produce pushState or replaceState feedback", async () => {
+    let resolveRemoteLookup!: (val: FilesystemClosedSession | null) => void;
+    const fetchSession = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveRemoteLookup = resolve;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession,
+    });
+
+    const { navCoordinator, pushStateSpy, replaceStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1",
+      { coordinator },
+    );
+
+    // --- Success Path ---
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-delayed-found");
+    expect(navCoordinator.isPopStatePending()).toBe(true);
+
+    // Resolve successfully
+    const foundSession = makeSession("sess-delayed-found");
+    resolveRemoteLookup(foundSession);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Reached terminal state
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(getState().selectedSessionId).toBe("sess-delayed-found");
+
+    // Zero feedback history writes
+    expect(pushStateSpy).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+
+    // --- Not-Found Path ---
+    let resolveNotFound!: (val: FilesystemClosedSession | null) => void;
+    fetchSession.mockImplementationOnce(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveNotFound = resolve;
+      });
+    });
+
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-delayed-expired");
+    expect(navCoordinator.isPopStatePending()).toBe(true);
+
+    // Resolve with null (not found / expired)
+    resolveNotFound(null);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(getState().expiredSessionId).toBe("sess-delayed-expired");
+    expect(pushStateSpy).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Scenario 12: Rapid popstate A -> B discards late A and never rewrites B’s URL
+  // =========================================================================
+  it("Scenario 12: Rapid popstate A -> B discards late A and never rewrites B’s URL", async () => {
+    let resolveA!: (val: FilesystemClosedSession | null) => void;
+    let resolveB!: (val: FilesystemClosedSession | null) => void;
+
+    const fetchSession = vi.fn().mockImplementation((id: string) => {
+      if (id === "sess-A") {
+        return new Promise<FilesystemClosedSession | null>((resolve) => {
+          resolveA = resolve;
+        });
+      }
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveB = resolve;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession,
+    });
+
+    const { navCoordinator, replaceStateSpy, getState } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1",
+      { coordinator },
+    );
+
+    // Popstate 1: user hits Back to sess-A
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-A");
+
+    // Rapid Popstate 2: user immediately hits Back again to sess-B
+    navCoordinator.handlePopState("?view=audit&sessionId=sess-B");
+
+    // Lookup A finishes late
+    resolveA(makeSession("sess-A"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Late A was discarded: sess-A was NOT adopted, URL was NOT rewritten
+    expect(getState().selectedSessionId).not.toBe("sess-A");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+
+    // Lookup B finishes
+    const sessionB = makeSession("sess-B");
+    resolveB(sessionB);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // sess-B was adopted
+    expect(getState().selectedSessionId).toBe("sess-B");
+    expect(window.location.search).toBe("?view=audit&sessionId=sess-B");
+  });
+
+  // =========================================================================
+  // Scenario 13: Repeated identical actions remain deduplicated
+  // =========================================================================
+  it("Scenario 13: Repeated identical actions remain deduplicated", () => {
+    const { navCoordinator, pushStateSpy } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1",
+    );
+
+    // Selecting identical session
+    navCoordinator.userSelectSession("sess-1");
+    expect(pushStateSpy).not.toHaveBeenCalled();
+
+    // Resetting filters when already reset
+    navCoordinator.userResetFilters();
+    expect(pushStateSpy).not.toHaveBeenCalled();
+
+    // Selecting identical hop
+    navCoordinator.userSelectHop(null);
+    expect(pushStateSpy).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Scenario 14: Autoplay continues using replaceState without increasing history length
+  // =========================================================================
+  it("Scenario 14: Autoplay continues using replaceState without increasing history length", () => {
+    const { navCoordinator, pushStateSpy, replaceStateSpy } = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=sess-1",
+    );
+
+    // Playback ticks through hops 1, 2, 3
+    navCoordinator.playbackSelectHop("hop-1");
+    navCoordinator.playbackSelectHop("hop-2");
+    navCoordinator.playbackSelectHop("hop-3");
+
+    // pushState was NEVER called
+    expect(pushStateSpy).not.toHaveBeenCalled();
+
+    // replaceState was called for each hop
+    expect(replaceStateSpy).toHaveBeenCalledTimes(3);
+    expect(replaceStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1",
+    );
+    expect(replaceStateSpy.mock.calls[1]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-2",
+    );
+    expect(replaceStateSpy.mock.calls[2]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-3",
+    );
+  });
+
+  // =========================================================================
+  // Hook Integration: Component mount & hook execution test
+  // =========================================================================
+  it("Component Integration: useFilesystemUrlState wires navigationCoordinator cleanly", () => {
+    let hookResult!: UseFilesystemUrlStateReturn;
+    const selectedSessionIdRef = { current: "sess-1" as string | null };
+
+    function TestComponent() {
+      hookResult = useFilesystemUrlState({
+        isHydrated: true,
+        snapshot: null,
+        extraAuditSessions: new Map(),
+        selectedSessionId: "sess-1",
+        selectedSessionIdRef,
+        selectSession: vi.fn(),
+        lookupRemoteAuditSession: vi.fn(),
+      });
+      return null;
+    }
+
+    act(() => {
+      root.render(createElement(TestComponent));
+    });
+
+    expect(hookResult.navigationCoordinator).toBeDefined();
+    expect(hookResult.navigationCoordinator).toBeInstanceOf(FilesystemNavigationCoordinator);
   });
 });

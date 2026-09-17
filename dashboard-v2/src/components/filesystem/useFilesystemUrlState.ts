@@ -8,10 +8,6 @@ import type {
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
 import {
-  type AuditUrlParams,
-  areAuditUrlParamsEqual,
-  buildAuditTargetUrl,
-  buildAuditUrlSearch,
   parseAuditUrlParams,
   resolveSessionSelection,
 } from "./filesystemUtils";
@@ -19,26 +15,38 @@ import type {
   RemoteAuditLookupCoordinator,
   RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
+import {
+  FilesystemNavigationCoordinator,
+  type NavigationStateCommitOptions,
+  type PopStateTransaction,
+} from "./filesystemNavigationCoordinator";
 
-export interface NavigationStateCommitOptions {
-  view?: "live" | "audit";
-  sessionId?: string | null;
-  hideHome?: boolean;
-  targetPath?: string | null;
-  hop?: string | null;
-}
+export {
+  FilesystemNavigationCoordinator,
+  type NavigationStateCommitOptions,
+  type PopStateTransaction,
+};
 
 export interface UseFilesystemUrlStateOptions {
   isHydrated: boolean;
   snapshot: FilesystemTopologySnapshot | null;
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
   selectedSessionId: string | null;
-  selectedSessionIdRef: React.MutableRefObject<string | null>;
-  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
-  lookupRemoteAuditSession: (target: RemoteAuditLookupIntent | string, targetHopId?: string | null) => Promise<void> | void;
+  selectedSessionIdRef?: React.MutableRefObject<string | null>;
+  selectSession: (
+    sessionId: string,
+    sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
+    targetHopId?: string | null,
+  ) => void;
+  lookupRemoteAuditSession: (intent: RemoteAuditLookupIntent) => Promise<void> | void;
   coordinator?: RemoteAuditLookupCoordinator;
-  setSelectedSessionId?: (id: string | null) => void;
   onExitFullscreenAndPlaying?: () => void;
+  setSelectedSessionId?: (id: string | null) => void;
+
+  allSessions?: FilesystemTopologySession[];
+  sessionById?: Map<string, FilesystemTopologySession | FilesystemClosedSession>;
+  resetHistory?: () => void;
+  resetRequestedHopState?: () => void;
 }
 
 export interface UseFilesystemUrlStateReturn {
@@ -56,9 +64,9 @@ export interface UseFilesystemUrlStateReturn {
   setExpiredSessionId: React.Dispatch<React.SetStateAction<string | null>>;
   requestedHopRef: React.MutableRefObject<string | null>;
   requestedSessionIdRef: React.MutableRefObject<string | null>;
-  isUserNavigatingRef: React.MutableRefObject<boolean>;
   commitUserNavigation: (updates: NavigationStateCommitOptions) => void;
   commitPlaybackNavigation: (hopId: string | null) => void;
+  navigationCoordinator: FilesystemNavigationCoordinator;
 }
 
 export function useFilesystemUrlState(
@@ -69,18 +77,17 @@ export function useFilesystemUrlState(
     snapshot,
     extraAuditSessions,
     selectedSessionId,
-    selectedSessionIdRef,
     selectSession,
     lookupRemoteAuditSession,
     coordinator,
-    setSelectedSessionId,
     onExitFullscreenAndPlaying,
+    setSelectedSessionId,
   } = options;
 
   const [viewMode, setViewMode] = useState<"live" | "audit">(() => {
     if (typeof window === "undefined") return "live";
     const parsed = parseAuditUrlParams(window.location.search);
-    return parsed.view === "audit" ? "audit" : "live";
+    return parsed.view ?? "live";
   });
   const [hideHomeOnly, setHideHomeOnly] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -97,18 +104,24 @@ export function useFilesystemUrlState(
     const parsed = parseAuditUrlParams(window.location.search);
     return parsed.hop ?? null;
   });
-  const [expiredSessionId, setExpiredSessionId] = useState<string | null>(null);
+  const [expiredSessionId, setExpiredSessionId] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const parsed = parseAuditUrlParams(window.location.search);
+    return parsed.sessionId ?? null;
+  });
 
-  const initialParsed = typeof window !== "undefined" ? parseAuditUrlParams(window.location.search) : null;
+  const requestedHopRef = useRef<string | null>(selectedHistoryEventId);
+  const requestedSessionIdRef = useRef<string | null>(
+    typeof window !== "undefined" ? parseAuditUrlParams(window.location.search).sessionId ?? null : null,
+  );
+
+  const selectedSessionIdRef = useRef<string | null>(selectedSessionId);
+
   const viewModeRef = useRef<"live" | "audit">(viewMode);
   const hideHomeOnlyRef = useRef<boolean>(hideHomeOnly);
   const targetPathFilterRef = useRef<string | null>(targetPathFilter);
   const selectedHistoryEventIdRef = useRef<string | null>(selectedHistoryEventId);
   const expiredSessionIdRef = useRef<string | null>(expiredSessionId);
-  const requestedSessionIdRef = useRef<string | null>(initialParsed?.sessionId ?? null);
-  const requestedHopRef = useRef<string | null>(initialParsed?.hop ?? null);
-  const isUserNavigatingRef = useRef(false);
-  const isPopStateActiveRef = useRef(false);
 
   useEffect(() => {
     viewModeRef.current = viewMode;
@@ -127,208 +140,109 @@ export function useFilesystemUrlState(
   }, [selectedHistoryEventId]);
 
   useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
     expiredSessionIdRef.current = expiredSessionId;
   }, [expiredSessionId]);
 
+  const [navigationCoordinator] = useState(() => new FilesystemNavigationCoordinator());
+
+  // Synchronize dynamic options
   useEffect(() => {
-    if (requestedSessionIdRef.current) {
-      selectedSessionIdRef.current = requestedSessionIdRef.current;
-    }
-  }, [selectedSessionIdRef]);
+    navigationCoordinator.updateOptions({
+      getViewMode: () => viewModeRef.current,
+      getSelectedSessionId: () => selectedSessionIdRef.current,
+      getHideHomeOnly: () => hideHomeOnlyRef.current,
+      getTargetPathFilter: () => targetPathFilterRef.current,
+      getSelectedHistoryEventId: () => selectedHistoryEventIdRef.current,
+      getRequestedHop: () => requestedHopRef.current,
+      getExpiredSessionId: () => expiredSessionIdRef.current,
+      getSnapshot: () => snapshot,
+      getExtraAuditSessions: () => extraAuditSessions,
+      getAllSessions: () => options.allSessions ?? [],
+      getSessionById: () => options.sessionById ?? new Map(),
+
+      setViewMode,
+      setHideHomeOnly,
+      setTargetPathFilter,
+      setSelectedHistoryEventId,
+      setExpiredSessionId,
+      setSelectedSessionId: (id) => {
+        selectedSessionIdRef.current = id;
+        setSelectedSessionId?.(id);
+      },
+      setRequestedHop: (hop) => {
+        requestedHopRef.current = hop;
+      },
+      setRequestedSessionId: (sid) => {
+        requestedSessionIdRef.current = sid;
+      },
+
+      selectSession,
+      resetHistory: () => options.resetHistory?.(),
+      resetRequestedHopState: () => options.resetRequestedHopState?.(),
+      onExitFullscreenAndPlaying,
+
+      coordinator,
+      lookupRemoteAuditSession: (intent) => lookupRemoteAuditSession(intent),
+    });
+  }, [
+    navigationCoordinator,
+    snapshot,
+    extraAuditSessions,
+    options,
+    setViewMode,
+    setHideHomeOnly,
+    setTargetPathFilter,
+    setSelectedHistoryEventId,
+    setExpiredSessionId,
+    setSelectedSessionId,
+    selectSession,
+    onExitFullscreenAndPlaying,
+    coordinator,
+    lookupRemoteAuditSession,
+    selectedSessionIdRef,
+  ]);
 
   const commitUserNavigation = useCallback(
     (updates: NavigationStateCommitOptions) => {
-      if (typeof window === "undefined") return;
-
-      const currentParams = parseAuditUrlParams(window.location.search);
-      const targetView = updates.view ?? viewModeRef.current;
-      const targetHop =
-        targetView === "live"
-          ? null
-          : updates.hop !== undefined
-            ? updates.hop
-            : (selectedHistoryEventIdRef.current ?? requestedHopRef.current);
-
-      const targetParams: AuditUrlParams = {
-        view: targetView,
-        sessionId:
-          updates.sessionId !== undefined
-            ? updates.sessionId
-            : (selectedSessionIdRef.current ?? expiredSessionIdRef.current),
-        hideHome: updates.hideHome !== undefined ? updates.hideHome : hideHomeOnlyRef.current,
-        targetPath:
-          updates.targetPath !== undefined
-            ? updates.targetPath
-            : targetPathFilterRef.current,
-        hop: targetHop,
-      };
-
-      const currentSearch = window.location.search;
-      const targetSearch = buildAuditUrlSearch(targetParams);
-
-      if (currentSearch === targetSearch && areAuditUrlParamsEqual(currentParams, targetParams)) {
-        return;
-      }
-
-      const targetUrl = buildAuditTargetUrl(targetParams);
-      window.history.pushState(null, "", targetUrl);
+      navigationCoordinator.commit(updates, "push");
     },
-    [requestedHopRef, selectedSessionIdRef],
+    [navigationCoordinator],
   );
 
   const commitPlaybackNavigation = useCallback(
     (hopId: string | null) => {
-      if (typeof window === "undefined") return;
-
-      const currentParams = parseAuditUrlParams(window.location.search);
-      const targetParams: AuditUrlParams = {
-        view: "audit",
-        sessionId: selectedSessionIdRef.current ?? expiredSessionIdRef.current,
-        hideHome: hideHomeOnlyRef.current,
-        targetPath: targetPathFilterRef.current,
-        hop: hopId,
-      };
-
-      const currentSearch = window.location.search;
-      const targetSearch = buildAuditUrlSearch(targetParams);
-
-      if (currentSearch === targetSearch && areAuditUrlParamsEqual(currentParams, targetParams)) {
-        return;
-      }
-
-      const targetUrl = buildAuditTargetUrl(targetParams);
-      window.history.replaceState(null, "", targetUrl);
+      navigationCoordinator.playbackSelectHop(hopId);
     },
-    [selectedSessionIdRef],
+    [navigationCoordinator],
   );
 
   const switchViewMode = useCallback(
     (mode: "live" | "audit", targetSessionId?: string) => {
-      if (mode === "live") {
-        onExitFullscreenAndPlaying?.();
-      }
-      isUserNavigatingRef.current = true;
-      viewModeRef.current = mode;
-      setViewMode(mode);
-      setExpiredSessionId(null);
-      const sid =
-        targetSessionId ??
-        selectedSessionIdRef.current ??
-        snapshot?.sessions[0]?.sessionId ??
-        snapshot?.recentClosedSessions[0]?.sessionId ??
-        null;
-
-      if (mode === "live") {
-        requestedHopRef.current = null;
-        setSelectedHistoryEventId(null);
-        coordinator?.notifyNavigationScope({
-          viewMode: "live",
-          sessionId: sid,
-          targetHopId: null,
-        });
-        commitUserNavigation({
-          view: "live",
-          sessionId: sid,
-          hop: null,
-        });
-      } else {
-        coordinator?.notifyNavigationScope({
-          viewMode: "audit",
-          sessionId: sid,
-          targetHopId: null,
-        });
-        commitUserNavigation({
-          view: "audit",
-          sessionId: sid,
-          hop: null,
-        });
-        if (sid) {
-          selectSession(sid);
-        }
-      }
+      navigationCoordinator.userSelectViewMode(mode, targetSessionId);
     },
-    [
-      commitUserNavigation,
-      coordinator,
-      onExitFullscreenAndPlaying,
-      requestedHopRef,
-      selectSession,
-      selectedSessionIdRef,
-      setSelectedHistoryEventId,
-      snapshot?.recentClosedSessions,
-      snapshot?.sessions,
-    ],
+    [navigationCoordinator],
   );
 
   // Listen for browser Back and Forward navigation (popstate)
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handlePopState = () => {
-      isPopStateActiveRef.current = true;
-      try {
-        processAuditPopState({
-          search: window.location.search,
-          snapshot,
-          extraAuditSessions,
-          coordinator,
-          lookupRemoteAuditSession: (intent) => lookupRemoteAuditSession(intent),
-          selectSession,
-          setViewMode,
-          viewModeRef,
-          setHideHomeOnly,
-          setTargetPathFilter,
-          setSelectedHistoryEventId,
-          setExpiredSessionId,
-          requestedHopRef,
-          requestedSessionIdRef,
-          selectedSessionIdRef,
-          setSelectedSessionId,
-        });
-      } finally {
-        queueMicrotask(() => {
-          isPopStateActiveRef.current = false;
-        });
-      }
+      navigationCoordinator.handlePopState(window.location.search);
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [
-    coordinator,
-    snapshot,
-    selectSession,
-    lookupRemoteAuditSession,
-    extraAuditSessions,
-    selectedSessionIdRef,
-    setSelectedSessionId,
-    requestedHopRef,
-    requestedSessionIdRef,
-    viewModeRef,
-  ]);
+  }, [navigationCoordinator]);
 
   // Synchronize React navigation & filter state with the URL for initial hydration and system-driven fallbacks
+  // Guarded against overwriting pending popstate targets with stale pre-navigation React state
   useEffect(() => {
     if (!isHydrated || typeof window === "undefined") return;
-    if (isPopStateActiveRef.current) return;
-
-    const currentParams = parseAuditUrlParams(window.location.search);
-    const currentSession = selectedSessionId ?? expiredSessionId;
-    const targetParams: AuditUrlParams = {
-      view: viewMode,
-      sessionId: currentSession,
-      hideHome: hideHomeOnly,
-      targetPath: targetPathFilter,
-      hop: viewMode === "live" ? null : (selectedHistoryEventId ?? requestedHopRef.current),
-    };
-
-    const currentSearch = window.location.search;
-    const targetSearch = buildAuditUrlSearch(targetParams);
-
-    if (currentSearch !== targetSearch || !areAuditUrlParamsEqual(currentParams, targetParams)) {
-      const targetUrl = buildAuditTargetUrl(targetParams);
-      // Automatic sync and hydration canonicalization use replaceState, never pushState
-      window.history.replaceState(null, "", targetUrl);
-    }
+    navigationCoordinator.synchronizeUrlState();
   }, [
     isHydrated,
     viewMode,
@@ -337,7 +251,7 @@ export function useFilesystemUrlState(
     hideHomeOnly,
     targetPathFilter,
     selectedHistoryEventId,
-    requestedHopRef,
+    navigationCoordinator,
   ]);
 
   return {
@@ -355,9 +269,9 @@ export function useFilesystemUrlState(
     setExpiredSessionId,
     requestedHopRef,
     requestedSessionIdRef,
-    isUserNavigatingRef,
     commitUserNavigation,
     commitPlaybackNavigation,
+    navigationCoordinator,
   };
 }
 
@@ -366,8 +280,15 @@ export interface ProcessAuditPopStateParams {
   snapshot: FilesystemTopologySnapshot | null;
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
   coordinator?: RemoteAuditLookupCoordinator | null;
-  lookupRemoteAuditSession: (intent: { sessionId: string; targetHopId?: string | null }) => Promise<void> | void;
-  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
+  lookupRemoteAuditSession: (intent: {
+    sessionId: string;
+    targetHopId?: string | null;
+  }) => Promise<void> | void;
+  selectSession: (
+    sessionId: string,
+    sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
+    targetHopId?: string | null,
+  ) => void;
   setViewMode: (mode: "live" | "audit") => void;
   viewModeRef?: { current: "live" | "audit" };
   setHideHomeOnly: (hide: boolean) => void;
@@ -407,7 +328,12 @@ export function processAuditPopState(params: ProcessAuditPopStateParams): void {
         ...params.snapshot.recentClosedSessions,
         ...params.extraAuditSessions.values(),
       ];
-      const resolution = resolveSessionSelection(parsed.sessionId, null, known, nextView === "audit");
+      const resolution = resolveSessionSelection(
+        parsed.sessionId,
+        null,
+        known,
+        nextView === "audit",
+      );
       if (resolution.expiredSessionId) {
         if (nextView === "audit") {
           void params.lookupRemoteAuditSession({
