@@ -1,8 +1,14 @@
 import type {
   AuditSessionsPage,
   FilesystemClosedSession,
+  FilesystemTopologySession,
+  FilesystemTopologySnapshot,
   SessionCwdHistoryEvent,
 } from "@/lib/dashboardTypes";
+import {
+  resolveSessionSelection,
+  type SessionResolutionResult,
+} from "./filesystemUtils";
 
 export type HopResolutionStatus = "idle" | "resolving" | "resolved" | "not-found" | "error";
 
@@ -449,6 +455,25 @@ export class RemoteAuditLookupCoordinator {
   }
 
   /**
+   * Notifies the coordinator that a session has become authoritative locally
+   * (e.g. found in snapshot.sessions, snapshot.recentClosedSessions, or authoritative directory).
+   *
+   * Cancels and invalidates any matching in-flight remote lookup for this session
+   * even when sessionId and targetHopId are unchanged, while adopting the session
+   * and preserving the requested hop in the navigation scope.
+   * Late found, not-found, or error callbacks from the canceled lookup are discarded.
+   */
+  notifySessionResolvedLocally(sessionId: string, targetHopId?: string | null): void {
+    const normHop = targetHopId !== undefined ? normalizeHop(targetHopId) : this.currentTargetHopId;
+    this.currentSessionId = sessionId;
+    this.currentTargetHopId = normHop;
+
+    if (this.inFlightIntent && this.inFlightIntent.sessionId === sessionId) {
+      this.abort();
+    }
+  }
+
+  /**
    * Requests a remote lookup for a retained session not in the active snapshot.
    *
    * Idempotence & Deduplication:
@@ -565,7 +590,7 @@ export class RemoteAuditLookupCoordinator {
    */
   async lookup(
     intent: RemoteAuditLookupIntent,
-    callbacks: RemoteAuditLookupCallback,
+    callbacks?: RemoteAuditLookupCallback,
     fetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
   ): Promise<FilesystemClosedSession | null> {
     return this.requestLookup(intent, callbacks, fetchSession);
@@ -589,3 +614,96 @@ export class RemoteAuditLookupCoordinator {
 }
 
 export { RemoteAuditLookupCoordinator as RemoteAuditLookupManager };
+
+export interface CreateRemoteAuditLookupCallbacksOptions {
+  recordLookedUpSession: (session: FilesystemClosedSession) => void;
+  setExtraAuditSessions: (updater: (prev: Map<string, FilesystemTopologySession | FilesystemClosedSession>) => Map<string, FilesystemTopologySession | FilesystemClosedSession>) => void;
+  setExpiredSessionId: (sessionId: string | null) => void;
+  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
+  setSelectedSessionId?: (sessionId: string | null) => void;
+  selectedSessionIdRef?: { current: string | null };
+  clearSelectedSessionRef?: () => void;
+}
+
+export function createRemoteAuditLookupCallbacks(
+  options: CreateRemoteAuditLookupCallbacksOptions,
+): RemoteAuditLookupCallback {
+  return {
+    onSessionFound: (found, targetHopId) => {
+      options.recordLookedUpSession(found);
+      options.setExtraAuditSessions((prev) => {
+        if (prev.has(found.sessionId)) return prev;
+        const next = new Map(prev);
+        next.set(found.sessionId, found);
+        return next;
+      });
+      options.setExpiredSessionId(null);
+      options.selectSession(found.sessionId, found, targetHopId);
+    },
+    onSessionNotFound: (targetId) => {
+      options.setExpiredSessionId(targetId);
+      if (options.clearSelectedSessionRef) {
+        options.clearSelectedSessionRef();
+      } else if (options.selectedSessionIdRef) {
+        options.selectedSessionIdRef.current = null;
+      }
+      options.setSelectedSessionId?.(null);
+    },
+  };
+}
+
+export interface ProcessSnapshotSessionResolutionParams {
+  snapshot: FilesystemTopologySnapshot;
+  extraAuditSessions: Map<string, FilesystemTopologySession | FilesystemClosedSession>;
+  requestedSessionIdRef: { current: string | null };
+  selectedSessionIdRef: { current: string | null };
+  requestedHopRef: { current: string | null };
+  viewMode: "live" | "audit";
+  lookupRemoteAuditSession: (intent: RemoteAuditLookupIntent) => Promise<void> | void;
+  setExpiredSessionId: (id: string | null) => void;
+  setSelectedSessionId: (id: string | null) => void;
+  coordinator?: RemoteAuditLookupCoordinator | null;
+}
+
+export function processSnapshotSessionResolution(
+  params: ProcessSnapshotSessionResolutionParams,
+): SessionResolutionResult {
+  const knownSessions = [
+    ...params.snapshot.sessions,
+    ...params.snapshot.recentClosedSessions,
+    ...params.extraAuditSessions.values(),
+  ];
+  const candidateId = params.requestedSessionIdRef.current ?? params.selectedSessionIdRef.current;
+  const resolution = resolveSessionSelection(
+    params.requestedSessionIdRef.current,
+    params.selectedSessionIdRef.current,
+    knownSessions,
+    params.viewMode === "audit",
+  );
+  params.requestedSessionIdRef.current = null;
+
+  if (resolution.expiredSessionId) {
+    if (params.viewMode === "audit" && candidateId) {
+      void params.lookupRemoteAuditSession({
+        sessionId: candidateId,
+        targetHopId: params.requestedHopRef.current,
+      });
+    } else {
+      params.setExpiredSessionId(resolution.expiredSessionId);
+      params.selectedSessionIdRef.current = null;
+      params.setSelectedSessionId(null);
+    }
+  } else {
+    params.setExpiredSessionId(null);
+    params.selectedSessionIdRef.current = resolution.sessionId;
+    params.setSelectedSessionId(resolution.sessionId);
+    if (resolution.sessionId) {
+      params.coordinator?.notifySessionResolvedLocally(
+        resolution.sessionId,
+        params.requestedHopRef.current,
+      );
+    }
+  }
+
+  return resolution;
+}

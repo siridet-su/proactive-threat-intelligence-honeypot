@@ -108,6 +108,7 @@ export function useFilesystemUrlState(
         onExitFullscreenAndPlaying?.();
       }
       isUserNavigatingRef.current = true;
+      viewModeRef.current = mode;
       setViewMode(mode);
       setExpiredSessionId(null);
       const sid =
@@ -144,62 +145,29 @@ export function useFilesystemUrlState(
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handlePopState = () => {
-      const parsed = parseAuditUrlParams(window.location.search);
-      const nextView = parsed.view ?? "live";
-      coordinator?.notifyNavigationScope({
-        viewMode: nextView,
-        sessionId: parsed.sessionId ?? null,
-        targetHopId: parsed.hop ?? null,
+      processAuditPopState({
+        search: window.location.search,
+        snapshot,
+        extraAuditSessions,
+        coordinator,
+        lookupRemoteAuditSession: (intent) => lookupRemoteAuditSession(intent),
+        selectSession,
+        setViewMode,
+        viewModeRef,
+        setHideHomeOnly,
+        setTargetPathFilter,
+        setSelectedHistoryEventId,
+        setExpiredSessionId,
+        requestedHopRef,
+        requestedSessionIdRef,
+        selectedSessionIdRef,
+        setSelectedSessionId,
       });
-      setViewMode(nextView);
-      setHideHomeOnly(Boolean(parsed.hideHome));
-      setTargetPathFilter(parsed.targetPath ?? null);
-      requestedHopRef.current = parsed.hop ?? null;
-      setSelectedHistoryEventId(parsed.hop ?? null);
-
-      if (parsed.sessionId) {
-        requestedSessionIdRef.current = parsed.sessionId;
-        if (snapshot) {
-          const known = [
-            ...snapshot.sessions,
-            ...snapshot.recentClosedSessions,
-            ...extraAuditSessions.values(),
-          ];
-          const resolution = resolveSessionSelection(parsed.sessionId, null, known, parsed.view === "audit");
-          if (resolution.expiredSessionId) {
-            if (parsed.view === "audit") {
-              void lookupRemoteAuditSession({
-                sessionId: resolution.expiredSessionId,
-                targetHopId: parsed.hop ?? null,
-              });
-            } else {
-              setExpiredSessionId(resolution.expiredSessionId);
-              selectedSessionIdRef.current = null;
-              setSelectedSessionId?.(null);
-            }
-          } else {
-            setExpiredSessionId(null);
-            if (resolution.sessionId) {
-              selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
-            }
-          }
-        } else {
-          selectedSessionIdRef.current = parsed.sessionId;
-          setSelectedSessionId?.(parsed.sessionId);
-        }
-      } else {
-        requestedSessionIdRef.current = null;
-        setExpiredSessionId(null);
-        if (parsed.view === "audit") {
-          selectedSessionIdRef.current = null;
-          setSelectedSessionId?.(null);
-        }
-      }
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [coordinator, snapshot, selectSession, lookupRemoteAuditSession, extraAuditSessions, selectedSessionIdRef, setSelectedSessionId]);
+  }, [coordinator, snapshot, selectSession, lookupRemoteAuditSession, extraAuditSessions, selectedSessionIdRef, setSelectedSessionId, requestedHopRef, requestedSessionIdRef]);
 
   // Synchronize React navigation & filter state with the URL
   useEffect(() => {
@@ -251,4 +219,80 @@ export function useFilesystemUrlState(
     requestedSessionIdRef,
     isUserNavigatingRef,
   };
+}
+
+export interface ProcessAuditPopStateParams {
+  search: string;
+  snapshot: FilesystemTopologySnapshot | null;
+  extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
+  coordinator?: RemoteAuditLookupCoordinator | null;
+  lookupRemoteAuditSession: (intent: { sessionId: string; targetHopId?: string | null }) => Promise<void> | void;
+  selectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void;
+  setViewMode: (mode: "live" | "audit") => void;
+  viewModeRef?: { current: "live" | "audit" };
+  setHideHomeOnly: (hide: boolean) => void;
+  setTargetPathFilter: (path: string | null) => void;
+  setSelectedHistoryEventId: (eventId: string | null) => void;
+  setExpiredSessionId: (id: string | null) => void;
+  requestedHopRef: { current: string | null };
+  requestedSessionIdRef: { current: string | null };
+  selectedSessionIdRef: { current: string | null };
+  setSelectedSessionId?: (id: string | null) => void;
+}
+
+export function processAuditPopState(params: ProcessAuditPopStateParams): void {
+  const parsed = parseAuditUrlParams(params.search);
+  const nextView = parsed.view ?? "live";
+  params.coordinator?.notifyNavigationScope({
+    viewMode: nextView,
+    sessionId: parsed.sessionId ?? null,
+    targetHopId: parsed.hop ?? null,
+  });
+  params.setViewMode(nextView);
+  if (params.viewModeRef) {
+    params.viewModeRef.current = nextView;
+  }
+  params.setHideHomeOnly(Boolean(parsed.hideHome));
+  params.setTargetPathFilter(parsed.targetPath ?? null);
+  params.requestedHopRef.current = parsed.hop ?? null;
+  params.setSelectedHistoryEventId(parsed.hop ?? null);
+
+  if (parsed.sessionId) {
+    params.requestedSessionIdRef.current = parsed.sessionId;
+    if (params.snapshot) {
+      const known = [
+        ...params.snapshot.sessions,
+        ...params.snapshot.recentClosedSessions,
+        ...params.extraAuditSessions.values(),
+      ];
+      const resolution = resolveSessionSelection(parsed.sessionId, null, known, nextView === "audit");
+      if (resolution.expiredSessionId) {
+        if (nextView === "audit") {
+          void params.lookupRemoteAuditSession({
+            sessionId: resolution.expiredSessionId,
+            targetHopId: parsed.hop ?? null,
+          });
+        } else {
+          params.setExpiredSessionId(resolution.expiredSessionId);
+          params.selectedSessionIdRef.current = null;
+          params.setSelectedSessionId?.(null);
+        }
+      } else {
+        params.setExpiredSessionId(null);
+        if (resolution.sessionId) {
+          params.selectSession(resolution.sessionId, undefined, parsed.hop ?? null);
+        }
+      }
+    } else {
+      params.selectedSessionIdRef.current = parsed.sessionId;
+      params.setSelectedSessionId?.(parsed.sessionId);
+    }
+  } else {
+    params.requestedSessionIdRef.current = null;
+    params.setExpiredSessionId(null);
+    if (nextView === "audit") {
+      params.selectedSessionIdRef.current = null;
+      params.setSelectedSessionId?.(null);
+    }
+  }
 }

@@ -8,8 +8,14 @@ import type { FilesystemClosedSession, SessionCwdHistoryEvent } from "@/lib/dash
 import {
   RemoteAuditLookupCoordinator,
   SessionHopLifecycleManager,
+  createRemoteAuditLookupCallbacks,
+  processSnapshotSessionResolution,
   type HopResolutionStatus,
+  type RemoteAuditLookupIntent,
 } from "@/components/filesystem/sessionHopResolver";
+import {
+  processAuditPopState,
+} from "@/components/filesystem/useFilesystemUrlState";
 import {
   buildAuditUrlSearch,
 } from "@/components/filesystem/filesystemUtils";
@@ -91,53 +97,339 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     expect(appliedHop).toBe("cwd:deep-hop-42");
   });
 
-  // 1b. Popstate to unknown retained session uses real callback path and selects returned session with requested hop
-  it("popstate to unknown retained session uses real callback path and selects returned session with requested hop", async () => {
+  // 1b. Real popstate production path for an unknown retained session invokes the authoritative callback-bearing lookup and selects the returned session/hop
+  it("popstate to unknown retained session uses real production path and selects returned session with requested hop", async () => {
     let recordedSession: FilesystemClosedSession | null = null;
     let selectedSessionId: string | null = null;
     let selectedSessionObj: FilesystemClosedSession | null = null;
     let forwardedHop: string | null = null;
+    let expiredSessionId: string | null = null;
+    let viewMode: "live" | "audit" = "live";
+    let hideHomeOnly = false;
+    let targetPathFilter: string | null = null;
+    let selectedHistoryEventId: string | null = null;
 
-    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const requestedHopRef = { current: null as string | null };
+    const requestedSessionIdRef = { current: null as string | null };
+    const selectedSessionIdRef = { current: null as string | null };
 
     const expectedSession = makeClosedSession({ sessionId: "sess-retained-popstate" });
     const fetchSession = vi.fn().mockResolvedValue(expectedSession);
 
-    // Production lookup wrapper (identical to lookupRemoteAuditSession in FilesystemActivity)
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+
+    // Production callbacks created using the identical factory used in FilesystemActivity
+    const authoritativeCallbacks = createRemoteAuditLookupCallbacks({
+      recordLookedUpSession: (s) => {
+        recordedSession = s;
+      },
+      setExtraAuditSessions: (updater) => {
+        extraAuditSessions = updater(extraAuditSessions);
+      },
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      selectSession: (sid, sObj, hop) => {
+        selectedSessionId = sid;
+        selectedSessionObj = (sObj as FilesystemClosedSession) ?? null;
+        forwardedHop = hop ?? null;
+        requestedHopRef.current = hop ?? null;
+        selectedHistoryEventId = hop ?? null;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      selectedSessionIdRef,
+    });
+    coordinator.setCallbacks(authoritativeCallbacks);
+
+    let extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
     const lookupRemoteAuditSession = async (intent: { sessionId: string; targetHopId?: string | null }) => {
-      await coordinator.lookup(
-        intent,
-        {
-          onSessionFound: (found, targetHop) => {
-            recordedSession = found;
-            selectedSessionId = found.sessionId;
-            selectedSessionObj = found;
-            forwardedHop = targetHop ?? null;
-          },
-          onSessionNotFound: vi.fn(),
-        },
-        fetchSession,
-      );
+      await coordinator.lookup(intent, authoritativeCallbacks, fetchSession);
     };
 
-    // Popstate navigation arrives: ?view=audit&session=sess-retained-popstate&hop=cwd:hop-99
-    coordinator.notifyNavigationScope({
-      viewMode: "audit",
-      sessionId: "sess-retained-popstate",
-      targetHopId: "cwd:hop-99",
-    });
-    await lookupRemoteAuditSession({
-      sessionId: "sess-retained-popstate",
-      targetHopId: "cwd:hop-99",
+    const snapshot = {
+      sessions: [makeClosedSession({ sessionId: "sess-live-1" })],
+      recentClosedSessions: [],
+      nodes: [],
+    };
+
+    // Execute the exact production popstate orchestration function exported from useFilesystemUrlState
+    processAuditPopState({
+      search: "?view=audit&sessionId=sess-retained-popstate&hop=cwd:hop-99",
+      snapshot,
+      extraAuditSessions,
+      coordinator,
+      lookupRemoteAuditSession,
+      selectSession: (sid, _sObj, hop) => {
+        selectedSessionId = sid;
+        forwardedHop = hop ?? null;
+      },
+      setViewMode: (v) => {
+        viewMode = v;
+      },
+      setHideHomeOnly: (h) => {
+        hideHomeOnly = h;
+      },
+      setTargetPathFilter: (p) => {
+        targetPathFilter = p;
+      },
+      setSelectedHistoryEventId: (id) => {
+        selectedHistoryEventId = id;
+      },
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      requestedHopRef,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
     });
 
-    // Authoritative UI callback path was invoked
+    // Wait for the asynchronous lookup to settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Production popstate path invoked authoritative callbacks and selected returned session and hop
     expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(viewMode).toBe("audit");
+    expect(hideHomeOnly).toBe(false);
+    expect(targetPathFilter).toBeNull();
     expect(recordedSession).toEqual(expectedSession);
     expect(selectedSessionId).toBe("sess-retained-popstate");
     expect(selectedSessionObj).toEqual(expectedSession);
     expect(forwardedHop).toBe("cwd:hop-99");
+    expect(requestedHopRef.current).toBe("cwd:hop-99");
+    expect(selectedHistoryEventId).toBe("cwd:hop-99");
+    expect(expiredSessionId).toBeNull();
     expect(coordinator.getInFlightSessionId()).toBeNull();
+  });
+
+  // 1b-2. Snapshot initially misses A, starts one lookup, then a later snapshot contains A: request is aborted and late not-found cannot clear A
+  it("cancels in-flight lookup when later snapshot contains the session and prevents late not-found from clearing it", async () => {
+    let expiredSessionId: string | null = null;
+    let selectedSessionId: string | null = null;
+    const requestedHopRef = { current: "cwd:hop-42" as string | null };
+    const requestedSessionIdRef = { current: "sess-retained-A" as string | null };
+    const selectedSessionIdRef = { current: null as string | null };
+    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+
+    let resolveFetchA!: (val: FilesystemClosedSession | null) => void;
+    let signalA!: AbortSignal;
+    const slowPromiseA = new Promise<FilesystemClosedSession | null>((res) => {
+      resolveFetchA = res;
+    });
+
+    const authoritativeCallbacks = createRemoteAuditLookupCallbacks({
+      recordLookedUpSession: vi.fn(),
+      setExtraAuditSessions: vi.fn(),
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      selectSession: vi.fn(),
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      selectedSessionIdRef,
+    });
+    coordinator.setCallbacks(authoritativeCallbacks);
+
+    const lookupRemoteAuditSession = (intent: RemoteAuditLookupIntent) => {
+      void coordinator.lookup(intent, authoritativeCallbacks, (_id, signal) => {
+        signalA = signal;
+        return slowPromiseA;
+      });
+    };
+
+    // Snapshot 1: does NOT contain sess-retained-A
+    const snapshot1 = {
+      sessions: [],
+      recentClosedSessions: [makeClosedSession({ sessionId: "sess-other" })],
+      nodes: [],
+    };
+
+    processSnapshotSessionResolution({
+      snapshot: snapshot1,
+      extraAuditSessions,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession,
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      coordinator,
+    });
+
+    // In-flight lookup is active for sess-retained-A
+    expect(coordinator.getInFlightSessionId()).toBe("sess-retained-A");
+    expect(signalA.aborted).toBe(false);
+
+    // Snapshot 2: now CONTAINS sess-retained-A
+    const sessionA = makeClosedSession({ sessionId: "sess-retained-A" });
+    const snapshot2 = {
+      sessions: [],
+      recentClosedSessions: [sessionA],
+      nodes: [],
+    };
+
+    processSnapshotSessionResolution({
+      snapshot: snapshot2,
+      extraAuditSessions,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession,
+      setExpiredSessionId: (id) => {
+        expiredSessionId = id;
+      },
+      setSelectedSessionId: (id) => {
+        selectedSessionId = id;
+      },
+      coordinator,
+    });
+
+    // sess-retained-A is adopted and selected from the snapshot
+    expect(selectedSessionId).toBe("sess-retained-A");
+    expect(selectedSessionIdRef.current).toBe("sess-retained-A");
+    expect(expiredSessionId).toBeNull();
+
+    // The in-flight lookup was aborted by notifySessionResolvedLocally
+    expect(signalA.aborted).toBe(true);
+    expect(coordinator.getInFlightSessionId()).toBeNull();
+
+    // Now late response arrives from server with 404 (not found)
+    resolveFetchA(null);
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Late not-found CANNOT clear sess-retained-A
+    expect(selectedSessionId).toBe("sess-retained-A");
+    expect(selectedSessionIdRef.current).toBe("sess-retained-A");
+    expect(expiredSessionId).toBeNull();
+  });
+
+  // 1b-3. Repeated snapshots still missing A deduplicate to exactly one fetch
+  it("repeated snapshots still missing A deduplicate to exactly one fetch", async () => {
+    const requestedHopRef = { current: "cwd:hop-42" as string | null };
+    const requestedSessionIdRef = { current: "sess-missing-A" as string | null };
+    const selectedSessionIdRef = { current: null as string | null };
+    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const fetchSession = vi.fn().mockImplementation(() => new Promise(() => {}));
+
+    const lookupRemoteAuditSession = (intent: RemoteAuditLookupIntent) => {
+      void coordinator.requestLookup(intent, undefined, fetchSession);
+    };
+
+    const snapshotMissing = {
+      sessions: [],
+      recentClosedSessions: [],
+      nodes: [],
+    };
+
+    // Snapshot 1 arrives
+    processSnapshotSessionResolution({
+      snapshot: snapshotMissing,
+      extraAuditSessions,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession,
+      setExpiredSessionId: vi.fn(),
+      setSelectedSessionId: vi.fn(),
+      coordinator,
+    });
+
+    // Snapshot 2 arrives with same missing session
+    requestedSessionIdRef.current = "sess-missing-A";
+    processSnapshotSessionResolution({
+      snapshot: snapshotMissing,
+      extraAuditSessions,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession,
+      setExpiredSessionId: vi.fn(),
+      setSelectedSessionId: vi.fn(),
+      coordinator,
+    });
+
+    // Snapshot 3 arrives with same missing session
+    requestedSessionIdRef.current = "sess-missing-A";
+    processSnapshotSessionResolution({
+      snapshot: snapshotMissing,
+      extraAuditSessions,
+      requestedSessionIdRef,
+      selectedSessionIdRef,
+      requestedHopRef,
+      viewMode: "audit",
+      lookupRemoteAuditSession,
+      setExpiredSessionId: vi.fn(),
+      setSelectedSessionId: vi.fn(),
+      coordinator,
+    });
+
+    expect(fetchSession).toHaveBeenCalledTimes(1);
+    expect(fetchSession).toHaveBeenCalledWith("sess-missing-A", expect.any(AbortSignal));
+  });
+
+  // 1b-4. Live topology session selection keeps coordinator in Live mode with null hop
+  it("live topology session selection keeps coordinator in Live mode with null hop", () => {
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "live" });
+    const viewModeRef = { current: "live" as "live" | "audit" };
+    let selectedSessionId: string | null = null;
+    const requestedHopRef = { current: null as string | null };
+
+    // Simulating selectSession in FilesystemActivity in Live mode
+    const selectSession = (sessionId: string, targetHopId?: string | null) => {
+      const currentMode = viewModeRef.current;
+      const effectiveHop = currentMode === "live" ? null : (targetHopId ?? null);
+
+      coordinator.notifyNavigationScope({
+        viewMode: currentMode,
+        sessionId,
+        targetHopId: effectiveHop,
+      });
+      coordinator.notifySessionResolvedLocally(sessionId, effectiveHop);
+      selectedSessionId = sessionId;
+      if (effectiveHop !== null) {
+        requestedHopRef.current = effectiveHop;
+      } else {
+        requestedHopRef.current = null;
+      }
+    };
+
+    // User in Live mode selects a node in TopologyCanvas
+    selectSession("sess-live-99", "attempted-hop-in-live");
+
+    const scope = coordinator.getNavigationScope();
+    expect(scope.viewMode).toBe("live");
+    expect(scope.sessionId).toBe("sess-live-99");
+    expect(scope.targetHopId).toBeNull();
+    expect(requestedHopRef.current).toBeNull();
+    expect(selectedSessionId).toBe("sess-live-99");
+
+    // Switching back to Audit establishes audit mode and hop scope
+    viewModeRef.current = "audit";
+    selectSession("sess-audit-1", "cwd:audit-hop-10");
+
+    const auditScope = coordinator.getNavigationScope();
+    expect(auditScope.viewMode).toBe("audit");
+    expect(auditScope.sessionId).toBe("sess-audit-1");
+    expect(auditScope.targetHopId).toBe("cwd:audit-hop-10");
+    expect(requestedHopRef.current).toBe("cwd:audit-hop-10");
   });
 
   // 1c. In-flight A/H1 followed by navigation to A/H2 aborts/discards H1 and applies H2
