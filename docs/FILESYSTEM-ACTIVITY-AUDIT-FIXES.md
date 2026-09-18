@@ -38,7 +38,7 @@ and the corrective work are not conflated.
 
 ## Current focus
 
-**In progress:** `FA-011` — bound the process-wide closed-session audit-path cache.
+**In progress:** `FA-012` — establish explicit filesystem feature ownership boundaries.
 
 ## Remediation backlog
 
@@ -54,8 +54,8 @@ and the corrective work are not conflated.
 | `FA-008` | `P1` | `DONE` | `FS-006`, `FS-018` | Filter and hop changes use `replaceState`, so Back/Forward cannot traverse user navigation between these states. | User-initiated view, session, filter, and hop changes create intentional history entries without flooding history during automatic synchronization or playback; Back/Forward restore a coherent UI and do not trigger loops. | Accepted FA-008 implementation chain `760017f` → `bf54095` → `4566131` → `3be0250` → `ef8e3b8` → `bcb36b2` → `ae45832`; supporting documentation in `8c82c7e`; origin/main integration merge `fdca7d6`. Final audit evidence: 17 dashboard test files / 399 Vitest tests passing, zero ESLint errors or warnings, clean production build, clean `git diff --check`, and all five Go modules passing. |
 | `FA-009` | `P1` | `DONE` | `FS-019` | Replay exposes real timestamps, but the scrubber thumb is positioned by hop index, implying uniform spacing. Partial history also displays a duration without identifying it as partial. | Scrubber position maps to elapsed event time, with a documented strategy for equal, missing, invalid, and non-monotonic timestamps; stepping remains hop-based; partial durations are explicitly labelled until retained history is complete; uneven-gap browser tests verify the real range input. | Final re-audit accepted the implementation chain `8e6e4c849628c431adddec7d64121be22ae68ae8` → `d3dbbf9309c78bd9d6682a3123891dd9d306cd90`: shared `buildReplayTimeline`, elapsed-time scrubber positioning, deterministic timestamp fallback, explicit partial/complete duration labels, and 18 unit/component regressions. |
 | `FA-010` | `P1` | `DONE` | `FS-002` | History `hasMore` is computed after malformed documents are normalized away, while counts are based on raw documents. | Pagination cursor, page completeness, and totals are based on the same valid-event contract; malformed legacy records cannot end pagination early or create an unreachable remainder. | Final audit accepted on commit chain `5c85c6464e4a4fe55a6720c97cb8fc8c7965ca21` → `470c9305e690a08a5954070110233f072256fbee` → `696fb208dfff535a3d0cf448031c79f0515f367b` → `9dec1c0bd5a08e8ad031179d5ca7189170ea5849` → `b2527715956e15a705f2ac7c78e247667cf22a95`; production `getSessionCwdHistory` uses one MongoDB aggregation with a shared valid-event contract, and the final guarded MongoDB validation passed. |
-| `FA-011` | `P2` | `IN PROGRESS` | `FS-007` | The process-wide closed-session audit-path cache has no size or expiry bound. Topology refreshes populate it from `cwd_session_state`'s recent closed-session buffer after `cwd_events` aggregation; historical audit-directory searches use separate pipelines and do not populate this cache. Rolling closed sessions can therefore grow the cache for the lifetime of the server process. | Cache has an explicit memory bound or expiry policy; eviction cannot corrupt immutable-session results; cache behavior and operational trade-offs are documented and tested. | Implemented bounded production LRU with a 24-entry hard bound (two 12-session topology windows), negative caching for missing aggregation rows, deterministic capacity behavior, and production integration regressions. Pending final audit. |
-| `FA-012` | `P2` | `TODO` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | — |
+| `FA-011` | `P2` | `DONE` | `FS-007` | The process-wide closed-session audit-path cache has no size or expiry bound. Topology refreshes populate it from `cwd_session_state`'s recent closed-session buffer after `cwd_events` aggregation; historical audit-directory searches use separate pipelines and do not populate this cache. Rolling closed sessions can therefore grow the cache for the lifetime of the server process. | Cache has an explicit memory bound or expiry policy; eviction cannot corrupt immutable-session results; cache behavior and operational trade-offs are documented and tested. | Final audit accepted on commit `d716bd48e504b376482961c555657971c23d4987` (`fix(filesystem): bound closed-session audit cache (FA-011)`). |
+| `FA-012` | `P2` | `IN PROGRESS` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | Ownership refactor started: page-level response controller, focused response panel, replay view-model props with no route-history autoplay timer, shared timeline composition, topology header presentation, and deterministic controller/import-boundary tests. Pending full audit. |
 | `FA-013` | `P1` | `TODO` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. Note: AuditSessionSelect debounce test currently mirrors behavior rather than rendering the component; full component/browser rendering tests to be added under FA-013. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | — |
 | `FA-014` | `P2` | `TODO` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded “clean” evidence does not match the current working tree. | Tracker has one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; original FS items affected by this audit are reopened or labelled partial. | — |
 | `FA-015` | `P2` | `TODO` | `Change hygiene` | `git diff --check` reports blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large uncommitted change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | — |
@@ -239,8 +239,31 @@ sessions re-enter the recent topology window. Nine regressions in
 and the production `getFilesystemTopology` path, including rolling-window
 capacity, deterministic LRU eviction and recency, duplicate writes, immutable
 hits, negative results, active-session live aggregation, eviction refetch, and
-concurrent request coalescing. FA-011 remains `IN PROGRESS` pending final
-audit; FA-012 and later items remain `TODO` and untouched.
+concurrent request coalescing. FA-011 is `DONE` after final audit on accepted
+commit `d716bd48e504b376482961c555657971c23d4987`. FA-012 is now `IN PROGRESS`;
+FA-013 and later items remain `TODO` and untouched.
+
+### FA-012 implementation evidence (2026-09-19)
+
+Response lifecycle ownership now resides in the explicit page-level
+`useResponseActionController` boundary in `FilesystemActivity`; the focused
+`ResponseActionPanel` receives only response state and callbacks. This preserves
+lazy capability probing, strict `(sessionId, actionId)` polling, terminal
+feedback, and abort behavior while removing `useResponseAction` and the fallback
+autoplay timer from `CwdRouteHistory`. `useAuditReplay` remains the sole
+production replay timer/state owner and its derived replay view model is passed
+to route-history presentation. `FilesystemTimelinePanel` centralizes the two
+layout variants so collapse/fullscreen changes do not duplicate feature owners.
+`TopologyCanvasHeader` isolates topology identity presentation while the
+existing `TopologyCanvas` remains the sole viewport/arrangement owner per
+mounted topology.
+
+Added deterministic production controller and real-DOM ownership regressions in
+`dashboard-v2/tests/filesystem-ownership-boundaries.test.tsx` covering inactive
+response capability requests, rerender deduplication, session-change abort,
+strict polling ownership, one autoplay hop per timer, and import boundaries.
+FA-012 remains `IN PROGRESS` pending full validation and final audit;
+FA-013 and later items remain `TODO` and untouched.
 
 ## Required validation gate
 

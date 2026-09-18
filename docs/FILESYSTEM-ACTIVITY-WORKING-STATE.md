@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity live working state
 status: active
-last_updated: 2026-09-15
+last_updated: 2026-09-19
 owner: Dashboard Filesystem workstream
 ---
 
@@ -40,13 +40,12 @@ Reproducible test results belong in [`validation/`](validation/).
 
 ## Current focus
 
-**In progress:** `FS-012` — add freshness and degraded-state semantics.
+**In progress:** `FA-012` — establish explicit filesystem feature ownership boundaries.
 
-**Why now:** `FS-011` (response-action polling cost reduction) is complete, eliminating Pi
-health ping spam, redundant MongoDB reads, and fixed-rate polling via single-pass database reads,
-TTL health caching, bounded backoff, and SSE-driven reactive triggers. We now advance to `FS-012`
-to introduce explicit freshness and degraded-state semantics so connected transport and stale data
-are distinguishable, with update age indicators, stale thresholds, and graceful snapshot retention during recovery.
+**Why now:** The original `FS-016` hook extraction remains complete. This follow-up
+remediation is not accepted yet: it is isolating the response-action controller,
+replay timer, topology presentation, and shared page composition without changing
+the original filesystem behavior contracts.
 
 ## Baseline
 
