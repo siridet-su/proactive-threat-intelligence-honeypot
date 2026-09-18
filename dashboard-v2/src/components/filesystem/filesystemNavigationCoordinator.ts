@@ -16,7 +16,11 @@ import type {
   RemoteAuditLookupCoordinator,
   RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
-import { createRemoteAuditLookupTerminalObserver } from "./sessionHopResolver";
+import {
+  createRemoteAuditLookupTerminalObserver,
+  normalizeHop,
+  type RemoteAuditLookupTerminalObserver,
+} from "./sessionHopResolver";
 
 export interface NavigationStateCommitOptions {
   view?: "live" | "audit";
@@ -29,7 +33,8 @@ export interface NavigationStateCommitOptions {
 export interface PopStateTransaction {
   id: number;
   target: AuditUrlParams;
-  status: "pending" | "terminal";
+  status: "pending" | "terminal" | "failed";
+  error?: unknown;
 }
 
 /**
@@ -72,6 +77,7 @@ export interface NavigationDomainAdapter {
     targetHopId?: string | null,
   ) => void;
   recordLookedUpSession?: (session: FilesystemClosedSession) => void;
+  onNavigationApplicationError?: (error: unknown, transaction: PopStateTransaction) => void;
   resetHistory: () => void;
   resetRequestedHopState: () => void;
   onExitFullscreenAndPlaying?: () => void;
@@ -173,6 +179,19 @@ export class FilesystemNavigationCoordinator {
   private markTransactionTerminal(txId: number): void {
     if (this.activeTransaction?.id === txId) {
       this.activeTransaction.status = "terminal";
+      this.activeTransaction.error = undefined;
+    }
+  }
+
+  private markTransactionFailed(txId: number, error: unknown): void {
+    if (this.activeTransaction?.id !== txId) return;
+    this.activeTransaction.status = "failed";
+    this.activeTransaction.error = error;
+    try {
+      this.options.onNavigationApplicationError?.(error, { ...this.activeTransaction });
+    } catch {
+      // Error reporting must not replace the original recoverable transaction
+      // state or make a failed navigation appear successfully adopted.
     }
   }
 
@@ -505,13 +524,18 @@ export class FilesystemNavigationCoordinator {
   handlePopState(searchString: string): void {
     const parsed = parseAuditUrlParams(searchString);
     const nextView = parsed.view ?? "live";
-    const effectiveHop = nextView === "live" ? null : (parsed.hop ?? null);
+    const effectiveHop = nextView === "live" ? null : normalizeHop(parsed.hop);
+    const canonicalTarget: AuditUrlParams = {
+      ...parsed,
+      view: nextView,
+      hop: effectiveHop,
+    };
 
     // Deduplicate if an active popstate transaction is already pending for this identical canonical target
     if (
       this.activeTransaction &&
       this.activeTransaction.status === "pending" &&
-      areAuditUrlParamsEqual(this.activeTransaction.target, parsed)
+      areAuditUrlParamsEqual(this.activeTransaction.target, canonicalTarget)
     ) {
       return;
     }
@@ -519,7 +543,7 @@ export class FilesystemNavigationCoordinator {
     const txId = ++this.transactionCounter;
     this.activeTransaction = {
       id: txId,
-      target: parsed,
+      target: canonicalTarget,
       status: "pending",
     };
 
@@ -615,12 +639,10 @@ export class FilesystemNavigationCoordinator {
     // Determine whether a lookup is already in flight for this exact intent.
     // A same-intent join is registered through the coordinator's terminal-only
     // observer API; a different intent must become the new mutation owner.
-    const inFlightIntent = this.options.coordinator.getInFlightIntent();
-    const alreadyInFlight = Boolean(
-      inFlightIntent &&
-        inFlightIntent.sessionId === sessionId &&
-        (inFlightIntent.targetHopId ?? null) === (targetHopId ?? null),
-    );
+    const alreadyInFlight = this.options.coordinator.isIntentInFlight({
+      sessionId,
+      targetHopId,
+    });
 
     // Full mutation callbacks used when THIS transaction starts the lookup
     const mutatingCallbacks = {
@@ -654,33 +676,44 @@ export class FilesystemNavigationCoordinator {
     // Lightweight terminal-only observer used when joining an existing lookup.
     // It has no RemoteAuditLookupCallback shape and therefore cannot become an
     // authoritative domain mutation owner.
-    const terminalObserver = alreadyInFlight
-      ? createRemoteAuditLookupTerminalObserver(() => {
-          if (this.activeTransaction?.id !== txId) return;
-          this.markTransactionTerminal(txId);
-        })
-      : undefined;
+    let terminalObserver: RemoteAuditLookupTerminalObserver | undefined;
+    let registeredMutationOwner = false;
 
     try {
-      if (terminalObserver) {
-        await this.options.coordinator.joinLookup(
+      if (alreadyInFlight) {
+        const ownerClaim = this.options.coordinator.claimMutationOwner(
           { sessionId, targetHopId },
-          terminalObserver,
+          mutatingCallbacks,
         );
+        if (ownerClaim.claimed) {
+          registeredMutationOwner = true;
+          await ownerClaim.promise;
+        } else {
+          terminalObserver = createRemoteAuditLookupTerminalObserver(() => {
+            if (this.activeTransaction?.id !== txId) return;
+            this.markTransactionTerminal(txId);
+          });
+          await this.options.coordinator.joinLookup(
+            { sessionId, targetHopId },
+            terminalObserver,
+          );
+        }
       } else {
+        registeredMutationOwner = true;
         await this.options.coordinator.lookup(
           { sessionId, targetHopId },
           mutatingCallbacks,
         );
       }
-    } catch {
-      // A failed authoritative application intentionally leaves the transaction
-      // pending. This keeps passive URL synchronization suppressed rather than
-      // claiming terminal state after partially applied domain state.
+    } catch (error) {
+      // A failed authoritative application becomes explicitly recoverable:
+      // it is not terminal-success, but it also cannot suppress URL sync
+      // forever or deduplicate a retry of the same target.
+      this.markTransactionFailed(txId, error);
     } finally {
       if (terminalObserver) {
         this.options.coordinator.unsubscribe(terminalObserver);
-      } else {
+      } else if (registeredMutationOwner) {
         this.options.coordinator.unsubscribe(mutatingCallbacks);
       }
     }
@@ -693,7 +726,7 @@ export class FilesystemNavigationCoordinator {
    */
   synchronizeUrlState(): void {
     if (typeof window === "undefined") return;
-    if (this.isPopStatePending()) return;
+    if (this.activeTransaction && this.activeTransaction.status !== "terminal") return;
 
     const currentParams = parseAuditUrlParams(window.location.search);
     const currentSession =

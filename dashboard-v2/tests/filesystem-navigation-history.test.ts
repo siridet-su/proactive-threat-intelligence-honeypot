@@ -1361,6 +1361,71 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     expect(selectSessionSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("Finding 1: null, empty, whitespace, and trimmed hop values share one normalized intent", async () => {
+    const nullDeferred = createDeferred<FilesystemClosedSession | null>();
+    const nullOwner = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(() => nullDeferred.promise),
+    });
+    const nullPromise = coordinator.lookup(
+      { sessionId: "normalized-null", targetHopId: null },
+      nullOwner,
+    );
+
+    for (const targetHopId of [null, "", "   "]) {
+      expect(coordinator.isIntentInFlight({ sessionId: "normalized-null", targetHopId })).toBe(true);
+      const observer = createRemoteAuditLookupTerminalObserver(vi.fn());
+      expect(coordinator.joinLookup({ sessionId: "normalized-null", targetHopId }, observer)).toBe(nullPromise);
+      coordinator.unsubscribe(observer);
+    }
+
+    nullDeferred.resolve(makeSession("normalized-null"));
+    await nullPromise;
+    expect(nullOwner.onSessionFound).toHaveBeenCalledTimes(1);
+
+    const trimmedDeferred = createDeferred<FilesystemClosedSession | null>();
+    const trimmedCoordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(() => trimmedDeferred.promise),
+    });
+    const trimmedPromise = trimmedCoordinator.lookup({
+      sessionId: "normalized-hop",
+      targetHopId: " hop-1 ",
+    });
+    for (const targetHopId of ["hop-1", " hop-1 ", "  hop-1  "]) {
+      expect(trimmedCoordinator.isIntentInFlight({ sessionId: "normalized-hop", targetHopId })).toBe(true);
+    }
+    expect(trimmedCoordinator.isIntentInFlight({ sessionId: "normalized-hop", targetHopId: "hop-2" })).toBe(false);
+    trimmedDeferred.resolve(null);
+    await trimmedPromise;
+  });
+
+  it("Finding 1: a different normalized hop aborts the previous generation", async () => {
+    const firstDeferred = createDeferred<FilesystemClosedSession | null>();
+    const secondDeferred = createDeferred<FilesystemClosedSession | null>();
+    const abortSpy = vi.fn();
+    const fetchSpy = vi.fn((sessionId: string, signal: AbortSignal) => {
+      signal.addEventListener("abort", abortSpy);
+      return sessionId === "hop-change" ? firstDeferred.promise : secondDeferred.promise;
+    });
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+    });
+
+    const first = coordinator.lookup({ sessionId: "hop-change", targetHopId: "hop-1" });
+    const second = coordinator.lookup({ sessionId: "hop-change", targetHopId: " hop-2 " });
+    expect(second).not.toBe(first);
+    expect(abortSpy).toHaveBeenCalledTimes(1);
+    expect(coordinator.isIntentInFlight({ sessionId: "hop-change", targetHopId: "hop-2" })).toBe(true);
+
+    firstDeferred.resolve(makeSession("hop-change"));
+    secondDeferred.resolve(null);
+    await Promise.all([first, second]);
+    expect(coordinator.isInFlight()).toBe(false);
+  });
+
   it("Finding 1/2: async errors notify the owner once and terminal observers once in both join orders", async () => {
     const snapshotFirstDeferred = createDeferred<FilesystemClosedSession | null>();
     const snapshotFirstOwner = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
@@ -1488,7 +1553,142 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     await flushMicrotasks();
 
     expect(coordinator.isInFlight()).toBe(false);
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(navCoordinator.getActiveTransaction()).toMatchObject({
+      status: "failed",
+      error: expect.objectContaining({ message: "state-application-failed" }),
+    });
+  });
+
+  it("Finding 3: partial application failure is failed, retryable, and supersedable", async () => {
+    const firstDeferred = createDeferred<FilesystemClosedSession | null>();
+    const secondDeferred = createDeferred<FilesystemClosedSession | null>();
+    const requests = [firstDeferred, secondDeferred];
+    const fetchSpy = vi.fn(() => requests.shift()!.promise);
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+    });
+    let failApplication = true;
+    const setExpiredSessionIdSpy = vi.fn();
+    const setExtraAuditSessionsSpy = vi.fn((updater: (prev: Map<string, FilesystemClosedSession>) => Map<string, FilesystemClosedSession>) => {
+      updater(new Map());
+    });
+    const selectSessionSpy = vi.fn(() => {
+      if (failApplication) throw new Error("partial-application-failed");
+    });
+    const applicationErrors = vi.fn();
+    const navCoordinator = new FilesystemNavigationCoordinator({
+      getViewMode: () => "audit",
+      getSelectedSessionId: () => null,
+      getHideHomeOnly: () => false,
+      getTargetPathFilter: () => null,
+      getSelectedHistoryEventId: () => null,
+      getRequestedHop: () => null,
+      getExpiredSessionId: () => null,
+      getSnapshot: () => ({ sessions: [], recentClosedSessions: [], nodes: [], truncated: false, generatedAt: "" }),
+      getExtraAuditSessions: () => new Map(),
+      setViewMode: vi.fn(),
+      setHideHomeOnly: vi.fn(),
+      setTargetPathFilter: vi.fn(),
+      setSelectedHistoryEventId: vi.fn(),
+      setExpiredSessionId: setExpiredSessionIdSpy,
+      setSelectedSessionId: vi.fn(),
+      setRequestedHop: vi.fn(),
+      setRequestedSessionId: vi.fn(),
+      setExtraAuditSessions: setExtraAuditSessionsSpy,
+      getAllSessions: () => [],
+      getSessionById: () => new Map(),
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+      onNavigationApplicationError: applicationErrors,
+      coordinator,
+    });
+
+    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=partial-failure");
+    navCoordinator.handlePopState(window.location.search);
+    const firstPromise = coordinator.lookup({ sessionId: "partial-failure", targetHopId: null });
+    firstDeferred.resolve(makeSession("partial-failure"));
+    await expect(firstPromise).rejects.toThrow("partial-application-failed");
+    await flushMicrotasks();
+
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(navCoordinator.getActiveTransaction()?.status).toBe("failed");
+    expect(applicationErrors).toHaveBeenCalledTimes(1);
+    expect(setExpiredSessionIdSpy).toHaveBeenCalledTimes(1);
+    expect(selectSessionSpy).toHaveBeenCalledTimes(1);
+
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+    replaceStateSpy.mockClear();
+    navCoordinator.synchronizeUrlState();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+
+    // The same target is not deduplicated after failure and can retry.
+    failApplication = false;
+    navCoordinator.handlePopState(window.location.search);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     expect(navCoordinator.isPopStatePending()).toBe(true);
+    const retryPromise = coordinator.lookup({ sessionId: "partial-failure", targetHopId: "" });
+    secondDeferred.resolve(makeSession("partial-failure"));
+    await retryPromise;
+    await flushMicrotasks();
+    expect(navCoordinator.getActiveTransaction()?.status).toBe("terminal");
+
+    // A failed transaction is also superseded cleanly by a newer target.
+    navCoordinator.handlePopState("?view=audit&sessionId=newer-target");
+    expect(navCoordinator.getActiveTransaction()?.target.sessionId).toBe("newer-target");
+  });
+
+  it("Finding 3: ownerless lookups cannot notify terminal observers, while a later owner can claim safely", async () => {
+    const deferred = createDeferred<FilesystemClosedSession | null>();
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(() => deferred.promise),
+    });
+    const intent = { sessionId: "ownerless", targetHopId: null };
+    const ownerlessPromise = coordinator.lookup(intent);
+    const terminalSpy = vi.fn();
+    const terminalObserver = createRemoteAuditLookupTerminalObserver(terminalSpy);
+    expect(() => coordinator.joinLookup(intent, terminalObserver)).toThrow(/ownerless/);
+    deferred.resolve(makeSession("ownerless"));
+    await ownerlessPromise;
+    expect(terminalSpy).not.toHaveBeenCalled();
+
+    const claimDeferred = createDeferred<FilesystemClosedSession | null>();
+    const claimCoordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(() => claimDeferred.promise),
+    });
+    const owner = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+    const claimPromise = claimCoordinator.lookup(intent);
+    const claim = claimCoordinator.claimMutationOwner(intent, owner);
+    expect(claim.claimed).toBe(true);
+    expect(claim.promise).toBe(claimPromise);
+    claimDeferred.resolve(makeSession("ownerless"));
+    await claimPromise;
+    expect(owner.onSessionFound).toHaveBeenCalledTimes(1);
+
+    const popstateDeferred = createDeferred<FilesystemClosedSession | null>();
+    const popstateCoordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(() => popstateDeferred.promise),
+    });
+    const popstatePromise = popstateCoordinator.lookup({
+      sessionId: "ownerless-popstate",
+      targetHopId: null,
+    });
+    const popstateHarness = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=ownerless-popstate",
+      { coordinator: popstateCoordinator },
+    );
+    popstateHarness.navCoordinator.handlePopState(window.location.search);
+    expect(popstateHarness.navCoordinator.isPopStatePending()).toBe(true);
+    popstateDeferred.resolve(makeSession("ownerless-popstate"));
+    await popstatePromise;
+    await flushMicrotasks();
+    expect(popstateHarness.selectSession).toHaveBeenCalledTimes(1);
+    expect(popstateHarness.navCoordinator.getActiveTransaction()?.status).toBe("terminal");
   });
 
   it("Finding 1: Repeated identical popstate events do not add duplicate mutating observers", async () => {

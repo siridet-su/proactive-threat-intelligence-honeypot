@@ -363,6 +363,16 @@ export interface RemoteAuditLookupCoordinatorOptions {
   callbacks?: RemoteAuditLookupCallback;
 }
 
+interface NormalizedRemoteAuditLookupIntent {
+  sessionId: string;
+  targetHopId: string | null;
+}
+
+export interface MutationOwnerClaim {
+  promise: Promise<FilesystemClosedSession | null>;
+  claimed: boolean;
+}
+
 export class RemoteAuditLookupCoordinator {
   private viewMode: "live" | "audit";
   private currentSessionId: string | null = null;
@@ -392,6 +402,26 @@ export class RemoteAuditLookupCoordinator {
 
   setCallbacks(callbacks: RemoteAuditLookupCallback): void {
     this.callbacks = callbacks;
+  }
+
+  private normalizeIntent(intent: RemoteAuditLookupIntent): NormalizedRemoteAuditLookupIntent {
+    return {
+      sessionId: intent.sessionId,
+      targetHopId: normalizeHop(intent.targetHopId),
+    };
+  }
+
+  private intentsEqual(
+    left: NormalizedRemoteAuditLookupIntent,
+    right: NormalizedRemoteAuditLookupIntent,
+  ): boolean {
+    return left.sessionId === right.sessionId && left.targetHopId === right.targetHopId;
+  }
+
+  /** Returns true only when the exact normalized intent is actively executing. */
+  isIntentInFlight(intent: RemoteAuditLookupIntent): boolean {
+    if (!this.inFlightIntent || !intent.sessionId) return false;
+    return this.intentsEqual(this.inFlightIntent, this.normalizeIntent(intent));
   }
 
   getViewMode(): "live" | "audit" {
@@ -462,9 +492,12 @@ export class RemoteAuditLookupCoordinator {
 
     const matchesInFlight =
       !this.inFlightIntent ||
-      (this.inFlightIntent.sessionId === nextSessionId &&
-        normalizeHop(this.inFlightIntent.targetHopId) === nextTargetHopId &&
-        nextViewMode === "audit");
+      (nextViewMode === "audit" &&
+        nextSessionId !== null &&
+        this.isIntentInFlight({
+          sessionId: nextSessionId,
+          targetHopId: nextTargetHopId,
+        }));
 
     if (isSameScope && matchesInFlight) {
       return;
@@ -565,8 +598,9 @@ export class RemoteAuditLookupCoordinator {
     overrideCallbacks?: RemoteAuditLookupCallback,
     overrideFetchSession?: (sessionId: string, signal: AbortSignal) => Promise<FilesystemClosedSession | null>,
   ): Promise<FilesystemClosedSession | null> {
-    const sessionId = intent.sessionId;
-    const normHop = normalizeHop(intent.targetHopId);
+    const normalizedIntent = this.normalizeIntent(intent);
+    const sessionId = normalizedIntent.sessionId;
+    const normHop = normalizedIntent.targetHopId;
     if (!sessionId) return Promise.resolve(null);
 
     if (this.viewMode !== "audit") {
@@ -580,12 +614,12 @@ export class RemoteAuditLookupCoordinator {
     // A callback already registered as the owner is never registered again. A
     // different RemoteAuditLookupCallback is intentionally ignored here: it is
     // not a terminal observer and must not enter the observer collection.
-    if (
-      this.inFlightIntent &&
-      this.inFlightIntent.sessionId === sessionId &&
-      normalizeHop(this.inFlightIntent.targetHopId) === normHop
-    ) {
-      return this.inFlightIntent.promise;
+    const activeIntent = this.inFlightIntent;
+    if (activeIntent && this.isIntentInFlight(intent)) {
+      if (callbacks && !activeIntent.mutationOwner) {
+        activeIntent.mutationOwner = callbacks;
+      }
+      return activeIntent.promise;
     }
 
     // A genuinely different intent aborts the old request
@@ -662,10 +696,13 @@ export class RemoteAuditLookupCoordinator {
         const observers = Array.from(terminalObservers);
         terminalObservers.clear();
 
+        // A network completion without an owner is not an authoritative
+        // adoption. It resolves the shared network promise for cleanup, but
+        // cannot notify terminal observers or claim transaction success.
+        if (!owner) return null;
+
         if (found) {
-          if (owner) {
-            owner.onSessionFound(found, normHop);
-          }
+          owner.onSessionFound(found, normHop);
           const outcome: RemoteAuditLookupOutcome = {
             type: "found",
             session: found,
@@ -722,8 +759,7 @@ export class RemoteAuditLookupCoordinator {
       this.viewMode === "audit" &&
       this.inFlightIntent === record &&
       record.generation === generation &&
-      record.sessionId === sessionId &&
-      normalizeHop(record.targetHopId) === targetHopId &&
+      this.intentsEqual(record, { sessionId, targetHopId }) &&
       this.currentSessionId === sessionId &&
       normalizeHop(this.currentTargetHopId) === targetHopId
     );
@@ -756,21 +792,41 @@ export class RemoteAuditLookupCoordinator {
       throw new TypeError("joinLookup requires a registered terminal observer");
     }
 
-    const sessionId = intent.sessionId;
-    const normHop = normalizeHop(intent.targetHopId);
+    const normalizedIntent = this.normalizeIntent(intent);
+    const sessionId = normalizedIntent.sessionId;
     const active = this.inFlightIntent;
     if (
       !sessionId ||
       this.viewMode !== "audit" ||
       !active ||
-      active.sessionId !== sessionId ||
-      normalizeHop(active.targetHopId) !== normHop
+      !this.isIntentInFlight(intent) ||
+      !active.mutationOwner
     ) {
-      throw new Error("Cannot join a different or inactive remote lookup intent");
+      throw new Error("Cannot join a different, inactive, or ownerless remote lookup intent");
     }
 
     active.terminalObservers.add(observer);
     return active.promise;
+  }
+
+  /**
+   * Atomically claims an ownerless exact-intent lookup for an authoritative
+   * mutating caller. Existing owners remain authoritative and are not replaced.
+   */
+  claimMutationOwner(
+    intent: RemoteAuditLookupIntent,
+    callbacks: RemoteAuditLookupCallback,
+  ): MutationOwnerClaim {
+    if (!this.isIntentInFlight(intent) || !this.inFlightIntent) {
+      throw new Error("Cannot claim a different or inactive remote lookup intent");
+    }
+
+    if (this.inFlightIntent.mutationOwner) {
+      return { promise: this.inFlightIntent.promise, claimed: false };
+    }
+
+    this.inFlightIntent.mutationOwner = callbacks;
+    return { promise: this.inFlightIntent.promise, claimed: true };
   }
 
   /** Backwards-compatible alias for joinLookup. */

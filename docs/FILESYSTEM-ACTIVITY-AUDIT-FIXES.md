@@ -63,20 +63,26 @@ and the corrective work are not conflated.
 
 ### FA-008 follow-up evidence (2026-09-18)
 
-Commit `3be0250` was audited as a valid single-owner improvement but requires
+Commit `3be0250` was audited as a valid single-owner improvement but required
 follow-up: arbitrary mutating `RemoteAuditLookupCallback` objects could still be
 registered as observers, the in-flight record temporarily exposed a casted null
 promise, and popstate transactions were marked terminal before domain
-application. The new remediation commit is
-`fix(filesystem): finalize lookup ownership lifecycle (FA-008)`; its full and
-short hashes are recorded in the final handoff. It adds a deferred shared
-promise, runtime-registered terminal-only observers, exact-once owner
-application, post-application transaction marking, and production
-`useFilesystemUrlState`/FilesystemActivity-style binding coverage.
+application. The prior remediation commit was
+`ef8e3b8e97b82569113574b888204e66d911a29b` (`ef8e3b8`),
+`fix(filesystem): finalize lookup ownership lifecycle (FA-008)`. This new
+remediation commit, `fix(filesystem): close lookup failure lifecycle gaps
+(FA-008)`, centralizes normalized intent equality, adds recoverable failed
+transactions with explicit error reporting, and safely promotes ownerless
+lookups to a later authoritative mutation owner.
 
-Evidence: 33 FA-008 scenarios in
+Failure policy: an application exception stores the error on the active
+transaction with status `failed`, invokes the explicit application-error
+callback, suppresses stale URL synchronization while preserving the popped
+URL, and allows the same target to retry or a newer target to supersede it.
+
+Evidence: 37 FA-008 scenarios in
 `dashboard-v2/tests/filesystem-navigation-history.test.ts`; 17 dashboard test
-files / 394 Vitest tests passing; zero ESLint errors or warnings; clean Next.js
+files / 398 Vitest tests passing; zero ESLint errors or warnings; clean Next.js
 production build; clean `git diff --check`; and
 `go test -count=1 ./...` passing in all five `agents/` modules. FA-008 remains
 `IN PROGRESS` pending re-audit. FA-009 remains `TODO` and untouched.
