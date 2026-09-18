@@ -19,7 +19,7 @@ import {
   asString,
   buildAuditSessionsPipeline,
   buildAuditSummaryPipeline,
-  buildSessionCwdHistoryQuery,
+  buildSessionCwdHistoryPipeline,
   encodeAuditSessionCursor,
   encodeHistoryCursor,
   normalizeHistoryEvent,
@@ -279,6 +279,21 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
   return runtime.snapshotRequest;
 }
 
+/**
+ * Reads one history page through a single database-side aggregation.
+ *
+ * The aggregation first projects the production valid-event contract, then
+ * uses one $facet for the bounded page lookahead and valid-event totals. The
+ * application receives at most HISTORY_PAGE_SIZE + 1 normalized documents;
+ * malformed raw records are filtered and counted only inside MongoDB, never
+ * scanned or counted in application code.
+ * `allowDiskUse` permits MongoDB to spill the mixed-schema sort/count work;
+ * the leading sessionId/session_id match remains indexable. Recommended
+ * supporting indexes are { sessionId: 1, at: -1, eventId: -1 } and
+ * { session_id: 1, timestamp: -1, eventId: -1 }. The built-in _id_ index
+ * remains the fallback identifier lookup; because legacy fields are
+ * normalized in the pipeline, MongoDB may still sort after that projection.
+ */
 export async function getSessionCwdHistory(sessionId: string, cursor: string | null): Promise<SessionCwdHistoryPage> {
   if (typeof sessionId !== "string" || sessionId.length > MAX_CWD_IDENTIFIER_LENGTH || (cursor && cursor.length > MAX_CWD_IDENTIFIER_LENGTH)) {
     return { items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true };
@@ -287,24 +302,20 @@ export async function getSessionCwdHistory(sessionId: string, cursor: string | n
   if (!sanitizedSessionId) {
     return { items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true };
   }
-  const query = buildSessionCwdHistoryQuery(sanitizedSessionId, cursor);
-  const sessionQuery = buildSessionCwdHistoryQuery(sanitizedSessionId, null);
-
   const client = await getMongoClient();
   const collection = client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION);
-  const [documents, totalItems, totalSuccessfulItems] = await Promise.all([
-    collection
-      .find(query)
-      .sort({ at: -1, eventId: -1 })
-      .limit(HISTORY_PAGE_SIZE + 1)
-      .allowDiskUse(true)
-      .toArray(),
-    collection.countDocuments(sessionQuery),
-    collection.countDocuments({ $and: [sessionQuery, { action: { $ne: "failed_change" } }] }),
-  ]);
+  const pipeline = buildSessionCwdHistoryPipeline(sanitizedSessionId, cursor, HISTORY_PAGE_SIZE);
+  const [facet] = await collection.aggregate<{
+    items?: Document[];
+    totalItems?: Array<{ count?: number }>;
+    totalSuccessfulItems?: Array<{ count?: number }>;
+  }>(pipeline, { allowDiskUse: true }).toArray();
+  const documents = facet?.items ?? [];
   const events = documents.map(normalizeHistoryEvent).filter((item): item is SessionCwdHistoryEvent => item !== null);
-  const hasMore = events.length > HISTORY_PAGE_SIZE;
+  const hasMore = documents.length > HISTORY_PAGE_SIZE;
   const items = events.slice(0, HISTORY_PAGE_SIZE);
+  const totalItems = Number(facet?.totalItems?.[0]?.count ?? 0);
+  const totalSuccessfulItems = Number(facet?.totalSuccessfulItems?.[0]?.count ?? 0);
   return {
     items,
     nextCursor: hasMore && items.length ? encodeHistoryCursor(items.at(-1)!) : null,

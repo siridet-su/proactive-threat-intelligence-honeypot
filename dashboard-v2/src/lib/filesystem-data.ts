@@ -72,6 +72,142 @@ export function buildSessionCwdHistoryQuery(sessionId: string, cursor: string | 
   };
 }
 
+const SESSION_CWD_HISTORY_ACTIONS = ["entered", "changed", "failed_change"];
+
+function validHistoryStringExpression(field: string): Document {
+  return {
+    $cond: [
+      { $eq: [{ $type: field }, "string"] },
+      {
+        $cond: [
+          { $ne: [{ $trim: { input: field } }, ""] },
+          field,
+          null,
+        ],
+      },
+      null,
+    ],
+  };
+}
+
+function validHistoryDateExpression(field: string): Document {
+  return {
+    $cond: [
+      { $in: [{ $type: field }, ["date", "string"]] },
+      { $convert: { input: field, to: "date", onError: null, onNull: null } },
+      null,
+    ],
+  };
+}
+
+/**
+ * Builds the database-side valid-event contract used by history pagination.
+ *
+ * The contract deliberately mirrors normalizeHistoryEvent: a document is
+ * valid only when it has a non-blank session identifier (sessionId or
+ * session_id), a parseable at/timestamp (at preferred), a non-blank eventId
+ * or _id fallback, and one of the three supported actions. The projection
+ * makes those effective values canonical before sorting, cursor comparison,
+ * counting, or page limiting.
+ */
+export function buildSessionCwdHistoryPipeline(
+  sessionId: string,
+  cursor: string | null,
+  pageSize: number,
+): Document[] {
+  const limit = Math.max(1, Math.floor(pageSize));
+  const effectiveSessionId = {
+    $let: {
+      vars: {
+        canonical: validHistoryStringExpression("$sessionId"),
+        legacy: validHistoryStringExpression("$session_id"),
+      },
+      in: { $ifNull: ["$$canonical", "$$legacy"] },
+    },
+  };
+  const effectiveAt = {
+    $ifNull: [validHistoryDateExpression("$at"), validHistoryDateExpression("$timestamp")],
+  };
+  const effectiveEventId = {
+    $ifNull: [
+      validHistoryStringExpression("$eventId"),
+      {
+        $convert: {
+          input: "$_id",
+          to: "string",
+          onError: null,
+          onNull: null,
+        },
+      },
+    ],
+  };
+
+  const decodedCursor = decodeHistoryCursor(cursor);
+  const cursorMatch = decodedCursor
+    ? {
+        $match: {
+          $or: [
+            { at: { $lt: new Date(decodedCursor.at) } },
+            { at: new Date(decodedCursor.at), eventId: { $lt: decodedCursor.id } },
+          ],
+        },
+      }
+    : null;
+
+  const itemsPipeline: Document[] = [];
+  if (cursorMatch) itemsPipeline.push(cursorMatch);
+  itemsPipeline.push({ $sort: { at: -1, eventId: -1 } }, { $limit: limit + 1 });
+
+  return [
+    // This initial OR is indexable on either canonical or legacy session key.
+    { $match: { $or: [{ sessionId }, { session_id: sessionId }] } },
+    {
+      $set: {
+        effectiveSessionId,
+        effectiveAt,
+        effectiveEventId,
+      },
+    },
+    {
+      $match: {
+        $expr: {
+          $and: [
+            { $eq: ["$effectiveSessionId", sessionId] },
+            { $ne: ["$effectiveAt", null] },
+            { $ne: ["$effectiveEventId", null] },
+            { $ne: ["$effectiveEventId", ""] },
+            { $in: ["$action", SESSION_CWD_HISTORY_ACTIONS] },
+          ],
+        },
+      },
+    },
+    {
+      $project: {
+        _id: 0,
+        sessionId: "$effectiveSessionId",
+        at: "$effectiveAt",
+        eventId: "$effectiveEventId",
+        sequence: 1,
+        fromPath: 1,
+        toPath: 1,
+        action: 1,
+        status: 1,
+        sourceEventId: 1,
+      },
+    },
+    {
+      $facet: {
+        items: itemsPipeline,
+        totalItems: [{ $count: "count" }],
+        totalSuccessfulItems: [
+          { $match: { action: { $ne: "failed_change" } } },
+          { $count: "count" },
+        ],
+      },
+    },
+  ];
+}
+
 export interface AuditSessionCursor {
   closedAt: string;
   sessionId: string;
