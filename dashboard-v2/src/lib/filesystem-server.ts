@@ -288,11 +288,12 @@ export async function getFilesystemTopology(): Promise<FilesystemTopologySnapsho
  * malformed raw records are filtered and counted only inside MongoDB, never
  * scanned or counted in application code.
  * `allowDiskUse` permits MongoDB to spill the mixed-schema sort/count work;
- * the leading sessionId/session_id match remains indexable. Recommended
- * supporting indexes are { sessionId: 1, at: -1, eventId: -1 } and
- * { session_id: 1, timestamp: -1, eventId: -1 }. The built-in _id_ index
- * remains the fallback identifier lookup; because legacy fields are
- * normalized in the pipeline, MongoDB may still sort after that projection.
+ * the leading sessionId/session_id match remains indexable. Processor-agent
+ * currently provisions { sessionId: 1, at: -1, eventId: -1 } and
+ * { session_id: 1, at: -1, eventId: -1 }, plus the expires_at TTL index.
+ * There is no timestamp index; timestamp fallback documents and all effective
+ * fields are normalized before MongoDB sorts and counts after projection.
+ * The built-in _id_ index remains the fallback identifier lookup.
  */
 export async function getSessionCwdHistory(sessionId: string, cursor: string | null): Promise<SessionCwdHistoryPage> {
   if (typeof sessionId !== "string" || sessionId.length > MAX_CWD_IDENTIFIER_LENGTH || (cursor && cursor.length > MAX_CWD_IDENTIFIER_LENGTH)) {

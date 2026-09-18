@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity audit remediation
 status: active
-last_updated: 2026-09-18
+last_updated: 2026-09-19
 owner: Dashboard Filesystem workstream
 source_review: FS-001 through FS-019 audit
 ---
@@ -53,7 +53,7 @@ and the corrective work are not conflated.
 | `FA-007` | `P1` | `DONE` | `FS-013`, `FS-018` | Arrow keys on a closed combobox trigger try to focus unmounted options without opening the popover. The listbox owns search and action controls that are not options. Note: AuditSessionSelect currently has duplicated close cleanup/onClearSearch paths; cleanup to be addressed during FA-007. | ArrowDown/ArrowUp open the popover and place focus predictably; Escape and selection restore trigger focus; ARIA ownership follows the chosen combobox/listbox pattern; Session and Path selectors pass keyboard and screen-reader-oriented component tests. | Accepted remediation through commit chain ending at `c4680cd` (building on commits `03ad4f2`, `fd2ddcb`, `4db930e`, and `c4680cd`): (1) centralized debounce, generation scoping, and strictly-once close/search cleanup in `AuditSessionSearchManager`; (2) opened popover on trigger arrow keys (`ArrowDown` -> `"first"`, `ArrowUp` -> `"last"`) and roving DOM focus; (3) composite ARIA popover model: trigger combobox with `aria-controls` pointing to listbox ID, listbox containing only groups and options, search and action buttons outside listbox, direct roving focus; (4) parent-controlled vs standalone search ownership with page one to page two cursor pagination; (5) preserved intentional focus target via `isMeaningfulFocusTarget` (the dedicated control test directly exercises Retry while deliberate/external-focus tests cover shared focus preservation on Load more, Reset filters, search input, trigger, or external controls); (6) fallback to search input when focused option disappears; (7) synchronized option focus via `handleOptionFocus(index, key)` and roving tabindex (`tabIndex={0}` on active option); (8) stabilized identity extractors at module level; (9) 63 unit and real DOM interaction tests in `combobox-popover.test.ts` (16 test files / 361 tests passing total, Go backend tests passing, clean ESLint with 0 errors/0 warnings, clean Next.js Turbopack production build, clean `git diff --check`). |
 | `FA-008` | `P1` | `DONE` | `FS-006`, `FS-018` | Filter and hop changes use `replaceState`, so Back/Forward cannot traverse user navigation between these states. | User-initiated view, session, filter, and hop changes create intentional history entries without flooding history during automatic synchronization or playback; Back/Forward restore a coherent UI and do not trigger loops. | Accepted FA-008 implementation chain `760017f` → `bf54095` → `4566131` → `3be0250` → `ef8e3b8` → `bcb36b2` → `ae45832`; supporting documentation in `8c82c7e`; origin/main integration merge `fdca7d6`. Final audit evidence: 17 dashboard test files / 399 Vitest tests passing, zero ESLint errors or warnings, clean production build, clean `git diff --check`, and all five Go modules passing. |
 | `FA-009` | `P1` | `DONE` | `FS-019` | Replay exposes real timestamps, but the scrubber thumb is positioned by hop index, implying uniform spacing. Partial history also displays a duration without identifying it as partial. | Scrubber position maps to elapsed event time, with a documented strategy for equal, missing, invalid, and non-monotonic timestamps; stepping remains hop-based; partial durations are explicitly labelled until retained history is complete; uneven-gap browser tests verify the real range input. | Final re-audit accepted the implementation chain `8e6e4c849628c431adddec7d64121be22ae68ae8` → `d3dbbf9309c78bd9d6682a3123891dd9d306cd90`: shared `buildReplayTimeline`, elapsed-time scrubber positioning, deterministic timestamp fallback, explicit partial/complete duration labels, and 18 unit/component regressions. |
-| `FA-010` | `P1` | `IN PROGRESS` | `FS-002` | History `hasMore` is computed after malformed documents are normalized away, while counts are based on raw documents. | Pagination cursor, page completeness, and totals are based on the same valid-event contract; malformed legacy records cannot end pagination early or create an unreachable remainder. | Production `getSessionCwdHistory` now uses one MongoDB aggregation: indexable canonical/legacy session match, database-side valid-event projection, canonical effective sort/cursor keys, and a `$facet` returning at most 81 page documents plus valid total/successful counts. Six production-path regressions cover malformed interleaving/lookahead/tail/all-malformed data, canonical and legacy fields, fallback identifiers, timestamp ties, multi-page traversal, exact cursor exhaustion, and bounded identifiers. Pending re-audit. |
+| `FA-010` | `P1` | `IN PROGRESS` | `FS-002` | History `hasMore` is computed after malformed documents are normalized away, while counts are based on raw documents. | Pagination cursor, page completeness, and totals are based on the same valid-event contract; malformed legacy records cannot end pagination early or create an unreachable remainder. | Production `getSessionCwdHistory` uses one MongoDB aggregation: indexable canonical/legacy session match, database-side valid-event projection, canonical effective sort/cursor keys, and a `$facet` returning at most 81 page documents plus valid total/successful counts. Six application facet-decoding regressions remain, and the gated MongoDB suite now executes the exact production pipeline against MongoDB 8.0. Pending re-audit. |
 | `FA-011` | `P2` | `TODO` | `FS-007` | The process-wide closed-session audit-path cache has no size or expiry bound. Searching historical pages grows it for the lifetime of the server process. | Cache has an explicit memory bound or expiry policy; eviction cannot corrupt immutable-session results; cache behavior and operational trade-offs are documented and tested. | — |
 | `FA-012` | `P2` | `TODO` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | — |
 | `FA-013` | `P1` | `TODO` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. Note: AuditSessionSelect debounce test currently mirrors behavior rather than rendering the component; full component/browser rendering tests to be added under FA-013. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | — |
@@ -149,21 +149,39 @@ successful facet. The public cursor is exactly `{ at, id }` from the effective
 projection, so canonical and supported legacy fields share one ordering and
 cursor identity.
 
-The recommended supporting indexes are `{ sessionId: 1, at: -1, eventId: -1 }`
-and `{ session_id: 1, timestamp: -1, eventId: -1 }`; MongoDB's built-in
-`_id_` index remains the fallback identifier lookup. The leading mixed-schema
-session match can use those indexes; normalization of fallback fields means
-the final effective sort may still occur after projection, with MongoDB disk
-spill enabled. No application-side raw scan or raw count remains; the Node.js
-boundary receives only the bounded lookahead and facet totals.
+The processor currently provisions `{ sessionId: 1, at: -1, eventId: -1 }`,
+`{ session_id: 1, at: -1, eventId: -1 }`, and the `expires_at` TTL index;
+MongoDB's built-in `_id_` index remains the fallback identifier lookup. The
+leading mixed-schema session `$match` can use the two compound indexes. There
+is no `timestamp` index, and no index supports the projected effective fields:
+timestamp fallback documents, effective fallback identifiers, the final sort,
+and the facet counts are post-projection work that may spill to disk. No
+application-side raw scan or raw count remains; the Node.js boundary receives
+only the bounded lookahead and facet totals.
 
-Regression coverage is in
-`dashboard-v2/tests/filesystem-history-pagination.test.ts` and calls the
-production `getSessionCwdHistory` implementation. Full validation for this
-working change is 19 dashboard test files / 435 Vitest tests passing, zero
-ESLint errors or warnings, a passing Next.js production build, passing
-`git diff --check`, and all five Go modules passing with
-`go test -count=1 ./...`. FA-010 remains `IN PROGRESS` pending re-audit.
+The original six application tests in
+`dashboard-v2/tests/filesystem-history-pagination.test.ts` now describe facet
+decoding and structural checks only; they do not claim MongoDB execution.
+The same file contains a gated integration suite that uses a real MongoDB 8.0
+engine, captures `commandStarted` aggregate commands, and asserts that the
+command pipeline exactly equals `buildSessionCwdHistoryPipeline` for each
+production `getSessionCwdHistory` request. It inserts only into the temporary
+container's `honeypot_db.cwd_events`, clears the collection between tests, and
+drops it before closing the client. Run it reproducibly with:
+
+`cd dashboard-v2 && npm run test:filesystem-history-integration`
+
+The wrapper starts a temporary `mongo:8.0` container on an ephemeral localhost
+port, waits for `ping`, runs the gated Vitest suite with `FA010_MONGO_URI`, and
+force-removes the container in `finally`. The executed fixture covers
+canonical/legacy fields, Date and ISO values, ObjectId/string fallbacks,
+blank/invalid identifiers and timestamps, unsupported actions, fallback
+precedence, malformed records around page boundaries, 84+ valid events,
+failed-change totals, equal-timestamp ordering, multi-page cursor traversal,
+exact exhaustion, all-malformed data, and post-projection parity with
+`normalizeHistoryEvent`. Executed on 2026-09-19: 1 test file and 8 tests
+passed against the temporary MongoDB instance, with the container removed
+afterward. FA-010 remains `IN PROGRESS` pending re-audit.
 FA-011 and later items remain `TODO` and untouched.
 
 ## Required validation gate
