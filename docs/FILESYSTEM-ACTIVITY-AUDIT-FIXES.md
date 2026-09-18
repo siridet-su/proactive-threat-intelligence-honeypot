@@ -38,7 +38,7 @@ and the corrective work are not conflated.
 
 ## Current focus
 
-**In progress:** `FA-012` — establish explicit filesystem feature ownership boundaries.
+**In progress:** `FA-013` — add truthful component and browser coverage for the filesystem audit behaviors.
 
 ## Remediation backlog
 
@@ -55,8 +55,8 @@ and the corrective work are not conflated.
 | `FA-009` | `P1` | `DONE` | `FS-019` | Replay exposes real timestamps, but the scrubber thumb is positioned by hop index, implying uniform spacing. Partial history also displays a duration without identifying it as partial. | Scrubber position maps to elapsed event time, with a documented strategy for equal, missing, invalid, and non-monotonic timestamps; stepping remains hop-based; partial durations are explicitly labelled until retained history is complete; uneven-gap browser tests verify the real range input. | Final re-audit accepted the implementation chain `8e6e4c849628c431adddec7d64121be22ae68ae8` → `d3dbbf9309c78bd9d6682a3123891dd9d306cd90`: shared `buildReplayTimeline`, elapsed-time scrubber positioning, deterministic timestamp fallback, explicit partial/complete duration labels, and 18 unit/component regressions. |
 | `FA-010` | `P1` | `DONE` | `FS-002` | History `hasMore` is computed after malformed documents are normalized away, while counts are based on raw documents. | Pagination cursor, page completeness, and totals are based on the same valid-event contract; malformed legacy records cannot end pagination early or create an unreachable remainder. | Final audit accepted on commit chain `5c85c6464e4a4fe55a6720c97cb8fc8c7965ca21` → `470c9305e690a08a5954070110233f072256fbee` → `696fb208dfff535a3d0cf448031c79f0515f367b` → `9dec1c0bd5a08e8ad031179d5ca7189170ea5849` → `b2527715956e15a705f2ac7c78e247667cf22a95`; production `getSessionCwdHistory` uses one MongoDB aggregation with a shared valid-event contract, and the final guarded MongoDB validation passed. |
 | `FA-011` | `P2` | `DONE` | `FS-007` | The process-wide closed-session audit-path cache has no size or expiry bound. Topology refreshes populate it from `cwd_session_state`'s recent closed-session buffer after `cwd_events` aggregation; historical audit-directory searches use separate pipelines and do not populate this cache. Rolling closed sessions can therefore grow the cache for the lifetime of the server process. | Cache has an explicit memory bound or expiry policy; eviction cannot corrupt immutable-session results; cache behavior and operational trade-offs are documented and tested. | Final audit accepted on commit `d716bd48e504b376482961c555657971c23d4987` (`fix(filesystem): bound closed-session audit cache (FA-011)`). |
-| `FA-012` | `P2` | `IN PROGRESS` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | Follow-up remediation (pending re-audit): `useAuditReplay` now owns the required typed `AuditReplayPresentation` contract, including filtering, selected index, metrics, elapsed-time timeline, anchored-hop state, controls, and autoplay; `CwdRouteHistory` consumes that contract without fallback derivation/state/actions; `FilesystemActivity` owns response capability/polling through `useResponseActionController`; `TopologyCanvas` requires page-owned `freshnessState` and has no fallback clock/classifier; production-path happy-dom tests cover the real timeline/tab composition, response request deduplication/abort/reopen, one autoplay advance after rerender/layout changes, and zero topology fallback timers. `FA-012` remains `IN PROGRESS` pending re-audit. |
-| `FA-013` | `P1` | `TODO` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. Note: AuditSessionSelect debounce test currently mirrors behavior rather than rendering the component; full component/browser rendering tests to be added under FA-013. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | — |
+| `FA-012` | `P2` | `DONE` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | Accepted commit chain `356f48d74f64db7019cd622cca424676d42a7e4d` → `5779e32a739a6df1a45322c7172d17dd9086c14b` → `5ec0bf9ee0e28cd4b0eff50519045063e3efe470`: `useAuditReplay` owns the typed `AuditReplayPresentation` contract, `CwdRouteHistory` consumes it without fallback derivation/state/actions, `FilesystemActivity` owns response capability/polling through `useResponseActionController`, and `TopologyCanvas` requires page-owned `freshnessState` without a fallback clock/classifier. Existing production-path happy-dom evidence covers the real timeline/tab composition, response request deduplication/abort/reopen, one autoplay advance after rerender/layout changes, and zero topology fallback timers. |
+| `FA-013` | `P1` | `IN PROGRESS` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | Implementation and audit evidence in progress. Happy-dom scenarios will be recorded separately from real-browser layout/media-query scenarios; FA-013 remains `IN PROGRESS` pending audit. |
 | `FA-014` | `P2` | `TODO` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded “clean” evidence does not match the current working tree. | Tracker has one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; original FS items affected by this audit are reopened or labelled partial. | — |
 | `FA-015` | `P2` | `TODO` | `Change hygiene` | `git diff --check` reports blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large uncommitted change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | — |
 | `FA-016` | `P1` | `TODO` | `FS-007` | Full-scan summary aggregation and cursor skip on 1,878+ documents | Index optimization and execution plan bounds for large directory collections | — |
@@ -184,7 +184,7 @@ exact exhaustion, all-malformed data, and post-projection parity with
 `normalizeHistoryEvent`. Executed on 2026-09-19: 1 test file and 8 tests
 passed against the temporary MongoDB instance, with the container removed
 afterward. FA-010 is `DONE` after final audit. FA-011 is now `IN PROGRESS`;
-FA-012 and later items remain `TODO` and untouched.
+FA-013 is now `IN PROGRESS`; FA-014 and later items remain `TODO` and untouched.
 
 ### FA-010 fixture safety follow-up (2026-09-19)
 
@@ -288,14 +288,58 @@ test adapter around `useAuditReplay`, not hidden derivation in production
 `CwdRouteHistory`. No browser automation or manual response-agent smoke test
 was claimed or run.
 
-Validation after the follow-up: `npm test` in `dashboard-v2` passed 21 test
-files with 454 passing and 2 skipped tests; `npm run lint` passed; `npm run
-build` passed TypeScript, static generation, and route optimization; and
-`go test -count=1 ./...` passed in all five `agents/*` modules
+The accepted FA-012 commit chain is
+`356f48d74f64db7019cd622cca424676d42a7e4d` →
+`5779e32a739a6df1a45322c7172d17dd9086c14b` →
+`5ec0bf9ee0e28cd4b0eff50519045063e3efe470`; FA-012 is `DONE` pending no
+further implementation work under this item.
+
+### FA-013 component/browser evidence (2026-09-19)
+
+FA-013 adds `dashboard-v2/tests/fa013-component-evidence.test.tsx` with five
+production-path happy-dom scenarios: the real selector/filter composition
+applies hide-home and target-path scope through remote page-one/page-two
+search, deduplicates and completes pagination; `useSessionCwdHistory` plus
+`CwdRouteHistory` resolves a retained deep hop, preserves the URL anchor, and
+reconciles the anchor when an earlier page loads; the controlled Response tab
+uses fake timers to verify 100 ms then 150 ms cadence, terminal stop, and
+disable abort; `TopologyCanvas` renders a valid empty live snapshot as
+`Live · No activity` with zero freshness timers; and the real range input maps
+uneven elapsed positions plus Home/End hop navigation.
+
+Existing production-path happy-dom coverage remains authoritative for the
+remaining interaction breadth: `filesystem-navigation-history.test.ts` uses
+real `window.history` traversal and popstate for view/session/filter/hop state,
+stale retained-session lookup results, and history-entry ownership;
+`combobox-popover.test.ts` renders `AuditSessionSelect` and
+`AuditFilterControls` and asserts document focus, Arrow/Home/End/Enter/Space/
+Escape/typeahead behavior, ARIA ownership, loading/empty/error/retry/reset/load
+more controls, identity-preserving focus recovery, parent-controlled pagination,
+and stale page-two cancellation; `response-action-poller.test.ts` and
+`filesystem-ownership-boundaries.test.tsx` cover monotonic backoff, bounded
+timeout, session/enable/unmount cancellation, and controlled composition; and
+`filesystem-replay-scrubber.test.ts` covers equal, invalid, missing, and
+non-monotonic timestamp fallback, tie resolution, pause behavior, and partial
+versus complete labels.
+
+Real-browser-only evidence is in `tests/browser/filesystem-fa013.spec.mjs` and
+runs with the pinned `@playwright/test@1.55.0` dependency, system Chromium, and
+the dedicated `npm run test:browser` command. Scenario G exercises the real
+`FilesystemActivity` toolbar at 375, 768, and 1440 CSS pixels, checking visible
+bounding boxes and collapsed/expanded timeline reachability. Scenario H uses a
+real `prefers-reduced-motion: reduce` media setting, switches the production
+Forensic Studio tabs, and asserts zero-duration transitions with functional
+state changes. These two scenarios are not claimed as happy-dom coverage.
+
+Validation evidence: `npm test` in `dashboard-v2` passed 22 files with 459
+passing and 2 skipped tests; `npm run test:browser` passed 2 browser tests;
+`npm run lint` passed with 0 errors and 0 warnings; `npm run build` passed
+TypeScript, static generation, and route optimization; `git diff --check`
+passed; and `go test -count=1 ./...` passed in all five Go modules
 (`collector-agent`, `hardware-agent`, `processor-agent`, `response-agent`, and
-`ti-worker`). `git diff --check` and final clean-tree confirmation remain the
-commit gate. FA-012 remains `IN PROGRESS` pending re-audit; FA-013 and later
-items remain `TODO` and untouched.
+`ti-worker`). Deterministic intercepted fixtures were used; no production
+services, MongoDB, response agent, or live smoke test was contacted. FA-013
+remains `IN PROGRESS` pending audit. FA-014 and later items were not started.
 
 ## Required validation gate
 

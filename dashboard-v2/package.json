@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:browser": "playwright test --config=playwright.config.mjs",
     "test:filesystem-history-integration": "node scripts/validate-filesystem-history-pipeline.mjs",
     "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs"
   },
@@ -28,6 +29,7 @@
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/geoip-lite": "^1.4.4",
