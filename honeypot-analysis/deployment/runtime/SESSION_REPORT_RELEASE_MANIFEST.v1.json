@@ -1,0 +1,50 @@
+{
+  "schema_version": "session_report_release_manifest.v1",
+  "baseline_git_commit": "db074134a25084ffb61d8220a4148763fdf85453",
+  "runtime_baseline_release": "c15b4973654644db2ab33f790102059b76872566",
+  "scope": [
+    "deterministic_per_session_pdf_report",
+    "authenticated_dashboard_report_download",
+    "preserve_active_model1_model2_advisory_runtime",
+    "preserve_read_only_external_ti_and_next_distinct_dependencies"
+  ],
+  "report_contract": {
+    "format": "application/pdf",
+    "page_format": "A4",
+    "stored_report_required": true,
+    "on_demand_renderer": "read_only_nonpersistent_fallback",
+    "raw_command_text_included": false,
+    "subtechnique_inference": false,
+    "zero_fill": false
+  },
+  "source_files_sha256": {
+    "dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx": "53ee885f2ce03a03b935ccb0f17d2f5a7cf352db66159a86b704b2be11f134f7",
+    "dashboard-v2/src/app/api/session-report/route.ts": "ffb6e57e2cb120d9ff4b8cb2d8e5dd450ea4d435ed8c251b81118679101e9d3c",
+    "honeypot-analysis/production/api/monitor_web.py": "3cfd8ddc823ccc8d7cc5ed73753a74c901167d2d71ca878434bc7a77d2128935",
+    "honeypot-analysis/production/correlation/session_ttp_correlation.py": "5f3f3304ef1ad9f00e0a4e4159350a30a38350aab0ba15135f1984b7b8108ee8",
+    "honeypot-analysis/production/enrichment/enrichment_cache.py": "3ffa8f568237c4e5cd8fd2cc2c51413cd13c001520bc0175e98117091df74d7a",
+    "honeypot-analysis/production/enrichment/external_ti_contract.py": "f14ef21a78172d5c759a0efb8115458f073a9f4451c89d2646e9a6694e49111f",
+    "honeypot-analysis/production/enrichment/external_ti_proof_guard.py": "ece822e47e9829abc855ee45faa5aaa2f7710b499359b7b356baf814ee6e7e58",
+    "honeypot-analysis/production/enrichment/external_ti_session.py": "15bac1324a416c13ba114774d37fab2ef2d57e2492827f7c548e068a759929c5",
+    "honeypot-analysis/production/ensemble/evidence.py": "19969ec52716930dbdba1f04935e966254ef8df5f7d5bcf42a36aa8dbfcab3eb",
+    "honeypot-analysis/production/prediction_next_distinct_poc/dashboard_adapter.py": "f737b245473e7cf380fda8a7997f1a71f69d8005941e0533960de2921ddfee1c",
+    "honeypot-analysis/production/reporting/artifacts.py": "8b59105df0cfcd523d7d32d8da0e56d06686d602784b76ba62742f2de1bc29ce",
+    "honeypot-analysis/production/reporting/canonical_pipeline.py": "b4b1a4c337402306891706204a6c8274e8c82a0b9649faf71b514b03419c99e6",
+    "honeypot-analysis/production/reporting/response_guidance_v3.py": "2850a7a11e389bdb490f36253a84e1b8379831fdfa392fd5b231cca9aa3de8ad",
+    "honeypot-analysis/production/workers/analysis_worker.py": "bb957fff5c401121a32101f28c7f2d73533324d63cc86c685ac642b0587c47c6",
+    "honeypot-analysis/production/workers/session_worker.py": "5af72461a99568ad886f8922c177202eb8633af6134ad30f617624b7bfa9d47d",
+    "honeypot-analysis/tests/test_session_report_download.py": "451b85915723c57f6733868345b270daf8170fe3613b0aab464902311c57b00b"
+  },
+  "active_runtime_baseline_manifest_sha256": "166ed1ffb93a8da10496bb12d7fabe23539cf2d11fc52cbb469df89694909c3b",
+  "production_authority": "shadow_and_advisory_only",
+  "model_weights_changed": false,
+  "feature_contract_changed": false,
+  "database_schema_changed": false,
+  "mongo_writes_during_release": 0,
+  "firewall_mutations_during_release": 0,
+  "rollback": {
+    "monitor_backup": "/var/lib/honeypot/backups/session-report-20260917-v1/monitor_web.py",
+    "artifact_backup": "/var/lib/honeypot/backups/session-report-20260917-v1/artifacts.py",
+    "previous_dashboard_release": "20260917-db074134a25084ffb61d8220a4148763fdf85453"
+  }
+}

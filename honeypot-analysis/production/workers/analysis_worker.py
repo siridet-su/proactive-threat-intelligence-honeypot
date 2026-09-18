@@ -16,7 +16,6 @@ from production.classification.trust import (
     is_trusted_classification_event,
 )
 from production.classification.classification_pipeline import NotebookParityClassifier
-from production.classification.securebert_classifier import load_securebert_classifier
 from production.classification.environment import load_classifier_environment
 from production.classification.durable_replay import reclassify_durable_prefix
 from production.reporting.canonical_pipeline import (
@@ -70,20 +69,6 @@ def _safe_exception_text(exc: BaseException) -> str:
 
 def _safe_error_text(value: Any) -> str:
     return redact_error_for_log(value)
-
-
-def _load_securebert_for_replay(
-    config: ProductionConfig,
-    classifier_environment: Dict[str, Any],
-) -> Any:
-    """Keep SecureBERT available only for explicit historical replay opt-in."""
-
-    if not bool(getattr(config, "enable_securebert", False)):
-        return None
-    return load_securebert_classifier(
-        config,
-        classifier_environment=classifier_environment,
-    )
 
 
 def _safe_log_json(value: Any) -> str:
@@ -336,55 +321,8 @@ def _session_correlated_ttp_layer(hunting_context: Dict[str, Any]) -> Dict[str, 
     }
 
 
-def _prediction_hypothesis_layer(prediction_snapshot: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    payload = prediction_snapshot or {}
-    if isinstance(payload.get("payload"), dict):
-        payload = payload["payload"]
-    ranking = [
-        item
-        for item in _as_list(payload.get("final_ranking"))
-        if isinstance(item, dict)
-    ]
-    items = []
-    for item in ranking:
-        sources = [
-            source
-            for source in _as_list(item.get("sources"))
-            if isinstance(source, dict)
-        ]
-        items.append(
-            {
-                "predicted_tactic": _clean_text(item.get("tactic")),
-                "predicted_technique": _clean_text(item.get("technique")),
-                "main_ttp": _main_ttp(item.get("technique")),
-                "confidence": item.get("confidence"),
-                "score": item.get("score"),
-                "calibrated_score": item.get("calibrated_score"),
-                "source_type": ", ".join(item.get("source_types") or []),
-                "source_types": item.get("source_types") or [],
-                "evidence_type": "realtime_prediction_hypothesis",
-                "reasons": item.get("reasons") or [],
-                "sources": sources,
-            }
-        )
-    return {
-        "status": "available" if items else "not_available",
-        "count": len(items),
-        "description": (
-            "Realtime next-step hypotheses. These are forecasts only and must not "
-            "be mixed into the direct observed TTP list."
-        ),
-        "snapshot_id": payload.get("snapshot_id") or "",
-        "generated_at": payload.get("generated_at") or "",
-        "trust_status": payload.get("trust_status") or {},
-        "agreement": payload.get("agreement") or {},
-        "items": items,
-    }
-
-
 def build_threat_evidence_layers(
     session_payload: Dict[str, Any],
-    prediction_snapshot: Optional[Dict[str, Any]] = None,
     hunting_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     hunting = hunting_context or build_session_correlation_hunting_context(
@@ -395,30 +333,34 @@ def build_threat_evidence_layers(
     observed = _observed_trusted_ttp_layer(session_payload)
     audit_only = _audit_only_classification_layer(session_payload)
     correlated = _session_correlated_ttp_layer(hunting)
-    prediction = _prediction_hypothesis_layer(prediction_snapshot)
     return {
         "schema_version": "threat_evidence_layers.v1",
         "session_id": session_payload.get("session_id", "unknown"),
         "interpretation": (
-            "Direct command TTPs, session-correlated TTPs, and realtime prediction "
-            "hypotheses are intentionally separated so the report does not mix facts, "
-            "correlations, and forecasts."
+            "Direct command TTPs, session-correlated TTPs, and audit-only "
+            "classification candidates are intentionally separated so the report "
+            "does not mix facts, correlations, and non-authoritative context."
         ),
         "direct_command_ttps": direct,
         "observed_trusted_ttps": observed,
         "audit_only_classification_candidates": audit_only,
         "session_correlated_ttps": correlated,
         "correlated_ttp_hypotheses": correlated,
-        "prediction_only_hypotheses": prediction,
+        "prediction_only_hypotheses": {
+            "status": "retired",
+            "count": 0,
+            "description": "The canonical next-behavior predictor is retired from active analysis.",
+            "items": [],
+        },
         "summary": {
             "direct_command_ttp_count": direct["count"],
             "observed_trusted_ttp_count": observed["count"],
             "audit_only_classification_count": audit_only["count"],
             "session_correlated_ttp_count": correlated["count"],
-            "prediction_hypothesis_count": prediction["count"],
+            "prediction_hypothesis_count": 0,
             "has_direct_command_evidence": direct["count"] > 0,
             "has_session_correlation_evidence": correlated["count"] > 0,
-            "has_prediction_hypotheses": prediction["count"] > 0,
+            "has_prediction_hypotheses": False,
         },
     }
 
@@ -426,7 +368,6 @@ def build_threat_evidence_layers(
 def attach_threat_evidence_layers(
     report: Dict[str, Any],
     session_payload: Dict[str, Any],
-    prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     if report.get("schema_version") == "session_assessment.v4":
         # Visualization is context only. It cannot become a sibling authority
@@ -438,7 +379,6 @@ def attach_threat_evidence_layers(
             )
         context["threat_evidence_layers"] = build_threat_evidence_layers(
             session_payload,
-            prediction_snapshot=prediction_snapshot,
             hunting_context=build_session_correlation_hunting_context(
                 session_payload.get("session_ttp_correlations", []),
                 session_payload.get("session_id", "unknown"),
@@ -465,7 +405,6 @@ def session_state_from_payload(payload: Dict[str, Any]) -> SessionState:
 def deterministic_baseline_report(
     session_payload: Dict[str, Any],
     error: str,
-    prediction_snapshot: Optional[Dict[str, Any]] = None,
     config: Optional[ProductionConfig] = None,
 ) -> Dict[str, Any]:
     safe_error = _safe_error_text(error)
@@ -476,8 +415,6 @@ def deterministic_baseline_report(
         behavior_policy_path=selected.threat_hypothesis_behavior_policy_path,
         classification_policy=selected.classification_policy,
         classification_policy_path=selected.classification_rules_path,
-        model_artifact_provenance=selected.prediction_policy,
-        prediction_context=prediction_snapshot or {},
         enrichment_context=session_payload.get("enrichment_status") or {},
         correlation_context=session_payload.get("session_ttp_correlations") or [],
         mitre_cache_path=selected.mitre_attack_path,
@@ -485,6 +422,7 @@ def deterministic_baseline_report(
         response_guidance_asset_profile_path=(
             selected.response_guidance_asset_profile_path
         ),
+        include_complete_typed_hypotheses=True,
     )
     report["status"] = "observation_only_abstention"
     report["abstention"] = {
@@ -505,9 +443,7 @@ def deterministic_baseline_report(
         "fallback": "canonical_observation_only_abstention",
         "error": safe_error,
     }
-    report = attach_threat_evidence_layers(
-        report, session_payload, prediction_snapshot
-    )
+    report = attach_threat_evidence_layers(report, session_payload)
     validate_session_assessment_v4(report, raise_on_error=True)
     return _safe_report_mapping(report)
 
@@ -660,7 +596,6 @@ async def analyze_job(
     job: Dict[str, Any],
     config: ProductionConfig,
     coordinator_class: Type[Any] = CanonicalAssessmentCoordinator,
-    prediction_snapshot: Optional[Dict[str, Any]] = None,
     storage: Any = None,
 ) -> Dict[str, Any]:
     session_payload = job.get("session") or json.loads(job["payload_json"])
@@ -676,10 +611,9 @@ async def analyze_job(
         verify_assets=True,
     )
     replay_classifier = NotebookParityClassifier(
-        bert_fn=_load_securebert_for_replay(
-            config,
-            classifier_environment,
-        ),
+        # Historical evidence remains readable, but the retired transformer
+        # candidate is never instantiated by the production replay path.
+        bert_fn=None,
         mitre_db=context["mitre_attack"],
         high_confidence=float(
             config.classification_policy.get("bert_min_confidence", 0.55)
@@ -727,9 +661,6 @@ async def analyze_job(
         behavior_policy_path=config.threat_hypothesis_behavior_policy_path,
         classification_policy=config.classification_policy,
         classification_rules_path=config.classification_rules_path,
-        prediction_policy=config.prediction_policy,
-        prediction_policy_path=config.prediction_policy_path,
-        prediction_context=prediction_snapshot,
         response_guidance_policy_path=config.response_guidance_policy_path,
         response_guidance_asset_profile_path=config.response_guidance_asset_profile_path,
         mitre_cache_path=config.mitre_attack_path,
@@ -780,7 +711,7 @@ async def analyze_job(
             "non_authoritative_context must be an object"
         )
     context_payload["threat_hunting"] = hunting_context
-    result = attach_threat_evidence_layers(result, session_payload, prediction_snapshot)
+    result = attach_threat_evidence_layers(result, session_payload)
     if config.enable_actor_attribution:
         attribution = enrich_report_with_actor_attribution(
             {},
@@ -854,14 +785,6 @@ class AnalysisWorker:
                 session_payload.get("correlation_id"),
                 str(job["job_id"]),
             )
-            latest_prediction_row = self.storage.get_current_prediction_snapshot(
-                session_id
-            )
-            latest_prediction = (
-                latest_prediction_row.get("payload")
-                if isinstance(latest_prediction_row, dict)
-                else None
-            )
             with JobLeaseHeartbeat(self.storage, self.config, "analysis", job) as heartbeat:
                 try:
                     # Analysis jobs contain a bounded monitor projection. It is
@@ -927,7 +850,6 @@ class AnalysisWorker:
                         canonical_job,
                         self.config,
                         coordinator_class=coordinator_class,
-                        prediction_snapshot=latest_prediction,
                         storage=self.storage,
                     )
                 except Exception as exc:
@@ -957,7 +879,6 @@ class AnalysisWorker:
                             fallback = deterministic_baseline_report(
                                 fallback_session,
                                 safe_error,
-                                prediction_snapshot=latest_prediction,
                                 config=self.config,
                             )
                             fallback.setdefault("correlation_id", correlation_id)

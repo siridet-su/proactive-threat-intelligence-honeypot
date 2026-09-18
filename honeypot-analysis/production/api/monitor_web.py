@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import ipaddress
 import json
 import os
@@ -21,8 +22,6 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from production.api.dashboard_api import (
     TABLES as DASHBOARD_TABLES,
     _current_decision_payload,
-    _current_prediction_payload,
-    _external_seed_health_payload,
     _unverified_guidance_payload,
 )
 from production.api.security import (
@@ -38,9 +37,22 @@ from production.api.security import (
     validate_configured_bearer_tokens,
 )
 from production.classification.classification_evaluation import classification_metrics
+from production.ensemble.evidence import build_ensemble_from_session_payload
+from production.enrichment.external_ti_session import (
+    OBSERVABLE_TI_SCHEMA,
+    SESSION_TI_SCHEMA,
+    SOURCE_IP_CROSS_SESSION_SCHEMA,
+    build_observable_ti_projection,
+    build_source_ip_cross_session_projection,
+    build_session_ti_projection,
+)
+from production.correlation.session_ttp_correlation import build_observed_tactic_path
 from production.utils.config import ProductionConfig
-from production.prediction.prediction_health import infer_prediction_paths, load_prediction_health
+from production.prediction_next_distinct_poc.dashboard_adapter import (
+    build_dashboard_prediction,
+)
 from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
+from production.reporting.artifacts import render_pdf_report_bytes
 from production.utils.feedback import normalize_submitted_feedback_payload
 from production.utils.http_security import (
     BoundedThreadingHTTPServer,
@@ -68,6 +80,8 @@ MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
 MONITOR_SUMMARY_SCAN_LIMIT = 100_000
+MONITOR_SESSION_PAGE_SIZE = 256
+MONITOR_SESSION_TRAVERSAL_LIMIT = MAX_SESSIONS
 MONITOR_DETAIL_SCAN_LIMIT = 10_000
 MAX_FEEDBACK_JSON_BYTES = 1_000_000
 MAX_FEEDBACK_FORM_BYTES = 100_000
@@ -81,10 +95,6 @@ class MonitorConfig:
     reports_dir: str
     bind_host: str = "127.0.0.1"
     database_url: str = ""
-    external_seed_model_path: str = ""
-    external_seed_validation_path: str = ""
-    external_seed_review_path: str = ""
-    external_seed_health_path: str = ""
     mitre_attack_path: str = ""
     response_guidance_policy_path: str = ""
     response_guidance_asset_profile_path: str = ""
@@ -109,15 +119,10 @@ def _sqlite_path(database_url: str) -> str:
 
 def _load_monitor_config(config_path: Optional[str] = None) -> MonitorConfig:
     cfg = ProductionConfig.from_env(config_path)
-    external_seed_paths = infer_prediction_paths(cfg.prediction_policy)
     return MonitorConfig(
         database_url=cfg.database_url,
         db_path=_sqlite_path(cfg.database_url),
         reports_dir=cfg.reports_dir or DEFAULT_REPORTS_DIR,
-        external_seed_model_path=external_seed_paths["model"],
-        external_seed_validation_path=external_seed_paths["validation"],
-        external_seed_review_path=external_seed_paths["review"],
-        external_seed_health_path=external_seed_paths["health"],
         mitre_attack_path=cfg.mitre_attack_path,
         response_guidance_policy_path=cfg.response_guidance_policy_path,
         response_guidance_asset_profile_path=cfg.response_guidance_asset_profile_path,
@@ -482,35 +487,36 @@ def _decode_dashboard_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, List[str]]) -> Tuple[HTTPStatus, Optional[Dict[str, Any]]]:
-    runtime_config = _monitor_runtime_config(config)
-    storage = _open_monitor_storage(config)
-
-    if path == "/predictions/current":
+    # The canonical next-behavior route is retired before any runtime or
+    # storage initialization.  It must never become a hidden compatibility
+    # fallback or touch the historical snapshot collection.
+    if path in {"/predictions/current", "/prediction-snapshots", "/external-seed-health"}:
         session_id = query.get("session_id", [""])[0].strip()
-        if not session_id:
-            return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_current_prediction_snapshot(session_id)
-        if not snapshot:
-            return HTTPStatus.NOT_FOUND, {"error": "prediction not found", "session_id": session_id, "timestamp": utc_now()}
-        feedback_rows = [
-            row for row in storage.list_rows("analyst_feedback", limit=1000)
-            if str(row.get("session_id") or "") == session_id
-        ]
-        return HTTPStatus.OK, {
-            "item": api_row_view("prediction_snapshots", snapshot),
-            "current_prediction": _current_prediction_payload(snapshot, feedback_rows),
-            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
-            "session_id": session_id,
+        payload = {
+            "error_code": "canonical_prediction_retired",
+            "error": (
+                "canonical next-behavior prediction and historical snapshot "
+                "endpoint are retired; use /api/next-distinct"
+            ),
             "timestamp": utc_now(),
         }
+        if path in {"/predictions/current", "/prediction-snapshots"}:
+            payload["session_id"] = session_id
+        else:
+            payload["error"] = "canonical external prediction seed is retired"
+        return HTTPStatus.GONE, payload
+
+    runtime_config = _monitor_runtime_config(config)
+    storage = _open_monitor_storage(config)
 
     if path == "/decisions/current":
         session_id = query.get("session_id", [""])[0].strip()
         if not session_id:
             return HTTPStatus.BAD_REQUEST, {"error": "session_id is required"}
-        snapshot = storage.get_current_prediction_snapshot(session_id) or {"session_id": session_id, "payload": {}}
         return HTTPStatus.OK, {
-            "response_guidance": _current_decision_payload(runtime_config, storage, session_id, snapshot),
+            "response_guidance": _current_decision_payload(
+                runtime_config, storage, session_id, {},
+            ),
             "session_id": session_id,
             "timestamp": utc_now(),
         }
@@ -536,12 +542,6 @@ def _dashboard_get_payload(config: MonitorConfig, path: str, query: Dict[str, Li
         limit = _parse_limit(query, default=1000, maximum=5000)
         return HTTPStatus.OK, {
             "report": classification_metrics(storage.list_classification_review_labels(limit=limit)),
-            "timestamp": utc_now(),
-        }
-
-    if path == "/external-seed-health":
-        return HTTPStatus.OK, {
-            "external_seed_health": _external_seed_health_payload(runtime_config),
             "timestamp": utc_now(),
         }
 
@@ -656,6 +656,96 @@ def _storage_session_rows(
         return [], error
     filtered = [row for row in rows if _row_session_id(row) == session_id]
     return filtered[:limit], ""
+
+
+def _storage_session_summary_page(
+    storage: Any,
+    *,
+    limit: int,
+    session_source: str | None,
+    external_only: bool,
+    after: Tuple[str, str] | None,
+) -> List[Dict[str, Any]]:
+    """Load one bounded session-summary page without global materialization."""
+
+    page_loader = getattr(storage, "list_session_rows_page", None)
+    if callable(page_loader):
+        return [
+            dict(row)
+            for row in page_loader(
+                limit=limit,
+                session_source=session_source,
+                external_only=external_only,
+                after=after,
+            )
+            or []
+        ]
+    if after is not None:
+        raise RuntimeError("storage session pagination is unavailable")
+    return [
+        dict(row)
+        for row in storage.list_session_rows(
+            limit=limit,
+            session_source=session_source,
+            external_only=external_only,
+        )
+        or []
+    ]
+
+
+def _load_bounded_session_rows(
+    storage: Any,
+    *,
+    session_source: str | None,
+    external_only: bool,
+) -> Tuple[List[Dict[str, Any]], bool]:
+    """Traverse sessions with a bounded mixed-order keyset cursor.
+
+    The returned boolean is true only when storage reported exhaustion. A
+    storage/query exception deliberately propagates so callers can fail closed
+    instead of presenting a query failure as an empty database.
+    """
+
+    rows: List[Dict[str, Any]] = []
+    after: Tuple[str, str] | None = None
+    seen_cursors: set[Tuple[str, str]] = set()
+    while len(rows) < MONITOR_SESSION_TRAVERSAL_LIMIT:
+        page_limit = min(
+            MONITOR_SESSION_PAGE_SIZE,
+            MONITOR_SESSION_TRAVERSAL_LIMIT - len(rows),
+        )
+        page = _storage_session_summary_page(
+            storage,
+            limit=page_limit,
+            session_source=session_source,
+            external_only=external_only,
+            after=after,
+        )
+        if not page:
+            return rows, True
+        rows.extend(page)
+        if len(page) < page_limit:
+            return rows, True
+        last = page[-1]
+        payload = _payload_from_row(last)
+        cursor = (
+            _text(last.get("updated_at")),
+            _text(last.get("session_id") or payload.get("session_id")),
+        )
+        if not cursor[0] or not cursor[1] or cursor in seen_cursors:
+            raise RuntimeError("session pagination cursor did not advance")
+        seen_cursors.add(cursor)
+        after = cursor
+    # Distinguish an exact-boundary exhaustion from a genuinely truncated
+    # traversal without fetching another full page.
+    probe = _storage_session_summary_page(
+        storage,
+        limit=1,
+        session_source=session_source,
+        external_only=external_only,
+        after=after,
+    )
+    return rows, not bool(probe)
 
 
 def _storage_enrichment_rows(
@@ -875,6 +965,74 @@ def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
+
+
+def _authentication_activity(
+    session_payload: Dict[str, Any],
+    event_rows: Iterable[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Return bounded login evidence while never exposing password values."""
+
+    rows = list(event_rows or [])
+    source: Iterable[Any] = rows or (session_payload.get("raw_events") or [])
+    attempts: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str, str]] = set()
+    for row in source:
+        event = _event_payload(row) if isinstance(row, dict) else {}
+        event_id = _text(event.get("eventid") or (row.get("eventid") if isinstance(row, dict) else ""))
+        if event_id not in {"cowrie.login.success", "cowrie.login.failed"}:
+            continue
+        timestamp = _text(event.get("timestamp") or (row.get("timestamp") if isinstance(row, dict) else ""))
+        session = _text(event.get("session") or event.get("session_id") or session_payload.get("session_id"))
+        identity = (event_id, timestamp, session)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        raw_username = event.get("username")
+        attacker_username = ""
+        if raw_username == "[REDACTED]":
+            username_visibility = "REDACTED_BEFORE_PERSISTENCE"
+        elif raw_username in (None, ""):
+            username_visibility = "NOT_PERSISTED"
+        else:
+            username_visibility = "AVAILABLE"
+            attacker_username = str(raw_username)
+        attempt = {
+            "outcome": "success" if event_id.endswith(".success") else "failed",
+            "timestamp": timestamp,
+            "username_visibility": username_visibility,
+            "password_values_suppressed": True,
+        }
+        if attacker_username:
+            # ``attacker_username`` is intentionally distinct from credential
+            # identity fields. It is observed Cowrie evidence and is still
+            # passed through the normal plaintext secret scrubber downstream.
+            attempt["attacker_username"] = attacker_username
+        attempts.append(attempt)
+    attempts.sort(key=lambda item: (str(item.get("timestamp") or ""), str(item.get("outcome") or "")))
+    successes = sum(1 for item in attempts if item["outcome"] == "success")
+    failures = sum(1 for item in attempts if item["outcome"] == "failed")
+    username_states = {str(item.get("username_visibility") or "") for item in attempts}
+    username_visibility = (
+        "AVAILABLE"
+        if "AVAILABLE" in username_states
+        else "REDACTED_BEFORE_PERSISTENCE"
+        if "REDACTED_BEFORE_PERSISTENCE" in username_states
+        else "NOT_PERSISTED"
+    )
+    timestamps = [str(item.get("timestamp") or "") for item in attempts if item.get("timestamp")]
+    return {
+        "schema_version": "monitor.authentication_activity.v1",
+        "authority": "OBSERVED_COWRIE_METADATA",
+        "attempt_count": len(attempts),
+        "success_count": successes,
+        "failure_count": failures,
+        "first_attempt_at": timestamps[0] if timestamps else "",
+        "last_attempt_at": timestamps[-1] if timestamps else "",
+        "username_visibility": username_visibility,
+        "password_values_suppressed": True,
+        "attempts": attempts[:50],
+    }
 
 
 def _ip_scope(value: Any) -> Dict[str, Any]:
@@ -1430,29 +1588,14 @@ def _summarize_calibration_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _load_external_seed_health(config: MonitorConfig) -> Dict[str, Any]:
-    try:
-        health = load_prediction_health(
-            config.external_seed_health_path,
-            model_path=config.external_seed_model_path,
-            validation_path=config.external_seed_validation_path,
-            review_path=config.external_seed_review_path,
-            include_review=False,
-            mode=str(
-                (config.production_config.prediction_policy or {}).get(
-                    "prediction_mode"
-                )
-                if config.production_config
-                else ""
-            ),
-        )
-    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        return {
-            "schema_version": "external_seed_health.v1",
-            "generated_at": utc_now(),
-            "available": False,
-            "warnings": [f"External seed health load failed: {type(exc).__name__}"],
-        }
-    return health if isinstance(health, dict) else {}
+    del config
+    return {
+        "schema_version": "external_seed_health.v1",
+        "generated_at": utc_now(),
+        "available": False,
+        "status": "retired",
+        "reason": "canonical next-behavior predictor retired",
+    }
 
 
 def record_analyst_feedback(config: MonitorConfig, feedback: Dict[str, Any]) -> str:
@@ -1610,6 +1753,81 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
             or ""
         ),
     }
+
+
+def _hypothesis_artifact_paths(
+    hypothesis: Dict[str, Any],
+    canonical_evidence: Any,
+) -> List[str]:
+    """Project only resolved canonical paths that bind to this hypothesis."""
+
+    if not isinstance(canonical_evidence, dict):
+        return []
+    evidence_refs = {
+        _text(value)
+        for value in hypothesis.get("supporting_evidence_refs") or []
+        if _text(value)
+    }
+    if not evidence_refs:
+        return []
+    paths = set()
+    for entity in canonical_evidence.get("entities") or []:
+        if not isinstance(entity, dict):
+            continue
+        if (
+            _text(entity.get("entity_type")) != "path"
+            or entity.get("linkable") is not True
+            or entity.get("uncertain") is True
+        ):
+            continue
+        entity_refs = {
+            _text(value)
+            for value in entity.get("evidence_refs") or []
+            if _text(value)
+        }
+        normalized = _text(entity.get("normalized_value"))
+        if entity_refs and entity_refs.issubset(evidence_refs) and normalized:
+            paths.add(normalized)
+    return sorted(paths)
+
+
+def _compact_hypothesis_sets(
+    value: Any,
+    canonical_evidence: Any = None,
+) -> List[Dict[str, Any]]:
+    """Expose policy-authored hypothesis meaning without raw session content."""
+
+    output: List[Dict[str, Any]] = []
+    for raw_set in value or []:
+        if not isinstance(raw_set, dict):
+            continue
+        hypotheses = []
+        for raw_hypothesis in raw_set.get("hypotheses") or []:
+            if not isinstance(raw_hypothesis, dict):
+                continue
+            hypotheses.append({
+                "hypothesis_id": raw_hypothesis.get("hypothesis_id"),
+                "statement": raw_hypothesis.get("statement"),
+                "status": raw_hypothesis.get("status"),
+                "artifact_paths": _hypothesis_artifact_paths(
+                    raw_hypothesis,
+                    canonical_evidence,
+                ),
+                "supporting_evidence_refs": list(
+                    raw_hypothesis.get("supporting_evidence_refs") or []
+                ),
+                "falsification_conditions": list(
+                    raw_hypothesis.get("falsification_conditions") or []
+                ),
+            })
+        output.append({
+            "hypothesis_set_id": raw_set.get("hypothesis_set_id"),
+            "question": raw_set.get("question"),
+            "scope": raw_set.get("scope"),
+            "relationship_refs": list(raw_set.get("relationship_refs") or []),
+            "hypotheses": hypotheses,
+        })
+    return output
 
 
 def _render_ai_validation_warnings(report_payload: Dict[str, Any], artifact_payload: Dict[str, Any]) -> str:
@@ -1877,7 +2095,45 @@ def _report_recommendations(
     }
 
 
-def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]:
+def _guidance_with_current_policy_path(
+    stored: Dict[str, Any],
+    configured_policy_path: str,
+) -> Dict[str, Any]:
+    """Validate a stored policy after an immutable release-path move.
+
+    The persisted binding contains both the original path and the policy file
+    SHA-256.  For a read-only projection, a missing old release path may be
+    replaced only when the configured current file has exactly the same
+    bytes.  The persisted report is never changed.
+    """
+
+    if not configured_policy_path:
+        return stored
+    candidate = copy.deepcopy(stored)
+    binding = candidate.get("binding")
+    policy_binding = binding.get("policy") if isinstance(binding, dict) else None
+    if not isinstance(policy_binding, dict):
+        return stored
+    expected_sha = str(policy_binding.get("file_sha256") or "").lower()
+    if len(expected_sha) != 64:
+        return stored
+    try:
+        actual_sha = hashlib.sha256(
+            Path(configured_policy_path).read_bytes()
+        ).hexdigest()
+    except OSError:
+        return stored
+    if actual_sha != expected_sha:
+        return stored
+    policy_binding["path"] = str(Path(configured_policy_path).resolve())
+    return candidate
+
+
+def _historical_response_guidance_payload(
+    report_payload: Any,
+    *,
+    configured_policy_path: str = "",
+) -> Dict[str, Any]:
     """Return stored v3 guidance without recomputation.
 
     Old v1/v2 records are adapted as non-actionable, read-only historical
@@ -1888,7 +2144,22 @@ def _historical_response_guidance_payload(report_payload: Any) -> Dict[str, Any]
         return {}
     stored = report_payload.get("response_guidance_v3")
     if isinstance(stored, dict) and stored.get("schema_version") == "response_guidance.v3":
-        validation_errors = validate_response_guidance_v3(stored)
+        validation_target = _guidance_with_current_policy_path(
+            stored,
+            configured_policy_path,
+        )
+        policy_path_override = ""
+        if validation_target is not stored:
+            policy_path_override = str(
+                ((validation_target.get("binding") or {}).get("policy") or {}).get(
+                    "path"
+                )
+                or ""
+            )
+        validation_errors = validate_response_guidance_v3(
+            stored,
+            policy_path_override=policy_path_override,
+        )
         if validation_errors:
             return {
                 "schema_version": "response_guidance_legacy_adapter.v1",
@@ -1961,6 +2232,7 @@ def _summarize_session(
         "source_geo_context": geo_context,
         "command_count": len(commands),
         "tactics": tactics,
+        "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "analysis_status": analysis_status or _text(payload.get("status") or ""),
         "analysis_skip_reason": _text(payload.get("analysis_skip_reason") or ""),
         "job_status": _text(latest_job.get("status") or ""),
@@ -2014,6 +2286,7 @@ def _session_overview(session: Dict[str, Any]) -> Dict[str, Any]:
         ),
         "commands": payload.get("commands") or [],
         "tactics": payload.get("tactics") or [],
+        "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "ttps": payload.get("ttps") or [],
         "analysis_status": session.get("analysis_status") or "",
         "analysis_skip_reason": payload.get("analysis_skip_reason") or "",
@@ -2062,7 +2335,8 @@ DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
     "events": MAX_SESSION_EVENTS,
     "analysis_jobs": 50,
     "reports": 50,
-    "prediction_snapshots": 50,
+    "analyst_feedback": 50,
+    "observable_sightings": 100,
 }
 
 
@@ -2180,24 +2454,44 @@ def load_dashboard_session_detail(
     job_rows = related["analysis_jobs"]
     report_rows = related["reports"]
     event_rows = related["events"]
-    prediction_rows = related["prediction_snapshots"]
+    feedback_rows = related["analyst_feedback"]
+    sighting_rows = related["observable_sightings"]
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
     selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
+    authentication_activity = _authentication_activity(payload, event_rows)
     report_payload = _report_payload(selected.get("report_row"))
-    historical_guidance = _historical_response_guidance_payload(report_payload)
+    historical_guidance = _historical_response_guidance_payload(
+        report_payload,
+        configured_policy_path=config.response_guidance_policy_path,
+    )
     response_guidance = _fail_closed_session_guidance(
         clean_session_id,
         historical_guidance,
+    )
+    overview = _session_overview(selected)
+    event_timestamps = [
+        _text(_event_payload(row).get("timestamp") or row.get("timestamp"))
+        for row in event_rows
+    ]
+    event_timestamps = [value for value in event_timestamps if value]
+    overview["event_count"] = len(event_rows)
+    overview["is_ended"] = bool(
+        payload.get("is_ended") or session_rows[0].get("ended")
+    )
+    overview["end_time"] = (
+        event_timestamps[-1]
+        if overview["is_ended"] and event_timestamps
+        else ""
     )
     detail = {
         "ok": True,
         "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
         "timestamp": utc_now(),
         "session_id": clean_session_id,
-        "overview": _session_overview(selected),
+        "overview": overview,
         "source_geo": selected.get("geo") or (
             _extract_geo(payload) if selected.get("src_ip_is_public") else {}
         ),
@@ -2207,10 +2501,15 @@ def load_dashboard_session_detail(
             for observable_type, observable_value in _session_observables(payload, clean_session_id)
         ],
         "commands": payload.get("commands") or [],
+        "authentication_activity": authentication_activity,
         "classification_events": payload.get("classification_events") or [],
-        "ensemble_evidence": payload.get("ensemble_evidence") or {},
+        "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
+        "hypothesis_sets": _compact_hypothesis_sets(
+            report_payload.get("hypothesis_sets") or [],
+            report_payload.get("canonical_evidence") or {},
+        ),
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
         "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
         "tactics": payload.get("tactics") or [],
@@ -2219,8 +2518,8 @@ def load_dashboard_session_detail(
         "enrichment_status": payload.get("enrichment_status") or {},
         "session_payload": payload,
         "events_table_rows": [_row_with_payload(row) for row in event_rows],
-        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
-        "latest_prediction_snapshot": _row_with_payload(prediction_rows[0]) if prediction_rows else {},
+        "analyst_feedback": [_row_with_payload(row) for row in feedback_rows],
+        "observable_sightings": [_row_with_payload(row) for row in sighting_rows],
         "analysis_jobs": [_row_with_payload(row) for row in job_rows],
         "reports": [_row_with_payload(row) for row in report_rows],
         "report_summary": _report_summary(report_payload, {}),
@@ -2232,6 +2531,306 @@ def load_dashboard_session_detail(
         },
     }
     return _sanitize_public(detail)
+
+
+def load_session_ti(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load the bounded external-TI projection without invoking providers."""
+
+    try:
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema_version": SESSION_TI_SCHEMA,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage open", exc),
+            "session_id": str(session_id or "")[:256],
+            "timestamp": utc_now(),
+        }
+    return build_session_ti_projection(
+        storage,
+        session_id,
+        config=config.production_config,
+    )
+
+
+def load_source_ip_pivot(
+    config: MonitorConfig,
+    source_ip: str,
+    *,
+    exclude_session_id: str = "",
+    limit: int = 20,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load exact source-IP cross-session context from stored sightings/cache."""
+
+    try:
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema_version": SOURCE_IP_CROSS_SESSION_SCHEMA,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage open", exc),
+            "timestamp": utc_now(),
+        }
+    return build_source_ip_cross_session_projection(
+        storage,
+        source_ip,
+        exclude_session_id=exclude_session_id,
+        limit=limit,
+        config=config.production_config,
+    )
+
+
+def load_observable_ti(
+    config: MonitorConfig,
+    observable_type: str,
+    observable_value: str,
+    *,
+    limit: int = 100,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Load exact stored TI context for a supported observable identity."""
+
+    try:
+        storage = _storage or _open_monitor_storage(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema_version": OBSERVABLE_TI_SCHEMA,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage open", exc),
+            "timestamp": utc_now(),
+        }
+    return build_observable_ti_projection(
+        storage,
+        observable_type,
+        observable_value,
+        config=config.production_config,
+        limit=limit,
+    )
+
+
+# Read-side naming aliases for callers that use the longer contract names.
+load_source_ip_cross_session_pivot = load_source_ip_pivot
+load_observable_ti_lookup = load_observable_ti
+
+
+def load_next_distinct_prediction(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Project the latest stored shadow result without invoking inference."""
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "error_code": "missing_session_id",
+            "error": "session_id is required",
+            "session_id": "",
+            "timestamp": utc_now(),
+        }
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in clean_session_id
+    ):
+        return {
+            "ok": False,
+            "error_code": "malformed_session_id",
+            "error": "session_id is malformed",
+            "session_id": clean_session_id[:256],
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        rows = storage.list_rows_for_session(
+            "sessions",
+            clean_session_id,
+            limit=1,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("storage read", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    if not rows:
+        return {
+            "ok": False,
+            "error_code": "session_not_found",
+            "error": "session was not found",
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    projection = build_dashboard_prediction(clean_session_id, rows[0])
+    session_payload = _session_payload(rows[0])
+    projection["session_ended"] = bool(
+        session_payload.get("is_ended") or rows[0].get("ended")
+    )
+    projection["ok"] = projection.get("prediction_status") not in {
+        "UNAVAILABLE",
+    }
+    projection["timestamp"] = utc_now()
+    return projection
+
+
+def _dashboard_next_distinct_projection(
+    detail: Dict[str, Any],
+    session_id: str,
+) -> Dict[str, Any]:
+    """Adapt the stored sidecar result to the bounded Dashboard contract.
+
+    This is a read-only projection. It never computes a replacement
+    prediction and never retries another inference path.
+    """
+
+    result = dict(detail)
+    result["ok"] = True
+    result["session_id"] = _text(
+        result.get("session_id") or result.get("sequence_id") or session_id
+    )
+    result["source"] = "NEXT_DISTINCT_POC"
+    result["dashboard_source"] = "NEXT_DISTINCT_POC"
+    result["read_only"] = True
+    result["advisory_only"] = True
+    freshness = result.get("freshness")
+    freshness_state = _text(freshness.get("state")).upper() if isinstance(freshness, dict) else ""
+    prediction_status = _text(result.get("prediction_status")).upper()
+    top1 = result.get("next_distinct_tactic")
+    if top1 is None or top1 == "":
+        top1 = result.get("top1")
+    has_data = top1 is not None and top1 != ""
+    session_ended = bool(result.get("session_ended") or result.get("is_ended"))
+    unavailable = prediction_status == "UNAVAILABLE" or freshness_state == "UNAVAILABLE"
+    stale = prediction_status == "STALE" or freshness_state in {"STALE", "EXPIRED"}
+    waiting = prediction_status in {
+        "NO_TRUSTED_HISTORY",
+        "NO_DATA",
+        "INSUFFICIENT_EVIDENCE",
+    } or freshness_state in {"NO_DATA", "INSUFFICIENT_EVIDENCE"}
+    state = (
+        "SESSION_ENDED"
+        if session_ended
+        else "UNAVAILABLE"
+        if unavailable
+        else "STALE"
+        if stale
+        else "DATA"
+        if has_data
+        else "WAITING_FOR_EVIDENCE"
+        if waiting or not has_data
+        else "UNAVAILABLE"
+    )
+    result["state"] = state
+    result["status"] = state
+    result["availability"] = "AVAILABLE" if state == "DATA" else state
+    result["next_distinct_tactic"] = top1 if state == "DATA" else None
+    if state == "SESSION_ENDED":
+        result["prediction_status_reason"] = "session ended; no session-end prediction is emitted"
+    return result
+
+
+def load_session_report_pdf(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    _storage: Any = None,
+) -> Tuple[Optional[bytes], Dict[str, str]]:
+    """Render the exact stored report plus read-only presentation context.
+
+    This endpoint is deliberately read-only. It uses the canonical stored
+    report and session payload together with already-materialized external-TI
+    and AI-advisory projections, renders into a temporary directory, and never
+    invokes a provider/model or writes MongoDB/the persistent report directory.
+    A report must already exist; the endpoint never invents an assessment for
+    a session without a completed analysis job.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return None, {"error_code": "missing_session_id", "error": "session_id is required"}
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20
+        or ord(character) == 0x7F
+        or character in {"/", "\\"}
+        for character in clean_session_id
+    ):
+        return None, {"error_code": "malformed_session_id", "error": "session_id is malformed"}
+
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        session_rows, session_error = _storage_session_rows(
+            storage, "sessions", clean_session_id, 1
+        )
+        if not session_rows:
+            return None, {
+                "error_code": "session_not_found",
+                "error": session_error or "session was not found",
+            }
+        report_rows, report_error = _storage_session_rows(
+            storage, "reports", clean_session_id, 50
+        )
+        if report_error and not report_rows:
+            return None, {"error_code": "report_unavailable", "error": report_error}
+        latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
+        report_payload = _report_payload(latest_reports.get(clean_session_id))
+        if not report_payload:
+            return None, {
+                "error_code": "report_not_available",
+                "error": "no completed report is available for this session",
+            }
+        session_payload = _session_payload(session_rows[0])
+        session_payload.setdefault("session_id", clean_session_id)
+        try:
+            external_ti_projection = build_session_ti_projection(
+                storage,
+                clean_session_id,
+                config=config.production_config,
+            )
+        except Exception:
+            external_ti_projection = {
+                "ok": False,
+                "schema_version": SESSION_TI_SCHEMA,
+                "status": "TI_UNAVAILABLE",
+                "error_code": "projection_unavailable",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        try:
+            ai_advisory_projection = load_ai_advisory_detail(
+                config,
+                clean_session_id,
+                _storage=storage,
+            )
+        except Exception:
+            ai_advisory_projection = {
+                "ok": False,
+                "status": "unavailable",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        return render_pdf_report_bytes(
+            report_payload,
+            session_payload,
+            external_ti_projection=external_ti_projection,
+            ai_advisory_projection=ai_advisory_projection,
+        ), {}
+    except Exception as exc:
+        return None, {
+            "error_code": "pdf_render_failed",
+            "error": _storage_error("session report PDF", exc),
+        }
 
 
 def load_session_detail(
@@ -2278,15 +2877,15 @@ def load_session_detail(
         session_id,
         MAX_SESSION_EVENTS,
     )
-    alert_rows, alerts_error = _storage_session_rows(
-        storage,
-        "alerts",
-        session_id,
-        50,
-    )
     prediction_rows, predictions_error = _storage_session_rows(
         storage,
         "prediction_snapshots",
+        session_id,
+        50,
+    )
+    alert_rows, alerts_error = _storage_session_rows(
+        storage,
+        "alerts",
         session_id,
         50,
     )
@@ -2332,6 +2931,23 @@ def load_session_detail(
     # payload may have no denormalized ``commands`` list after ingestion.
     selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
+    latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
+    latest_prediction_payload = _payload_from_row(latest_prediction)
+    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
+    if not isinstance(ensemble_evidence, dict):
+        ensemble_evidence = {}
+    stored_model2 = ensemble_evidence.get("model2")
+    if not isinstance(stored_model2, dict) or stored_model2.get("available") is not True:
+        try:
+            live_ensemble = build_ensemble_from_session_payload(
+                payload,
+                computed_at=utc_now(),
+            )
+        except Exception:
+            live_ensemble = {}
+        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
+        if isinstance(live_model2, dict) and live_model2.get("available") is True:
+            ensemble_evidence = live_ensemble
     decoded_enrichment_records = [_row_with_payload(row) for row in enrichment_record_rows]
     src_ip = payload.get("src_ip") or selected.get("src_ip")
     enrichment_contexts = [
@@ -2352,7 +2968,6 @@ def load_session_detail(
     report_payload = _report_payload(selected.get("report_row"))
     artifact_paths = _artifact_paths(report_payload, config.reports_dir)
     artifact_payload = _load_report_json_from_artifact(artifact_paths, config.reports_dir)
-    latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     report_recommendations = _report_recommendations(report_payload, artifact_payload, payload)
     current_policy_reevaluation: Dict[str, Any] = {}
     if config.enable_response_guidance:
@@ -2360,11 +2975,12 @@ def load_session_detail(
             config,
             storage,
             session_id,
-            latest_prediction,
+            {},
             report_recommendations=report_recommendations,
         )
     historical_response_guidance = _historical_response_guidance_payload(
-        _merged_report_payload(report_payload, artifact_payload)
+        _merged_report_payload(report_payload, artifact_payload),
+        configured_policy_path=config.response_guidance_policy_path,
     )
     primary_response_guidance = historical_response_guidance or current_policy_reevaluation
     detail = {
@@ -2377,7 +2993,7 @@ def load_session_detail(
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
         "commands": payload.get("commands") or [],
         "classification_events": payload.get("classification_events") or [],
-        "ensemble_evidence": payload.get("ensemble_evidence") or {},
+        "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         # Keep trusted observed TTPs separate from contextual correlations in
         # the API/reporting handoff.  The legacy correlation key remains for
         # compatibility, but it is never the trusted observed namespace.
@@ -2392,12 +3008,13 @@ def load_session_detail(
         "ttp_command_map": payload.get("ttp_command_map") or {},
         "enrichment_status": payload.get("enrichment_status") or {},
         "credential_metadata": payload.get("credential_metadata") or {},
+        "ensemble_evidence": ensemble_evidence,
+        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
+        "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
         "raw_events_from_session_payload": payload.get("raw_events") or [],
         "events_table_rows": [_row_with_payload(row) for row in event_rows],
         "alerts": [_row_with_payload(row) for row in alert_rows],
-        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
-        "latest_prediction_snapshot": latest_prediction,
         "analyst_feedback": [_row_with_payload(row) for row in feedback_rows],
         "observable_sightings": [_row_with_payload(row) for row in sighting_rows],
         "related_observable_sightings": [_row_with_payload(row) for row in related_sighting_rows],
@@ -2429,8 +3046,8 @@ def load_session_detail(
             "jobs": jobs_error,
             "reports": reports_error,
             "events": events_error,
-            "alerts": alerts_error,
             "predictions": predictions_error,
+            "alerts": alerts_error,
             "analyst_feedback": feedback_error,
             "observable_sightings": sightings_error,
             "threat_hunting": threat_hunt_error,
@@ -2449,6 +3066,19 @@ def load_ai_advisory_detail(
 ) -> Dict[str, Any]:
     """Load the separate non-authoritative AI record, never the v4 report."""
 
+    empty_policy_gap = {
+        "schema_version": "ai_policy_gap_projection.v1",
+        "status": "EMPTY_VALID",
+        "mode": "RUNTIME_REVIEW_ONLY_PROPOSAL",
+        "proposals": [],
+        "authority": "PROPOSED_UNVALIDATED",
+        "requires_review": True,
+        "policy_write_count": 0,
+        "automatic_promotion_count": 0,
+        "automatic_policy_mutation": False,
+        "automatic_response_execution": False,
+    }
+
     clean_session_id = str(session_id or "").strip()
     if not clean_session_id:
         return {
@@ -2465,6 +3095,7 @@ def load_ai_advisory_detail(
                 "status": "not_available",
                 "session_id": clean_session_id,
                 "advisory": {},
+                "policy_gap": empty_policy_gap,
                 "timestamp": utc_now(),
             }
         report_id = str(report.get("report_id") or "")
@@ -2502,9 +3133,66 @@ def load_ai_advisory_detail(
             "report_id": report_id,
             "assessment_id": assessment_id,
             "advisory": {},
+            "policy_gap": empty_policy_gap,
             "timestamp": utc_now(),
         }
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    shadow = payload.get("shadow_candidates")
+    shadow = shadow if isinstance(shadow, dict) else {}
+    raw_candidates = shadow.get("candidates")
+    raw_candidates = raw_candidates if isinstance(raw_candidates, list) else []
+    proposals = []
+    for candidate in raw_candidates:
+        if not isinstance(candidate, dict):
+            continue
+        evidence_refs = [
+            *list(candidate.get("premise_finding_ids") or []),
+            *list(candidate.get("premise_relationship_ids") or []),
+            *list(candidate.get("premise_evidence_refs") or []),
+        ]
+        falsifiers = list(candidate.get("falsifier_codes") or [])
+        proposals.append(
+            {
+                "schema_version": "ai_policy_gap_proposal.v1",
+                "proposal_id": str(candidate.get("candidate_id") or ""),
+                "candidate_type": str(candidate.get("candidate_type") or ""),
+                "status": "PROPOSED_UNVALIDATED",
+                "authority": "PROPOSED_UNVALIDATED",
+                "scope": "current_session_only",
+                "predicates": {
+                    "finding_ids": list(candidate.get("premise_finding_ids") or []),
+                    "relationship_ids": list(
+                        candidate.get("premise_relationship_ids") or []
+                    ),
+                    "evidence_refs": list(
+                        candidate.get("premise_evidence_refs") or []
+                    ),
+                },
+                "exclusions": falsifiers,
+                "assumptions": list(candidate.get("reason_codes") or []),
+                "attack_references": [],
+                "supporting_evidence_references": evidence_refs,
+                "limitations": list(candidate.get("missing_evidence_codes") or []),
+                "falsifiers": falsifiers,
+                "ambiguous_cases": list(
+                    candidate.get("missing_evidence_codes") or []
+                ),
+                "missing_evidence": list(
+                    candidate.get("missing_evidence_codes") or []
+                ),
+                "proposed_validation_tests": [
+                    f"verify_{code}" for code in falsifiers
+                ],
+                "requires_review": True,
+                "policy_write_allowed": False,
+                "automatic_promotion": False,
+            }
+        )
+    policy_gap = {
+        **empty_policy_gap,
+        "status": "DATA" if proposals else "EMPTY_VALID",
+        "proposals": proposals,
+    }
     return {
         "ok": True,
         "status": str(row.get("status") or "unavailable"),
@@ -2518,13 +3206,14 @@ def load_ai_advisory_detail(
             "authority": payload.get("authority"),
             "validation": payload.get("validation") or {},
             "rendered_advisory": payload.get("rendered_advisory") or {},
-            "shadow_candidates": payload.get("shadow_candidates") or {
+            "shadow_candidates": shadow or {
                 "schema_version": "ai_shadow_candidate_set.v1",
                 "candidates": [],
             },
             "safety": payload.get("safety") or {},
             "provenance": payload.get("provenance") or {},
         },
+        "policy_gap": policy_gap,
         "metrics": row.get("metrics") or {},
         "timestamp": utc_now(),
     }
@@ -2535,6 +3224,7 @@ def load_snapshot(
     selected_session_id: str = "",
     session_limit: int = DEFAULT_SESSION_LIMIT,
     session_offset: int = 0,
+    sessions_only: bool = False,
 ) -> Dict[str, Any]:
     try:
         storage = _open_monitor_storage(config)
@@ -2552,23 +3242,89 @@ def load_snapshot(
 
     session_limit = min(max(int(session_limit), 1), MAX_SESSIONS)
     session_offset = max(int(session_offset), 0)
-    try:
-        all_session_rows = [
-            dict(row)
-            for row in storage.list_session_rows(
-                limit=max(
-                    MONITOR_SUMMARY_SCAN_LIMIT,
-                    session_offset + session_limit,
-                ),
-                session_source=None,
-                external_only=False,
+    if sessions_only:
+        try:
+            requested = session_offset + session_limit
+            rows = [
+                dict(row)
+                for row in storage.list_session_rows(
+                    limit=requested,
+                    session_source=None,
+                    external_only=False,
+                )
+                or []
+            ]
+            session_rows = rows[session_offset:requested]
+            sessions = [_summarize_session(row, {}, {}) for row in session_rows]
+            total_sessions = int(
+                storage.count_sessions(
+                    session_source=None,
+                    external_only=False,
+                )
             )
-            or []
-        ]
+            ended_sessions = int(
+                storage.count_sessions(
+                    session_source=None,
+                    external_only=False,
+                    ended_only=True,
+                )
+            )
+            selected = next(
+                (
+                    item
+                    for item in sessions
+                    if item.get("session_id") == selected_session_id
+                ),
+                sessions[0] if sessions else None,
+            )
+            return {
+                "ok": True,
+                "error": "",
+                "sessions": sessions,
+                "selected": selected,
+                "events": [],
+                "events_error": "",
+                "summary": {
+                    "total_sessions": total_sessions,
+                    "shown_sessions": len(sessions),
+                    "session_limit": session_limit,
+                    "session_offset": session_offset,
+                    "active_sessions": max(total_sessions - ended_sessions, 0),
+                    "latest_updated": (
+                        sessions[0].get("updated_at") if sessions else ""
+                    ),
+                },
+                "timestamp": utc_now(),
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": _storage_error("sessions query", exc),
+                "sessions": [],
+                "selected": None,
+                "events": [],
+                "events_error": "sessions table not available",
+                "summary": {},
+                "timestamp": utc_now(),
+            }
+    try:
+        all_session_rows, sessions_complete = _load_bounded_session_rows(
+            storage,
+            session_source=None,
+            external_only=False,
+        )
         sessions_error = ""
     except Exception as exc:
-        all_session_rows = []
-        sessions_error = _storage_error("sessions query", exc)
+        return {
+            "ok": False,
+            "error": _storage_error("sessions query", exc),
+            "sessions": [],
+            "selected": None,
+            "events": [],
+            "events_error": "sessions table not available",
+            "summary": {},
+            "timestamp": utc_now(),
+        }
     session_rows = all_session_rows[
         session_offset : session_offset + session_limit
     ]
@@ -2747,6 +3503,8 @@ def load_snapshot(
         },
         "summary": {
             "total_sessions": total_sessions,
+            "total_sessions_complete": sessions_complete,
+            "session_scan_truncated": not sessions_complete,
             "shown_sessions": len(sessions),
             "session_limit": session_limit,
             "session_offset": session_offset,
@@ -4006,71 +4764,6 @@ def _classification_quality_warnings(classification_quality: Dict[str, Any]) -> 
     return warnings
 
 
-def _render_ensemble_evidence(value: Any) -> str:
-    if not isinstance(value, dict) or not value:
-        return '<div class="empty">No late-fusion evidence snapshot is available.</div>'
-    model2 = value.get("model2") if isinstance(value.get("model2"), dict) else {}
-
-    def display_bool(flag: Any) -> str:
-        if flag is True:
-            return "YES"
-        if flag is False:
-            return "NO"
-        return "-"
-
-    if model2.get("one_model") is True:
-        model2_architecture = "UNIFIED_ONE_MODEL"
-        model2_note = (
-            "Model2 is one unified multi-output model used as a shadow "
-            "corroborator; it does not replace Model1 and numeric scores are "
-            "not fused."
-        )
-    elif model2.get("one_model") is False:
-        model2_architecture = "NOT_UNIFIED"
-        model2_note = "Model2 evidence is not marked as a unified one-model result."
-    else:
-        model2_architecture = "-"
-        model2_note = (
-            "Primary: Model1. Model2 is corroborating, contradicting, or "
-            "unavailable; the native scores are not combined."
-        )
-    rows = []
-    for item in value.get("results") or []:
-        if not isinstance(item, dict):
-            continue
-        rows.append(
-            "<tr>"
-            f"<td><strong>{_html(item.get('technique_id') or '-')}</strong></td>"
-            f"<td>{_html(item.get('model1_result') or 'NOT_APPLICABLE')}</td>"
-            f"<td class=\"num\">{_html(item.get('model1_margin') if item.get('model1_margin') is not None else '-')}</td>"
-            f"<td>{_html(item.get('model2_result') or 'UNAVAILABLE')}</td>"
-            f"<td>{_html(item.get('evidence_state') or '-')}</td>"
-            "</tr>"
-        )
-    table = (
-        "<table><thead><tr><th>technique</th><th>Model1</th>"
-        "<th>Model1 raw margin</th><th>Model2</th><th>ensemble state</th>"
-        "</tr></thead><tbody>"
-        + ("".join(rows) or '<tr><td colspan="5" class="empty">No shared-technique rows.</td></tr>')
-        + "</tbody></table>"
-    )
-    meta = (
-        '<div class="warning"><strong>Advisory evidence only:</strong> '
-        f"{_html(model2_note)}</div>"
-        '<div class="overview-grid prediction-meta">'
-        f'<div class="kv"><span>Model2 status</span><strong>{_html(model2.get("status") or "-")}</strong></div>'
-        f'<div class="kv"><span>Model2 available at</span><strong>{_html(model2.get("available_at") or "-")}</strong></div>'
-        f'<div class="kv"><span>Model2 architecture</span><strong>{_html(model2_architecture)}</strong></div>'
-        f'<div class="kv"><span>One inference call</span><strong>{_html(display_bool(model2.get("one_inference_call")))}</strong></div>'
-        f'<div class="kv"><span>Independent binary heads</span><strong>{_html(display_bool(model2.get("independent_binary_heads")))}</strong></div>'
-        f'<div class="kv"><span>Model2 version</span><strong>{_html(model2.get("model_version") or model2.get("model_id") or "-")}</strong></div>'
-        f'<div class="kv"><span>computed at</span><strong>{_html(value.get("ensemble_computed_at") or "-")}</strong></div>'
-        f'<div class="kv"><span>authority</span><strong>{_html(value.get("ensemble_authority") or "ADVISORY_ONLY")}</strong></div>'
-        "</div>"
-    )
-    return meta + table
-
-
 def _render_prediction_panel(detail: Dict[str, Any]) -> str:
     if not detail or not detail.get("ok"):
         return '<div class="empty">No selected session.</div>'
@@ -4082,10 +4775,74 @@ def _render_prediction_panel(detail: Dict[str, Any]) -> str:
         suffix = f" {_html(error)}" if error else ""
         return f'<div class="empty">No prediction snapshot recorded for this session yet.{suffix}</div>'
 
-    ensemble_html = (
-        "<h3>Model1 + Model2 Ensemble Evidence</h3>"
-        + _render_ensemble_evidence(payload.get("ensemble_evidence") or detail.get("ensemble_evidence") or {})
-    )
+    ensemble = payload.get("ensemble_evidence") or detail.get("ensemble_evidence") or {}
+
+    def render_ensemble(value: Any) -> str:
+        if not isinstance(value, dict) or not value:
+            return '<div class="empty">No late-fusion evidence snapshot is available.</div>'
+        model2 = value.get("model2") if isinstance(value.get("model2"), dict) else {}
+
+        def display_bool(flag: Any) -> str:
+            if flag is True:
+                return "YES"
+            if flag is False:
+                return "NO"
+            return "-"
+
+        if model2.get("one_model") is True:
+            model2_architecture = "UNIFIED_ONE_MODEL"
+        elif model2.get("one_model") is False:
+            model2_architecture = "NOT_UNIFIED"
+        else:
+            model2_architecture = "-"
+        if model2.get("one_model") is True:
+            model2_note = (
+                "Model2 is one unified multi-output model used as a shadow "
+                "corroborator; it does not replace Model1 and numeric scores are "
+                "not fused."
+            )
+        else:
+            model2_note = (
+                "Primary: Model1. Model2 is corroborating, contradicting, or "
+                "unavailable; the native scores are not combined."
+            )
+        rows = []
+        for item in value.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                "<tr>"
+                f"<td><strong>{_html(item.get('technique_id') or '-')}</strong></td>"
+                f"<td>{_html(item.get('model1_result') or 'NOT_APPLICABLE')}</td>"
+                f"<td class=\"num\">{_html(item.get('model1_margin') if item.get('model1_margin') is not None else '-')}</td>"
+                f"<td>{_html(item.get('model2_result') or 'UNAVAILABLE')}</td>"
+                f"<td>{_html(item.get('evidence_state') or '-')}</td>"
+                "</tr>"
+            )
+        table = (
+            "<table><thead><tr><th>technique</th><th>Model1</th>"
+            "<th>Model1 raw margin</th><th>Model2</th><th>ensemble state</th>"
+            "</tr></thead><tbody>"
+            + ("".join(rows) or '<tr><td colspan="5" class="empty">No shared-technique rows.</td></tr>')
+            + "</tbody></table>"
+        )
+        meta = (
+            '<div class="warning"><strong>Advisory evidence only:</strong> '
+            f"{_html(model2_note)}</div>"
+            '<div class="overview-grid prediction-meta">'
+            f'<div class="kv"><span>Model2 status</span><strong>{_html(model2.get("status") or "-")}</strong></div>'
+            f'<div class="kv"><span>Model2 available at</span><strong>{_html(model2.get("available_at") or "-")}</strong></div>'
+            f'<div class="kv"><span>Model2 architecture</span><strong>{_html(model2_architecture)}</strong></div>'
+            f'<div class="kv"><span>One inference call</span><strong>{_html(display_bool(model2.get("one_inference_call")))}</strong></div>'
+            f'<div class="kv"><span>Independent binary heads</span><strong>{_html(display_bool(model2.get("independent_binary_heads")))}</strong></div>'
+            f'<div class="kv"><span>Model2 version</span><strong>{_html(model2.get("model_version") or model2.get("model_id") or "-")}</strong></div>'
+            f'<div class="kv"><span>computed at</span><strong>{_html(value.get("ensemble_computed_at") or "-")}</strong></div>'
+            f'<div class="kv"><span>authority</span><strong>{_html(value.get("ensemble_authority") or "ADVISORY_ONLY")}</strong></div>'
+            "</div>"
+        )
+        return meta + table
+
+    ensemble_html = "<h3>Model1 + Model2 Ensemble Evidence</h3>" + render_ensemble(ensemble)
 
     if payload.get("prediction_mode") == "professor_approved_corrected_target_transformer_poc":
         model = payload.get("active_model") or {}
@@ -4929,6 +5686,27 @@ class MonitorHandler(BaseHTTPRequestHandler):
             "application/json",
         )
 
+    def _send_binary(
+        self,
+        status: HTTPStatus,
+        data: bytes,
+        content_type: str,
+        *,
+        content_disposition: str = "",
+    ) -> None:
+        self.send_response(status.value)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if content_disposition:
+            self.send_header("Content-Disposition", content_disposition)
+        self.send_header("X-Request-ID", self._request_id())
+        self.end_headers()
+        self.wfile.write(data)
+
     def _send_sensitive_json(self, status: HTTPStatus, payload: Dict[str, Any]) -> None:
         """Send the private admin projection without the public redactor."""
         self._send(
@@ -4955,8 +5733,17 @@ class MonitorHandler(BaseHTTPRequestHandler):
         )
         return False
 
-    def _require_raw_command_admin(self) -> bool:
-        """Require both loopback transport and the dedicated admin token."""
+    def _require_local_command_read(self) -> bool:
+        """Require the explicit localhost profile and the normal read token."""
+        if os.getenv("LOCAL_DASHBOARD_COMMANDS_ENABLED", "").strip().lower() != "true":
+            self._send_json(
+                HTTPStatus.FORBIDDEN,
+                {
+                    "error": "sensitive command view is disabled for this local profile",
+                    "request_id": self._request_id(),
+                },
+            )
+            return False
         bind_loopback = self.monitor_config.bind_host == "127.0.0.1"
         client_host = self.client_address[0] if self.client_address else ""
         client_loopback = _is_loopback_management_address(client_host)
@@ -4971,7 +5758,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             return False
         decision = authorize_read(
             single_header_value(self.headers, "Authorization"),
-            _monitor_raw_commands_token(self.monitor_config),
+            _monitor_read_token(self.monitor_config),
             allow_anonymous=False,
         )
         if decision.allowed:
@@ -5174,7 +5961,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if parsed.path == "/api/internal/session-commands":
-            if not self._require_raw_command_admin():
+            if not self._require_local_command_read():
                 return
             query = parse_qs(parsed.query)
             session_id = query.get("session_id", [""])[0]
@@ -5199,6 +5986,120 @@ class MonitorHandler(BaseHTTPRequestHandler):
             self._send_json(
                 HTTPStatus.OK if detail.get("ok") else HTTPStatus.NOT_FOUND,
                 detail,
+            )
+            return
+        if parsed.path == "/api/session-ti":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_session_ti(self.monitor_config, session_id=session_id)
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, detail)
+            return
+        if parsed.path == "/api/next-distinct":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            detail = load_next_distinct_prediction(
+                self.monitor_config,
+                session_id=session_id,
+            )
+            if detail.get("ok"):
+                detail = _dashboard_next_distinct_projection(detail, session_id)
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            elif (
+                detail.get("prediction_status") == "UNAVAILABLE"
+                or (
+                    isinstance(detail.get("freshness"), dict)
+                    and detail["freshness"].get("state") == "UNAVAILABLE"
+                )
+            ):
+                detail = _dashboard_next_distinct_projection(detail, session_id)
+                status = HTTPStatus.OK
+            else:
+                status = HTTPStatus.SERVICE_UNAVAILABLE
+            self._send_json(status, detail)
+            return
+        if parsed.path == "/api/source-ip-pivot":
+            query = parse_qs(parsed.query)
+            source_ip = query.get("source_ip", query.get("normalized_source_ip", [""]))[0]
+            exclude_session_id = query.get("exclude_session_id", [""])[0]
+            detail = load_source_ip_pivot(
+                self.monitor_config,
+                source_ip,
+                exclude_session_id=exclude_session_id,
+                limit=_parse_limit(query, default=20, maximum=20),
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {
+                "missing_observable_type",
+                "invalid_observable",
+                "unsupported_observable_type",
+            }:
+                status = HTTPStatus.BAD_REQUEST
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, detail)
+            return
+        if parsed.path == "/api/observable-ti":
+            query = parse_qs(parsed.query)
+            observable_type = query.get("observable_type", query.get("type", [""]))[0]
+            observable_value = query.get("observable_value", query.get("value", [""]))[0]
+            detail = load_observable_ti(
+                self.monitor_config,
+                observable_type,
+                observable_value,
+                limit=_parse_limit(query, default=100, maximum=100),
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {
+                "missing_observable_type",
+                "invalid_observable",
+                "unsupported_observable_type",
+                "observable_not_found",
+            }:
+                status = HTTPStatus.BAD_REQUEST if detail.get("error_code") != "observable_not_found" else HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, detail)
+            return
+        if parsed.path == "/api/session-report":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            pdf, error = load_session_report_pdf(self.monitor_config, session_id)
+            if pdf is not None:
+                self._send_binary(
+                    HTTPStatus.OK,
+                    pdf,
+                    "application/pdf",
+                    content_disposition='attachment; filename="session-threat-report.pdf"',
+                )
+                return
+            error_code = error.get("error_code")
+            status = (
+                HTTPStatus.BAD_REQUEST
+                if error_code in {"missing_session_id", "malformed_session_id"}
+                else HTTPStatus.NOT_FOUND
+                if error_code in {"session_not_found", "report_not_available"}
+                else HTTPStatus.SERVICE_UNAVAILABLE
+            )
+            self._send_json(
+                status,
+                {
+                    "error": error.get("error") or "session report PDF is unavailable",
+                    "error_code": error_code or "pdf_unavailable",
+                },
             )
             return
         if parsed.path == "/api/session-detail":
@@ -5240,6 +6141,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
                 selected_session_id=selected_session_id,
                 session_limit=session_limit,
                 session_offset=session_offset,
+                sessions_only=True,
             )
             sessions = snapshot.get("sessions") or []
             sessions = [
@@ -5368,7 +6270,6 @@ def build_server(host: str, port: int, config: MonitorConfig) -> BoundedThreadin
     validate_configured_bearer_tokens(
         read_token=_monitor_read_token(config),
         write_token=_monitor_write_token(config),
-        admin_token=_monitor_raw_commands_token(config),
         service_name="monitor_web",
     )
     validate_bind_auth(

@@ -128,6 +128,80 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def build_observed_tactic_path(
+    session_payload: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Build the ordered, trusted tactic history used by analyst views.
+
+    This is an observation projection, not a forecast.  Only classification
+    events that passed the trusted-observation contract are considered.  Runs
+    of the same adjacent tactic are coalesced, while a later revisit remains a
+    new phase (for example ``execution -> discovery -> execution``).
+    """
+
+    path: List[Dict[str, Any]] = []
+    raw_events = [
+        item
+        for item in _as_list(session_payload.get("classification_events"))
+        if isinstance(item, dict) and is_trusted_classification_event(item)
+    ]
+
+    def _chronology(item: Tuple[int, Dict[str, Any]]) -> Tuple[int, Any, int]:
+        original_index, event = item
+        durable_order = event.get("durable_evidence_order")
+        if isinstance(durable_order, dict):
+            raw_event_index = durable_order.get("event_index")
+            try:
+                return (0, int(raw_event_index), original_index)
+            except (TypeError, ValueError):
+                pass
+        timestamp = _clean_text(
+            event.get("event_timestamp")
+            or event.get("timestamp")
+            or event.get("received_at")
+        )
+        return (1, timestamp, original_index)
+
+    events = [event for _, event in sorted(enumerate(raw_events), key=_chronology)]
+    for index, event in enumerate(events):
+        tactic = _clean_text(event.get("tactic"))
+        ttp = _clean_text(event.get("ttp")).upper()
+        if not tactic or tactic.lower() == "unknown" or not ttp or ttp == "T0000_UNKNOWN":
+            continue
+        evidence_id = _clean_text(event.get("evidence_id"))
+        durable_order = event.get("durable_evidence_order")
+        if not evidence_id and isinstance(durable_order, dict):
+            evidence_id = _clean_text(durable_order.get("event_id"))
+        command = _clean_text(event.get("command") or event.get("subcommand"))
+        timestamp = _clean_text(event.get("event_timestamp"))
+        if path and path[-1].get("tactic") == tactic:
+            phase = path[-1]
+            for key, value in (("techniques", ttp), ("evidence_refs", evidence_id), ("commands", command), ("event_ids", evidence_id), ("event_timestamps", timestamp)):
+                if value and value not in phase[key]:
+                    phase[key].append(value)
+            phase["last_event_index"] = index
+            phase["last_event_timestamp"] = timestamp or phase.get("last_event_timestamp", "")
+            continue
+        path.append(
+            {
+                "sequence_index": len(path),
+                "tactic": tactic,
+                "techniques": [ttp],
+                "evidence_refs": [evidence_id] if evidence_id else [],
+                "commands": [command] if command else [],
+                "event_ids": [evidence_id] if evidence_id else [],
+                "event_timestamps": [timestamp] if timestamp else [],
+                "first_event_index": index,
+                "last_event_index": index,
+                "first_event_timestamp": timestamp,
+                "last_event_timestamp": timestamp,
+                "authority": "TRUSTED_CANONICAL_OBSERVATIONS",
+                "source": _clean_text(event.get("source")) or "trusted_classification",
+            }
+        )
+    return path
+
+
 def _clamp_confidence(value: Any, default: float = 0.0) -> float:
     return round(min(max(_safe_float(value, default), 0.0), 1.0), 4)
 

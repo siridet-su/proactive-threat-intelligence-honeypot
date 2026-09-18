@@ -43,33 +43,17 @@ from production.reporting.analysis_policy import (
     session_analysis_skip_reason,
 )
 from production.correlation.campaign_clustering import create_or_update_campaign
-from production.prediction.next_behavior_runtime import (
-    MODE as TRANSFORMER_POC_MODE,
-    FrozenTransformerPocPredictor,
-    finalize_prediction_snapshot,
-)
 from production.prediction.trusted_history import build_prediction_trusted_history_manifest
+from production.ensemble.evidence import build_ensemble_from_session_payload
 from production.prediction.evidence_cutoff import (
     make_evidence_cutoff,
     require_valid_evidence_cutoff,
-)
-from production.prediction.prediction_snapshot_contract import (
-    PredictionSnapshotIntegrityError,
-)
-from production.prediction.external_vomm_artifact import load_external_vomm_artifact
-from production.ensemble.evidence import build_ensemble_from_session_payload
-from production.prediction.vomm_rollback import (
-    MODE as VOMM_ROLLBACK_MODE,
-    ValidatedVommRollbackPredictor,
-    empty_transition_model,
 )
 from production.utils.runtime_context import attach_runtime_context
 from production.utils.serialization import session_to_payload, stable_id, utc_now
 from production.utils.service_lifecycle import ServiceLifecycle
 from production.utils.http_security import safe_correlation_id
-from production.prediction.session_features import build_session_features
 from production.correlation.session_ttp_correlation import apply_session_ttp_correlations, load_knowledge as load_session_ttp_correlation_knowledge
-from production.classification.securebert_classifier import load_securebert_classifier
 from production.classification.s1_advisory_classifier import (
     S1AdvisoryClassifier,
     S1AdvisoryModelError,
@@ -80,26 +64,12 @@ from production.storage.session_provenance import (
     SESSION_SOURCE_PRODUCTION_LIVE,
     normalize_session_source,
 )
-from production.utils.feedback import build_auto_evidence_feedback
 from production.utils.sensitive_data import (
-    redact_for_artifact,
     redact_exception_for_log,
     redact_for_session_state,
 )
 from production.workers.threat_hunt_worker import enqueue_threat_hunts_for_session
 
-
-DEFAULT_PREDICTION_TRIGGER_EVENTIDS = [
-    "cowrie.login.success",
-    "cowrie.login.failed",
-    "cowrie.session.file_download",
-    "cowrie.session.file_upload",
-    "cowrie.session.closed",
-]
-
-DEFAULT_PREDICTION_TRIGGER_PREFIXES = [
-    "cowrie.command.",
-]
 
 WORKER_LEADER_SCOPE = "session-worker"
 
@@ -167,23 +137,42 @@ def _safe_exception_text(exc: BaseException) -> str:
     return redact_exception_for_log(exc)
 
 
-def _load_securebert_for_final_runtime(
-    config: ProductionConfig,
-    classifier_environment: Dict[str, Any],
-) -> Any:
-    """Load the legacy SecureBERT candidate only for an explicit opt-in.
+def _await_terminal_model2_ensemble(
+    payload: Dict[str, Any],
+    initial: Dict[str, Any],
+    *,
+    attempts: int = 20,
+    delay_seconds: float = 0.5,
+    builder: Optional[Callable[..., Dict[str, Any]]] = None,
+    sleeper: Callable[[float], None] = time.sleep,
+    require_bridge: bool = True,
+    bridge_socket_path: str = "/run/model2-v7-ensemble/bridge.sock",
+) -> Dict[str, Any]:
+    """Refresh late Model2 evidence after the closed session is durable.
 
-    The classifier environment remains verified for replay/provenance, but the
-    final runtime must not construct the historical model when its feature is
-    disabled.  FINAL_S1 is a separate advisory overlay and is not routed here.
+    The receiver completes exact PCAP/Zeek processing asynchronously. Keep the
+    canonical terminal transition independent of model latency, then allow a
+    short bounded window for the advisory-only projection to catch up.
     """
 
-    if not bool(getattr(config, "enable_securebert", False)):
-        return None
-    return load_securebert_classifier(
-        config,
-        classifier_environment=classifier_environment,
-    )
+    selected = dict(initial)
+    if (selected.get("model2") or {}).get("available") is True:
+        return selected
+    if require_bridge:
+        try:
+            if not Path(bridge_socket_path).is_socket():
+                return selected
+        except OSError:
+            return selected
+    selected_builder = builder or build_ensemble_from_session_payload
+    for _ in range(max(int(attempts), 0)):
+        sleeper(max(float(delay_seconds), 0.0))
+        candidate = selected_builder(payload, computed_at=utc_now())
+        if isinstance(candidate, dict):
+            selected = candidate
+        if (selected.get("model2") or {}).get("available") is True:
+            break
+    return selected
 
 
 def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any]:
@@ -216,12 +205,6 @@ def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any
     return payload
 
 
-class _DisabledPredictionEngine:
-    """Explicit no-op used when prediction is disabled by configuration."""
-
-    enabled = False
-
-
 class SessionWorker:
     def __init__(self, config: ProductionConfig) -> None:
         self.config = config
@@ -240,19 +223,6 @@ class SessionWorker:
         self.alert_authority_policy = load_alert_authority_policy(
             config.alert_authority_policy_path
         )
-        prediction_lifecycle = self.data_lifecycle_policy.document["entities"][
-            "prediction_snapshots"
-        ]
-        if (
-            config.prediction_snapshot_retention_days
-            != prediction_lifecycle["minimum_age_days"]
-            or config.prediction_snapshot_keep_latest_per_session
-            is not prediction_lifecycle["preserve_latest_per_session"]
-        ):
-            raise RuntimeError(
-                "runtime prediction retention does not match the exact "
-                "data-lifecycle policy"
-            )
         record_lifecycle_policy = getattr(
             self.storage, "record_data_lifecycle_policy", None
         )
@@ -272,19 +242,11 @@ class SessionWorker:
         self._current_event_effects: Optional[Dict[str, bool | int]] = None
         self._processing_event_id = ""
         self._last_recovered_active_sessions = 0
-        self._prediction_generation_errors = 0
         self._events_processed_total = 0
         self._worker_started_at = time.monotonic()
         self.feeds = None
         self.mitre_db = None
         self.enrichment_db: Dict[str, Any] = {}
-        self.external_artifact_validation: Dict[str, Any] = {
-            "status": "unavailable",
-            "valid": False,
-            "reasons": ["external_artifact_not_loaded"],
-        }
-        self._session_latest_snapshots: Dict[str, Dict[str, Any]] = {}
-        self._session_prediction_snapshots: Dict[str, List[Dict[str, Any]]] = {}
         self.classifier_environment = load_classifier_environment(
             getattr(config, "classifier_environment_path", ""),
             verify_assets=True,
@@ -292,14 +254,12 @@ class SessionWorker:
         # Bind the verified environment before constructing the model.  A
         # wrong/unverified model must never be loaded ahead of the source,
         # policy, and runtime-asset identity gates.
-        self.bert_fn = _load_securebert_for_final_runtime(
-            config,
-            self.classifier_environment,
-        )
+        # The retired transformer candidate is not part of the production
+        # execution graph. Model1 is loaded separately as the learned overlay.
+        self.bert_fn = None
         self.s1_advisory_classifier = self._load_s1_advisory_classifier()
         self.classifier = None
         self.session_ttp_correlation_policy = self._load_session_ttp_correlation_policy()
-        self.prediction_engine = self._new_prediction_engine()
         if config.enable_feed_loading:
             self.feeds = load_threat_feeds(
                 cisa_cache_path=config.cisa_cache_path or None,
@@ -495,10 +455,6 @@ class SessionWorker:
                 if self.monitor.campaign_tracker is not None
                 else None
             ),
-            "latest_existed": session_id in self._session_latest_snapshots,
-            "latest": deepcopy(self._session_latest_snapshots.get(session_id)),
-            "history_existed": session_id in self._session_prediction_snapshots,
-            "history": deepcopy(self._session_prediction_snapshots.get(session_id)),
         }
 
     def _restore_event_state(self, checkpoint: Dict[str, Any]) -> None:
@@ -512,14 +468,6 @@ class SessionWorker:
             self.monitor.campaign_tracker._profiles = (
                 checkpoint["campaign_profiles"] or []
             )
-        if checkpoint["latest_existed"]:
-            self._session_latest_snapshots[session_id] = checkpoint["latest"]
-        else:
-            self._session_latest_snapshots.pop(session_id, None)
-        if checkpoint["history_existed"]:
-            self._session_prediction_snapshots[session_id] = checkpoint["history"]
-        else:
-            self._session_prediction_snapshots.pop(session_id, None)
 
     def _session_state_from_payload(
         self,
@@ -591,32 +539,6 @@ class SessionWorker:
             "sessions": len(sessions),
         }
 
-    def _recover_prediction_cache(self, session_id: str) -> None:
-        history_limit = 25
-        rows = self.storage.list_prediction_snapshots_for_session(
-            session_id,
-            limit=history_limit,
-        )
-        snapshots: List[Dict[str, Any]] = []
-        for row in reversed(rows):
-            snapshot = self._payload_from_storage_row(row)
-            redacted = redact_for_artifact(snapshot)
-            if not isinstance(redacted, dict):
-                raise WorkerError("prediction recovery payload must be an object")
-            snapshots.append(redacted)
-        if snapshots:
-            self._session_prediction_snapshots[session_id] = snapshots
-            current = self.storage.get_current_prediction_snapshot(session_id)
-            if current is None:
-                self._session_latest_snapshots.pop(session_id, None)
-            else:
-                self._session_latest_snapshots[session_id] = (
-                    self._payload_from_storage_row(current)
-                )
-        else:
-            self._session_prediction_snapshots.pop(session_id, None)
-            self._session_latest_snapshots.pop(session_id, None)
-
     def _recover_active_sessions(self) -> int:
         limit = int(self.config.active_session_recovery_limit)
         rows = self.storage.list_active_session_rows(
@@ -628,8 +550,6 @@ class SessionWorker:
         self.monitor._sessions.clear()
         if self.monitor.campaign_tracker is not None:
             self.monitor.campaign_tracker._profiles.clear()
-        self._session_latest_snapshots.clear()
-        self._session_prediction_snapshots.clear()
         for row in rows:
             session_id = str(row.get("session_id") or "")
             state = self._session_state_from_payload(
@@ -640,7 +560,6 @@ class SessionWorker:
             if state.is_ended:
                 raise WorkerError("active session recovery returned a closed session")
             self.monitor._sessions[session_id] = state
-            self._recover_prediction_cache(session_id)
         self._recalculate_monitor_stats()
         return len(rows)
 
@@ -660,7 +579,6 @@ class SessionWorker:
             expected_session_id=session_id,
         )
         self.monitor._bound_session_history(state)
-        self._recover_prediction_cache(session_id)
         return state
 
     def _retry_delay_seconds(self, attempts: int) -> float:
@@ -721,77 +639,6 @@ class SessionWorker:
             )
             return {"policy": {"enabled": False, "rules": []}}
 
-    def _load_external_transition_model(self) -> Dict[str, Any]:
-        policy = self.config.prediction_policy or {}
-        path_text = str(policy.get("external_transition_model_path") or "").strip()
-        manifest_path_text = str(policy.get("external_transition_manifest_path") or "").strip()
-        if not path_text:
-            self.external_artifact_validation = {
-                "status": "unavailable",
-                "valid": False,
-                "reasons": ["external_transition_model_path_not_configured"],
-            }
-            return empty_transition_model()
-        if not manifest_path_text:
-            self.external_artifact_validation = {
-                "status": "unavailable",
-                "valid": False,
-                "reasons": ["external_only_mode_requires_manifest_path"],
-                "artifact_path": path_text,
-            }
-            return empty_transition_model()
-        model, validation = load_external_vomm_artifact(
-            path_text,
-            manifest_path_text,
-            expected_artifact_sha256=str(
-                policy.get("external_transition_expected_artifact_sha256") or ""
-            ),
-            expected_model_id=str(
-                policy.get("external_transition_expected_model_id") or ""
-            ),
-            expected_manifest_id=str(
-                policy.get("external_transition_expected_manifest_id") or ""
-            ),
-        )
-        self.external_artifact_validation = validation
-        if validation.get("valid"):
-            return model
-        print(
-            json.dumps(
-                {
-                    "service": "session_worker",
-                    "warning": "external_vomm_artifact_unavailable",
-                    "path": path_text,
-                    "manifest_path": manifest_path_text,
-                    "reasons": list(validation.get("reasons") or []),
-                    "timestamp": utc_now(),
-                },
-                sort_keys=True,
-            ),
-            flush=True,
-        )
-        return empty_transition_model()
-
-    def _new_prediction_engine(self) -> Any:
-        policy = self.config.prediction_policy or {}
-        if policy.get("enabled") is False:
-            return _DisabledPredictionEngine()
-        if str(policy.get("prediction_mode") or "") == TRANSFORMER_POC_MODE:
-            return FrozenTransformerPocPredictor(self.config.prediction_policy)
-        if str(policy.get("prediction_mode") or "") != VOMM_ROLLBACK_MODE:
-            raise WorkerError(
-                "prediction policy must select the frozen Transformer or explicit VOMM rollback"
-            )
-        return ValidatedVommRollbackPredictor(
-            self.config.prediction_policy,
-            model=self._load_external_transition_model(),
-            artifact_validation=self.external_artifact_validation,
-        )
-
-    def _refresh_prediction_engine(self) -> None:
-        if self.prediction_engine.enabled:
-            self.prediction_engine = self._new_prediction_engine()
-
     def _new_monitor(self) -> SessionMonitor:
         return SessionMonitor(
             feeds=self.feeds,
@@ -801,11 +648,10 @@ class SessionWorker:
             classification_fn=(
                 self._classify_with_s1_advisory if self.classifier else None
             ),
-            prediction_fn=self._predict_next_for_alert,
             on_alert=None,
             # The durable worker invokes the close stage explicitly after the
-            # final close-event prediction has been persisted. SessionMonitor
-            # retains callback support for standalone/legacy callers.
+            # final event has been persisted. SessionMonitor retains callback
+            # support for standalone/legacy callers.
             on_session_end=None,
             classification_policy=self.config.classification_policy,
             credential_policy=self.config.credential_policy,
@@ -873,86 +719,6 @@ class SessionWorker:
 
         _ = alert
 
-    def _prediction_trigger_for_event(self, event: Dict[str, Any]) -> Dict[str, Any]:
-        """Return whether a Cowrie event should create a prediction snapshot.
-
-        All events are still stored, sighted, and applied to SessionMonitor.
-        This gate only controls durable prediction snapshot creation so metadata
-        events do not make the realtime prediction history noisy.
-        """
-        eventid = str(event.get("eventid") or "").strip()
-        policy = self.config.prediction_policy or {}
-        trigger_policy = policy.get("prediction_triggers") or {}
-        if not isinstance(trigger_policy, dict):
-            trigger_policy = {}
-
-        if trigger_policy.get("enabled") is False:
-            return {
-                "matched": True,
-                "eventid": eventid,
-                "reason": "prediction trigger filtering disabled by policy",
-                "filter_enabled": False,
-            }
-
-        exact_eventids = trigger_policy.get("eventids")
-        if exact_eventids is None:
-            exact_eventids = DEFAULT_PREDICTION_TRIGGER_EVENTIDS
-        exact = {str(item).strip() for item in exact_eventids or [] if str(item).strip()}
-
-        prefixes = trigger_policy.get("eventid_prefixes")
-        if prefixes is None:
-            prefixes = DEFAULT_PREDICTION_TRIGGER_PREFIXES
-        prefix_values = [str(item).strip() for item in prefixes or [] if str(item).strip()]
-
-        if eventid in exact:
-            return {
-                "matched": True,
-                "eventid": eventid,
-                "reason": f"eventid matched prediction trigger policy: {eventid}",
-                "filter_enabled": True,
-                "match_type": "eventid",
-            }
-        for prefix in prefix_values:
-            if eventid.startswith(prefix):
-                return {
-                    "matched": True,
-                    "eventid": eventid,
-                    "reason": f"eventid matched prediction trigger prefix: {prefix}",
-                    "filter_enabled": True,
-                    "match_type": "eventid_prefix",
-                    "matched_prefix": prefix,
-                }
-        return {
-            "matched": False,
-            "eventid": eventid,
-            "reason": "event does not materially change attack evidence for realtime prediction",
-            "filter_enabled": True,
-        }
-
-    def _maybe_store_predictive_alert(self, snapshot: Dict[str, Any]) -> None:
-        """Persist the fixed advisory boundary; never evaluate alert thresholds."""
-
-        snapshot["predictive_alert"] = {
-            "schema_version": "predictive_alert_evaluation.v1",
-            "enabled": False,
-            "status": "prohibited",
-            "reason": "prediction-only alert creation is prohibited",
-            "suppressed_reasons": [
-                "advisory next-behavior output has no alert authority"
-            ],
-            "legacy_candidate_thresholds_crossed": False,
-            "authority": {
-            "prediction_only": True,
-            "may_create_alert": False,
-            "may_escalate_enrichment": False,
-                "semantics": "advisory_forecast_only",
-            },
-            "enrichment_escalation": {
-                "status": "prohibited",
-                "reason": "prediction alone cannot escalate enrichment",
-            },
-        }
-
     def _apply_campaign_clustering(self, payload: Dict[str, Any], status: str) -> Dict[str, Any]:
         try:
             summary = create_or_update_campaign(
@@ -987,44 +753,16 @@ class SessionWorker:
             self._record_event_effect("campaign_updated")
         return summary
 
-    def _predict_next_for_alert(self, state: Any) -> List[str]:
-        """Return alert text predictions from the production scorer engine.
-
-        This keeps legacy realtime alerts aligned with the monitor/API output.
-        It deliberately does not store a snapshot; the normal event path stores
-        the durable prediction immediately after SessionMonitor.on_event().
-        """
-        if not self.prediction_engine.enabled:
-            return []
-        if isinstance(self.prediction_engine, FrozenTransformerPocPredictor):
-            # The corrected-target PoC forecast is advisory and can never feed
-            # the legacy realtime alert callback.
-            return []
-        if hasattr(self.monitor, "_apply_session_enrichment"):
-            self.monitor._apply_session_enrichment(state)
-        self._apply_session_ttp_correlations(state)
-        payload = self._session_payload(state)
-        payload.setdefault("status", "closed" if payload.get("is_ended") else "active")
-        mark_session_outcome(payload)
-        features = build_session_features(payload)
-        snapshot = self.prediction_engine.predict(features, event_id="alert-preview")
-        return [
-            str(tactic or "").strip()
-            for tactic in snapshot.get("prediction") or []
-            if str(tactic or "").strip()
-        ]
-
-    def _apply_prediction_trusted_history_contract(
+    def _materialize_trusted_history_manifest(
         self,
         payload: Dict[str, Any],
         evidence_cutoff: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        """Materialize the single V3 trusted-history contract for a payload.
+        """Materialize the shared V3 history contract for Next-Distinct.
 
-        Both prediction-outbox payloads and terminal canonical session rows
-        must carry the same manifest, ordered history, and evidence cutoff.
-        Keeping construction in one helper prevents the session-end path from
-        persisting a row that the read-only Mongo feeder cannot validate.
+        Active and terminal session rows carry the same manifest, ordered
+        trusted phases, and evidence cutoff so the read-only feeder can bind
+        its projection to the exact observed prefix.
         """
 
         cutoff = require_valid_evidence_cutoff(evidence_cutoff)
@@ -1054,204 +792,6 @@ class SessionWorker:
         payload["prediction_trusted_history"] = manifest["ordered_trusted_phases"]
         payload["evidence_cutoff"] = cutoff
         return cutoff
-
-    def _save_prediction_snapshot_unobserved(
-        self,
-        state: Any,
-        event: Dict[str, Any],
-        event_id: str = "",
-        trigger_info: Optional[Dict[str, Any]] = None,
-        evidence_cutoff: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        if not self.prediction_engine.enabled:
-            return False
-        if hasattr(self.monitor, "_apply_session_enrichment"):
-            self.monitor._apply_session_enrichment(state)
-        self._apply_session_ttp_correlations(state)
-        payload = self._session_payload(state)
-        payload.setdefault("status", "closed" if payload.get("is_ended") else "active")
-        mark_session_outcome(payload)
-        self._apply_campaign_clustering(payload, "closed" if payload.get("is_ended") else "active")
-        safe_event = redact_for_artifact(event)
-        if not isinstance(safe_event, dict):
-            raise WorkerError("prediction trigger event redaction failed")
-        cutoff = require_valid_evidence_cutoff(evidence_cutoff)
-        if cutoff["event_id"] != str(event_id or ""):
-            raise WorkerError(
-                "prediction trigger event does not match evidence cutoff"
-            )
-        cutoff = self._apply_prediction_trusted_history_contract(
-            payload, cutoff
-        )
-        task = {
-            "schema_version": "prediction_outbox_task.v2",
-            "session_id": str(payload.get("session_id") or "unknown"),
-            "event_id": str(event_id or ""),
-            "evidence_cutoff": cutoff,
-            "prediction_mode": str(
-                self.config.prediction_policy.get("prediction_mode") or ""
-            ),
-            "session_payload": payload,
-            "event": safe_event,
-            "trigger": (
-                trigger_info or self._prediction_trigger_for_event(event)
-            ),
-        }
-        self.storage.enqueue_prediction_outbox(task)
-        self._record_event_effect("prediction_outbox_enqueued")
-        self._drain_prediction_outbox(limit=1)
-        return True
-
-    def _prediction_outbox_retry_delay(self, attempts: int) -> float:
-        exponent = min(max(int(attempts) - 1, 0), 31)
-        return min(
-            float(self.config.prediction_outbox_retry_max_seconds),
-            float(self.config.prediction_outbox_retry_base_seconds)
-            * (2**exponent),
-        )
-
-    def _drain_prediction_outbox(self, *, limit: Optional[int] = None) -> int:
-        if not hasattr(self.storage, "claim_prediction_outbox"):
-            raise WorkerError("selected storage lacks prediction outbox support")
-        claimed = self.storage.claim_prediction_outbox(
-            self.worker_owner,
-            int(limit or self.config.prediction_outbox_batch_size),
-            self.config.prediction_outbox_lease_seconds,
-            self.config.prediction_outbox_max_attempts,
-        )
-        completed = 0
-        for row in claimed:
-            try:
-                task = row["task"]
-                payload = task.get("session_payload")
-                event = task.get("event")
-                if not isinstance(payload, dict) or not isinstance(event, dict):
-                    raise ValueError("prediction outbox task is invalid")
-                event_id = str(task.get("event_id") or "")
-                evidence_cutoff = task.get("evidence_cutoff")
-                if evidence_cutoff is not None:
-                    evidence_cutoff = require_valid_evidence_cutoff(
-                        evidence_cutoff
-                    )
-                    if evidence_cutoff["event_id"] != event_id:
-                        raise ValueError(
-                            "prediction task cutoff does not match event_id"
-                        )
-                if isinstance(
-                    self.prediction_engine, FrozenTransformerPocPredictor
-                ):
-                    snapshot = self.prediction_engine.predict_session(
-                        payload,
-                        event_id=event_id,
-                        evidence_cutoff=evidence_cutoff,
-                    )
-                else:
-                    features = build_session_features(
-                        payload, current_event=event
-                    )
-                    snapshot = self.prediction_engine.predict(
-                        features, event_id=event_id
-                    )
-                    if evidence_cutoff is not None:
-                        snapshot["evidence_cutoff"] = evidence_cutoff
-                snapshot["prediction_trigger"] = task.get("trigger") or {}
-                snapshot["predictive_alert"] = {
-                    "status": "prohibited",
-                    "reason": "prediction alone cannot create an alert",
-                }
-                # Late fusion is a bounded advisory projection over the same
-                # outbox payload. Model2 is only consumed when a completed
-                # run result is already attached to this exact session.
-                snapshot["ensemble_evidence"] = build_ensemble_from_session_payload(
-                    payload,
-                    computed_at=utc_now(),
-                )
-                if isinstance(
-                    self.prediction_engine, FrozenTransformerPocPredictor
-                ):
-                    snapshot = finalize_prediction_snapshot(snapshot)
-                snapshot_id = self.storage.save_prediction_snapshot(snapshot)
-                if not self.storage.complete_prediction_outbox(
-                    row["outbox_id"],
-                    row["claim_owner"],
-                    row["claim_token"],
-                    snapshot_id,
-                ):
-                    raise LeaseExpired("prediction outbox completion lost claim")
-                self._record_event_effect("prediction_saved")
-                session_id = str(snapshot.get("session_id") or "")
-                if session_id:
-                    self._recover_prediction_cache(session_id)
-                completed += 1
-            except Exception as exc:
-                self._prediction_generation_errors += 1
-                error_type = type(exc).__name__
-                retryable = not isinstance(exc, (TypeError, ValueError))
-                error_code = (
-                    "prediction_snapshot_integrity_error"
-                    if isinstance(exc, PredictionSnapshotIntegrityError)
-                    else "prediction_generation_failed"
-                )
-                self.storage.fail_prediction_outbox(
-                    row["outbox_id"],
-                    row["claim_owner"],
-                    row["claim_token"],
-                    error_code,
-                    error_type,
-                    retryable,
-                    self.config.prediction_outbox_max_attempts,
-                    self._prediction_outbox_retry_delay(
-                        int(row.get("attempts") or 1)
-                    ),
-                )
-                print(
-                    json.dumps(
-                        {
-                            "service": "session_worker",
-                            "event": "prediction_outbox_failed",
-                            "outbox_id": row.get("outbox_id"),
-                            "error": _safe_exception_text(exc),
-                            "timestamp": utc_now(),
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-        return completed
-
-    def _save_prediction_snapshot(
-        self,
-        state: Any,
-        event: Dict[str, Any],
-        event_id: str = "",
-        trigger_info: Optional[Dict[str, Any]] = None,
-        evidence_cutoff: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        try:
-            return self._save_prediction_snapshot_unobserved(
-                state,
-                event,
-                event_id=event_id,
-                trigger_info=trigger_info,
-                evidence_cutoff=evidence_cutoff,
-            )
-        except Exception as exc:
-            self._prediction_generation_errors += 1
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "event": "prediction_generation_failed",
-                        "correlation_id": event_id,
-                        "prediction_generation_errors": self._prediction_generation_errors,
-                        "error": _safe_exception_text(exc),
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-            raise
 
     def _on_session_end(
         self,
@@ -1287,7 +827,7 @@ class SessionWorker:
                 "manifest_sha256",
             )
         }
-        cutoff = self._apply_prediction_trusted_history_contract(
+        cutoff = self._materialize_trusted_history_manifest(
             payload, evidence_cutoff
         )
         if cutoff["event_id"] != str(self._processing_event_id or ""):
@@ -1314,10 +854,25 @@ class SessionWorker:
         if skip_reason:
             mark_session_analysis_skipped(payload, skip_reason)
 
-        # Durable close order: prediction persistence happens in the caller;
-        # persist the finalized closed session before making work visible.
+        # Persist the finalized closed session before enrichment and downstream
+        # analysis work becomes visible.  This is
+        # the authoritative terminal transition used by the API and dashboard;
+        # it must not depend on model latency.
         self.storage.save_session(payload)
         self._record_event_effect("session_saved")
+        print(
+            json.dumps(
+                {
+                    "service": "session_worker",
+                    "event": "session_terminal_persisted",
+                    "session_id": payload.get("session_id", "unknown"),
+                    "event_id": self._processing_event_id,
+                    "timestamp": utc_now(),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
 
         if skip_reason:
             self.storage.update_session_analysis_status(
@@ -1357,67 +912,30 @@ class SessionWorker:
             "threat_hunt_jobs_enqueued",
             int(payload["threat_hunt_enqueue"].get("queued") or 0),
         )
+        payload["ensemble_evidence"] = _await_terminal_model2_ensemble(
+            payload,
+            payload.get("ensemble_evidence") or {},
+        )
         self.storage.save_session(payload)
         self._record_event_effect("session_saved")
         self._record_event_effect("session_closed")
-        if not skip_reason:
-            self._try_generate_auto_evidence(payload)
-
-    def _try_generate_auto_evidence(self, payload: Dict[str, Any]) -> None:
-        """Generate auto-evidence feedback at session close using recent prediction snapshots.
-
-        Uses an in-memory snapshot cache to avoid extra storage queries.
-        Only generates a row when classification confidence meets the policy threshold.
-        Errors are logged but never raise so session close is never blocked.
-        """
-        try:
-            session_id = str(payload.get("session_id") or "")
-            self._recover_prediction_cache(session_id)
-            snapshots = self._session_prediction_snapshots.pop(session_id, [])
-            latest_snapshot = self._session_latest_snapshots.pop(session_id, None)
-            if not snapshots and latest_snapshot:
-                snapshots = [latest_snapshot]
-            if not snapshots:
-                return
-            min_confidence = 0.90
-            for snapshot in reversed(snapshots):
-                feedback = build_auto_evidence_feedback(
-                    {"payload": snapshot},
-                    payload,
-                    min_confidence=min_confidence,
-                )
-                if feedback:
-                    self.storage.record_analyst_feedback(feedback)
-                    break
-        except Exception as exc:
-            print(
-                json.dumps(
-                    {
-                        "service": "session_worker",
-                        "warning": "auto_evidence_generation_failed",
-                        "session_id": payload.get("session_id", "unknown"),
-                        "error": _safe_exception_text(exc),
-                        "timestamp": utc_now(),
-                    },
-                    sort_keys=True,
-                ),
-                flush=True,
-            )
-
-    def _save_active_session(self, state: Any) -> None:
+    def _save_active_session(
+        self,
+        state: Any,
+        *,
+        evidence_cutoff: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if getattr(state, "is_ended", False):
             return
         self._apply_session_ttp_correlations(state)
         payload = self._session_payload(state)
         payload.setdefault("status", "active")
+        if evidence_cutoff is not None:
+            self._materialize_trusted_history_manifest(payload, evidence_cutoff)
         mark_session_outcome(payload)
         self._apply_campaign_clustering(payload, "active")
         self.storage.save_session(payload)
         self._record_event_effect("session_saved")
-
-    def _save_active_sessions(self) -> None:
-        for state in self.monitor._sessions.values():
-            self._save_active_session(state)
 
     def process_unprocessed(
         self,
@@ -1428,11 +946,8 @@ class SessionWorker:
             return 0
         if not self._ensure_leadership():
             return 0
-        self._refresh_enrichment_cache()
-        self._drain_prediction_outbox()
         processed = 0
         attempted = 0
-        prediction_refreshed = False
         while attempted < self.config.worker_batch_size:
             if should_stop is not None and should_stop():
                 break
@@ -1458,9 +973,21 @@ class SessionWorker:
                     leader_token=self.worker_token,
                 )
                 break
-            if not prediction_refreshed:
-                self._refresh_prediction_engine()
-                prediction_refreshed = True
+            print(
+                json.dumps(
+                    {
+                        "service": "session_worker",
+                        "event": "session_event_picked_up",
+                        "event_id": row["event_id"],
+                        "eventid": row["event"].get("eventid", ""),
+                        "session_id": row["event"].get("session", "unknown"),
+                        "received_at": row.get("received_at", ""),
+                        "timestamp": utc_now(),
+                    },
+                    sort_keys=True,
+                ),
+                flush=True,
+            )
             attempted += 1
             event = dict(row["event"])
             # The durable row is populated from authenticated ingest state.
@@ -1504,6 +1031,8 @@ class SessionWorker:
                             self.storage,
                             event,
                             enabled=self.config.enable_enrichment_jobs,
+                            event_id=row["event_id"],
+                            sensor_id=row.get("sensor_id", self.config.sensor_id),
                         ),
                     )
                     self._renew_claim(row)
@@ -1518,24 +1047,14 @@ class SessionWorker:
                         self._recalculate_monitor_stats()
                         self._record_event_effect("event_applied")
                         if state.is_ended:
-                            trigger_info = self._prediction_trigger_for_event(event)
-                            latest = self._session_latest_snapshots.get(session_id) or {}
-                            if (
-                                trigger_info.get("matched")
-                                and latest.get("event_id") != row["event_id"]
-                            ):
-                                self._save_prediction_snapshot(
-                                    state,
-                                    event,
-                                    event_id=row["event_id"],
-                                    trigger_info=trigger_info,
-                                    evidence_cutoff=evidence_cutoff,
-                                )
                             self._on_session_end(
                                 state, evidence_cutoff=evidence_cutoff
                             )
                         else:
-                            self._save_active_session(state)
+                            self._save_active_session(
+                                state,
+                                evidence_cutoff=evidence_cutoff,
+                            )
                     else:
                         monitor_event = dict(event)
                         monitor_event[
@@ -1546,22 +1065,16 @@ class SessionWorker:
                         state = self.monitor.get_session(session_id)
                         if state is not None and not getattr(state, "is_ended", False):
                             state.last_applied_event_id = row["event_id"]
-                        trigger_info = self._prediction_trigger_for_event(event)
-                        if state is not None and trigger_info.get("matched"):
-                            self._save_prediction_snapshot(
-                                state,
-                                event,
-                                event_id=row["event_id"],
-                                trigger_info=trigger_info,
-                                evidence_cutoff=evidence_cutoff,
-                            )
                         if state is not None:
                             if getattr(state, "is_ended", False):
                                 self._on_session_end(
                                     state, evidence_cutoff=evidence_cutoff
                                 )
                             else:
-                                self._save_active_session(state)
+                                self._save_active_session(
+                                    state,
+                                    evidence_cutoff=evidence_cutoff,
+                                )
                     self._renew_claim(row)
                     heartbeat.check()
                     if not self.storage.complete_event(
@@ -1613,6 +1126,25 @@ class SessionWorker:
             finally:
                 self._current_event_effects = None
                 self._processing_event_id = ""
+        # Enrichment refresh is intentionally lowest priority in this loop.
+        # Raw event claims and authoritative persistence above must complete
+        # before it consumes worker time.
+        if self._leader_held and (should_stop is None or not should_stop()):
+            try:
+                self._refresh_enrichment_cache()
+            except Exception as exc:
+                print(
+                    json.dumps(
+                        {
+                            "service": "session_worker",
+                            "warning": "enrichment_cache_refresh_failed",
+                            "error": _safe_exception_text(exc),
+                            "timestamp": utc_now(),
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
         return processed
 
     def _evict_closed_sessions(self) -> int:
@@ -1625,8 +1157,6 @@ class SessionWorker:
         ]
         for session_id in closed:
             self.monitor._sessions.pop(session_id, None)
-            self._session_latest_snapshots.pop(session_id, None)
-            self._session_prediction_snapshots.pop(session_id, None)
         return len(closed)
 
     def rebuild_from_events(self, limit: int = 100000) -> int:
@@ -1659,7 +1189,6 @@ class SessionWorker:
                                         self._events_processed_total / elapsed,
                                         6,
                                     ),
-                                    "prediction_generation_errors": self._prediction_generation_errors,
                                     "timestamp": utc_now(),
                                 },
                                 sort_keys=True,

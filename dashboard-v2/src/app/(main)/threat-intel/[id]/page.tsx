@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useMemo, useState } from "react";
-import { Activity, Check, ChevronRight, Copy, MapPin, Printer, Terminal } from "lucide-react";
+import { Activity, Check, ChevronRight, Copy, Download, MapPin, Printer, Terminal } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
@@ -354,6 +354,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const hasPayload = Boolean(payload);
   const commandTimestamps = liveCommands.map(commandTimestamp);
   const readableLiveCommands = liveCommands.map(commandInput).filter((value): value is string => Boolean(value));
+  const hasStoredReport = Array.isArray(detailData.reports) && detailData.reports.length > 0;
+  const reportDownloadHref = `/api/session-report?session_id=${encodeURIComponent(sessionId)}`;
 
   return (
     <div className="space-y-5 pb-10">
@@ -406,6 +408,21 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               <Printer className="h-4 w-4" aria-hidden="true" />
               Print / Export report
             </button>
+            <a
+              href={hasStoredReport ? reportDownloadHref : undefined}
+              download="session-threat-report.pdf"
+              aria-disabled={!hasStoredReport}
+              className={cn(
+                "ui-button min-h-9 px-3 text-xs sm:text-sm",
+                hasStoredReport
+                  ? "border border-border bg-surface text-text hover:border-primary-border hover:text-primary"
+                  : "pointer-events-none border border-border bg-surface-muted text-text-subtle opacity-60",
+              )}
+              title={hasStoredReport ? "Download the stored session report as PDF" : "A completed session report is not available yet"}
+            >
+              <Download className="h-4 w-4" aria-hidden="true" />
+              Download PDF
+            </a>
           </div>
         </div>
       </header>

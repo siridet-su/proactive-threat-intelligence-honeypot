@@ -12,9 +12,11 @@ from collections import Counter
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
-from production.reporting.session_assessment_v4 import build_session_assessment_v4
+from production.reporting.session_assessment_v4 import (
+    build_session_assessment_v4,
+    validate_session_assessment_v4,
+)
 from production.correlation.semantics import resolve_confidence_semantics
-from production.utils.sensitive_data import redact_for_artifact
 
 
 def _clean(value: Any) -> str:
@@ -174,9 +176,6 @@ class CanonicalAssessmentCoordinator:
         behavior_policy_path: str = "",
         classification_policy: Optional[Dict[str, Any]] = None,
         classification_rules_path: str = "",
-        prediction_policy: Optional[Dict[str, Any]] = None,
-        prediction_policy_path: str = "",
-        prediction_context: Optional[Dict[str, Any]] = None,
         response_guidance_policy_path: str = "",
         response_guidance_asset_profile_path: str = "",
         mitre_cache_path: str = "",
@@ -185,9 +184,6 @@ class CanonicalAssessmentCoordinator:
         self.behavior_policy_path = _clean(behavior_policy_path)
         self.classification_policy = deepcopy(classification_policy or {})
         self.classification_rules_path = _clean(classification_rules_path)
-        self.prediction_policy = deepcopy(prediction_policy)
-        self.prediction_policy_path = _clean(prediction_policy_path)
-        self.prediction_context = deepcopy(prediction_context or {})
         self.response_guidance_policy_path = _clean(
             response_guidance_policy_path
         )
@@ -220,16 +216,16 @@ class CanonicalAssessmentCoordinator:
             behavior_policy_path=self.behavior_policy_path,
             classification_policy=self.classification_policy,
             classification_policy_path=self.classification_rules_path,
-            model_artifact_provenance=self.prediction_policy,
-            prediction_context=self.prediction_context,
             correlation_context=session_correlations or [],
             mitre_cache_path=self.mitre_cache_path,
             response_guidance_policy_path=self.response_guidance_policy_path,
             response_guidance_asset_profile_path=(
                 self.response_guidance_asset_profile_path
             ),
+            include_complete_typed_hypotheses=True,
         )
-        redacted = redact_for_artifact(report)
-        if not isinstance(redacted, dict):
-            raise TypeError("canonical report redaction must return an object")
-        return redacted
+        # The v4 builder performs privacy projection before computing its
+        # content-addressed evidence, guidance and assessment identities.
+        # A second generic redaction mutates those already-bound branches.
+        validate_session_assessment_v4(report, raise_on_error=True)
+        return deepcopy(report)

@@ -13,6 +13,7 @@ from production.prediction.next_behavior_runtime import (
     validate_prediction_snapshot_integrity,
 )
 from production.reporting.artifacts import (
+    _evidence_reference_summary,
     attach_report_artifacts,
     build_stix_bundle,
     validate_report_artifact_manifest,
@@ -142,6 +143,131 @@ def test_pdf_is_byte_deterministic(tmp_path: Path) -> None:
     second = Path(write_pdf_report(report, session, second_dir))
 
     assert first.read_bytes() == second.read_bytes()
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
+def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
+    tmp_path: Path,
+) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    report["ioc_summary"] = {
+        "ips": [
+            {"type": "ipv4", "value": "8.8.8.8", "confidence": "high"},
+            {"type": "ipv4", "value": "10.58.33.42", "confidence": "high"},
+        ]
+    }
+    external_ti = {
+        "ok": True,
+        "status": "TI_AVAILABLE",
+        "external_ti_summary": {
+            "status": "TI_AVAILABLE",
+            "eligible_observable_count": 1,
+            "eligible_observable_types": ["ip"],
+            "records_found": 1,
+            "evidence_returned": 1,
+            "source_ip_cache_records_found": 0,
+            "shared_entity_count": 0,
+            "authority": "CONTEXT_ONLY",
+        },
+        "provider_status": {
+            "virustotal": {
+                "status": "ok",
+                "lookup_status": "OK",
+                "finding_state": "CONTEXT_PRESENT",
+                "record_count": 1,
+                "freshness_state": "FRESH",
+            },
+            "censys": {
+                "status": "ok",
+                "lookup_status": "OK",
+                "finding_state": "CONTEXT_PRESENT",
+                "record_count": 1,
+                "freshness_state": "FRESH",
+            },
+        },
+        "freshness": {
+            "state": "TI_FRESH",
+            "latest_retrieved_at": "2026-07-28T10:11:00Z",
+        },
+        "evidence": [
+            {
+                "provider": "virustotal",
+                "observable_type": "ip",
+                "observable_value": "8.8.8.8",
+                "lookup_status": "OK",
+                "finding_state": "CONTEXT_PRESENT",
+                "summary": "Stored provider context is available",
+                "freshness_state": "FRESH",
+            },
+            {
+                "provider": "censys",
+                "observable_type": "ip",
+                "observable_value": "8.8.8.8",
+                "lookup_status": "OK",
+                "finding_state": "CONTEXT_PRESENT",
+                "summary": "Must not be rendered",
+                "freshness_state": "FRESH",
+            },
+        ],
+    }
+    ai_advisory = {
+        "ok": True,
+        "status": "accepted",
+        "advisory_id": "ai_advisory_fixture",
+        "report_id": "report_fixture",
+        "assessment_id": "assessment_fixture",
+        "advisory": {
+            "schema_version": "ai_advisory_record.v1",
+            "authority": "non_authoritative_advisory_only",
+            "validation": {"status": "accepted"},
+            "rendered_advisory": {
+                "paragraphs": [{"text": "Review the recorded evidence before action."}],
+            },
+        },
+    }
+    output_dir = tmp_path / "bounded-context-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(write_pdf_report(
+        report,
+        session,
+        output_dir,
+        external_ti_projection=external_ti,
+        ai_advisory_projection=ai_advisory,
+    ))
+    reader = PdfReader(path)
+    text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    first_page_text = reader.pages[0].extract_text() or ""
+
+    assert len(reader.pages) <= 5
+    assert "Executive Decision Summary" in first_page_text
+    assert "Report map" not in first_page_text
+    assert "TI_AVAILABLE" in text
+    assert "virustotal" in text
+    assert "Review the recorded evidence before action." in text
+    assert "Internal Infrastructure Context" in text
+    assert "10.58.33.42" in text
+    assert "Private/reserved network context" in text
+    assert "8.8.8.8" in text
+    assert "censys" not in text.lower()
+    assert "Must not be rendered" not in text
+
+
+def test_evidence_reference_summary_is_bounded_and_content_addressed() -> None:
+    references = [f"evidence_ref_{index:04d}" for index in range(50)]
+    summary = _evidence_reference_summary(references)
+
+    assert summary.startswith(
+        "50 refs; examples: evidence_ref_0000, evidence_ref_0001, evidence_ref_0002; +47 more"
+    )
+    assert "set SHA-256:" in summary
+    assert "evidence_ref_0049" not in summary
+    assert summary == _evidence_reference_summary(list(reversed(references)))
 
 
 def test_integrity_manifest_hash_binds_every_emitted_artifact(
