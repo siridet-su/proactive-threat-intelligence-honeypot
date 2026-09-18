@@ -166,13 +166,15 @@ The same file contains a gated integration suite that uses a real MongoDB 8.0
 engine, captures `commandStarted` aggregate commands, and asserts that the
 command pipeline exactly equals `buildSessionCwdHistoryPipeline` for each
 production `getSessionCwdHistory` request. It inserts only into the temporary
-container's `honeypot_db.cwd_events`, clears the collection between tests, and
-drops it before closing the client. Run it reproducibly with:
+container's validated unique `pti_fa010_test_<runId>.cwd_events` database and
+collection, clears the collection between tests, and drops the validated test
+database before closing the client. Run it reproducibly with:
 
 `cd dashboard-v2 && npm run test:filesystem-history-integration`
 
 The wrapper starts a temporary `mongo:8.0` container on an ephemeral localhost
-port, waits for `ping`, runs the gated Vitest suite with `FA010_MONGO_URI`, and
+port, waits for `ping`, runs the gated Vitest suite with the validated
+`FA010_MONGO_URI`, `FA010_MONGO_TEST_DB`, and `FA010_MONGO_RUN_ID` values, and
 force-removes the container in `finally`. The executed fixture covers
 canonical/legacy fields, Date and ISO values, ObjectId/string fallbacks,
 blank/invalid identifiers and timestamps, unsupported actions, fallback
