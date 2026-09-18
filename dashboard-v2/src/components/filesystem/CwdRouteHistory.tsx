@@ -18,27 +18,22 @@ import {
   Terminal,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
   actionLabel,
-  buildReplayTimeline,
   formatFromPath,
   formatTimestamp,
-  getHistoryWindowMetrics,
   isReplayTimelineKeyboardKey,
   isInitialSshEntry,
   mapReplayTimelineKeyToIndex,
   mapReplayTimelineValueToIndex,
   statusLabel,
-  type ReplayTimeline,
-  type ReplayPacingMode,
-  type HopTimeMetrics,
-  type SessionReplayTimeSummary,
 } from "./filesystemUtils";
 import type { HopResolutionStatus } from "./sessionHopResolver";
+import type { AuditReplayPresentation } from "./useAuditReplay";
 
 type SidebarTab = "replay" | "commands" | "actions";
 
@@ -63,34 +58,17 @@ export interface CwdRouteHistoryProps {
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
   historyComplete: boolean;
-  replayTimeline?: ReplayTimeline;
-  selectedHistoryEventId: string | null;
+  replay: AuditReplayPresentation;
   layout?: "card" | "sidebar";
-  sessionIsLive?: boolean;
-  activeTab?: SidebarTab;
-  onTabChange?: (tab: SidebarTab) => void;
-  responsePanel?: ReactNode;
+  activeTab: SidebarTab;
+  onTabChange: (tab: SidebarTab) => void;
+  responsePanel: ReactNode;
   hopResolutionStatus?: HopResolutionStatus;
   requestedHop?: string | null;
-  onClearHop?: () => void;
-  onShowLatestHop?: () => void;
+  onClearHop: () => void;
+  onShowLatestHop: () => void;
   onSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
   onLoadEarlier: () => void;
-  isPlaying?: boolean;
-  onTogglePlay?: () => void;
-  onPause?: () => void;
-  playbackSpeed?: number;
-  onToggleSpeed?: () => void;
-  pacingMode?: ReplayPacingMode;
-  onTogglePacingMode?: () => void;
-  showFailedAttempts?: boolean;
-  onToggleShowFailedAttempts?: (show: boolean) => void;
-  displayedHistory?: SessionCwdHistoryEvent[];
-  selectedHistoryIndex?: number;
-  displayedHistoryMetrics?: ReturnType<typeof getHistoryWindowMetrics>;
-  isAnchoredSelected?: boolean;
-  hopTimeMetrics?: HopTimeMetrics[];
-  sessionTimeSummary?: SessionReplayTimeSummary;
 }
 
 export function CwdRouteHistory({
@@ -102,10 +80,9 @@ export function CwdRouteHistory({
   historyTotalItems,
   historyTotalSuccessfulItems,
   historyComplete,
-  replayTimeline: suppliedReplayTimeline,
-  selectedHistoryEventId,
+  replay,
   layout = "card",
-  activeTab: controlledSidebarTab = "replay",
+  activeTab: controlledSidebarTab,
   onTabChange,
   responsePanel,
   hopResolutionStatus = "idle",
@@ -114,59 +91,30 @@ export function CwdRouteHistory({
   onShowLatestHop,
   onSelectHistoryEventId,
   onLoadEarlier,
-  isPlaying: controlledIsPlaying,
-  onTogglePlay,
-  onPause,
-  playbackSpeed: controlledPlaybackSpeed,
-  onToggleSpeed,
-  pacingMode: controlledPacingMode,
-  onTogglePacingMode,
-  showFailedAttempts: controlledShowFailedAttempts,
-  onToggleShowFailedAttempts,
-  displayedHistory: suppliedDisplayedHistory,
-  selectedHistoryIndex: suppliedSelectedHistoryIndex,
-  displayedHistoryMetrics: suppliedDisplayedHistoryMetrics,
-  isAnchoredSelected: suppliedIsAnchoredSelected,
-  hopTimeMetrics: suppliedHopTimeMetrics,
-  sessionTimeSummary: suppliedSessionTimeSummary,
 }: CwdRouteHistoryProps) {
-  const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
-  const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
   const shouldReduceMotion = useReducedMotion();
   const isSidebar = layout === "sidebar";
   const sidebarTab = controlledSidebarTab;
-
-  const isPlaying = controlledIsPlaying ?? false;
-  const playbackSpeed = controlledPlaybackSpeed ?? 1400;
-  const pacingMode = controlledPacingMode ?? "realistic";
-  const showFailedAttempts = controlledShowFailedAttempts !== undefined ? controlledShowFailedAttempts : internalShowFailedAttempts;
-
+  const {
+    isPlaying,
+    playbackSpeed,
+    pacingMode,
+    displayedHistory,
+    selectedHistoryIndex,
+    displayedHistoryMetrics,
+    isAnchoredSelected,
+    hopTimeMetrics,
+    sessionTimeSummary,
+    replayTimeline,
+    onTogglePlay,
+    onPause,
+    onToggleSpeed,
+    onTogglePacingMode,
+    showFailedAttempts,
+    onToggleShowFailedAttempts,
+  } = replay;
   const failedCount = Math.max(0, historyTotalItems - historyTotalSuccessfulItems);
-
-  // Production always supplies this replay view model from useAuditReplay. The
-  // fallback preserves direct-render test fixtures without introducing a timer
-  // or a second replay lifecycle owner.
-  const derivedDisplayedHistory = useMemo(() => {
-    if (showFailedAttempts) return chronologicalHistory;
-    return chronologicalHistory.filter((e) => e.action !== "failed_change");
-  }, [chronologicalHistory, showFailedAttempts]);
-  const displayedHistory = suppliedDisplayedHistory ?? derivedDisplayedHistory;
-
-  const isAnchoredSelected = suppliedIsAnchoredSelected ?? Boolean(
-    anchoredHop &&
-      selectedHistoryEventId === anchoredHop.id &&
-      !displayedHistory.some((event) => event.id === anchoredHop.id),
-  );
-
-  const derivedSelectedHistoryIndex = useMemo(() => {
-    if (isAnchoredSelected) return -1;
-    if (!displayedHistory.length) return -1;
-    if (selectedHistoryEventId === null) return displayedHistory.length - 1;
-    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
-    return index >= 0 ? index : displayedHistory.length - 1;
-  }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
-  const selectedHistoryIndex = suppliedSelectedHistoryIndex ?? derivedSelectedHistoryIndex;
 
   const selectedHistoryEvent = isAnchoredSelected
     ? anchoredHop
@@ -174,58 +122,7 @@ export function CwdRouteHistory({
       ? displayedHistory[selectedHistoryIndex]
       : null;
 
-  const explicitHopNumber = showFailedAttempts
-    ? selectedHistoryEvent?.hopNumber
-    : (selectedHistoryEvent?.successfulHopNumber ?? selectedHistoryEvent?.hopNumber);
-
-  const derivedDisplayedHistoryMetrics = useMemo(
-    () => getHistoryWindowMetrics(
-      displayedHistory.length,
-      showFailedAttempts ? historyTotalItems : historyTotalSuccessfulItems,
-      selectedHistoryIndex,
-      explicitHopNumber,
-    ),
-    [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts, explicitHopNumber],
-  );
-
-  const displayedHistoryMetrics = suppliedDisplayedHistoryMetrics ?? derivedDisplayedHistoryMetrics;
-  const derivedReplayTimeline = useMemo(
-    () => buildReplayTimeline(
-      displayedHistory,
-      selectedHistoryIndex,
-      historyComplete,
-      showFailedAttempts && historyComplete ? "retained" : "displayed",
-    ),
-    [displayedHistory, historyComplete, selectedHistoryIndex, showFailedAttempts],
-  );
-  const replayTimeline = suppliedReplayTimeline ?? derivedReplayTimeline;
-
-  const derivedTimeMetrics = useMemo(() => {
-    if (isAnchoredSelected && anchoredHop) {
-      const hopNum = explicitHopNumber ?? 1;
-      const progressPercent =
-        displayedHistoryMetrics.totalItems > 0
-          ? Math.min(100, Math.max(0, (hopNum / displayedHistoryMetrics.totalItems) * 100))
-          : 0;
-      return {
-        hopMetrics: [],
-        summary: {
-          totalDurationMs: 0,
-          formattedTotalDuration: "unloaded gap",
-          currentElapsedMs: 0,
-          formattedCurrentElapsed: "+00:00",
-          currentDeltaMs: 0,
-          formattedCurrentDelta: "Gap",
-          timeProgressPercent: progressPercent,
-        },
-      };
-    }
-    return replayTimeline;
-  }, [anchoredHop, displayedHistoryMetrics.totalItems, explicitHopNumber, isAnchoredSelected, replayTimeline]);
-  const timeMetrics = {
-    hopMetrics: suppliedHopTimeMetrics ?? derivedTimeMetrics.hopMetrics,
-    summary: suppliedSessionTimeSummary ?? derivedTimeMetrics.summary,
-  };
+  const timeMetrics = { hopMetrics: hopTimeMetrics, summary: sessionTimeSummary };
 
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
@@ -251,12 +148,8 @@ export function CwdRouteHistory({
   }, [activeHistoryEventId]);
 
   const handlePause = useCallback(() => {
-    if (onPause) {
-      onPause();
-    } else if (onTogglePlay) {
-      if (isPlaying) onTogglePlay();
-    }
-  }, [isPlaying, onPause, onTogglePlay]);
+    onPause();
+  }, [onPause]);
 
   const selectDisplayedHistoryIndex = useCallback((targetIndex: number) => {
     if (isAnchoredSelected || targetIndex < 0 || targetIndex >= displayedHistory.length || targetIndex === selectedHistoryIndex) return;
@@ -274,12 +167,8 @@ export function CwdRouteHistory({
   }, [displayedHistory.length, isAnchoredSelected, selectDisplayedHistoryIndex, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
-    if (onTogglePlay) {
-      onTogglePlay();
-    } else if (selectedHistoryIndex >= displayedHistory.length - 1) {
-      onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-    }
-  }, [displayedHistory, onSelectHistoryEventId, onTogglePlay, selectedHistoryIndex]);
+    onTogglePlay();
+  }, [onTogglePlay]);
 
   const sidebarTabColumn = SIDEBAR_TAB_COLUMN[sidebarTab];
   const sidebarContentDirection = shouldReduceMotion ? 0 : sidebarTabDirection;
@@ -287,7 +176,7 @@ export function CwdRouteHistory({
   const handleSidebarTabChange = (nextTab: SidebarTab) => {
     if (nextTab === sidebarTab) return;
     setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
-    onTabChange?.(nextTab);
+    onTabChange(nextTab);
   };
 
   return (
@@ -386,7 +275,7 @@ export function CwdRouteHistory({
                     </p>
                   </div>
                   <div className="flex shrink-0 gap-1.5">
-                    {onShowLatestHop && history.length > 0 && (
+                    {history.length > 0 && (
                       <button
                         type="button"
                         onClick={onShowLatestHop}
@@ -395,15 +284,13 @@ export function CwdRouteHistory({
                         Show latest hop
                       </button>
                     )}
-                    {onClearHop && (
-                      <button
+                    <button
                         type="button"
                         onClick={onClearHop}
                         className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
                       >
                         Clear hop
-                      </button>
-                    )}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -499,7 +386,7 @@ export function CwdRouteHistory({
                           >
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                               <span>Anchored deep hop: intervening events are unloaded. Replay and adjacent stepping are paused across this gap.</span>
-                              {onLoadEarlier && !historyComplete && (
+                              {!historyComplete && (
                                 <button
                                   type="button"
                                   onClick={onLoadEarlier}
@@ -583,11 +470,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (onToggleSpeed) {
-                        onToggleSpeed();
-                      }
-                    }}
+                    onClick={onToggleSpeed}
                     className="ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0"
                     title="Toggle playback speed (1x / 2x)"
                   >
@@ -596,11 +479,7 @@ export function CwdRouteHistory({
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (onTogglePacingMode) {
-                        onTogglePacingMode();
-                      }
-                    }}
+                    onClick={onTogglePacingMode}
                     className={`ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0 flex items-center gap-1 ${
                       pacingMode === "realistic" ? "border-primary/50 text-primary" : ""
                     }`}
@@ -624,11 +503,7 @@ export function CwdRouteHistory({
                         type="checkbox"
                         checked={showFailedAttempts}
                         onChange={(e) => {
-                          if (onToggleShowFailedAttempts) {
-                            onToggleShowFailedAttempts(e.target.checked);
-                          } else {
-                            setInternalShowFailedAttempts(e.target.checked);
-                          }
+                          onToggleShowFailedAttempts(e.target.checked);
                         }}
                         className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
                       />
@@ -915,7 +790,7 @@ export function CwdRouteHistory({
                           <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                           <span>Unloaded history gap</span>
                         </div>
-                        {onLoadEarlier && !historyComplete && (
+                        {!historyComplete && (
                           <button
                             type="button"
                             onClick={onLoadEarlier}
@@ -950,7 +825,7 @@ export function CwdRouteHistory({
                         <div className="flex items-center justify-between gap-1.5 min-w-0">
                           <p className="truncate font-medium text-xs text-text min-w-0">
                             <span className="mr-1.5 font-mono text-xs text-text-subtle">
-                              {String(explicitHopNumber ?? anchoredHop.hopNumber ?? 1).padStart(2, "0")}
+                              {String((showFailedAttempts ? anchoredHop.hopNumber : anchoredHop.successfulHopNumber ?? anchoredHop.hopNumber) ?? 1).padStart(2, "0")}
                             </span>
                             {actionLabel(anchoredHop)}
                             <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-[10px] text-amber-300 font-sans">

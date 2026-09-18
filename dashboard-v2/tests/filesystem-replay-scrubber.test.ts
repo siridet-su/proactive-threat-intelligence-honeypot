@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, type ComponentProps } from "react";
+import { act, createElement, useEffect, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MotionGlobalConfig } from "framer-motion";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ MotionGlobalConfig.skipAnimations = true;
 vi.mock("server-only", () => ({}));
 
 import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
+import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "../src/lib/dashboardTypes";
 
 function makeEvent(id: string, at: string | null, action: SessionCwdHistoryEvent["action"] = "change"): SessionCwdHistoryEvent {
@@ -61,23 +62,91 @@ function fireKey(input: HTMLInputElement, key: string): KeyboardEvent {
   return event;
 }
 
+type HistoryAdapterProps = Partial<ComponentProps<typeof CwdRouteHistory>> & {
+  selectedHistoryEventId?: string | null;
+  isPlaying?: boolean;
+  onPause?: () => void;
+  showFailedAttempts?: boolean;
+};
+
+function ReplayHistoryAdapter({
+  selectedHistoryEventId = "event-a",
+  isPlaying: requestedIsPlaying,
+  onPause,
+  showFailedAttempts: requestedShowFailedAttempts,
+  history = [...chronologicalEvents].reverse(),
+  historyTotalItems = 3,
+  historyTotalSuccessfulItems = 3,
+  historyComplete = true,
+  anchoredHop = null,
+  onSelectHistoryEventId = () => {},
+  onLoadEarlier = () => {},
+  onClearHop = () => {},
+  onShowLatestHop = () => {},
+  requestedHop = null,
+  hopResolutionStatus = "idle",
+}: HistoryAdapterProps) {
+  const selectedId = selectedHistoryEventId;
+  const replay = useAuditReplay({
+    viewMode: "audit",
+    history,
+    anchoredHop,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    selectedHistoryEventId: selectedId,
+    onSelectHistoryEventId: (id, source) => {
+      onSelectHistoryEventId(id, source);
+    },
+  });
+
+  useEffect(() => {
+    if (requestedShowFailedAttempts !== undefined && requestedShowFailedAttempts !== replay.showFailedAttempts) {
+      replay.presentation.onToggleShowFailedAttempts(requestedShowFailedAttempts);
+    }
+  }, [replay, requestedShowFailedAttempts]);
+
+  const presentation = {
+    ...replay.presentation,
+    isPlaying: requestedIsPlaying ?? replay.presentation.isPlaying,
+    onPause: () => {
+      replay.onPause();
+      onPause?.();
+    },
+  };
+
+  return createElement(CwdRouteHistory, {
+    selectedSession: replaySession,
+    history,
+    anchoredHop,
+    historyStatus: "ready",
+    historyCursor: null,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    replay: presentation,
+    layout: "card",
+    activeTab: "replay",
+    onTabChange: () => {},
+    responsePanel: null,
+    hopResolutionStatus,
+    requestedHop,
+    onClearHop,
+    onShowLatestHop,
+    onSelectHistoryEventId,
+    onLoadEarlier,
+  });
+}
+
 function renderHistory(
   root: Root,
   container: HTMLDivElement,
-  overrides: Partial<ComponentProps<typeof CwdRouteHistory>> = {},
+  overrides: HistoryAdapterProps = {},
 ) {
   const onSelectHistoryEventId = overrides.onSelectHistoryEventId ?? vi.fn();
   act(() => {
     root.render(
-      createElement(CwdRouteHistory, {
-        selectedSession: replaySession,
-        history: [...chronologicalEvents].reverse(),
-        historyStatus: "ready",
-        historyCursor: null,
-        historyTotalItems: 3,
-        historyTotalSuccessfulItems: 3,
-        historyComplete: true,
-        selectedHistoryEventId: "event-a",
+      createElement(ReplayHistoryAdapter, {
         onSelectHistoryEventId,
         onLoadEarlier: vi.fn(),
         ...overrides,

@@ -95,7 +95,6 @@ export function FilesystemActivity() {
     return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
   });
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
-  const [showFailedAttempts, setShowFailedAttempts] = useState(true);
   const [activeForensicTab, setActiveForensicTab] = useState<ForensicTab>("replay");
 
   // Cross-cutting refs
@@ -205,9 +204,6 @@ export function FilesystemActivity() {
     regionStatus,
     streamState,
     isHydrated,
-    telemetryAgeMs,
-    snapshotReceiptAgeMs,
-    retrievalAgeMs,
     freshnessState,
     refresh,
     handleReconnect,
@@ -334,21 +330,14 @@ export function FilesystemActivity() {
     isPlaying,
     setIsPlaying,
     playbackSpeed,
-    pacingMode,
     displayedHistory,
     selectedHistoryIndex,
     displayedHistoryMetrics,
-    isAnchoredSelected,
-    hopTimeMetrics,
-    sessionTimeSummary,
     activeHop,
-    handlePrevHop,
-    handleNextHop,
-    handleTogglePlay,
-    handlePause,
-    handleToggleSpeed,
-    handleTogglePacingMode,
-    replayTimeline,
+    onPrevHop: handlePrevHop,
+    onNextHop: handleNextHop,
+    onTogglePlay: handleTogglePlay,
+    presentation: replayPresentation,
   } = useAuditReplay({
     viewMode,
     history,
@@ -356,7 +345,6 @@ export function FilesystemActivity() {
     historyTotalItems,
     historyTotalSuccessfulItems,
     historyComplete,
-    showFailedAttempts,
     selectedHistoryEventId,
     onSelectHistoryEventId: handleSelectHistoryEventId,
   });
@@ -968,9 +956,6 @@ export function FilesystemActivity() {
               regionStatus={regionStatus}
               streamState={streamState}
               freshnessState={freshnessState}
-              telemetryAgeMs={telemetryAgeMs}
-              snapshotReceiptAgeMs={snapshotReceiptAgeMs}
-              retrievalAgeMs={retrievalAgeMs}
               selectedSessionId={selectedSessionId}
               selectedPath={selectedPath}
               onSelectSession={selectSession}
@@ -1273,9 +1258,6 @@ export function FilesystemActivity() {
                 regionStatus={regionStatus}
                 streamState={streamState}
                 freshnessState={freshnessState}
-                telemetryAgeMs={telemetryAgeMs}
-                snapshotReceiptAgeMs={snapshotReceiptAgeMs}
-                retrievalAgeMs={retrievalAgeMs}
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}
@@ -1313,7 +1295,6 @@ export function FilesystemActivity() {
               width={timelineWidth}
               variant="fullscreen"
                   selectedSession={selectedSession}
-                  sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
                   anchoredHop={anchoredHop}
                   historyStatus={historyStatus}
@@ -1321,8 +1302,7 @@ export function FilesystemActivity() {
                   historyTotalItems={historyTotalItems}
                   historyTotalSuccessfulItems={historyTotalSuccessfulItems}
                   historyComplete={historyComplete}
-                  replayTimeline={replayTimeline}
-                  selectedHistoryEventId={selectedHistoryEventId}
+                  replay={replayPresentation}
                   activeTab={activeForensicTab}
                   onTabChange={setActiveForensicTab}
                   responsePanel={responsePanel}
@@ -1334,21 +1314,6 @@ export function FilesystemActivity() {
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
                   }}
-                  isPlaying={isPlaying}
-                  onTogglePlay={handleTogglePlay}
-                  onPause={handlePause}
-                  playbackSpeed={playbackSpeed}
-                  onToggleSpeed={handleToggleSpeed}
-                  pacingMode={pacingMode}
-                  onTogglePacingMode={handleTogglePacingMode}
-                  showFailedAttempts={showFailedAttempts}
-                  onToggleShowFailedAttempts={setShowFailedAttempts}
-                  displayedHistory={displayedHistory}
-                  selectedHistoryIndex={selectedHistoryIndex}
-                  displayedHistoryMetrics={displayedHistoryMetrics}
-                  isAnchoredSelected={isAnchoredSelected}
-                  hopTimeMetrics={hopTimeMetrics}
-                  sessionTimeSummary={sessionTimeSummary}
             />
           </div>
         </div>
@@ -1591,9 +1556,6 @@ export function FilesystemActivity() {
                 regionStatus={regionStatus}
                 streamState={streamState}
                 freshnessState={freshnessState}
-                telemetryAgeMs={telemetryAgeMs}
-                snapshotReceiptAgeMs={snapshotReceiptAgeMs}
-                retrievalAgeMs={retrievalAgeMs}
                 selectedSessionId={selectedSessionId}
                 selectedPath={selectedPath}
                 activeHop={activeHop}
@@ -1631,7 +1593,6 @@ export function FilesystemActivity() {
               width={timelineWidth}
               variant="page"
                   selectedSession={selectedSession}
-                  sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
                   anchoredHop={anchoredHop}
                   historyStatus={historyStatus}
@@ -1639,8 +1600,7 @@ export function FilesystemActivity() {
                   historyTotalItems={historyTotalItems}
                   historyTotalSuccessfulItems={historyTotalSuccessfulItems}
                   historyComplete={historyComplete}
-                  replayTimeline={replayTimeline}
-                  selectedHistoryEventId={selectedHistoryEventId}
+                  replay={replayPresentation}
                   activeTab={activeForensicTab}
                   onTabChange={setActiveForensicTab}
                   responsePanel={responsePanel}
@@ -1652,21 +1612,6 @@ export function FilesystemActivity() {
                   onLoadEarlier={() => {
                     if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
                   }}
-                  isPlaying={isPlaying}
-                  onTogglePlay={handleTogglePlay}
-                  onPause={handlePause}
-                  playbackSpeed={playbackSpeed}
-                  onToggleSpeed={handleToggleSpeed}
-                  pacingMode={pacingMode}
-                  onTogglePacingMode={handleTogglePacingMode}
-                  showFailedAttempts={showFailedAttempts}
-                  onToggleShowFailedAttempts={setShowFailedAttempts}
-                  displayedHistory={displayedHistory}
-                  selectedHistoryIndex={selectedHistoryIndex}
-                  displayedHistoryMetrics={displayedHistoryMetrics}
-                  isAnchoredSelected={isAnchoredSelected}
-                  hopTimeMetrics={hopTimeMetrics}
-                  sessionTimeSummary={sessionTimeSummary}
             />
           </div>
         </div>

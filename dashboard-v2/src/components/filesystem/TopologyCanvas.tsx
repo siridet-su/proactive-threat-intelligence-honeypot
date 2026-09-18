@@ -42,13 +42,10 @@ import {
   analyzeTopologyDensity,
   calloutsForGraph,
   compactDirectoryPath,
-  calculateTelemetryAge,
   DEFAULT_DENSITY_THRESHOLDS,
-  DEFAULT_STALE_THRESHOLD_MS,
   directorySegment,
   formatTimestamp,
   formatUpdateAge,
-  getFreshnessState,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
   isSensitiveDirectory,
@@ -94,10 +91,7 @@ interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
   streamState: StreamState;
-  freshnessState?: FreshnessState;
-  telemetryAgeMs?: number | null;
-  snapshotReceiptAgeMs?: number;
-  retrievalAgeMs?: number;
+  freshnessState: FreshnessState;
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
@@ -110,7 +104,7 @@ interface TopologyCanvasProps {
   onToggleExpand?: () => void;
   onRefresh?: () => void;
   onReconnect?: () => void;
-  staleThresholdMs?: number;
+  staleThresholdMs: number;
   isAuditMode?: boolean;
   isResizingContainer?: boolean;
   className?: string;
@@ -120,10 +114,7 @@ export function TopologyCanvas({
   snapshot,
   regionStatus,
   streamState,
-  freshnessState: propFreshnessState,
-  telemetryAgeMs: propTelemetryAgeMs,
-  snapshotReceiptAgeMs: propSnapshotReceiptAgeMs,
-  retrievalAgeMs: propRetrievalAgeMs,
+  freshnessState,
   selectedSessionId,
   selectedPath,
   activeHop,
@@ -136,7 +127,7 @@ export function TopologyCanvas({
   onToggleExpand,
   onRefresh,
   onReconnect,
-  staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
+  staleThresholdMs,
   isAuditMode = false,
   isResizingContainer = false,
   className,
@@ -154,31 +145,6 @@ export function TopologyCanvas({
       setInternalIsTopologyExpanded((prev) => !prev);
     }
   }, [onToggleExpand]);
-
-  const [fallbackNow, setFallbackNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (propFreshnessState) return;
-    const timer = window.setInterval(() => {
-      setFallbackNow(Date.now());
-    }, 2_000);
-    return () => window.clearInterval(timer);
-  }, [propFreshnessState]);
-
-  const freshnessState = useMemo(() => {
-    if (propFreshnessState) return propFreshnessState;
-    const telemetryAge = calculateTelemetryAge({ snapshot, now: fallbackNow });
-    return getFreshnessState({
-      telemetryAgeMs: propTelemetryAgeMs !== undefined ? propTelemetryAgeMs : telemetryAge.telemetryAgeMs,
-      telemetryStatus: telemetryAge.telemetryStatus,
-      snapshotReceiptAgeMs: propSnapshotReceiptAgeMs !== undefined ? propSnapshotReceiptAgeMs : telemetryAge.snapshotReceiptAgeMs,
-      retrievalAgeMs: propRetrievalAgeMs !== undefined ? propRetrievalAgeMs : telemetryAge.retrievalAgeMs,
-      hasTelemetry: telemetryAge.hasTelemetry,
-      staleThresholdMs,
-      streamState,
-      regionStatus,
-      hasSnapshot: Boolean(snapshot),
-    });
-  }, [propFreshnessState, propTelemetryAgeMs, propSnapshotReceiptAgeMs, propRetrievalAgeMs, snapshot, fallbackNow, staleThresholdMs, streamState, regionStatus]);
 
   // Scope layout persistence so audit session inspection never overrides live global topology
   const { labelStorageKey, nodeStorageKey } = useMemo(

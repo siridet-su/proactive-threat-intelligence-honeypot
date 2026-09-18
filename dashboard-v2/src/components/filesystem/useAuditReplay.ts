@@ -124,20 +124,15 @@ export interface UseAuditReplayOptions {
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
   historyComplete: boolean;
-  showFailedAttempts: boolean;
   selectedHistoryEventId: string | null;
   onSelectHistoryEventId: (id: string | null, source?: "user" | "playback") => void;
   initialPacingMode?: ReplayPacingMode;
 }
 
-export interface UseAuditReplayReturn {
+export interface AuditReplayPresentation {
   isPlaying: boolean;
-  setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
   playbackSpeed: number;
-  setPlaybackSpeed: React.Dispatch<React.SetStateAction<number>>;
   pacingMode: ReplayPacingMode;
-  setPacingMode: React.Dispatch<React.SetStateAction<ReplayPacingMode>>;
-  chronologicalHistory: SessionCwdHistoryEvent[];
   displayedHistory: SessionCwdHistoryEvent[];
   selectedHistoryIndex: number;
   displayedHistoryMetrics: HistoryWindowMetrics;
@@ -146,12 +141,22 @@ export interface UseAuditReplayReturn {
   sessionTimeSummary: SessionReplayTimeSummary;
   replayTimeline: ReplayTimeline;
   isAnchoredSelected: boolean;
-  handlePrevHop: () => void;
-  handleNextHop: () => void;
-  handleTogglePlay: () => void;
-  handlePause: () => void;
-  handleToggleSpeed: () => void;
-  handleTogglePacingMode: () => void;
+  showFailedAttempts: boolean;
+  onToggleShowFailedAttempts: (show: boolean) => void;
+  onPrevHop: () => void;
+  onNextHop: () => void;
+  onTogglePlay: () => void;
+  onPause: () => void;
+  onToggleSpeed: () => void;
+  onTogglePacingMode: () => void;
+}
+
+export interface UseAuditReplayReturn extends AuditReplayPresentation {
+  setIsPlaying: React.Dispatch<React.SetStateAction<boolean>>;
+  setPlaybackSpeed: React.Dispatch<React.SetStateAction<number>>;
+  setPacingMode: React.Dispatch<React.SetStateAction<ReplayPacingMode>>;
+  chronologicalHistory: SessionCwdHistoryEvent[];
+  presentation: AuditReplayPresentation;
 }
 
 export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayReturn {
@@ -162,7 +167,6 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     historyTotalItems,
     historyTotalSuccessfulItems,
     historyComplete,
-    showFailedAttempts,
     selectedHistoryEventId,
     onSelectHistoryEventId,
     initialPacingMode = "realistic",
@@ -171,6 +175,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
   const [pacingMode, setPacingMode] = useState<ReplayPacingMode>(initialPacingMode);
+  const [showFailedAttempts, setShowFailedAttempts] = useState(true);
 
   const chronologicalHistory = useMemo(() => deriveChronologicalHistory(history), [history]);
 
@@ -357,14 +362,10 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     onSelectHistoryEventId,
   ]);
 
-  return {
+  const presentation: AuditReplayPresentation = {
     isPlaying,
-    setIsPlaying,
     playbackSpeed,
-    setPlaybackSpeed,
     pacingMode,
-    setPacingMode,
-    chronologicalHistory,
     displayedHistory,
     selectedHistoryIndex,
     displayedHistoryMetrics,
@@ -373,11 +374,22 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     sessionTimeSummary: timeMetrics.summary,
     replayTimeline,
     isAnchoredSelected,
-    handlePrevHop,
-    handleNextHop,
-    handleTogglePlay,
-    handlePause,
-    handleToggleSpeed,
-    handleTogglePacingMode,
+    showFailedAttempts,
+    onToggleShowFailedAttempts: setShowFailedAttempts,
+    onPrevHop: handlePrevHop,
+    onNextHop: handleNextHop,
+    onTogglePlay: handleTogglePlay,
+    onPause: handlePause,
+    onToggleSpeed: handleToggleSpeed,
+    onTogglePacingMode: handleTogglePacingMode,
+  };
+
+  return {
+    ...presentation,
+    setIsPlaying,
+    setPlaybackSpeed,
+    setPacingMode,
+    chronologicalHistory,
+    presentation,
   };
 }
