@@ -697,9 +697,9 @@ export class RemoteAuditLookupCoordinator {
         terminalObservers.clear();
 
         // A network completion without an owner is not an authoritative
-        // adoption. It resolves the shared network promise for cleanup, but
-        // cannot notify terminal observers or claim transaction success.
-        if (!owner) return null;
+        // adoption. Preserve the truthful network result for direct callers,
+        // but do not notify observers or claim transaction success.
+        if (!owner) return found;
 
         if (found) {
           owner.onSessionFound(found, normHop);

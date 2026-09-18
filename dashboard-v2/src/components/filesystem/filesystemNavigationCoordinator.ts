@@ -78,6 +78,7 @@ export interface NavigationDomainAdapter {
   ) => void;
   recordLookedUpSession?: (session: FilesystemClosedSession) => void;
   onNavigationApplicationError?: (error: unknown, transaction: PopStateTransaction) => void;
+  onNavigationTransactionStarted?: (target: AuditUrlParams) => void;
   resetHistory: () => void;
   resetRequestedHopState: () => void;
   onExitFullscreenAndPlaying?: () => void;
@@ -132,6 +133,8 @@ export class FilesystemNavigationCoordinator {
   private options: FilesystemNavigationCoordinatorOptions;
   private transactionCounter = 0;
   private activeTransaction: PopStateTransaction | null = null;
+  /** Keeps the failed URL authoritative after explicit recovery releases tx state. */
+  private recoveredTransactionTarget: AuditUrlParams | null = null;
 
   constructor(options: FilesystemNavigationCoordinatorOptions = DEFAULT_COORDINATOR_OPTIONS) {
     this.options = options;
@@ -174,6 +177,22 @@ export class FilesystemNavigationCoordinator {
 
   isPopStatePending(): boolean {
     return this.activeTransaction !== null && this.activeTransaction.status === "pending";
+  }
+
+  /**
+   * Explicitly releases a recoverably failed transaction. This does not write
+   * history or derive a replacement URL from potentially stale React state.
+   * A short-lived URL guard keeps passive synchronization from immediately
+   * replacing the failed target with stale state; a new popstate or explicit
+   * user push clears the guard.
+   */
+  recoverFailedTransaction(): boolean {
+    if (!this.activeTransaction || this.activeTransaction.status !== "failed") {
+      return false;
+    }
+    this.recoveredTransactionTarget = { ...this.activeTransaction.target };
+    this.activeTransaction = null;
+    return true;
   }
 
   private markTransactionTerminal(txId: number): void {
@@ -236,6 +255,7 @@ export class FilesystemNavigationCoordinator {
 
     const targetUrl = buildAuditTargetUrl(targetParams);
     if (mode === "push") {
+      this.recoveredTransactionTarget = null;
       window.history.pushState(null, "", targetUrl);
       // Explicit user navigation invalidates any pending popstate transaction
       this.activeTransaction = null;
@@ -540,7 +560,18 @@ export class FilesystemNavigationCoordinator {
       return;
     }
 
+    // A new canonical target supersedes any previously failed transaction.
+    // The callback is deliberately outside the lookup lifecycle and cannot
+    // make a failed URL appear successfully adopted.
+    try {
+      this.options.onNavigationTransactionStarted?.(canonicalTarget);
+    } catch {
+      // Error-state cleanup must never prevent the new transaction from being
+      // registered or the popped URL from remaining authoritative.
+    }
+
     const txId = ++this.transactionCounter;
+    this.recoveredTransactionTarget = null;
     this.activeTransaction = {
       id: txId,
       target: canonicalTarget,
@@ -618,11 +649,10 @@ export class FilesystemNavigationCoordinator {
    * - If no lookup is in flight for this intent, this transaction becomes the
    *   authoritative "mutation owner": on success it applies domain mutations
    *   (setExtraAuditSessions, selectSession) and marks itself terminal.
-   * - If a lookup is already in flight for the same intent (e.g. initiated by a
-   *   snapshot update), this transaction registers only a lightweight terminal-marker
-   *   as a join observer. The marker calls markTransactionTerminal and nothing else,
-   *   preventing duplicate domain-state application while still ensuring the
-   *   transaction completes.
+   * - If a lookup is already in flight for the same normalized intent (e.g.
+   *   initiated by a snapshot update), this transaction either claims an
+   *   ownerless lookup or registers only a lightweight terminal marker. The
+   *   marker performs no domain application.
    *
    * If a newer popstate or user navigation supersedes txId, callbacks are discarded.
    */
@@ -636,9 +666,9 @@ export class FilesystemNavigationCoordinator {
       return;
     }
 
-    // Determine whether a lookup is already in flight for this exact intent.
-    // A same-intent join is registered through the coordinator's terminal-only
-    // observer API; a different intent must become the new mutation owner.
+    // Determine whether a lookup is already in flight for this exact normalized
+    // intent. The coordinator owns normalization and equality; this layer does
+    // not reproduce that comparison.
     const alreadyInFlight = this.options.coordinator.isIntentInFlight({
       sessionId,
       targetHopId,
@@ -739,8 +769,24 @@ export class FilesystemNavigationCoordinator {
       hop:
         this.options.getViewMode() === "live"
           ? null
-          : (this.options.getSelectedHistoryEventId() ?? this.options.getRequestedHop()),
+        : (this.options.getSelectedHistoryEventId() ?? this.options.getRequestedHop()),
     };
+
+    if (this.recoveredTransactionTarget) {
+      const stateMatchesRecoveredTarget = areAuditUrlParamsEqual(
+        targetParams,
+        this.recoveredTransactionTarget,
+      );
+      if (stateMatchesRecoveredTarget) {
+        this.recoveredTransactionTarget = null;
+      } else if (areAuditUrlParamsEqual(currentParams, this.recoveredTransactionTarget)) {
+        // Explicit recovery released the transaction but did not authorize
+        // stale state to rewrite the still-popped URL.
+        return;
+      } else {
+        this.recoveredTransactionTarget = null;
+      }
+    }
 
     const currentSearch = window.location.search;
     const targetSearch = buildAuditUrlSearch(targetParams);

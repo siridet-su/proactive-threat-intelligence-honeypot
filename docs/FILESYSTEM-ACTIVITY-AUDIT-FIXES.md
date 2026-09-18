@@ -67,22 +67,31 @@ Commit `3be0250` was audited as a valid single-owner improvement but required
 follow-up: arbitrary mutating `RemoteAuditLookupCallback` objects could still be
 registered as observers, the in-flight record temporarily exposed a casted null
 promise, and popstate transactions were marked terminal before domain
-application. The prior remediation commit was
+application. The prior remediation commits audited before this change are
 `ef8e3b8e97b82569113574b888204e66d911a29b` (`ef8e3b8`),
-`fix(filesystem): finalize lookup ownership lifecycle (FA-008)`. This new
-remediation commit, `fix(filesystem): close lookup failure lifecycle gaps
-(FA-008)`, centralizes normalized intent equality, adds recoverable failed
-transactions with explicit error reporting, and safely promotes ownerless
-lookups to a later authoritative mutation owner.
+`fix(filesystem): finalize lookup ownership lifecycle (FA-008)`, and
+`bcb36b22a7cf6943ea0a6dc738e68a1ef8b654fc` (`bcb36b2`),
+`fix(filesystem): close lookup failure lifecycle gaps (FA-008)`. The new
+remediation commit, `fix(filesystem): surface navigation recovery failures
+(FA-008)`, wires recoverable application failures through FilesystemActivity
+and preserves truthful ownerless network results.
 
 Failure policy: an application exception stores the error on the active
 transaction with status `failed`, invokes the explicit application-error
 callback, suppresses stale URL synchronization while preserving the popped
 URL, and allows the same target to retry or a newer target to supersede it.
+FilesystemActivity stores only the canonical failed target and a bounded
+user-safe message, renders persistent accessible Retry/Dismiss feedback, and
+guards late callbacks after unmount. Dismissal releases the failed transaction
+without a history write while retaining a URL guard until state catches up or
+new navigation begins. An ownerless lookup resolves its truthful fetched
+session (or null for not-found/network error) but performs no domain mutation
+and cannot notify terminal-success observers; a later authoritative owner can
+claim it before completion.
 
-Evidence: 37 FA-008 scenarios in
+Evidence: 38 FA-008 scenarios in
 `dashboard-v2/tests/filesystem-navigation-history.test.ts`; 17 dashboard test
-files / 398 Vitest tests passing; zero ESLint errors or warnings; clean Next.js
+files / 399 Vitest tests passing; zero ESLint errors or warnings; clean Next.js
 production build; clean `git diff --check`; and
 `go test -count=1 ./...` passing in all five `agents/` modules. FA-008 remains
 `IN PROGRESS` pending re-audit. FA-009 remains `TODO` and untouched.

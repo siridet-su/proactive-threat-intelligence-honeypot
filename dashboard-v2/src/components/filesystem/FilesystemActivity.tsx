@@ -33,9 +33,11 @@ import {
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
   TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
+  buildAuditUrlSearch,
   clampTimelineSidebarWidth,
   formatPageBadgeText,
   parseAuditUrlParams,
+  type AuditUrlParams,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { useFilesystemStreaming } from "./useFilesystemStreaming";
@@ -53,6 +55,13 @@ import {
   processSnapshotSessionResolution,
   type RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
+import type { PopStateTransaction } from "./filesystemNavigationCoordinator";
+
+interface NavigationApplicationErrorState {
+  target: AuditUrlParams;
+  targetSearch: string;
+  message: string;
+}
 
 export function FilesystemActivity() {
   const shouldReduceMotion = useReducedMotion();
@@ -61,6 +70,7 @@ export function FilesystemActivity() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [extraAuditSessions, setExtraAuditSessions] = useState<Map<string, FilesystemClosedSession | FilesystemTopologySession>>(new Map());
+  const [navigationApplicationError, setNavigationApplicationError] = useState<NavigationApplicationErrorState | null>(null);
 
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
@@ -86,6 +96,7 @@ export function FilesystemActivity() {
   // Cross-cutting refs
   const selectedSessionIdRef = useRef<string | null>(null);
   const selectedLiveCwdRef = useRef<string | null>(null);
+  const isMountedRef = useRef(false);
   const auditDialogRef = useRef<HTMLDivElement | null>(null);
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
   const [remoteAuditLookupManager] = useState(() => {
@@ -104,9 +115,12 @@ export function FilesystemActivity() {
   const selectSessionRef = useRef<((sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession, targetHopId?: string | null) => void) | null>(null);
   const handleSnapshotAppliedRef = useRef<((data: FilesystemTopologySnapshot) => void) | null>(null);
 
-  // Unmount cleanup: abort any in-flight remote lookup
+  // Unmount cleanup: abort any in-flight remote lookup and prevent late
+  // navigation-error callbacks from updating detached component state.
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       remoteAuditLookupManager.destroy();
     };
   }, [remoteAuditLookupManager]);
@@ -233,6 +247,42 @@ export function FilesystemActivity() {
       setIsAuditFullscreen(false);
     },
   });
+
+  const handleNavigationApplicationError = useCallback(
+    (_error: unknown, transaction: PopStateTransaction) => {
+      if (!isMountedRef.current) return;
+      try {
+        const target = { ...transaction.target };
+        setNavigationApplicationError({
+          target,
+          targetSearch: buildAuditUrlSearch(target),
+          message: "We couldn't complete this navigation. Retry or choose another destination.",
+        });
+      } catch {
+        // Error reporting is deliberately bounded and cannot break navigation.
+      }
+    },
+    [],
+  );
+
+  const handleNavigationTransactionStarted = useCallback(() => {
+    if (isMountedRef.current) {
+      setNavigationApplicationError(null);
+    }
+  }, []);
+
+  const retryNavigationApplication = useCallback(() => {
+    const failure = navigationApplicationError;
+    if (!failure) return;
+    navigationCoordinator.recoverFailedTransaction();
+    setNavigationApplicationError(null);
+    navigationCoordinator.handlePopState(failure.targetSearch);
+  }, [navigationApplicationError, navigationCoordinator]);
+
+  const dismissNavigationApplicationError = useCallback(() => {
+    navigationCoordinator.recoverFailedTransaction();
+    setNavigationApplicationError(null);
+  }, [navigationCoordinator]);
 
   const handleSelectHistoryEventId = useCallback(
     (eventId: string | null, source: "user" | "playback" | "sync" = "user") => {
@@ -562,6 +612,8 @@ export function FilesystemActivity() {
       getSessionById: () => sessionById,
       selectSession,
       recordLookedUpSession,
+      onNavigationApplicationError: handleNavigationApplicationError,
+      onNavigationTransactionStarted: handleNavigationTransactionStarted,
       resetHistory,
       resetRequestedHopState,
       onExitFullscreenAndPlaying: () => {
@@ -577,6 +629,8 @@ export function FilesystemActivity() {
     navigationCoordinator,
     remoteAuditLookupManager,
     recordLookedUpSession,
+    handleNavigationApplicationError,
+    handleNavigationTransactionStarted,
     resetHistory,
     resetRequestedHopState,
     selectSession,
@@ -722,6 +776,23 @@ export function FilesystemActivity() {
 
   return (
     <div className="space-y-5 pb-10 sm:pb-14">
+      {navigationApplicationError ? (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-danger-border bg-danger-subtle px-4 py-3 text-sm text-danger"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <p className="min-w-0 flex-1">{navigationApplicationError.message}</p>
+          <button type="button" className="ui-button" onClick={retryNavigationApplication}>
+            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+            Retry
+          </button>
+          <button type="button" className="ui-button" onClick={dismissNavigationApplicationError}>
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       {/* Header Section: Global view controls and real-time telemetry status */}
       <section className="flex flex-col gap-3.5 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
         <div>

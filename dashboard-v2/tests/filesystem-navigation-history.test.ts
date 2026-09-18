@@ -1401,13 +1401,54 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     await trimmedPromise;
   });
 
+  it("Finding 1: a raw whitespace popstate hop joins the normalized null lookup", async () => {
+    const deferred = createDeferred<FilesystemClosedSession | null>();
+    const fetchSpy = vi.fn(() => deferred.promise);
+    const owner = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+    });
+    const ownerPromise = coordinator.lookup(
+      { sessionId: "raw-whitespace", targetHopId: null },
+      owner,
+    );
+    const harness = setupCoordinatorHarness(
+      "/filesystem-activity?view=audit&sessionId=raw-whitespace",
+      {
+        coordinator,
+        getSnapshot: () => ({
+          sessions: [],
+          recentClosedSessions: [],
+          nodes: [],
+          truncated: false,
+          generatedAt: "",
+        }),
+      },
+    );
+
+    harness.navCoordinator.handlePopState(
+      "?view=audit&sessionId=raw-whitespace&hop=%20%20",
+    );
+    expect(harness.navCoordinator.isPopStatePending()).toBe(true);
+    deferred.resolve(makeSession("raw-whitespace"));
+    await ownerPromise;
+    await flushMicrotasks();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(owner.onSessionFound).toHaveBeenCalledTimes(1);
+    expect(harness.navCoordinator.getActiveTransaction()?.status).toBe("terminal");
+  });
+
   it("Finding 1: a different normalized hop aborts the previous generation", async () => {
     const firstDeferred = createDeferred<FilesystemClosedSession | null>();
     const secondDeferred = createDeferred<FilesystemClosedSession | null>();
     const abortSpy = vi.fn();
-    const fetchSpy = vi.fn((sessionId: string, signal: AbortSignal) => {
+    let invocation = 0;
+    const fetchSpy = vi.fn((_sessionId: string, signal: AbortSignal) => {
       signal.addEventListener("abort", abortSpy);
-      return sessionId === "hop-change" ? firstDeferred.promise : secondDeferred.promise;
+      invocation += 1;
+      return invocation === 1 ? firstDeferred.promise : secondDeferred.promise;
     });
     const coordinator = new RemoteAuditLookupCoordinator({
       initialViewMode: "audit",
@@ -1621,8 +1662,10 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
 
     const replaceStateSpy = vi.spyOn(window.history, "replaceState");
     replaceStateSpy.mockClear();
+    expect(navCoordinator.recoverFailedTransaction()).toBe(true);
     navCoordinator.synchronizeUrlState();
     expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?view=audit&sessionId=partial-failure");
 
     // The same target is not deduplicated after failure and can retry.
     failApplication = false;
@@ -1651,9 +1694,25 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     const terminalSpy = vi.fn();
     const terminalObserver = createRemoteAuditLookupTerminalObserver(terminalSpy);
     expect(() => coordinator.joinLookup(intent, terminalObserver)).toThrow(/ownerless/);
-    deferred.resolve(makeSession("ownerless"));
-    await ownerlessPromise;
+    const ownerlessSession = makeSession("ownerless");
+    deferred.resolve(ownerlessSession);
+    await expect(ownerlessPromise).resolves.toBe(ownerlessSession);
     expect(terminalSpy).not.toHaveBeenCalled();
+
+    const notFoundCoordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(async () => null),
+    });
+    await expect(notFoundCoordinator.lookup({ sessionId: "ownerless-not-found" })).resolves.toBeNull();
+
+    const errorCoordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: vi.fn(async () => {
+        throw new Error("network-failure");
+      }),
+    });
+    await expect(errorCoordinator.lookup({ sessionId: "ownerless-error" })).resolves.toBeNull();
+    expect(errorCoordinator.isInFlight()).toBe(false);
 
     const claimDeferred = createDeferred<FilesystemClosedSession | null>();
     const claimCoordinator = new RemoteAuditLookupCoordinator({
