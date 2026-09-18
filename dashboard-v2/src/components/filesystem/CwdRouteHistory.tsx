@@ -20,7 +20,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
@@ -31,7 +31,9 @@ import {
   formatFromPath,
   formatTimestamp,
   getHistoryWindowMetrics,
+  isReplayTimelineKeyboardKey,
   isInitialSshEntry,
+  mapReplayTimelineKeyToIndex,
   mapReplayTimelineValueToIndex,
   statusLabel,
   type ReplayTimeline,
@@ -189,8 +191,13 @@ export function CwdRouteHistory({
   );
 
   const derivedReplayTimeline = useMemo(
-    () => buildReplayTimeline(displayedHistory, selectedHistoryIndex, historyComplete),
-    [displayedHistory, historyComplete, selectedHistoryIndex],
+    () => buildReplayTimeline(
+      displayedHistory,
+      selectedHistoryIndex,
+      historyComplete,
+      showFailedAttempts && historyComplete ? "retained" : "displayed",
+    ),
+    [displayedHistory, historyComplete, selectedHistoryIndex, showFailedAttempts],
   );
   const replayTimeline = suppliedReplayTimeline ?? derivedReplayTimeline;
 
@@ -205,7 +212,7 @@ export function CwdRouteHistory({
         hopMetrics: [],
         summary: {
           totalDurationMs: 0,
-          formattedTotalDuration: `Partial · unloaded gap · ${replayTimeline.durationLabel}`,
+          formattedTotalDuration: "unloaded gap",
           currentElapsedMs: 0,
           formattedCurrentElapsed: "+00:00",
           currentDeltaMs: 0,
@@ -249,6 +256,21 @@ export function CwdRouteHistory({
       setInternalIsPlaying(false);
     }
   }, [isPlaying, onPause, onTogglePlay]);
+
+  const selectDisplayedHistoryIndex = useCallback((targetIndex: number) => {
+    if (isAnchoredSelected || targetIndex < 0 || targetIndex >= displayedHistory.length || targetIndex === selectedHistoryIndex) return;
+    const targetEvent = displayedHistory[targetIndex];
+    if (!targetEvent) return;
+    handlePause();
+    onSelectHistoryEventId(targetEvent.id);
+  }, [displayedHistory, handlePause, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
+
+  const handleScrubberKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (isAnchoredSelected || !isReplayTimelineKeyboardKey(event.key)) return;
+    event.preventDefault();
+    const targetIndex = mapReplayTimelineKeyToIndex(event.key, selectedHistoryIndex, displayedHistory.length);
+    if (targetIndex !== null) selectDisplayedHistoryIndex(targetIndex);
+  }, [displayedHistory.length, isAnchoredSelected, selectDisplayedHistoryIndex, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
     if (onTogglePlay) {
@@ -587,8 +609,7 @@ export function CwdRouteHistory({
                               aria-label="First hop"
                               disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
                               onClick={() => {
-                                handlePause();
-                                onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
+                                selectDisplayedHistoryIndex(0);
                               }}
                             >
                               <Rewind className="h-3 w-3" />
@@ -601,8 +622,7 @@ export function CwdRouteHistory({
                               aria-label="Previous hop"
                               disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
                               onClick={() => {
-                                handlePause();
-                                onSelectHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
+                                selectDisplayedHistoryIndex(selectedHistoryIndex - 1);
                               }}
                             >
                               <ChevronLeft className="h-3.5 w-3.5" />
@@ -629,8 +649,7 @@ export function CwdRouteHistory({
                               aria-label="Next hop"
                               disabled={isAnchoredSelected || selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                               onClick={() => {
-                                handlePause();
-                                onSelectHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
+                                selectDisplayedHistoryIndex(selectedHistoryIndex + 1);
                               }}
                             >
                               <ChevronRight className="h-3.5 w-3.5" />
@@ -643,8 +662,7 @@ export function CwdRouteHistory({
                               aria-label="Latest hop"
                               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistory.length - 1}
                               onClick={() => {
-                                handlePause();
-                                onSelectHistoryEventId(displayedHistory.at(-1)?.id ?? null);
+                                selectDisplayedHistoryIndex(displayedHistory.length - 1);
                               }}
                             >
                               <FastForward className="h-3 w-3" />
@@ -745,14 +763,10 @@ export function CwdRouteHistory({
                     step={1}
                     value={replayTimeline.value}
                     disabled={isAnchoredSelected || displayedHistory.length <= 1}
+                    onKeyDown={handleScrubberKeyDown}
                     onChange={(e) => {
-                      if (isAnchoredSelected) return;
-                      handlePause();
                       const targetIndex = mapReplayTimelineValueToIndex(replayTimeline, Number(e.target.value));
-                      const targetEvent = displayedHistory[targetIndex];
-                      if (targetEvent) {
-                        onSelectHistoryEventId(targetEvent.id);
-                      }
+                      selectDisplayedHistoryIndex(targetIndex);
                     }}
                     aria-label="Replay timeline scrubber"
                     aria-valuemin={replayTimeline.minValue}
@@ -823,7 +837,9 @@ export function CwdRouteHistory({
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-subtle" aria-live="polite">
-              <span>{historyComplete ? "Complete retained history loaded" : `${replayTimeline.durationLabel} · ${history.length} of ${historyTotalItems} retained events loaded`}</span>
+              <span>{historyComplete
+                ? replayTimeline.durationScope === "retained" ? "Complete retained history loaded" : "Complete displayed history loaded"
+                : `${replayTimeline.durationLabel} · ${history.length} of ${historyTotalItems} retained events loaded`}</span>
               <span className="shrink-0 font-mono">{historyTotalItems} total</span>
             </div>
 

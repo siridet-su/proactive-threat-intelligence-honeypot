@@ -55,6 +55,12 @@ function fireInputChange(input: HTMLInputElement, value: string): void {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function fireKey(input: HTMLInputElement, key: string): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+  input.dispatchEvent(event);
+  return event;
+}
+
 function renderHistory(
   root: Root,
   container: HTMLDivElement,
@@ -147,9 +153,146 @@ describe("FA-009 production replay scrubber", () => {
     expect(onPause).toHaveBeenCalledTimes(2);
   });
 
+  it("scrubs one uneven-gap hop per ArrowRight and ArrowLeft key", () => {
+    const onSelect = vi.fn();
+    const onPause = vi.fn();
+    const { range } = renderHistory(root, container, {
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+
+    act(() => fireKey(range, "ArrowRight"));
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenCalledWith("event-b");
+
+    renderHistory(root, container, {
+      selectedHistoryEventId: "event-b",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+    act(() => fireKey(range, "ArrowLeft"));
+    expect(onPause).toHaveBeenCalledTimes(2);
+    expect(onSelect).toHaveBeenLastCalledWith("event-a");
+  });
+
+  it("uses ArrowUp and ArrowDown as hop navigation and pauses successful moves", () => {
+    const onSelect = vi.fn();
+    const onPause = vi.fn();
+    const { range } = renderHistory(root, container, {
+      selectedHistoryEventId: "event-b",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+
+    act(() => fireKey(range, "ArrowUp"));
+    expect(onPause).toHaveBeenCalledTimes(1);
+    expect(onSelect).toHaveBeenLastCalledWith("event-c");
+
+    renderHistory(root, container, {
+      selectedHistoryEventId: "event-b",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+    act(() => fireKey(range, "ArrowDown"));
+    expect(onPause).toHaveBeenCalledTimes(2);
+    expect(onSelect).toHaveBeenLastCalledWith("event-a");
+  });
+
+  it("uses Home and End for boundary hops", () => {
+    const onSelect = vi.fn();
+    const onPause = vi.fn();
+    const { range } = renderHistory(root, container, {
+      selectedHistoryEventId: "event-b",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+
+    act(() => fireKey(range, "Home"));
+    expect(onSelect).toHaveBeenLastCalledWith("event-a");
+    renderHistory(root, container, {
+      selectedHistoryEventId: "event-b",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+    act(() => fireKey(range, "End"));
+    expect(onSelect).toHaveBeenLastCalledWith("event-c");
+    expect(onPause).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps equal-timestamp and index-fallback timelines keyboard-navigable by hop", () => {
+    const onSelect = vi.fn();
+    const onPause = vi.fn();
+    const equalTimestampEvents = chronologicalEvents.map((event) => ({
+      ...event,
+      at: chronologicalEvents[0].at,
+    }));
+    const { range } = renderHistory(root, container, {
+      history: [...equalTimestampEvents].reverse(),
+      historyTotalItems: 3,
+      historyTotalSuccessfulItems: 3,
+      selectedHistoryEventId: "event-a",
+      onSelectHistoryEventId: onSelect,
+      onPause,
+    });
+    expect(range.max).toBe("2");
+    act(() => fireKey(range, "ArrowRight"));
+    expect(onSelect).toHaveBeenLastCalledWith("event-b");
+
+    const invalidEvents = [
+      makeEvent("invalid-a", "not-a-timestamp"),
+      makeEvent("invalid-b", "also-not-a-timestamp"),
+    ];
+    renderHistory(root, container, {
+      history: [...invalidEvents].reverse(),
+      historyTotalItems: 2,
+      historyTotalSuccessfulItems: 2,
+      selectedHistoryEventId: "invalid-a",
+      onSelectHistoryEventId: onSelect,
+      onPause,
+    });
+    expect(range.max).toBe("1");
+    act(() => fireKey(range, "ArrowRight"));
+    expect(onSelect).toHaveBeenLastCalledWith("invalid-b");
+  });
+
+  it("prevents handled boundary keys without wrapping or duplicate side effects", () => {
+    const onSelect = vi.fn();
+    const onPause = vi.fn();
+    const { range } = renderHistory(root, container, {
+      selectedHistoryEventId: "event-a",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+
+    let boundaryEvent: KeyboardEvent | undefined;
+    act(() => {
+      boundaryEvent = fireKey(range, "ArrowLeft");
+    });
+    expect(boundaryEvent?.defaultPrevented).toBe(true);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onPause).not.toHaveBeenCalled();
+
+    renderHistory(root, container, {
+      selectedHistoryEventId: "event-c",
+      onSelectHistoryEventId: onSelect,
+      isPlaying: true,
+      onPause,
+    });
+    act(() => fireKey(range, "ArrowRight"));
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onPause).not.toHaveBeenCalled();
+  });
+
   it("labels partial loaded span and complete retained duration distinctly", () => {
     renderHistory(root, container, { historyComplete: false });
-    expect(container.textContent).toContain("Partial · loaded span 30m 05s");
+    expect(container.textContent).toContain("Partial · displayed loaded span 30m 05s");
 
     renderHistory(root, container, { historyComplete: true });
     expect(container.textContent).toContain("Complete retained duration 30m 05s");
@@ -182,5 +325,31 @@ describe("FA-009 production replay scrubber", () => {
     expect(range.disabled).toBe(true);
     expect(range.getAttribute("aria-valuetext")).toContain("unloaded gap");
     expect(container.textContent).toContain("unloaded gap");
+  });
+
+  it("does not navigate an anchored or disabled scrubber", () => {
+    const onSelect = vi.fn();
+    const { range } = renderHistory(root, container, {
+      anchoredHop: makeEvent("event-deep", "2026-09-15T13:00:00.000Z"),
+      selectedHistoryEventId: "event-deep",
+      requestedHop: "event-deep",
+      onSelectHistoryEventId: onSelect,
+    });
+    act(() => fireKey(range, "ArrowRight"));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("labels complete filtered spans as displayed-event spans", () => {
+    const failedBoundary = makeEvent("failed-boundary", "2026-09-15T11:00:00.000Z", "failed_change");
+    renderHistory(root, container, {
+      history: [chronologicalEvents[2], chronologicalEvents[1], failedBoundary],
+      historyTotalItems: 3,
+      historyTotalSuccessfulItems: 2,
+      historyComplete: true,
+      showFailedAttempts: false,
+      selectedHistoryEventId: chronologicalEvents[1].id,
+    });
+    expect(container.textContent).toContain("Complete displayed span 30m 00s");
+    expect(container.textContent).not.toContain("Complete retained duration");
   });
 });

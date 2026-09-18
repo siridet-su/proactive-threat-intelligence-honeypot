@@ -16,6 +16,7 @@ import {
   formatElapsedTime,
   formatTimeDelta,
   getHistoryWindowMetrics,
+  mapReplayTimelineKeyToIndex,
   mapReplayTimelineValueToIndex,
 } from "../src/components/filesystem/filesystemUtils";
 
@@ -129,6 +130,17 @@ describe("useAuditReplay pure replay helpers (FS-016)", () => {
 
     // at start (index 0): prev is null
     expect(calculateNextHistoryEventId(chronological, 0, "prev")).toBeNull();
+  });
+
+  it("maps supported scrubber keys to adjacent displayed hops without wrapping", () => {
+    expect(mapReplayTimelineKeyToIndex("ArrowRight", 0, 3)).toBe(1);
+    expect(mapReplayTimelineKeyToIndex("ArrowUp", 0, 3)).toBe(1);
+    expect(mapReplayTimelineKeyToIndex("ArrowLeft", 1, 3)).toBe(0);
+    expect(mapReplayTimelineKeyToIndex("ArrowDown", 1, 3)).toBe(0);
+    expect(mapReplayTimelineKeyToIndex("Home", 2, 3)).toBe(0);
+    expect(mapReplayTimelineKeyToIndex("End", 0, 3)).toBe(2);
+    expect(mapReplayTimelineKeyToIndex("ArrowLeft", 0, 3)).toBeNull();
+    expect(mapReplayTimelineKeyToIndex("End", 2, 3)).toBeNull();
   });
 
   it("toggles playback speed between 1400ms and 700ms", () => {
@@ -277,7 +289,9 @@ describe("time-based replay scrubber pure helpers (FS-019)", () => {
   it("labels partial and complete durations without overstating loaded history", () => {
     const partial = buildReplayTimeline(unevenEvents, 1, false);
     const complete = buildReplayTimeline(unevenEvents, 1, true);
-    expect(partial.durationLabel).toBe("Partial · loaded span 30m 05s");
+    expect(partial.durationScope).toBe("displayed");
+    expect(partial.durationLabel).toBe("Partial · displayed loaded span 30m 05s");
+    expect(complete.durationScope).toBe("retained");
     expect(complete.durationLabel).toBe("Complete retained duration 30m 05s");
   });
 
@@ -297,10 +311,38 @@ describe("time-based replay scrubber pure helpers (FS-019)", () => {
       unevenEvents[2],
     ];
     const filtered = filterDisplayedHistory(withFailure, false);
-    const timeline = buildReplayTimeline(filtered, 1, true);
+    const timeline = buildReplayTimeline(filtered, 1, true, "displayed");
     expect(filtered.map((event) => event.id)).toEqual(["ev-1", "ev-3"]);
     expect(timeline.maxValue).toBe(1_805_000);
     expect(timeline.selectedEventId).toBe("ev-3");
+    expect(timeline.durationLabel).toBe("Complete displayed span 30m 05s");
+  });
+
+  it.each([
+    ["earliest", [
+      { ...unevenEvents[0], action: "failed_change" as const, status: "failed" },
+      unevenEvents[1],
+      unevenEvents[2],
+    ], "Complete displayed span 30m 00s"],
+    ["latest", [
+      unevenEvents[0],
+      unevenEvents[1],
+      { ...unevenEvents[2], action: "failed_change" as const, status: "failed" },
+    ], "Complete displayed span 5s"],
+    ["both boundaries", [
+      { ...unevenEvents[0], action: "failed_change" as const, status: "failed" },
+      unevenEvents[1],
+      { ...unevenEvents[2], action: "failed_change" as const, status: "failed" },
+    ], "Complete displayed span 0s"],
+    ["every event", [
+      { ...unevenEvents[0], action: "failed_change" as const, status: "failed" },
+      { ...unevenEvents[1], action: "failed_change" as const, status: "failed" },
+    ], "No displayed duration"],
+  ] as const)("labels the %s filtered boundary truthfully", (_name, events, expectedLabel) => {
+    const filtered = filterDisplayedHistory(events, false);
+    const timeline = buildReplayTimeline(filtered, 0, true, "displayed");
+    expect(timeline.durationScope).toBe("displayed");
+    expect(timeline.durationLabel).toBe(expectedLabel);
   });
 
   it("formats forensic time deltas concisely across orders of magnitude", () => {

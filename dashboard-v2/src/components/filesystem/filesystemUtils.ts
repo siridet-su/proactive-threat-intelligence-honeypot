@@ -179,6 +179,7 @@ export interface SessionReplayTimeSummary {
 }
 
 export type ReplayTimelineScaleMode = "time" | "index";
+export type ReplayTimelineDurationScope = "displayed" | "retained";
 export type ReplayTimelineTimingStatus =
   | "empty"
   | "single-event"
@@ -190,6 +191,7 @@ export type ReplayTimelineTimingStatus =
 
 export interface ReplayTimeline {
   scaleMode: ReplayTimelineScaleMode;
+  durationScope: ReplayTimelineDurationScope;
   timingStatus: ReplayTimelineTimingStatus;
   isPartial: boolean;
   loadedSpanMs: number;
@@ -209,13 +211,18 @@ function replayTimelineDurationLabel(
   timingStatus: ReplayTimelineTimingStatus,
   loadedSpanMs: number,
   historyComplete: boolean,
+  durationScope: ReplayTimelineDurationScope,
 ): string {
   if (scaleMode === "time") {
-    const prefix = historyComplete ? "Complete retained duration" : "Partial · loaded span";
+    const prefix = durationScope === "retained"
+      ? "Complete retained duration"
+      : historyComplete
+        ? "Complete displayed span"
+        : "Partial · displayed loaded span";
     return `${prefix} ${formatTimeDelta(loadedSpanMs)}`;
   }
   if (!historyComplete) return "Partial · timing unavailable";
-  if (timingStatus === "empty") return "No retained duration";
+  if (timingStatus === "empty") return durationScope === "retained" ? "No retained duration" : "No displayed duration";
   return "Timing unavailable · index scale";
 }
 
@@ -257,12 +264,14 @@ export function buildReplayTimeline(
   displayedHistory: readonly SessionCwdHistoryEvent[],
   selectedIndex: number,
   historyComplete: boolean,
+  durationScope: ReplayTimelineDurationScope = historyComplete ? "retained" : "displayed",
 ): ReplayTimeline {
   const isPartial = !historyComplete;
   if (!displayedHistory.length) {
-    const durationLabel = replayTimelineDurationLabel("index", "empty", 0, historyComplete);
+    const durationLabel = replayTimelineDurationLabel("index", "empty", 0, historyComplete, durationScope);
     return {
       scaleMode: "index",
+      durationScope,
       timingStatus: "empty",
       isPartial,
       loadedSpanMs: 0,
@@ -349,6 +358,7 @@ export function buildReplayTimeline(
     timingStatus,
     loadedSpanMs,
     historyComplete,
+    durationScope,
   );
   const summary: SessionReplayTimeSummary = {
     totalDurationMs: loadedSpanMs,
@@ -362,6 +372,7 @@ export function buildReplayTimeline(
 
   return {
     scaleMode,
+    durationScope,
     timingStatus,
     isPartial,
     loadedSpanMs,
@@ -375,6 +386,29 @@ export function buildReplayTimeline(
     hopMetrics,
     summary,
   };
+}
+
+export type ReplayTimelineKeyboardKey = "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End";
+
+export function isReplayTimelineKeyboardKey(key: string): key is ReplayTimelineKeyboardKey {
+  return key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown" || key === "Home" || key === "End";
+}
+
+/** Maps supported range keys to displayed-event hops; boundary presses return null without wrapping. */
+export function mapReplayTimelineKeyToIndex(
+  key: ReplayTimelineKeyboardKey,
+  currentIndex: number,
+  eventCount: number,
+): number | null {
+  if (eventCount <= 0 || currentIndex < 0 || currentIndex >= eventCount) return null;
+  const targetIndex = key === "ArrowLeft" || key === "ArrowDown"
+    ? currentIndex - 1
+    : key === "ArrowRight" || key === "ArrowUp"
+      ? currentIndex + 1
+      : key === "Home"
+        ? 0
+        : eventCount - 1;
+  return targetIndex === currentIndex || targetIndex < 0 || targetIndex >= eventCount ? null : targetIndex;
 }
 
 /** Maps a scrubber value to the nearest displayed event; ties choose earliest. */

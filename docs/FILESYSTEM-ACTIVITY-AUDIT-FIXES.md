@@ -101,29 +101,39 @@ production build; clean `git diff --check`; and
 
 The production replay timeline is now a single chronological model shared by
 the replay hook and route-history component. Its time scale uses elapsed
-milliseconds from the first loaded event, maps a scrub value to the nearest
-displayed event with an earliest-event tie-break, and preserves Previous/Next
-as discrete hop-index navigation. A valid scale requires every displayed
-timestamp to parse and be non-decreasing with positive total span. Equal
-timestamps share elapsed positions; all-equal timestamps, missing or invalid
-timestamps, and non-monotonic sequences use an explicitly labelled index
-fallback (`Timing unavailable`) without invented interpolation. A single valid
-event has a stable zero-duration scale.
+milliseconds from the first displayed event, maps pointer/input values to the
+nearest displayed event with an earliest-event tie-break, and preserves
+Previous/Next as discrete hop-index navigation. A valid scale requires every
+displayed timestamp to parse and be non-decreasing with positive total span.
+Equal timestamps share elapsed positions; all-equal timestamps, missing or
+invalid timestamps, and non-monotonic sequences use an explicitly labelled
+index fallback (`Timing unavailable`) without invented interpolation. A single
+valid event has a stable zero-duration scale.
 
-Incomplete history is labelled `Partial · loaded span …` and elapsed values
-are relative to the loaded window. Complete history may claim `Complete
-retained duration …`. Loading earlier events recomputes the origin while the
-selected event remains identified by ID. Anchored deep targets remain disabled
-and report the unloaded gap rather than being spliced into the loaded scale.
+Keyboard range semantics are explicitly hop-based: ArrowLeft/ArrowDown select
+the previous displayed event, ArrowRight/ArrowUp select the next, and Home/End
+select the first/last. Handled keys prevent the native millisecond movement;
+boundary presses do not wrap, pause, select, or write history. Successful
+keyboard and pointer/input selections pause once and select once. Anchored deep
+targets remain disabled and report one concise `unloaded gap` label.
 
-Evidence: 11 deterministic timeline-helper regressions in
-`dashboard-v2/tests/filesystem-hooks.test.ts` and 7 real DOM production
+The timeline model now carries an explicit duration scope. Partial windows say
+`Partial · displayed loaded span …`; complete filtered windows say `Complete
+displayed span …`; only complete unfiltered retained history says `Complete
+retained duration …`. Filtering out the earliest, latest, both boundaries, or
+every event therefore cannot overstate the timestamp scope. Loading earlier
+events recomputes the displayed origin while the selected event remains
+identified by ID.
+
+Evidence: 16 deterministic timeline/helper regressions in
+`dashboard-v2/tests/filesystem-hooks.test.ts` and 14 real DOM production
 `CwdRouteHistory` scrubber regressions in
 `dashboard-v2/tests/filesystem-replay-scrubber.test.ts`; 18 dashboard test
-files / 417 Vitest tests passing; zero ESLint errors or warnings; clean
+files / 429 Vitest tests passing; zero ESLint errors or warnings; clean
 production build; clean `git diff --check`; and all five Go modules passing.
-FA-009 remains `IN PROGRESS` pending re-audit. FA-010 and later items remain
-`TODO` and untouched.
+The remediation commit hash is recorded in the final handoff for this
+single commit. FA-009 remains `IN PROGRESS` pending re-audit. FA-010 and later
+items remain `TODO` and untouched.
 
 ## Required validation gate
 

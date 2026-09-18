@@ -196,8 +196,13 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
 
   const replayTimeline = useMemo(
-    () => buildReplayTimeline(displayedHistory, selectedHistoryIndex, historyComplete),
-    [displayedHistory, historyComplete, selectedHistoryIndex],
+    () => buildReplayTimeline(
+      displayedHistory,
+      selectedHistoryIndex,
+      historyComplete,
+      showFailedAttempts && historyComplete ? "retained" : "displayed",
+    ),
+    [displayedHistory, historyComplete, selectedHistoryIndex, showFailedAttempts],
   );
 
   const currentEvent = isAnchoredSelected
@@ -267,7 +272,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
         hopMetrics: [],
         summary: {
           totalDurationMs: 0,
-          formattedTotalDuration: "Partial",
+          formattedTotalDuration: "unloaded gap",
           currentElapsedMs: 0,
           formattedCurrentElapsed: "+00:00",
           currentDeltaMs: 0,
