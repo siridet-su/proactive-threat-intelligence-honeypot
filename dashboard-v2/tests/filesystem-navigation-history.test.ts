@@ -20,7 +20,7 @@ import {
   useFilesystemUrlState,
   type UseFilesystemUrlStateReturn,
 } from "@/components/filesystem/useFilesystemUrlState";
-import { RemoteAuditLookupCoordinator } from "@/components/filesystem/sessionHopResolver";
+import { RemoteAuditLookupCoordinator, createRemoteAuditLookupCallbacks } from "@/components/filesystem/sessionHopResolver";
 
 function makeSession(
   id: string,
@@ -875,8 +875,9 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     expect(pushStateSpy).toHaveBeenCalledTimes(1);
   });
 
+
   // =========================================================================
-  // Finding 2: Same-Intent In-Flight Lookup Join Semantics
+  // Finding 2 (Previous): Promise identity and subscriber delivery
   // =========================================================================
   it("Finding 2: RemoteAuditLookupCoordinator.requestLookup joins active promise and delivers results to all subscribers", async () => {
     const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
@@ -912,10 +913,406 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
 
     expect(res1).toBe(mockSession);
     expect(res2).toBe(mockSession);
+    // cb1 is the mutation owner; cb2 is a join observer — both are notified exactly once
+    expect(cb1.onSessionFound).toHaveBeenCalledTimes(1);
+    expect(cb2.onSessionFound).toHaveBeenCalledTimes(1);
     expect(cb1.onSessionFound).toHaveBeenCalledWith(mockSession, "hop-1");
     expect(cb2.onSessionFound).toHaveBeenCalledWith(mockSession, "hop-1");
     expect(cb1.onSessionNotFound).not.toHaveBeenCalled();
     expect(cb2.onSessionNotFound).not.toHaveBeenCalled();
+  });
+
+  // =========================================================================
+  // Finding 1 (New): Exactly-once domain adoption for joined lookups
+  // =========================================================================
+
+  it("Finding 1 (exact-once): Snapshot lookup joined by popstate uses createRemoteAuditLookupCallbacks; domain mutations apply exactly once on success", async () => {
+    let resolveFetch!: (s: FilesystemClosedSession | null) => void;
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+
+    // ---- Snapshot-layer state (what createRemoteAuditLookupCallbacks mutates) ----
+    let selectedSessionId: string | null = null;
+    let expiredSessionId: string | null = null;
+    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
+    const recordLookedUpSessionSpy = vi.fn();
+    const setExtraAuditSessionsSpy = vi.fn((updater: (p: Map<string, FilesystemClosedSession>) => Map<string, FilesystemClosedSession>) => {
+      const next = updater(extraAuditSessions);
+      extraAuditSessions.clear();
+      for (const [k, v] of next) extraAuditSessions.set(k, v);
+    });
+    const setExpiredSessionIdSpy = vi.fn((id: string | null) => { expiredSessionId = id; });
+    const selectSessionSpy = vi.fn((sid: string) => {
+      selectedSessionId = sid;
+    });
+    const loadHistorySpy = vi.fn();
+
+    // Production snapshot callback (what FilesystemActivity wires via createRemoteAuditLookupCallbacks)
+    const productionCallbacks = createRemoteAuditLookupCallbacks({
+      recordLookedUpSession: recordLookedUpSessionSpy,
+      setExtraAuditSessions: setExtraAuditSessionsSpy as Parameters<typeof createRemoteAuditLookupCallbacks>[0]["setExtraAuditSessions"],
+      setExpiredSessionId: setExpiredSessionIdSpy,
+      selectSession: (sid, sObj, hop) => {
+        selectSessionSpy(sid, sObj, hop);
+        loadHistorySpy();
+      },
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+      callbacks: productionCallbacks,
+    });
+
+    // 1. Snapshot update initiates lookup ("remote-join" is missing from snapshot)
+    const snapshotPromise = coordinator.lookup({ sessionId: "remote-join", targetHopId: "hop-1" });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(coordinator.isInFlight()).toBe(true);
+
+    // 2. Build navCoordinator wired to the same coordinator
+    const navCoordinator = new FilesystemNavigationCoordinator({
+      getViewMode: () => "audit",
+      getSelectedSessionId: () => selectedSessionId,
+      getHideHomeOnly: () => false,
+      getTargetPathFilter: () => null,
+      getSelectedHistoryEventId: () => "hop-1",
+      getRequestedHop: () => "hop-1",
+      getExpiredSessionId: () => expiredSessionId,
+      getSnapshot: () => ({ sessions: [], recentClosedSessions: [], nodes: [], truncated: false, generatedAt: "" }),
+      getExtraAuditSessions: () => extraAuditSessions,
+      setExtraAuditSessions: setExtraAuditSessionsSpy as Parameters<typeof createRemoteAuditLookupCallbacks>[0]["setExtraAuditSessions"],
+      getAllSessions: () => [],
+      getSessionById: () => new Map(),
+      setViewMode: vi.fn(),
+      setHideHomeOnly: vi.fn(),
+      setTargetPathFilter: vi.fn(),
+      setSelectedHistoryEventId: vi.fn(),
+      setExpiredSessionId: setExpiredSessionIdSpy,
+      setSelectedSessionId: (id) => { selectedSessionId = id; },
+      setRequestedHop: vi.fn(),
+      setRequestedSessionId: vi.fn(),
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+      coordinator,
+    });
+
+    // 3. Popstate arrives for the same session while snapshot lookup is in flight
+    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=remote-join&hop=hop-1");
+    navCoordinator.handlePopState(window.location.search);
+
+    // Must join without re-fetching
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(navCoordinator.isPopStatePending()).toBe(true);
+
+    // 4. Resolve the fetch
+    const remoteSession = makeSession("remote-join");
+    resolveFetch(remoteSession);
+    await snapshotPromise;
+    // Flush all microtasks (executeRemoteLookupForPopState awaits the promise)
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // ── Exact-once assertions ──
+    // Network: exactly one request
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Domain mutations: each exactly once
+    expect(recordLookedUpSessionSpy).toHaveBeenCalledTimes(1);
+    expect(recordLookedUpSessionSpy).toHaveBeenCalledWith(remoteSession);
+
+    expect(setExtraAuditSessionsSpy).toHaveBeenCalledTimes(1);
+    expect(extraAuditSessions.has("remote-join")).toBe(true);
+
+    expect(selectSessionSpy).toHaveBeenCalledTimes(1);
+    expect(selectSessionSpy).toHaveBeenCalledWith("remote-join", remoteSession, "hop-1");
+
+    // loadHistory is called via selectSession wrapper — exactly once
+    expect(loadHistorySpy).toHaveBeenCalledTimes(1);
+
+    // Popstate transaction becomes terminal after authoritative application
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(expiredSessionId).toBeNull();
+  });
+
+  it("Finding 1 (exact-once): Snapshot lookup joined by popstate — not-found applies exactly once", async () => {
+    let resolveFetch!: (s: FilesystemClosedSession | null) => void;
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+
+    let selectedSessionId: string | null = null;
+    let expiredSessionId: string | null = null;
+
+    const setExpiredSessionIdSpy = vi.fn((id: string | null) => { expiredSessionId = id; });
+    const setSelectedSessionIdSpy = vi.fn((id: string | null) => { selectedSessionId = id; });
+    const selectSessionSpy = vi.fn();
+
+    const productionCallbacks = createRemoteAuditLookupCallbacks({
+      recordLookedUpSession: vi.fn(),
+      setExtraAuditSessions: vi.fn(),
+      setExpiredSessionId: setExpiredSessionIdSpy,
+      selectSession: selectSessionSpy,
+      setSelectedSessionId: setSelectedSessionIdSpy,
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+      callbacks: productionCallbacks,
+    });
+
+    const snapshotPromise = coordinator.lookup({ sessionId: "remote-404", targetHopId: null });
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    const navCoordinator = new FilesystemNavigationCoordinator({
+      getViewMode: () => "audit",
+      getSelectedSessionId: () => selectedSessionId,
+      getHideHomeOnly: () => false,
+      getTargetPathFilter: () => null,
+      getSelectedHistoryEventId: () => null,
+      getRequestedHop: () => null,
+      getExpiredSessionId: () => expiredSessionId,
+      getSnapshot: () => ({ sessions: [], recentClosedSessions: [], nodes: [], truncated: false, generatedAt: "" }),
+      getExtraAuditSessions: () => new Map(),
+      getAllSessions: () => [],
+      getSessionById: () => new Map(),
+      setViewMode: vi.fn(),
+      setHideHomeOnly: vi.fn(),
+      setTargetPathFilter: vi.fn(),
+      setSelectedHistoryEventId: vi.fn(),
+      setExpiredSessionId: setExpiredSessionIdSpy,
+      setSelectedSessionId: setSelectedSessionIdSpy,
+      setRequestedHop: vi.fn(),
+      setRequestedSessionId: vi.fn(),
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+      coordinator,
+    });
+
+    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=remote-404");
+    navCoordinator.handlePopState(window.location.search);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // no duplicate fetch
+
+    // Resolve with null (not found)
+    resolveFetch(null);
+    await snapshotPromise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Not-found path: setExpiredSessionId and setSelectedSessionId each once
+    expect(setExpiredSessionIdSpy).toHaveBeenCalledTimes(1);
+    expect(setExpiredSessionIdSpy).toHaveBeenCalledWith("remote-404");
+    expect(setSelectedSessionIdSpy).toHaveBeenCalledTimes(1);
+    expect(setSelectedSessionIdSpy).toHaveBeenCalledWith(null);
+    expect(selectSessionSpy).not.toHaveBeenCalled();
+
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+    expect(expiredSessionId).toBe("remote-404");
+  });
+
+  it("Finding 1: Repeated identical popstate events do not add duplicate mutating observers", async () => {
+    let resolveFetch!: (s: FilesystemClosedSession | null) => void;
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+
+    let selectedSessionId: string | null = null;
+    let expiredSessionId: string | null = null;
+    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+
+    const setExtraAuditSessionsSpy = vi.fn((updater: (p: Map<string, FilesystemClosedSession>) => Map<string, FilesystemClosedSession>) => {
+      const next = updater(extraAuditSessions);
+      extraAuditSessions.clear();
+      for (const [k, v] of next) extraAuditSessions.set(k, v);
+    });
+    const selectSessionSpy = vi.fn((sid: string) => { selectedSessionId = sid; });
+
+    const coordinator = new RemoteAuditLookupCoordinator({
+      initialViewMode: "audit",
+      fetchSession: fetchSpy,
+    });
+
+    const navCoordinator = new FilesystemNavigationCoordinator({
+      getViewMode: () => "audit",
+      getSelectedSessionId: () => selectedSessionId,
+      getHideHomeOnly: () => false,
+      getTargetPathFilter: () => null,
+      getSelectedHistoryEventId: () => null,
+      getRequestedHop: () => null,
+      getExpiredSessionId: () => expiredSessionId,
+      getSnapshot: () => ({ sessions: [], recentClosedSessions: [], nodes: [], truncated: false, generatedAt: "" }),
+      getExtraAuditSessions: () => extraAuditSessions,
+      setExtraAuditSessions: setExtraAuditSessionsSpy as Parameters<typeof createRemoteAuditLookupCallbacks>[0]["setExtraAuditSessions"],
+      getAllSessions: () => [],
+      getSessionById: () => new Map(),
+      setViewMode: vi.fn(),
+      setHideHomeOnly: vi.fn(),
+      setTargetPathFilter: vi.fn(),
+      setSelectedHistoryEventId: vi.fn(),
+      setExpiredSessionId: (id) => { expiredSessionId = id; },
+      setSelectedSessionId: (id) => { selectedSessionId = id; },
+      setRequestedHop: vi.fn(),
+      setRequestedSessionId: vi.fn(),
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+      coordinator,
+    });
+
+    // First popstate → starts fresh lookup (mutatingCallbacks becomes mutationOwner)
+    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=remote-dup");
+    navCoordinator.handlePopState(window.location.search);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(navCoordinator.isPopStatePending()).toBe(true);
+
+    // Second identical popstate → deduplication guard fires, no second handlePopState execution
+    // (handlePopState deduplicates at the transaction level)
+    navCoordinator.handlePopState(window.location.search);
+    expect(fetchSpy).toHaveBeenCalledTimes(1); // still only one fetch
+
+    // Third popstate for same URL with different txId path:
+    // We force a new transaction by temporarily changing and restoring URL
+    // But the deduplication guard should prevent it anyway.
+
+    // Resolve
+    const foundSession = makeSession("remote-dup");
+    resolveFetch(foundSession);
+    await new Promise<void>((r) => { Promise.resolve().then(() => Promise.resolve().then(r)); });
+
+    // selectSession called exactly once (not three times)
+    expect(selectSessionSpy).toHaveBeenCalledTimes(1);
+    expect(selectSessionSpy).toHaveBeenCalledWith("remote-dup", foundSession, null);
+    expect(setExtraAuditSessionsSpy).toHaveBeenCalledTimes(1);
+    expect(navCoordinator.isPopStatePending()).toBe(false);
+  });
+
+  it("Finding 2 (new): Synchronously throwing fetchFn clears isInFlight() and permits a successful retry", async () => {
+    let callCount = 0;
+    let resolveSecond!: (s: FilesystemClosedSession | null) => void;
+
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // Throw synchronously on the first call
+        throw new Error("sync-error");
+      }
+      // Succeed on the second call
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveSecond = resolve;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const cb = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+
+    // First call: fetch throws synchronously
+    const p1 = coordinator.requestLookup(
+      { sessionId: "sess-sync-throw", targetHopId: null },
+      cb,
+      fetchSpy,
+    );
+
+    // After a tick, the settled rejected/error promise clears inFlightIntent
+    await p1;
+
+    // isInFlight must be false — synchronous exception was cleaned up correctly
+    expect(coordinator.isInFlight()).toBe(false);
+    // The error path calls onSessionNotFound
+    expect(cb.onSessionNotFound).toHaveBeenCalledTimes(1);
+    expect(cb.onSessionNotFound).toHaveBeenCalledWith("sess-sync-throw");
+    expect(cb.onSessionFound).not.toHaveBeenCalled();
+
+    cb.onSessionFound.mockClear();
+    cb.onSessionNotFound.mockClear();
+
+    // Second call for the same intent: must start a NEW request (not join a phantom in-flight)
+    const p2 = coordinator.requestLookup(
+      { sessionId: "sess-sync-throw", targetHopId: null },
+      cb,
+      fetchSpy,
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(coordinator.isInFlight()).toBe(true);
+
+    const retrySession = makeSession("sess-sync-throw");
+    resolveSecond(retrySession);
+    await p2;
+
+    expect(cb.onSessionFound).toHaveBeenCalledTimes(1);
+    expect(cb.onSessionFound).toHaveBeenCalledWith(retrySession, null);
+    expect(cb.onSessionNotFound).not.toHaveBeenCalled();
+    expect(coordinator.isInFlight()).toBe(false);
+  });
+
+  it("Finding 2 (new): Asynchronous rejection clears isInFlight() and calls onSessionNotFound", async () => {
+    let rejectFetch!: (err: Error) => void;
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((_resolve, reject) => {
+        rejectFetch = reject;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const cb = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+
+    const p = coordinator.requestLookup(
+      { sessionId: "sess-async-reject", targetHopId: null },
+      cb,
+      fetchSpy,
+    );
+    expect(coordinator.isInFlight()).toBe(true);
+
+    rejectFetch(new Error("network-error"));
+    await p;
+
+    expect(coordinator.isInFlight()).toBe(false);
+    expect(cb.onSessionNotFound).toHaveBeenCalledTimes(1);
+    expect(cb.onSessionNotFound).toHaveBeenCalledWith("sess-async-reject");
+    expect(cb.onSessionFound).not.toHaveBeenCalled();
+  });
+
+  it("Finding 2: unsubscribe prevents late state mutation for disposed observers", async () => {
+    let resolveFetch!: (s: FilesystemClosedSession | null) => void;
+    const fetchSpy = vi.fn().mockImplementation(() => {
+      return new Promise<FilesystemClosedSession | null>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+
+    const coordinator = new RemoteAuditLookupCoordinator({ initialViewMode: "audit" });
+    const ownerCb = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+    const observerCb = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
+
+    // Start lookup with ownerCb as mutation owner
+    coordinator.requestLookup({ sessionId: "sess-unsub", targetHopId: null }, ownerCb, fetchSpy);
+    // Join with observerCb as join observer
+    coordinator.requestLookup({ sessionId: "sess-unsub", targetHopId: null }, observerCb, fetchSpy);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Observer disposes before resolution (e.g. component unmounts)
+    coordinator.unsubscribe(observerCb);
+
+    const found = makeSession("sess-unsub");
+    resolveFetch(found);
+    await coordinator.requestLookup({ sessionId: "sess-unsub", targetHopId: null }, undefined, fetchSpy).catch(() => {});
+    // We can't await the original promise directly from here; wait a tick
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Owner was notified
+    expect(ownerCb.onSessionFound).toHaveBeenCalledTimes(1);
+    // Observer was unsubscribed before resolution — must NOT be called
+    expect(observerCb.onSessionFound).not.toHaveBeenCalled();
   });
 
   it("Finding 2: Concurrent popstate joining in-flight lookup keeps transaction pending and suppresses synchronizeUrlState until resolution", async () => {
@@ -1004,7 +1401,8 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     // Resolve network request
     const foundSession = makeSession("remote-1");
     resolveFetch(foundSession);
-    await new Promise((r) => setTimeout(r, 10));
+    // Flush microtasks
+    await new Promise<void>((r) => { Promise.resolve().then(() => Promise.resolve().then(r)); });
 
     expect(navCoordinator.isPopStatePending()).toBe(false);
     expect(selectSessionSpy).toHaveBeenCalledWith("remote-1", foundSession, "hop-1");
@@ -1070,93 +1468,14 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
 
     // Resolve with null (session not found remotely)
     resolveFetch(null);
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise<void>((r) => { Promise.resolve().then(() => Promise.resolve().then(r)); });
 
     expect(navCoordinator.isPopStatePending()).toBe(false);
     expect(expiredSessionId).toBe("remote-404");
     expect(selectedSessionId).toBeNull();
   });
 
-  it("Finding 2: Snapshot-initiated lookup joined by popstate transaction", async () => {
-    let resolveFetch!: (s: FilesystemClosedSession | null) => void;
-    const delayedFetch = vi.fn().mockImplementation(() => {
-      return new Promise<FilesystemClosedSession | null>((resolve) => {
-        resolveFetch = resolve;
-      });
-    });
-
-    const snapshotCallback = { onSessionFound: vi.fn(), onSessionNotFound: vi.fn() };
-    const coordinator = new RemoteAuditLookupCoordinator({
-      initialViewMode: "audit",
-      fetchSession: delayedFetch,
-      callbacks: snapshotCallback,
-    });
-
-    // 1. Snapshot update initiates lookup for "remote-shared"
-    const snapshotPromise = coordinator.lookup({ sessionId: "remote-shared", targetHopId: "hop-1" });
-    expect(delayedFetch).toHaveBeenCalledTimes(1);
-    expect(coordinator.isInFlight()).toBe(true);
-
-    let selectedSessionId: string | null = null;
-    const selectSessionSpy = vi.fn((sid: string) => {
-      selectedSessionId = sid;
-    });
-
-    const navCoordinator = new FilesystemNavigationCoordinator({
-      getViewMode: () => "audit",
-      getSelectedSessionId: () => selectedSessionId,
-      getHideHomeOnly: () => false,
-      getTargetPathFilter: () => null,
-      getSelectedHistoryEventId: () => "hop-1",
-      getRequestedHop: () => "hop-1",
-      getExpiredSessionId: () => null,
-      getSnapshot: () => ({
-        sessions: [],
-        recentClosedSessions: [],
-        nodes: [],
-        truncated: false,
-        generatedAt: "",
-      }),
-      getExtraAuditSessions: () => new Map(),
-      getAllSessions: () => [],
-      getSessionById: () => new Map(),
-
-      setViewMode: vi.fn(),
-      setHideHomeOnly: vi.fn(),
-      setTargetPathFilter: vi.fn(),
-      setSelectedHistoryEventId: vi.fn(),
-      setExpiredSessionId: vi.fn(),
-      setSelectedSessionId: (id) => { selectedSessionId = id; },
-      setRequestedHop: vi.fn(),
-      setRequestedSessionId: vi.fn(),
-
-      selectSession: selectSessionSpy,
-      resetHistory: vi.fn(),
-      resetRequestedHopState: vi.fn(),
-
-      coordinator,
-    });
-
-    // 2. Popstate arrives for the same session while snapshot lookup is in flight
-    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=remote-shared&hop=hop-1");
-    navCoordinator.handlePopState(window.location.search);
-
-    // Should join the existing in-flight lookup without restarting fetch
-    expect(delayedFetch).toHaveBeenCalledTimes(1);
-    expect(navCoordinator.isPopStatePending()).toBe(true);
-
-    // Resolve fetch
-    const remoteSession = makeSession("remote-shared");
-    resolveFetch(remoteSession);
-    await snapshotPromise;
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(snapshotCallback.onSessionFound).toHaveBeenCalledWith(remoteSession, "hop-1");
-    expect(selectSessionSpy).toHaveBeenCalledWith("remote-shared", remoteSession, "hop-1");
-    expect(navCoordinator.isPopStatePending()).toBe(false);
-  });
-
-  it("Finding 2: Rapid A -> B popstate navigation aborts A and discards stale callbacks", async () => {
+  it("Finding 2: Rapid A → B popstate navigation aborts A and discards stale callbacks", async () => {
     let abortCalledA = false;
     const delayedFetch = vi.fn().mockImplementation((sid: string, signal: AbortSignal) => {
       return new Promise<FilesystemClosedSession | null>((resolve) => {
@@ -1231,5 +1550,85 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     expect(navCoordinator.isPopStatePending()).toBe(false);
     expect(selectSessionSpy).toHaveBeenCalledWith("remote-B", expect.objectContaining({ sessionId: "remote-B" }), null);
     expect(selectSessionSpy).not.toHaveBeenCalledWith("remote-A", expect.anything(), expect.anything());
+  });
+
+  it("Finding 1 (wiring): bindUrlState rerenders cannot replace bindDomainAdapter callbacks", () => {
+    const pushStateSpy = vi.spyOn(window.history, "pushState");
+    window.history.replaceState(null, "", "/filesystem-activity?view=audit&sessionId=sess-home");
+
+    const sessionHome = makeSession("sess-home", {
+      cwdState: { path: "/home/user", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/home/user"], homeOnly: true, eventCount: 1 },
+    });
+    const sessionNonHome = makeSession("sess-nonhome", {
+      cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
+    });
+    const allSessions = [sessionNonHome, sessionHome];
+    const sessionById = new Map(allSessions.map((s) => [s.sessionId, s]));
+
+    let viewMode: "live" | "audit" = "audit";
+    let selectedSessionId: string | null = "sess-home";
+    let hideHomeOnly = false;
+    const selectSessionSpy = vi.fn((sid: string) => { selectedSessionId = sid; });
+
+    const coord = new FilesystemNavigationCoordinator();
+
+    const makeUrlBindings = (): Parameters<typeof coord.bindUrlState>[0] => ({
+      getViewMode: () => viewMode,
+      getSelectedSessionId: () => selectedSessionId,
+      getHideHomeOnly: () => hideHomeOnly,
+      getTargetPathFilter: () => null,
+      getSelectedHistoryEventId: () => null,
+      getRequestedHop: () => null,
+      getExpiredSessionId: () => null,
+      getSnapshot: () => ({ sessions: allSessions, recentClosedSessions: [], nodes: [], truncated: false, generatedAt: "" }),
+      getExtraAuditSessions: () => new Map(),
+      setViewMode: (v) => { viewMode = v; },
+      setHideHomeOnly: (h) => { hideHomeOnly = h; },
+      setTargetPathFilter: vi.fn(),
+      setSelectedHistoryEventId: vi.fn(),
+      setExpiredSessionId: vi.fn(),
+      setSelectedSessionId: (id) => { selectedSessionId = id; },
+      setRequestedHop: vi.fn(),
+      setRequestedSessionId: vi.fn(),
+    });
+
+    // Initial bind
+    coord.bindUrlState(makeUrlBindings());
+    coord.bindDomainAdapter({
+      getAllSessions: () => allSessions,
+      getSessionById: () => sessionById,
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+    });
+
+    // Simulate URL state rebind (e.g. snapshot update rerender)
+    coord.bindUrlState(makeUrlBindings());
+
+    // sess-home (homeOnly=true) gets filtered when hideHomeOnly=true → fallback to sess-nonhome
+    coord.userToggleHideHome();
+
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
+    expect(pushStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=sess-nonhome&hideHome=1",
+    );
+    expect(selectSessionSpy).toHaveBeenCalledWith("sess-nonhome");
+
+    // Simulate domain adapter rebind (e.g. callback identity change from parent rerender)
+    coord.bindDomainAdapter({
+      getAllSessions: () => allSessions,
+      getSessionById: () => sessionById,
+      selectSession: selectSessionSpy,
+      resetHistory: vi.fn(),
+      resetRequestedHopState: vi.fn(),
+    });
+
+    // URL state still correct after domain adapter rebind
+    pushStateSpy.mockClear();
+    selectSessionSpy.mockClear();
+    coord.userToggleHideHome(); // toggles back to hideHome=false; no fallback needed (sess-nonhome survives)
+    expect(pushStateSpy).toHaveBeenCalledTimes(1);
   });
 });

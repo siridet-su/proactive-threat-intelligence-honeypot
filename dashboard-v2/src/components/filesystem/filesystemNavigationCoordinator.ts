@@ -13,6 +13,7 @@ import {
   resolveSessionSelection,
 } from "./filesystemUtils";
 import type {
+  RemoteAuditLookupCallback,
   RemoteAuditLookupCoordinator,
   RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
@@ -587,6 +588,17 @@ export class FilesystemNavigationCoordinator {
 
   /**
    * Executes remote lookup for popstate with transaction generation tracking.
+   *
+   * Ownership model:
+   * - If no lookup is in flight for this intent, this transaction becomes the
+   *   authoritative "mutation owner": on success it applies domain mutations
+   *   (setExtraAuditSessions, selectSession) and marks itself terminal.
+   * - If a lookup is already in flight for the same intent (e.g. initiated by a
+   *   snapshot update), this transaction registers only a lightweight terminal-marker
+   *   as a join observer. The marker calls markTransactionTerminal and nothing else,
+   *   preventing duplicate domain-state application while still ensuring the
+   *   transaction completes.
+   *
    * If a newer popstate or user navigation supersedes txId, callbacks are discarded.
    */
   private async executeRemoteLookupForPopState(
@@ -594,8 +606,19 @@ export class FilesystemNavigationCoordinator {
     sessionId: string,
     targetHopId: string | null,
   ): Promise<void> {
-    const txCallbacks = {
-      onSessionFound: (session: FilesystemClosedSession, targetHopId?: string | null) => {
+    if (!this.options.coordinator) {
+      this.markTransactionTerminal(txId);
+      return;
+    }
+
+    // Determine whether a lookup is already in flight for this exact intent.
+    // If so, this transaction must NOT repeat domain mutations — it only
+    // registers a lightweight terminal-marker as a join observer.
+    const alreadyInFlight = this.options.coordinator.isInFlight();
+
+    // Full mutation callbacks used when THIS transaction starts the lookup
+    const mutatingCallbacks = {
+      onSessionFound: (session: FilesystemClosedSession, resolvedHopId?: string | null) => {
         if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
         this.markTransactionTerminal(txId);
         this.options.setExtraAuditSessions?.((prev) => {
@@ -605,7 +628,7 @@ export class FilesystemNavigationCoordinator {
           return next;
         });
         this.options.setExpiredSessionId(null);
-        this.options.selectSession(session.sessionId, session, targetHopId ?? null);
+        this.options.selectSession(session.sessionId, session, resolvedHopId ?? null);
       },
       onSessionNotFound: (targetId: string) => {
         if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
@@ -615,22 +638,33 @@ export class FilesystemNavigationCoordinator {
       },
     };
 
-    try {
-      if (!this.options.coordinator) {
+    // Lightweight terminal-only callbacks used when joining an existing lookup.
+    // Parameters are intentionally omitted — domain mutations are handled by the
+    // mutation owner; these only mark the popstate transaction terminal.
+    const terminalOnlyCallbacks: RemoteAuditLookupCallback = {
+      onSessionFound: () => {
+        if (this.activeTransaction?.id !== txId) return;
         this.markTransactionTerminal(txId);
-        return;
-      }
+      },
+      onSessionNotFound: () => {
+        if (this.activeTransaction?.id !== txId) return;
+        this.markTransactionTerminal(txId);
+      },
+    };
 
+    const registeredCallbacks = alreadyInFlight ? terminalOnlyCallbacks : mutatingCallbacks;
+
+    try {
       await this.options.coordinator.lookup(
         { sessionId, targetHopId },
-        txCallbacks,
+        registeredCallbacks,
       );
     } catch {
       if (this.activeTransaction?.id === txId) {
         this.markTransactionTerminal(txId);
       }
     } finally {
-      this.options.coordinator?.unsubscribe(txCallbacks);
+      this.options.coordinator?.unsubscribe(registeredCallbacks);
       if (this.activeTransaction?.id === txId && this.activeTransaction.status === "pending") {
         this.markTransactionTerminal(txId);
       }

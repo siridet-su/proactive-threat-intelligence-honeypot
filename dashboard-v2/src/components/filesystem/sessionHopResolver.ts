@@ -336,7 +336,10 @@ export class RemoteAuditLookupCoordinator {
     targetHopId: string | null;
     generation: number;
     promise: Promise<FilesystemClosedSession | null>;
-    subscribers: Set<RemoteAuditLookupCallback>;
+    /** The authoritative callback that performs domain mutations exactly once. */
+    mutationOwner: RemoteAuditLookupCallback | undefined;
+    /** Lightweight join observers notified after the mutation owner commits. */
+    joinObservers: Set<RemoteAuditLookupCallback>;
   } | null = null;
   private generation = 0;
   private abortController: AbortController | null = null;
@@ -498,13 +501,28 @@ export class RemoteAuditLookupCoordinator {
   /**
    * Requests a remote lookup for a retained session not in the active snapshot.
    *
+   * Ownership model:
+   * The first caller becomes the authoritative "mutation owner" whose callbacks
+   * perform domain-state mutations (setExtraAuditSessions, selectSession, etc.)
+   * exactly once. Subsequent callers with the same in-flight intent are added as
+   * "join observers" that receive the outcome notification after the owner commits,
+   * enabling them to perform lightweight terminal-state updates (e.g. marking a
+   * popstate transaction terminal) without repeating any domain mutation.
+   *
    * Idempotence & Deduplication:
-   * Repeated snapshot updates or concurrent popstate navigations for the same in-flight {sessionId, targetHopId}
-   * reuse and join the existing in-flight lookup promise without aborting, restarting, or returning premature null.
-   * The same promise object is returned to all callers for the same in-flight intent, preserving reference identity.
+   * Repeated calls for the same in-flight {sessionId, targetHopId} reuse the
+   * existing in-flight promise without aborting, restarting, or returning premature
+   * null. The SAME promise object is returned to all callers preserving reference
+   * identity so callers can distinguish joins via toBe().
+   *
+   * Synchronous-exception safety:
+   * The in-flight record is installed before invoking fetchFn. A synchronous throw
+   * in fetchFn settles through the catch path, clears inFlightIntent in finally,
+   * and leaves isInFlight() false — allowing a clean retry with a new request.
    *
    * Scope change:
-   * A genuinely different remote intent aborts the old request, clears subscribers, and starts a new one.
+   * A genuinely different remote intent aborts the old request, clears observers,
+   * and starts a new one.
    */
   requestLookup(
     intent: RemoteAuditLookupIntent,
@@ -522,14 +540,16 @@ export class RemoteAuditLookupCoordinator {
     const callbacks = overrideCallbacks ?? this.callbacks;
     const fetchFn = overrideFetchSession ?? this.fetchSession;
 
-    // Join in-flight lookup if same intent is already executing — return the SAME promise object
+    // Join in-flight lookup if same intent is already executing — return the SAME promise object.
+    // The joining caller is added as a join observer (notified after the mutation owner commits)
+    // NOT as an additional mutation owner, preventing double domain-state application.
     if (
       this.inFlightIntent &&
       this.inFlightIntent.sessionId === sessionId &&
       normalizeHop(this.inFlightIntent.targetHopId) === normHop
     ) {
       if (callbacks) {
-        this.inFlightIntent.subscribers.add(callbacks);
+        this.inFlightIntent.joinObservers.add(callbacks);
       }
       return this.inFlightIntent.promise;
     }
@@ -543,10 +563,26 @@ export class RemoteAuditLookupCoordinator {
     const controller = new AbortController();
     this.abortController = controller;
 
-    const subscribers = new Set<RemoteAuditLookupCallback>();
-    if (callbacks) {
-      subscribers.add(callbacks);
-    }
+    // Install the in-flight record BEFORE starting the async IIFE.
+    // This ensures that if fetchFn throws synchronously, the finally block
+    // finds inFlightIntent and clears it correctly, leaving isInFlight() false.
+    const joinObservers = new Set<RemoteAuditLookupCallback>();
+    const inFlightRecord: {
+      sessionId: string;
+      targetHopId: string | null;
+      generation: number;
+      promise: Promise<FilesystemClosedSession | null>;
+      mutationOwner: RemoteAuditLookupCallback | undefined;
+      joinObservers: Set<RemoteAuditLookupCallback>;
+    } = {
+      sessionId,
+      targetHopId: normHop,
+      generation: currentGen,
+      promise: null as unknown as Promise<FilesystemClosedSession | null>, // filled below before any await
+      mutationOwner: callbacks ?? undefined,
+      joinObservers,
+    };
+    this.inFlightIntent = inFlightRecord;
 
     const lookupPromise = (async (): Promise<FilesystemClosedSession | null> => {
       try {
@@ -580,25 +616,29 @@ export class RemoteAuditLookupCoordinator {
           return null;
         }
 
-        const subs = Array.from(subscribers);
-        subscribers.clear();
+        // Snapshot the observer sets before clearing (abort() may race)
+        const owner = inFlightRecord.mutationOwner;
+        const observers = Array.from(joinObservers);
+        joinObservers.clear();
 
         if (found) {
-          for (const sub of subs) {
-            try {
-              sub.onSessionFound(found, normHop);
-            } catch {
-              // Ignore subscriber errors
-            }
+          // 1. Authoritative domain mutation — called exactly once
+          if (owner) {
+            try { owner.onSessionFound(found, normHop); } catch { /* ignore */ }
+          }
+          // 2. Join observers notified after owner commits
+          for (const obs of observers) {
+            try { obs.onSessionFound(found, normHop); } catch { /* ignore */ }
           }
           return found;
         } else {
-          for (const sub of subs) {
-            try {
-              sub.onSessionNotFound(sessionId);
-            } catch {
-              // Ignore subscriber errors
-            }
+          // 1. Authoritative domain mutation — called exactly once
+          if (owner) {
+            try { owner.onSessionNotFound(sessionId); } catch { /* ignore */ }
+          }
+          // 2. Join observers notified after owner commits
+          for (const obs of observers) {
+            try { obs.onSessionNotFound(sessionId); } catch { /* ignore */ }
           }
           return null;
         }
@@ -616,14 +656,15 @@ export class RemoteAuditLookupCoordinator {
         ) {
           return null;
         }
-        const subs = Array.from(subscribers);
-        subscribers.clear();
-        for (const sub of subs) {
-          try {
-            sub.onSessionNotFound(sessionId);
-          } catch {
-            // Ignore subscriber errors
-          }
+        // Network/fetch error treated as not-found — apply exactly once
+        const owner = inFlightRecord.mutationOwner;
+        const observers = Array.from(joinObservers);
+        joinObservers.clear();
+        if (owner) {
+          try { owner.onSessionNotFound(sessionId); } catch { /* ignore */ }
+        }
+        for (const obs of observers) {
+          try { obs.onSessionNotFound(sessionId); } catch { /* ignore */ }
         }
         return null;
       } finally {
@@ -634,13 +675,9 @@ export class RemoteAuditLookupCoordinator {
       }
     })();
 
-    this.inFlightIntent = {
-      sessionId,
-      targetHopId: normHop,
-      generation: currentGen,
-      promise: lookupPromise,
-      subscribers,
-    };
+    // Assign the promise into the already-installed in-flight record.
+    // Safe because no async body runs until after this line (JS single-threaded).
+    inFlightRecord.promise = lookupPromise;
 
     return lookupPromise;
   }
@@ -664,11 +701,15 @@ export class RemoteAuditLookupCoordinator {
   }
 
   /**
-   * Safely unregisters a subscriber callback from any active in-flight lookup.
+   * Safely unregisters a callback from any active in-flight lookup.
+   * Removes from joinObservers; if the callback is the mutationOwner it is cleared.
    */
   unsubscribe(callbacks?: RemoteAuditLookupCallback): void {
     if (callbacks && this.inFlightIntent) {
-      this.inFlightIntent.subscribers.delete(callbacks);
+      this.inFlightIntent.joinObservers.delete(callbacks);
+      if (this.inFlightIntent.mutationOwner === callbacks) {
+        this.inFlightIntent.mutationOwner = undefined;
+      }
     }
   }
 
@@ -678,7 +719,8 @@ export class RemoteAuditLookupCoordinator {
       this.abortController = null;
     }
     if (this.inFlightIntent) {
-      this.inFlightIntent.subscribers.clear();
+      this.inFlightIntent.joinObservers.clear();
+      this.inFlightIntent.mutationOwner = undefined;
       this.inFlightIntent = null;
     }
     this.generation += 1;
