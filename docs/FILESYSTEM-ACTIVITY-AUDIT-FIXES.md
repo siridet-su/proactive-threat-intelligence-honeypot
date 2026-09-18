@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity audit remediation
 status: active
-last_updated: 2026-09-17
+last_updated: 2026-09-18
 owner: Dashboard Filesystem workstream
 source_review: FS-001 through FS-019 audit
 ---
@@ -60,6 +60,26 @@ and the corrective work are not conflated.
 | `FA-014` | `P2` | `TODO` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded “clean” evidence does not match the current working tree. | Tracker has one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; original FS items affected by this audit are reopened or labelled partial. | — |
 | `FA-015` | `P2` | `TODO` | `Change hygiene` | `git diff --check` reports blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large uncommitted change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | — |
 | `FA-016` | `P1` | `TODO` | `FS-007` | Full-scan summary aggregation and cursor skip on 1,878+ documents | Index optimization and execution plan bounds for large directory collections | — |
+
+### FA-008 follow-up evidence (2026-09-18)
+
+Commit `3be0250` was audited as a valid single-owner improvement but requires
+follow-up: arbitrary mutating `RemoteAuditLookupCallback` objects could still be
+registered as observers, the in-flight record temporarily exposed a casted null
+promise, and popstate transactions were marked terminal before domain
+application. The new remediation commit is
+`fix(filesystem): finalize lookup ownership lifecycle (FA-008)`; its full and
+short hashes are recorded in the final handoff. It adds a deferred shared
+promise, runtime-registered terminal-only observers, exact-once owner
+application, post-application transaction marking, and production
+`useFilesystemUrlState`/FilesystemActivity-style binding coverage.
+
+Evidence: 33 FA-008 scenarios in
+`dashboard-v2/tests/filesystem-navigation-history.test.ts`; 17 dashboard test
+files / 394 Vitest tests passing; zero ESLint errors or warnings; clean Next.js
+production build; clean `git diff --check`; and
+`go test -count=1 ./...` passing in all five `agents/` modules. FA-008 remains
+`IN PROGRESS` pending re-audit. FA-009 remains `TODO` and untouched.
 
 ## Required validation gate
 

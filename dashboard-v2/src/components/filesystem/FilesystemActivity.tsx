@@ -484,14 +484,6 @@ export function FilesystemActivity() {
         targetHopId,
       });
 
-      if (sessionObj) {
-        setExtraAuditSessions((prev) => {
-          if (prev.has(sessionId)) return prev;
-          const next = new Map(prev);
-          next.set(sessionId, sessionObj);
-          return next;
-        });
-      }
       const isDifferentSession = sessionId !== selectedSessionIdRef.current;
       const session = sessionObj ?? sessionById.get(sessionId);
       setExpiredSessionId(null);
@@ -569,6 +561,7 @@ export function FilesystemActivity() {
       getAllSessions: () => allSessions,
       getSessionById: () => sessionById,
       selectSession,
+      recordLookedUpSession,
       resetHistory,
       resetRequestedHopState,
       onExitFullscreenAndPlaying: () => {
@@ -583,6 +576,7 @@ export function FilesystemActivity() {
     sessionById,
     navigationCoordinator,
     remoteAuditLookupManager,
+    recordLookedUpSession,
     resetHistory,
     resetRequestedHopState,
     selectSession,

@@ -306,6 +306,42 @@ export interface RemoteAuditLookupCallback {
 
 export type RemoteAuditLookupCallbacks = RemoteAuditLookupCallback;
 
+export type RemoteAuditLookupOutcome =
+  | {
+      type: "found";
+      session: FilesystemClosedSession;
+      targetHopId: string | null;
+    }
+  | {
+      type: "not-found";
+      sessionId: string;
+      reason: "not-found" | "error";
+    };
+
+/**
+ * A terminal observer can observe the result of a lookup, but is not eligible
+ * to apply the authoritative session result. Instances must be created through
+ * createRemoteAuditLookupTerminalObserver so runtime registration can reject
+ * arbitrary mutation callbacks passed to the observer path.
+ */
+export interface RemoteAuditLookupTerminalObserver {
+  onLookupCompleted: (outcome: RemoteAuditLookupOutcome) => void;
+}
+
+const registeredTerminalObservers = new WeakSet<object>();
+
+export function createRemoteAuditLookupTerminalObserver(
+  onLookupCompleted: (outcome: RemoteAuditLookupOutcome) => void,
+): RemoteAuditLookupTerminalObserver {
+  const observer: RemoteAuditLookupTerminalObserver = { onLookupCompleted };
+  registeredTerminalObservers.add(observer);
+  return observer;
+}
+
+function isRegisteredTerminalObserver(observer: object): boolean {
+  return registeredTerminalObservers.has(observer);
+}
+
 export interface NavigationScope {
   viewMode: "live" | "audit";
   sessionId: string | null;
@@ -338,8 +374,8 @@ export class RemoteAuditLookupCoordinator {
     promise: Promise<FilesystemClosedSession | null>;
     /** The authoritative callback that performs domain mutations exactly once. */
     mutationOwner: RemoteAuditLookupCallback | undefined;
-    /** Lightweight join observers notified after the mutation owner commits. */
-    joinObservers: Set<RemoteAuditLookupCallback>;
+    /** Terminal-only observers notified after the mutation owner commits. */
+    terminalObservers: Set<RemoteAuditLookupTerminalObserver>;
   } | null = null;
   private generation = 0;
   private abortController: AbortController | null = null;
@@ -540,17 +576,15 @@ export class RemoteAuditLookupCoordinator {
     const callbacks = overrideCallbacks ?? this.callbacks;
     const fetchFn = overrideFetchSession ?? this.fetchSession;
 
-    // Join in-flight lookup if same intent is already executing — return the SAME promise object.
-    // The joining caller is added as a join observer (notified after the mutation owner commits)
-    // NOT as an additional mutation owner, preventing double domain-state application.
+    // Repeated owner requests for the same intent return the SAME promise object.
+    // A callback already registered as the owner is never registered again. A
+    // different RemoteAuditLookupCallback is intentionally ignored here: it is
+    // not a terminal observer and must not enter the observer collection.
     if (
       this.inFlightIntent &&
       this.inFlightIntent.sessionId === sessionId &&
       normalizeHop(this.inFlightIntent.targetHopId) === normHop
     ) {
-      if (callbacks) {
-        this.inFlightIntent.joinObservers.add(callbacks);
-      }
       return this.inFlightIntent.promise;
     }
 
@@ -563,123 +597,188 @@ export class RemoteAuditLookupCoordinator {
     const controller = new AbortController();
     this.abortController = controller;
 
-    // Install the in-flight record BEFORE starting the async IIFE.
-    // This ensures that if fetchFn throws synchronously, the finally block
-    // finds inFlightIntent and clears it correctly, leaving isInFlight() false.
-    const joinObservers = new Set<RemoteAuditLookupCallback>();
+    // Construct the real shared promise before invoking any external code.
+    // This is important for a synchronous/reentrant fetchFn: a nested request
+    // must observe this exact promise rather than a temporary null placeholder.
+    let resolveShared!: (value: FilesystemClosedSession | null) => void;
+    let rejectShared!: (reason?: unknown) => void;
+    const sharedPromise = new Promise<FilesystemClosedSession | null>((resolve, reject) => {
+      resolveShared = resolve;
+      rejectShared = reject;
+    });
+
+    const terminalObservers = new Set<RemoteAuditLookupTerminalObserver>();
     const inFlightRecord: {
       sessionId: string;
       targetHopId: string | null;
       generation: number;
       promise: Promise<FilesystemClosedSession | null>;
       mutationOwner: RemoteAuditLookupCallback | undefined;
-      joinObservers: Set<RemoteAuditLookupCallback>;
+      terminalObservers: Set<RemoteAuditLookupTerminalObserver>;
     } = {
       sessionId,
       targetHopId: normHop,
       generation: currentGen,
-      promise: null as unknown as Promise<FilesystemClosedSession | null>, // filled below before any await
+      promise: sharedPromise,
       mutationOwner: callbacks ?? undefined,
-      joinObservers,
+      terminalObservers,
     };
     this.inFlightIntent = inFlightRecord;
 
-    const lookupPromise = (async (): Promise<FilesystemClosedSession | null> => {
+    const performLookup = async (): Promise<FilesystemClosedSession | null> => {
       try {
         let found: FilesystemClosedSession | null = null;
+        let outcomeReason: "not-found" | "error" = "not-found";
         if (fetchFn) {
-          found = await fetchFn(sessionId, controller.signal);
+          try {
+            found = await fetchFn(sessionId, controller.signal);
+          } catch {
+            outcomeReason = "error";
+          }
         } else {
-          const res = await fetch(
-            `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(sessionId)}&limit=1`,
-            { cache: "no-store", signal: controller.signal },
-          );
-          if (res.ok) {
-            const data: unknown = await res.json();
-            const page = data as Partial<AuditSessionsPage>;
-            found = page.items?.find((s) => s.sessionId === sessionId) ?? null;
+          try {
+            const res = await fetch(
+              `/api/filesystem-topology/audit-sessions?search=${encodeURIComponent(sessionId)}&limit=1`,
+              { cache: "no-store", signal: controller.signal },
+            );
+            if (res.ok) {
+              const data: unknown = await res.json();
+              const page = data as Partial<AuditSessionsPage>;
+              found = page.items?.find((s) => s.sessionId === sessionId) ?? null;
+            }
+          } catch {
+            outcomeReason = "error";
           }
         }
 
         // Check if navigation scope or generation moved while awaiting response
-        if (
-          controller.signal.aborted ||
-          this.generation !== currentGen ||
-          this.viewMode !== "audit" ||
-          !this.inFlightIntent ||
-          this.inFlightIntent.generation !== currentGen ||
-          this.inFlightIntent.sessionId !== sessionId ||
-          normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
-          this.currentSessionId !== sessionId ||
-          normalizeHop(this.currentTargetHopId) !== normHop
-        ) {
+        if (!this.isCurrentLookup(inFlightRecord, controller, sessionId, normHop, currentGen)) {
           return null;
         }
 
-        // Snapshot the observer sets before clearing (abort() may race)
+        // Snapshot terminal observers before owner application. The owner may
+        // synchronously adopt local state and abort/clear this lookup.
         const owner = inFlightRecord.mutationOwner;
-        const observers = Array.from(joinObservers);
-        joinObservers.clear();
+        const observers = Array.from(terminalObservers);
+        terminalObservers.clear();
 
         if (found) {
-          // 1. Authoritative domain mutation — called exactly once
           if (owner) {
-            try { owner.onSessionFound(found, normHop); } catch { /* ignore */ }
+            owner.onSessionFound(found, normHop);
           }
-          // 2. Join observers notified after owner commits
-          for (const obs of observers) {
-            try { obs.onSessionFound(found, normHop); } catch { /* ignore */ }
-          }
+          const outcome: RemoteAuditLookupOutcome = {
+            type: "found",
+            session: found,
+            targetHopId: normHop,
+          };
+          this.notifyTerminalObservers(observers, outcome);
           return found;
         } else {
-          // 1. Authoritative domain mutation — called exactly once
           if (owner) {
-            try { owner.onSessionNotFound(sessionId); } catch { /* ignore */ }
+            owner.onSessionNotFound(sessionId);
           }
-          // 2. Join observers notified after owner commits
-          for (const obs of observers) {
-            try { obs.onSessionNotFound(sessionId); } catch { /* ignore */ }
-          }
+          const outcome: RemoteAuditLookupOutcome = {
+            type: "not-found",
+            sessionId,
+            reason: outcomeReason,
+          };
+          this.notifyTerminalObservers(observers, outcome);
           return null;
         }
-      } catch {
-        if (
-          controller.signal.aborted ||
-          this.generation !== currentGen ||
-          this.viewMode !== "audit" ||
-          !this.inFlightIntent ||
-          this.inFlightIntent.generation !== currentGen ||
-          this.inFlightIntent.sessionId !== sessionId ||
-          normalizeHop(this.inFlightIntent.targetHopId) !== normHop ||
-          this.currentSessionId !== sessionId ||
-          normalizeHop(this.currentTargetHopId) !== normHop
-        ) {
-          return null;
-        }
-        // Network/fetch error treated as not-found — apply exactly once
-        const owner = inFlightRecord.mutationOwner;
-        const observers = Array.from(joinObservers);
-        joinObservers.clear();
-        if (owner) {
-          try { owner.onSessionNotFound(sessionId); } catch { /* ignore */ }
-        }
-        for (const obs of observers) {
-          try { obs.onSessionNotFound(sessionId); } catch { /* ignore */ }
-        }
-        return null;
       } finally {
-        if (this.generation === currentGen) {
+        if (this.inFlightIntent === inFlightRecord) {
           this.inFlightIntent = null;
-          this.abortController = null;
+          if (this.abortController === controller) {
+            this.abortController = null;
+          }
         }
       }
-    })();
+    };
 
-    // Assign the promise into the already-installed in-flight record.
-    // Safe because no async body runs until after this line (JS single-threaded).
-    inFlightRecord.promise = lookupPromise;
+    // The record already contains the real promise. Starting the worker may
+    // synchronously invoke fetchFn, including reentrant requestLookup calls.
+    void performLookup().then(resolveShared, rejectShared);
 
-    return lookupPromise;
+    return sharedPromise;
+  }
+
+  private isCurrentLookup(
+    record: {
+      sessionId: string;
+      targetHopId: string | null;
+      generation: number;
+      promise: Promise<FilesystemClosedSession | null>;
+      mutationOwner: RemoteAuditLookupCallback | undefined;
+      terminalObservers: Set<RemoteAuditLookupTerminalObserver>;
+    },
+    controller: AbortController,
+    sessionId: string,
+    targetHopId: string | null,
+    generation: number,
+  ): boolean {
+    return (
+      !controller.signal.aborted &&
+      this.generation === generation &&
+      this.viewMode === "audit" &&
+      this.inFlightIntent === record &&
+      record.generation === generation &&
+      record.sessionId === sessionId &&
+      normalizeHop(record.targetHopId) === targetHopId &&
+      this.currentSessionId === sessionId &&
+      normalizeHop(this.currentTargetHopId) === targetHopId
+    );
+  }
+
+  private notifyTerminalObservers(
+    observers: RemoteAuditLookupTerminalObserver[],
+    outcome: RemoteAuditLookupOutcome,
+  ): void {
+    for (const observer of observers) {
+      try {
+        observer.onLookupCompleted(outcome);
+      } catch {
+        // A terminal observer is not authoritative; its failure must not
+        // change the shared lookup result or the owner's committed state.
+      }
+    }
+  }
+
+  /**
+   * Joins an exact in-flight intent as a terminal-only observer. This method
+   * cannot promote the observer to the mutation owner and rejects unregistered
+   * arbitrary callback objects at runtime.
+   */
+  joinLookup(
+    intent: RemoteAuditLookupIntent,
+    observer: RemoteAuditLookupTerminalObserver,
+  ): Promise<FilesystemClosedSession | null> {
+    if (!isRegisteredTerminalObserver(observer)) {
+      throw new TypeError("joinLookup requires a registered terminal observer");
+    }
+
+    const sessionId = intent.sessionId;
+    const normHop = normalizeHop(intent.targetHopId);
+    const active = this.inFlightIntent;
+    if (
+      !sessionId ||
+      this.viewMode !== "audit" ||
+      !active ||
+      active.sessionId !== sessionId ||
+      normalizeHop(active.targetHopId) !== normHop
+    ) {
+      throw new Error("Cannot join a different or inactive remote lookup intent");
+    }
+
+    active.terminalObservers.add(observer);
+    return active.promise;
+  }
+
+  /** Backwards-compatible alias for joinLookup. */
+  join(
+    intent: RemoteAuditLookupIntent,
+    observer: RemoteAuditLookupTerminalObserver,
+  ): Promise<FilesystemClosedSession | null> {
+    return this.joinLookup(intent, observer);
   }
 
   /**
@@ -701,13 +800,18 @@ export class RemoteAuditLookupCoordinator {
   }
 
   /**
-   * Safely unregisters a callback from any active in-flight lookup.
-   * Removes from joinObservers; if the callback is the mutationOwner it is cleared.
+   * Safely unregisters either the mutation owner or a registered terminal
+   * observer from the active lookup.
    */
-  unsubscribe(callbacks?: RemoteAuditLookupCallback): void {
-    if (callbacks && this.inFlightIntent) {
-      this.inFlightIntent.joinObservers.delete(callbacks);
-      if (this.inFlightIntent.mutationOwner === callbacks) {
+  unsubscribe(
+    callback?: RemoteAuditLookupCallback | RemoteAuditLookupTerminalObserver,
+  ): void {
+    if (callback && this.inFlightIntent) {
+      if (isRegisteredTerminalObserver(callback)) {
+        this.inFlightIntent.terminalObservers.delete(
+          callback as RemoteAuditLookupTerminalObserver,
+        );
+      } else if (this.inFlightIntent.mutationOwner === callback) {
         this.inFlightIntent.mutationOwner = undefined;
       }
     }
@@ -719,7 +823,7 @@ export class RemoteAuditLookupCoordinator {
       this.abortController = null;
     }
     if (this.inFlightIntent) {
-      this.inFlightIntent.joinObservers.clear();
+      this.inFlightIntent.terminalObservers.clear();
       this.inFlightIntent.mutationOwner = undefined;
       this.inFlightIntent = null;
     }
@@ -772,7 +876,6 @@ export function createRemoteAuditLookupCallbacks(
     },
   };
 }
-
 export interface AdoptLocalSessionScopeParams {
   coordinator?: RemoteAuditLookupCoordinator | null;
   viewMode: "live" | "audit";

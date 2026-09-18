@@ -13,10 +13,10 @@ import {
   resolveSessionSelection,
 } from "./filesystemUtils";
 import type {
-  RemoteAuditLookupCallback,
   RemoteAuditLookupCoordinator,
   RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
+import { createRemoteAuditLookupTerminalObserver } from "./sessionHopResolver";
 
 export interface NavigationStateCommitOptions {
   view?: "live" | "audit";
@@ -71,6 +71,7 @@ export interface NavigationDomainAdapter {
     sessionObj?: FilesystemTopologySession | FilesystemClosedSession,
     targetHopId?: string | null,
   ) => void;
+  recordLookedUpSession?: (session: FilesystemClosedSession) => void;
   resetHistory: () => void;
   resetRequestedHopState: () => void;
   onExitFullscreenAndPlaying?: () => void;
@@ -612,61 +613,75 @@ export class FilesystemNavigationCoordinator {
     }
 
     // Determine whether a lookup is already in flight for this exact intent.
-    // If so, this transaction must NOT repeat domain mutations — it only
-    // registers a lightweight terminal-marker as a join observer.
-    const alreadyInFlight = this.options.coordinator.isInFlight();
+    // A same-intent join is registered through the coordinator's terminal-only
+    // observer API; a different intent must become the new mutation owner.
+    const inFlightIntent = this.options.coordinator.getInFlightIntent();
+    const alreadyInFlight = Boolean(
+      inFlightIntent &&
+        inFlightIntent.sessionId === sessionId &&
+        (inFlightIntent.targetHopId ?? null) === (targetHopId ?? null),
+    );
 
     // Full mutation callbacks used when THIS transaction starts the lookup
     const mutatingCallbacks = {
       onSessionFound: (session: FilesystemClosedSession, resolvedHopId?: string | null) => {
         if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
-        this.markTransactionTerminal(txId);
+        this.options.recordLookedUpSession?.(session);
+        if (this.activeTransaction?.id !== txId) return;
         this.options.setExtraAuditSessions?.((prev) => {
           if (prev.has(session.sessionId)) return prev;
           const next = new Map(prev);
           next.set(session.sessionId, session);
           return next;
         });
+        if (this.activeTransaction?.id !== txId) return;
         this.options.setExpiredSessionId(null);
+        if (this.activeTransaction?.id !== txId) return;
         this.options.selectSession(session.sessionId, session, resolvedHopId ?? null);
+        // The transaction is terminal only after every authoritative state
+        // application above completed successfully.
+        this.markTransactionTerminal(txId);
       },
       onSessionNotFound: (targetId: string) => {
         if (this.activeTransaction?.id !== txId) return; // Superseded! Discard!
-        this.markTransactionTerminal(txId);
         this.options.setExpiredSessionId(targetId);
+        if (this.activeTransaction?.id !== txId) return;
         this.options.setSelectedSessionId(null);
-      },
-    };
-
-    // Lightweight terminal-only callbacks used when joining an existing lookup.
-    // Parameters are intentionally omitted — domain mutations are handled by the
-    // mutation owner; these only mark the popstate transaction terminal.
-    const terminalOnlyCallbacks: RemoteAuditLookupCallback = {
-      onSessionFound: () => {
-        if (this.activeTransaction?.id !== txId) return;
-        this.markTransactionTerminal(txId);
-      },
-      onSessionNotFound: () => {
-        if (this.activeTransaction?.id !== txId) return;
         this.markTransactionTerminal(txId);
       },
     };
 
-    const registeredCallbacks = alreadyInFlight ? terminalOnlyCallbacks : mutatingCallbacks;
+    // Lightweight terminal-only observer used when joining an existing lookup.
+    // It has no RemoteAuditLookupCallback shape and therefore cannot become an
+    // authoritative domain mutation owner.
+    const terminalObserver = alreadyInFlight
+      ? createRemoteAuditLookupTerminalObserver(() => {
+          if (this.activeTransaction?.id !== txId) return;
+          this.markTransactionTerminal(txId);
+        })
+      : undefined;
 
     try {
-      await this.options.coordinator.lookup(
-        { sessionId, targetHopId },
-        registeredCallbacks,
-      );
-    } catch {
-      if (this.activeTransaction?.id === txId) {
-        this.markTransactionTerminal(txId);
+      if (terminalObserver) {
+        await this.options.coordinator.joinLookup(
+          { sessionId, targetHopId },
+          terminalObserver,
+        );
+      } else {
+        await this.options.coordinator.lookup(
+          { sessionId, targetHopId },
+          mutatingCallbacks,
+        );
       }
+    } catch {
+      // A failed authoritative application intentionally leaves the transaction
+      // pending. This keeps passive URL synchronization suppressed rather than
+      // claiming terminal state after partially applied domain state.
     } finally {
-      this.options.coordinator?.unsubscribe(registeredCallbacks);
-      if (this.activeTransaction?.id === txId && this.activeTransaction.status === "pending") {
-        this.markTransactionTerminal(txId);
+      if (terminalObserver) {
+        this.options.coordinator.unsubscribe(terminalObserver);
+      } else {
+        this.options.coordinator.unsubscribe(mutatingCallbacks);
       }
     }
   }
