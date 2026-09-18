@@ -4,13 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
-  calculateHistoryTimeMetrics,
+  buildReplayTimeline,
   calculateReplayPacingDelay,
   getHistoryWindowMetrics,
   type ActiveHopRoute,
   type HistoryWindowMetrics,
   type HopTimeMetrics,
   type ReplayPacingMode,
+  type ReplayTimeline,
   type SessionReplayTimeSummary,
 } from "./filesystemUtils";
 
@@ -122,6 +123,7 @@ export interface UseAuditReplayOptions {
   anchoredHop?: SessionCwdHistoryEvent | null;
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
+  historyComplete: boolean;
   showFailedAttempts: boolean;
   selectedHistoryEventId: string | null;
   onSelectHistoryEventId: (id: string | null, source?: "user" | "playback") => void;
@@ -142,6 +144,7 @@ export interface UseAuditReplayReturn {
   activeHop: ActiveHopRoute | null;
   hopTimeMetrics: HopTimeMetrics[];
   sessionTimeSummary: SessionReplayTimeSummary;
+  replayTimeline: ReplayTimeline;
   isAnchoredSelected: boolean;
   handlePrevHop: () => void;
   handleNextHop: () => void;
@@ -158,6 +161,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     anchoredHop,
     historyTotalItems,
     historyTotalSuccessfulItems,
+    historyComplete,
     showFailedAttempts,
     selectedHistoryEventId,
     onSelectHistoryEventId,
@@ -187,8 +191,14 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     if (isAnchoredSelected) return -1;
     if (!displayedHistory.length) return -1;
     if (selectedHistoryEventId === null) return displayedHistory.length - 1;
-    return displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
+    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
+    return index >= 0 ? index : displayedHistory.length - 1;
   }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
+
+  const replayTimeline = useMemo(
+    () => buildReplayTimeline(displayedHistory, selectedHistoryIndex, historyComplete),
+    [displayedHistory, historyComplete, selectedHistoryIndex],
+  );
 
   const currentEvent = isAnchoredSelected
     ? anchoredHop
@@ -266,14 +276,13 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
         },
       };
     }
-    return calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex);
+    return replayTimeline;
   }, [
     anchoredHop,
-    displayedHistory,
     displayedHistoryMetrics.totalItems,
     explicitHopNumber,
     isAnchoredSelected,
-    selectedHistoryIndex,
+    replayTimeline,
   ]);
 
   const handlePrevHop = useCallback(() => {
@@ -357,6 +366,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     activeHop,
     hopTimeMetrics: timeMetrics.hopMetrics,
     sessionTimeSummary: timeMetrics.summary,
+    replayTimeline,
     isAnchoredSelected,
     handlePrevHop,
     handleNextHop,

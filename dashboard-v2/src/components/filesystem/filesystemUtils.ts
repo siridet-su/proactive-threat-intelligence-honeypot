@@ -164,6 +164,8 @@ export interface HopTimeMetrics {
   elapsedMs: number;
   formattedElapsed: string;
   timeProgressPercent: number;
+  /** The authoritative value used by the replay range input. */
+  positionValue: number;
 }
 
 export interface SessionReplayTimeSummary {
@@ -176,6 +178,226 @@ export interface SessionReplayTimeSummary {
   timeProgressPercent: number;
 }
 
+export type ReplayTimelineScaleMode = "time" | "index";
+export type ReplayTimelineTimingStatus =
+  | "empty"
+  | "single-event"
+  | "time"
+  | "all-equal"
+  | "missing"
+  | "invalid"
+  | "non-monotonic";
+
+export interface ReplayTimeline {
+  scaleMode: ReplayTimelineScaleMode;
+  timingStatus: ReplayTimelineTimingStatus;
+  isPartial: boolean;
+  loadedSpanMs: number;
+  minValue: number;
+  maxValue: number;
+  value: number;
+  selectedIndex: number;
+  selectedEventId: string | null;
+  durationLabel: string;
+  timingLabel: string;
+  hopMetrics: HopTimeMetrics[];
+  summary: SessionReplayTimeSummary;
+}
+
+function replayTimelineDurationLabel(
+  scaleMode: ReplayTimelineScaleMode,
+  timingStatus: ReplayTimelineTimingStatus,
+  loadedSpanMs: number,
+  historyComplete: boolean,
+): string {
+  if (scaleMode === "time") {
+    const prefix = historyComplete ? "Complete retained duration" : "Partial · loaded span";
+    return `${prefix} ${formatTimeDelta(loadedSpanMs)}`;
+  }
+  if (!historyComplete) return "Partial · timing unavailable";
+  if (timingStatus === "empty") return "No retained duration";
+  return "Timing unavailable · index scale";
+}
+
+function replayTimelineTimingLabel(
+  scaleMode: ReplayTimelineScaleMode,
+  timingStatus: ReplayTimelineTimingStatus,
+): string {
+  if (scaleMode === "time") {
+    return timingStatus === "single-event" ? "Single event · zero duration" : "Elapsed time scale";
+  }
+  switch (timingStatus) {
+    case "all-equal":
+      return "Timing unavailable · all timestamps equal";
+    case "missing":
+      return "Timing unavailable · missing timestamp";
+    case "invalid":
+      return "Timing unavailable · invalid timestamp";
+    case "non-monotonic":
+      return "Timing unavailable · non-monotonic timestamps";
+    case "empty":
+      return "Timing unavailable";
+    default:
+      return "Timing unavailable · index scale";
+  }
+}
+
+/**
+ * Builds the single authoritative scale used by replay pacing and the
+ * interactive scrubber.
+ *
+ * Timestamps are trusted only when every displayed event has a parseable,
+ * non-decreasing timestamp and the window has positive duration. Equal
+ * timestamps in an otherwise valid window share one elapsed position. A
+ * multi-event all-equal window, missing/invalid timestamp, or backwards clock
+ * transition fails closed to an explicitly labelled index scale. No forensic
+ * timestamp is invented or interpolated.
+ */
+export function buildReplayTimeline(
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedIndex: number,
+  historyComplete: boolean,
+): ReplayTimeline {
+  const isPartial = !historyComplete;
+  if (!displayedHistory.length) {
+    const durationLabel = replayTimelineDurationLabel("index", "empty", 0, historyComplete);
+    return {
+      scaleMode: "index",
+      timingStatus: "empty",
+      isPartial,
+      loadedSpanMs: 0,
+      minValue: 0,
+      maxValue: 0,
+      value: 0,
+      selectedIndex: -1,
+      selectedEventId: null,
+      durationLabel,
+      timingLabel: replayTimelineTimingLabel("index", "empty"),
+      hopMetrics: [],
+      summary: {
+        totalDurationMs: 0,
+        formattedTotalDuration: durationLabel,
+        currentElapsedMs: 0,
+        formattedCurrentElapsed: "+00:00",
+        currentDeltaMs: 0,
+        formattedCurrentDelta: "0s",
+        timeProgressPercent: 0,
+      },
+    };
+  }
+
+  const safeSelectedIndex = Math.max(
+    0,
+    Math.min(displayedHistory.length - 1, selectedIndex >= 0 ? selectedIndex : 0),
+  );
+  const parsedTimes = displayedHistory.map((event) => {
+    if (event.at === null || event.at === undefined || event.at.trim() === "") return NaN;
+    return new Date(event.at).getTime();
+  });
+
+  let timingStatus: ReplayTimelineTimingStatus = "time";
+  if (parsedTimes.some((time) => Number.isNaN(time))) {
+    timingStatus = displayedHistory.some((event, index) => {
+      const at = event.at;
+      return at !== null && at !== undefined && at.trim() !== "" && Number.isNaN(parsedTimes[index]);
+    })
+      ? "invalid"
+      : "missing";
+  } else if (displayedHistory.length === 1) {
+    timingStatus = "single-event";
+  } else if (parsedTimes.some((time, index) => index > 0 && time < parsedTimes[index - 1])) {
+    timingStatus = "non-monotonic";
+  } else if (parsedTimes[parsedTimes.length - 1] === parsedTimes[0]) {
+    timingStatus = "all-equal";
+  }
+
+  const scaleMode: ReplayTimelineScaleMode =
+    timingStatus === "time" || timingStatus === "single-event" ? "time" : "index";
+  const firstTime = parsedTimes[0];
+  const lastTime = parsedTimes[parsedTimes.length - 1];
+  const loadedSpanMs = scaleMode === "time" && timingStatus === "time"
+    ? Math.max(0, lastTime - firstTime)
+    : 0;
+  const hopMetrics = displayedHistory.map((event, index) => {
+    const elapsedMs = scaleMode === "time"
+      ? timingStatus === "single-event"
+        ? 0
+        : Math.max(0, parsedTimes[index] - firstTime)
+      : 0;
+    const deltaMs = scaleMode === "time" && index > 0
+      ? Math.max(0, parsedTimes[index] - parsedTimes[index - 1])
+      : 0;
+    const positionValue = scaleMode === "time" ? elapsedMs : index;
+    const timeProgressPercent = loadedSpanMs > 0
+      ? (elapsedMs / loadedSpanMs) * 100
+      : displayedHistory.length > 1
+        ? (index / (displayedHistory.length - 1)) * 100
+        : 0;
+    return {
+      eventId: event.id,
+      deltaMs,
+      formattedDelta: formatTimeDelta(deltaMs),
+      elapsedMs,
+      formattedElapsed: formatElapsedTime(elapsedMs),
+      timeProgressPercent: Math.min(100, Math.max(0, timeProgressPercent)),
+      positionValue,
+    };
+  });
+  const selectedMetric = hopMetrics[safeSelectedIndex];
+  const durationLabel = replayTimelineDurationLabel(
+    scaleMode,
+    timingStatus,
+    loadedSpanMs,
+    historyComplete,
+  );
+  const summary: SessionReplayTimeSummary = {
+    totalDurationMs: loadedSpanMs,
+    formattedTotalDuration: durationLabel,
+    currentElapsedMs: selectedMetric.elapsedMs,
+    formattedCurrentElapsed: selectedMetric.formattedElapsed,
+    currentDeltaMs: selectedMetric.deltaMs,
+    formattedCurrentDelta: selectedMetric.formattedDelta,
+    timeProgressPercent: selectedMetric.timeProgressPercent,
+  };
+
+  return {
+    scaleMode,
+    timingStatus,
+    isPartial,
+    loadedSpanMs,
+    minValue: 0,
+    maxValue: scaleMode === "time" ? loadedSpanMs : Math.max(0, displayedHistory.length - 1),
+    value: selectedMetric.positionValue,
+    selectedIndex: safeSelectedIndex,
+    selectedEventId: selectedMetric.eventId,
+    durationLabel,
+    timingLabel: replayTimelineTimingLabel(scaleMode, timingStatus),
+    hopMetrics,
+    summary,
+  };
+}
+
+/** Maps a scrubber value to the nearest displayed event; ties choose earliest. */
+export function mapReplayTimelineValueToIndex(
+  timeline: ReplayTimeline,
+  requestedValue: number,
+): number {
+  if (!timeline.hopMetrics.length) return -1;
+  const safeValue = Number.isFinite(requestedValue)
+    ? Math.min(timeline.maxValue, Math.max(timeline.minValue, requestedValue))
+    : timeline.value;
+  let nearestIndex = 0;
+  let nearestDistance = Math.abs(timeline.hopMetrics[0].positionValue - safeValue);
+  for (let index = 1; index < timeline.hopMetrics.length; index++) {
+    const distance = Math.abs(timeline.hopMetrics[index].positionValue - safeValue);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  }
+  return nearestIndex;
+}
+
 /**
  * Calculates per-hop time deltas and cumulative elapsed times for a chronological history list.
  */
@@ -186,82 +408,8 @@ export function calculateHistoryTimeMetrics(
   hopMetrics: HopTimeMetrics[];
   summary: SessionReplayTimeSummary;
 } {
-  if (!displayedHistory.length) {
-    return {
-      hopMetrics: [],
-      summary: {
-        totalDurationMs: 0,
-        formattedTotalDuration: "0s",
-        currentElapsedMs: 0,
-        formattedCurrentElapsed: "+00:00",
-        currentDeltaMs: 0,
-        formattedCurrentDelta: "0s",
-        timeProgressPercent: 0,
-      },
-    };
-  }
-
-  const parsedTimes = displayedHistory.map((ev) => (ev.at ? new Date(ev.at).getTime() : NaN));
-  const validTimes = parsedTimes.filter((t) => Number.isFinite(t));
-  const firstTime = validTimes.length > 0 ? validTimes[0] : NaN;
-  const lastTime = validTimes.length > 0 ? validTimes[validTimes.length - 1] : NaN;
-  const totalDurationMs = Number.isFinite(firstTime) && Number.isFinite(lastTime) ? Math.max(0, lastTime - firstTime) : 0;
-
-  const hopMetrics: HopTimeMetrics[] = [];
-  let prevTime = firstTime;
-
-  for (let i = 0; i < displayedHistory.length; i++) {
-    const ev = displayedHistory[i];
-    const currTime = parsedTimes[i];
-    let deltaMs = 0;
-    let elapsedMs = 0;
-
-    if (Number.isFinite(currTime) && Number.isFinite(firstTime)) {
-      if (i > 0 && Number.isFinite(prevTime)) {
-        deltaMs = Math.max(0, currTime - prevTime);
-      }
-      elapsedMs = Math.max(0, currTime - firstTime);
-      prevTime = currTime;
-    }
-
-    const timeProgressPercent =
-      totalDurationMs > 0
-        ? Math.min(100, Math.max(0, (elapsedMs / totalDurationMs) * 100))
-        : displayedHistory.length > 1
-          ? (i / (displayedHistory.length - 1)) * 100
-          : 0;
-
-    hopMetrics.push({
-      eventId: ev.id,
-      deltaMs,
-      formattedDelta: formatTimeDelta(deltaMs),
-      elapsedMs,
-      formattedElapsed: formatElapsedTime(elapsedMs),
-      timeProgressPercent,
-    });
-  }
-
-  const safeIndex = Math.max(0, Math.min(displayedHistory.length - 1, selectedIndex >= 0 ? selectedIndex : 0));
-  const currentMetric = hopMetrics[safeIndex] ?? {
-    eventId: displayedHistory[safeIndex]?.id ?? "",
-    deltaMs: 0,
-    formattedDelta: "0s",
-    elapsedMs: 0,
-    formattedElapsed: "+00:00",
-    timeProgressPercent: 0,
-  };
-
-  const summary: SessionReplayTimeSummary = {
-    totalDurationMs,
-    formattedTotalDuration: formatTimeDelta(totalDurationMs),
-    currentElapsedMs: currentMetric.elapsedMs,
-    formattedCurrentElapsed: currentMetric.formattedElapsed,
-    currentDeltaMs: currentMetric.deltaMs,
-    formattedCurrentDelta: currentMetric.formattedDelta,
-    timeProgressPercent: currentMetric.timeProgressPercent,
-  };
-
-  return { hopMetrics, summary };
+  const timeline = buildReplayTimeline(displayedHistory, selectedIndex, true);
+  return { hopMetrics: timeline.hopMetrics, summary: timeline.summary };
 }
 
 export type ReplayPacingMode = "realistic" | "uniform";

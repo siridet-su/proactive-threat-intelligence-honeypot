@@ -340,12 +340,14 @@ export function FilesystemActivity() {
     handlePause,
     handleToggleSpeed,
     handleTogglePacingMode,
+    replayTimeline,
   } = useAuditReplay({
     viewMode,
     history,
     anchoredHop,
     historyTotalItems,
     historyTotalSuccessfulItems,
+    historyComplete,
     showFailedAttempts,
     selectedHistoryEventId,
     onSelectHistoryEventId: handleSelectHistoryEventId,
@@ -1302,6 +1304,7 @@ export function FilesystemActivity() {
                   historyTotalItems={historyTotalItems}
                   historyTotalSuccessfulItems={historyTotalSuccessfulItems}
                   historyComplete={historyComplete}
+                  replayTimeline={replayTimeline}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
                   hopResolutionStatus={hopResolutionStatus}
@@ -1631,6 +1634,7 @@ export function FilesystemActivity() {
                   historyTotalItems={historyTotalItems}
                   historyTotalSuccessfulItems={historyTotalSuccessfulItems}
                   historyComplete={historyComplete}
+                  replayTimeline={replayTimeline}
                   selectedHistoryEventId={selectedHistoryEventId}
                   layout="sidebar"
                   hopResolutionStatus={hopResolutionStatus}

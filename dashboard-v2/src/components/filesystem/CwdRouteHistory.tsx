@@ -26,13 +26,15 @@ import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
   actionLabel,
-  calculateHistoryTimeMetrics,
+  buildReplayTimeline,
   calculateReplayPacingDelay,
   formatFromPath,
   formatTimestamp,
   getHistoryWindowMetrics,
   isInitialSshEntry,
+  mapReplayTimelineValueToIndex,
   statusLabel,
+  type ReplayTimeline,
   type ReplayPacingMode,
 } from "./filesystemUtils";
 import { useResponseAction } from "./useResponseAction";
@@ -63,6 +65,7 @@ interface CwdRouteHistoryProps {
   historyTotalItems: number;
   historyTotalSuccessfulItems: number;
   historyComplete: boolean;
+  replayTimeline?: ReplayTimeline;
   selectedHistoryEventId: string | null;
   layout?: "card" | "sidebar";
   sessionIsLive?: boolean;
@@ -92,6 +95,7 @@ export function CwdRouteHistory({
   historyTotalItems,
   historyTotalSuccessfulItems,
   historyComplete,
+  replayTimeline: suppliedReplayTimeline,
   selectedHistoryEventId,
   layout = "card",
   sessionIsLive = false,
@@ -184,6 +188,12 @@ export function CwdRouteHistory({
     [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts, explicitHopNumber],
   );
 
+  const derivedReplayTimeline = useMemo(
+    () => buildReplayTimeline(displayedHistory, selectedHistoryIndex, historyComplete),
+    [displayedHistory, historyComplete, selectedHistoryIndex],
+  );
+  const replayTimeline = suppliedReplayTimeline ?? derivedReplayTimeline;
+
   const timeMetrics = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
       const hopNum = explicitHopNumber ?? 1;
@@ -195,7 +205,7 @@ export function CwdRouteHistory({
         hopMetrics: [],
         summary: {
           totalDurationMs: 0,
-          formattedTotalDuration: "Partial",
+          formattedTotalDuration: `Partial · unloaded gap · ${replayTimeline.durationLabel}`,
           currentElapsedMs: 0,
           formattedCurrentElapsed: "+00:00",
           currentDeltaMs: 0,
@@ -204,8 +214,8 @@ export function CwdRouteHistory({
         },
       };
     }
-    return calculateHistoryTimeMetrics(displayedHistory, selectedHistoryIndex);
-  }, [displayedHistory, selectedHistoryIndex, isAnchoredSelected, anchoredHop, explicitHopNumber, displayedHistoryMetrics.totalItems]);
+    return replayTimeline;
+  }, [anchoredHop, displayedHistoryMetrics.totalItems, explicitHopNumber, isAnchoredSelected, replayTimeline]);
 
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
@@ -731,26 +741,27 @@ export function CwdRouteHistory({
                   <input
                     type="range"
                     min={0}
-                    max={Math.max(0, displayedHistory.length - 1)}
-                    value={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
+                    max={replayTimeline.maxValue}
+                    step={1}
+                    value={replayTimeline.value}
                     disabled={isAnchoredSelected || displayedHistory.length <= 1}
                     onChange={(e) => {
                       if (isAnchoredSelected) return;
                       handlePause();
-                      const targetIndex = Number(e.target.value);
+                      const targetIndex = mapReplayTimelineValueToIndex(replayTimeline, Number(e.target.value));
                       const targetEvent = displayedHistory[targetIndex];
                       if (targetEvent) {
                         onSelectHistoryEventId(targetEvent.id);
                       }
                     }}
                     aria-label="Replay timeline scrubber"
-                    aria-valuemin={0}
-                    aria-valuemax={Math.max(0, displayedHistory.length - 1)}
-                    aria-valuenow={selectedHistoryIndex >= 0 ? selectedHistoryIndex : 0}
+                    aria-valuemin={replayTimeline.minValue}
+                    aria-valuemax={replayTimeline.maxValue}
+                    aria-valuenow={replayTimeline.value}
                     aria-valuetext={
                       isAnchoredSelected
                         ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems} (Anchored deep target, replay scrubber paused across unloaded gap)`
-                        : `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`
+                        : `${replayTimeline.timingLabel}; ${replayTimeline.durationLabel}; Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`
                     }
                     className="w-full h-1.5 bg-border/60 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 disabled:cursor-not-allowed"
                   />
@@ -812,7 +823,7 @@ export function CwdRouteHistory({
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-subtle" aria-live="polite">
-              <span>{historyComplete ? "Complete retained history loaded" : `${history.length} of ${historyTotalItems} retained events loaded`}</span>
+              <span>{historyComplete ? "Complete retained history loaded" : `${replayTimeline.durationLabel} · ${history.length} of ${historyTotalItems} retained events loaded`}</span>
               <span className="shrink-0 font-mono">{historyTotalItems} total</span>
             </div>
 

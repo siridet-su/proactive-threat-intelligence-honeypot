@@ -10,11 +10,13 @@ import {
   getNextPlaybackSpeed,
 } from "../src/components/filesystem/useAuditReplay";
 import {
+  buildReplayTimeline,
   calculateHistoryTimeMetrics,
   calculateReplayPacingDelay,
   formatElapsedTime,
   formatTimeDelta,
   getHistoryWindowMetrics,
+  mapReplayTimelineValueToIndex,
 } from "../src/components/filesystem/filesystemUtils";
 
 describe("useAuditReplay pure replay helpers (FS-016)", () => {
@@ -192,6 +194,115 @@ describe("useTopologyArrange pure helpers (FS-016)", () => {
 });
 
 describe("time-based replay scrubber pure helpers (FS-019)", () => {
+  const unevenEvents: SessionCwdHistoryEvent[] = [
+    {
+      id: "ev-1",
+      sessionId: "sess-1",
+      fromPath: "/",
+      toPath: "/home/cowrie",
+      command: "cd ~",
+      action: "change",
+      status: "confirmed",
+      at: "2026-09-15T12:00:00.000Z",
+    },
+    {
+      id: "ev-2",
+      sessionId: "sess-1",
+      fromPath: "/home/cowrie",
+      toPath: "/tmp",
+      command: "cd /tmp",
+      action: "change",
+      status: "confirmed",
+      at: "2026-09-15T12:00:05.000Z",
+    },
+    {
+      id: "ev-3",
+      sessionId: "sess-1",
+      fromPath: "/tmp",
+      toPath: "/etc",
+      command: "cd /etc",
+      action: "change",
+      status: "confirmed",
+      at: "2026-09-15T12:30:05.000Z",
+    },
+  ];
+
+  it("uses uneven elapsed positions and maps 5 seconds to the five-second hop", () => {
+    const timeline = buildReplayTimeline(unevenEvents, 1, true);
+    expect(timeline.scaleMode).toBe("time");
+    expect(timeline.maxValue).toBe(1_805_000);
+    expect(timeline.hopMetrics.map((metric) => metric.positionValue)).toEqual([0, 5_000, 1_805_000]);
+    expect(timeline.hopMetrics[1].timeProgressPercent).toBeCloseTo(0.277, 2);
+    expect(mapReplayTimelineValueToIndex(timeline, 5_000)).toBe(1);
+  });
+
+  it("maps mid-gap ties to the earliest chronological hop", () => {
+    const timeline = buildReplayTimeline(unevenEvents, 0, true);
+    expect(mapReplayTimelineValueToIndex(timeline, 905_000)).toBe(1);
+    expect(mapReplayTimelineValueToIndex(timeline, 900_000)).toBe(1);
+  });
+
+  it("allows equal timestamps to share a time position while stepping remains index-based", () => {
+    const events = [unevenEvents[0], { ...unevenEvents[1], at: unevenEvents[0].at }, unevenEvents[2]];
+    const timeline = buildReplayTimeline(events, 1, true);
+    expect(timeline.scaleMode).toBe("time");
+    expect(timeline.hopMetrics[0].positionValue).toBe(timeline.hopMetrics[1].positionValue);
+    expect(timeline.hopMetrics[1].positionValue).toBe(0);
+    expect(mapReplayTimelineValueToIndex(timeline, 0)).toBe(0);
+    expect(calculateNextHistoryEventId(events, 0, "next")).toBe(events[1].id);
+  });
+
+  it("keeps a single event on a stable zero-duration time scale", () => {
+    const timeline = buildReplayTimeline([unevenEvents[0]], 0, true);
+    expect(timeline.scaleMode).toBe("time");
+    expect(timeline.timingStatus).toBe("single-event");
+    expect(timeline.minValue).toBe(0);
+    expect(timeline.maxValue).toBe(0);
+    expect(timeline.value).toBe(0);
+  });
+
+  it.each([
+    ["all equal", [unevenEvents[0], { ...unevenEvents[1], at: unevenEvents[0].at }, { ...unevenEvents[2], at: unevenEvents[0].at }], "all-equal", "Timing unavailable"],
+    ["missing", [{ ...unevenEvents[0], at: null }, unevenEvents[1]], "missing", "Timing unavailable"],
+    ["invalid", [{ ...unevenEvents[0], at: "not-a-timestamp" }, unevenEvents[1]], "invalid", "Timing unavailable"],
+    ["non-monotonic", [unevenEvents[1], unevenEvents[0]], "non-monotonic", "Timing unavailable"],
+  ] as const)("fails closed for %s timestamps with an explicit index fallback", (_name, events, status, label) => {
+    const timeline = buildReplayTimeline(events, 0, true);
+    expect(timeline.scaleMode).toBe("index");
+    expect(timeline.timingStatus).toBe(status);
+    expect(timeline.durationLabel).toContain(label);
+    expect(timeline.maxValue).toBe(events.length - 1);
+  });
+
+  it("labels partial and complete durations without overstating loaded history", () => {
+    const partial = buildReplayTimeline(unevenEvents, 1, false);
+    const complete = buildReplayTimeline(unevenEvents, 1, true);
+    expect(partial.durationLabel).toBe("Partial · loaded span 30m 05s");
+    expect(complete.durationLabel).toBe("Complete retained duration 30m 05s");
+  });
+
+  it("recomputes the loaded origin while preserving the selected event identity", () => {
+    const laterWindow = buildReplayTimeline(unevenEvents.slice(1), 0, false);
+    const earlierEvent = { ...unevenEvents[0], at: "2026-09-15T11:59:50.000Z" };
+    const expandedWindow = buildReplayTimeline([earlierEvent, ...unevenEvents.slice(1)], 1, false);
+    expect(laterWindow.selectedEventId).toBe("ev-2");
+    expect(expandedWindow.selectedEventId).toBe("ev-2");
+    expect(expandedWindow.value).toBe(15_000);
+  });
+
+  it("builds a truthful scale from the filtered displayed event set", () => {
+    const withFailure = [
+      unevenEvents[0],
+      { ...unevenEvents[1], id: "ev-failed", action: "failed_change" as const, status: "failed" },
+      unevenEvents[2],
+    ];
+    const filtered = filterDisplayedHistory(withFailure, false);
+    const timeline = buildReplayTimeline(filtered, 1, true);
+    expect(filtered.map((event) => event.id)).toEqual(["ev-1", "ev-3"]);
+    expect(timeline.maxValue).toBe(1_805_000);
+    expect(timeline.selectedEventId).toBe("ev-3");
+  });
+
   it("formats forensic time deltas concisely across orders of magnitude", () => {
     expect(formatTimeDelta(0)).toBe("0s");
     expect(formatTimeDelta(-100)).toBe("0s");
