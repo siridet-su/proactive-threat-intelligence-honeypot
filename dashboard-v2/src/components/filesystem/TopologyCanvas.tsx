@@ -69,6 +69,7 @@ import {
 import { useTopologyViewport } from "./useTopologyViewport";
 import { useTopologyArrange } from "./useTopologyArrange";
 import { getLayoutStorageKeys } from "./layoutPersistence";
+import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
 
@@ -228,6 +229,9 @@ export function TopologyCanvas({
   const restoreViewportRef = useRef<((snapshot: { pan: Pan; zoom: number }) => void) | null>(null);
   const resetViewportRef = useRef<((overrideLabels?: Record<string, LabelPosition>, overrideNodes?: Record<string, LabelPosition>) => void) | null>(null);
 
+  // TopologyCanvas is the sole mounted owner of arrangement state for this
+  // topology instance. Presentational header/scene/overlay children receive
+  // focused values and callbacks; they never call viewport or arrangement hooks.
   const {
     isArrangeMode,
     setIsArrangeMode,
@@ -703,17 +707,7 @@ export function TopologyCanvas({
       } ${className ?? ""}`}
       aria-busy={regionStatus === "loading"}
     >
-      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1 pr-3">
-          <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-            <h2 className="truncate font-semibold text-text text-sm sm:text-base">{title ?? "Live filesystem topology"}</h2>
-          </div>
-          <p className="mt-0.5 truncate text-xs text-text-subtle">
-            {subtitle ?? "Observed paths form the topology; compact source-IP clusters point to their most recently verified location."}
-          </p>
-        </div>
-
+      <TopologyCanvasHeader title={title} subtitle={subtitle}>
         {/* Unified toolbar: Canvas navigation, Layout editing, and Canvas expansion are grouped distinctly to prevent ambiguous wrapping */}
         <div
           className="flex shrink-0 flex-wrap items-center justify-start sm:justify-end gap-2"
@@ -982,7 +976,7 @@ export function TopologyCanvas({
             </button>
           </div>
         </div>
-      </div>
+      </TopologyCanvasHeader>
 
       {regionStatus === "error" && !snapshot ? (
         <div className="p-5">

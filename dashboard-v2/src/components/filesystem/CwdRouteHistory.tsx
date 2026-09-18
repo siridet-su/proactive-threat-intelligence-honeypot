@@ -3,7 +3,6 @@
 import {
   AlertCircle,
   AlertTriangle,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -12,7 +11,6 @@ import {
   History,
   Pause,
   Play,
-  Power,
   Plus,
   RefreshCw,
   Rewind,
@@ -20,14 +18,13 @@ import {
   Terminal,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
   actionLabel,
   buildReplayTimeline,
-  calculateReplayPacingDelay,
   formatFromPath,
   formatTimestamp,
   getHistoryWindowMetrics,
@@ -38,10 +35,9 @@ import {
   statusLabel,
   type ReplayTimeline,
   type ReplayPacingMode,
+  type HopTimeMetrics,
+  type SessionReplayTimeSummary,
 } from "./filesystemUtils";
-import { useResponseAction } from "./useResponseAction";
-import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
-import { OperationToast } from "@/components/ui/OperationToast";
 import type { HopResolutionStatus } from "./sessionHopResolver";
 
 type SidebarTab = "replay" | "commands" | "actions";
@@ -58,7 +54,7 @@ const SIDEBAR_CONTENT_VARIANTS = {
   exit: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * -6 }),
 };
 
-interface CwdRouteHistoryProps {
+export interface CwdRouteHistoryProps {
   selectedSession: FilesystemTopologySession | null;
   history: SessionCwdHistoryEvent[];
   anchoredHop?: SessionCwdHistoryEvent | null;
@@ -71,6 +67,9 @@ interface CwdRouteHistoryProps {
   selectedHistoryEventId: string | null;
   layout?: "card" | "sidebar";
   sessionIsLive?: boolean;
+  activeTab?: SidebarTab;
+  onTabChange?: (tab: SidebarTab) => void;
+  responsePanel?: ReactNode;
   hopResolutionStatus?: HopResolutionStatus;
   requestedHop?: string | null;
   onClearHop?: () => void;
@@ -86,6 +85,12 @@ interface CwdRouteHistoryProps {
   onTogglePacingMode?: () => void;
   showFailedAttempts?: boolean;
   onToggleShowFailedAttempts?: (show: boolean) => void;
+  displayedHistory?: SessionCwdHistoryEvent[];
+  selectedHistoryIndex?: number;
+  displayedHistoryMetrics?: ReturnType<typeof getHistoryWindowMetrics>;
+  isAnchoredSelected?: boolean;
+  hopTimeMetrics?: HopTimeMetrics[];
+  sessionTimeSummary?: SessionReplayTimeSummary;
 }
 
 export function CwdRouteHistory({
@@ -100,7 +105,9 @@ export function CwdRouteHistory({
   replayTimeline: suppliedReplayTimeline,
   selectedHistoryEventId,
   layout = "card",
-  sessionIsLive = false,
+  activeTab: controlledSidebarTab = "replay",
+  onTabChange,
+  responsePanel,
   hopResolutionStatus = "idle",
   requestedHop = null,
   onClearHop,
@@ -116,59 +123,50 @@ export function CwdRouteHistory({
   onTogglePacingMode,
   showFailedAttempts: controlledShowFailedAttempts,
   onToggleShowFailedAttempts,
+  displayedHistory: suppliedDisplayedHistory,
+  selectedHistoryIndex: suppliedSelectedHistoryIndex,
+  displayedHistoryMetrics: suppliedDisplayedHistoryMetrics,
+  isAnchoredSelected: suppliedIsAnchoredSelected,
+  hopTimeMetrics: suppliedHopTimeMetrics,
+  sessionTimeSummary: suppliedSessionTimeSummary,
 }: CwdRouteHistoryProps) {
   const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
-  const [internalIsPlaying, setInternalIsPlaying] = useState(false);
-  const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
-  const [internalPacingMode, setInternalPacingMode] = useState<ReplayPacingMode>("realistic");
   const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>("replay");
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
   const shouldReduceMotion = useReducedMotion();
   const isSidebar = layout === "sidebar";
+  const sidebarTab = controlledSidebarTab;
 
-  const {
-    visibleTerminateAction,
-    visibleTerminateCapability,
-    terminateDialogOpen,
-    setTerminateDialogOpen,
-    terminateProcessing,
-    terminateError,
-    setTerminateError,
-    operationToast,
-    setOperationToast,
-    handleTerminateSession,
-  } = useResponseAction({
-    selectedSession,
-    sessionIsLive,
-    enabled: isSidebar && sidebarTab === "actions",
-  });
-
-  const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
-  const playbackSpeed = controlledPlaybackSpeed !== undefined ? controlledPlaybackSpeed : internalPlaybackSpeed;
-  const pacingMode = controlledPacingMode !== undefined ? controlledPacingMode : internalPacingMode;
+  const isPlaying = controlledIsPlaying ?? false;
+  const playbackSpeed = controlledPlaybackSpeed ?? 1400;
+  const pacingMode = controlledPacingMode ?? "realistic";
   const showFailedAttempts = controlledShowFailedAttempts !== undefined ? controlledShowFailedAttempts : internalShowFailedAttempts;
 
   const failedCount = Math.max(0, historyTotalItems - historyTotalSuccessfulItems);
 
-  const displayedHistory = useMemo(() => {
+  // Production always supplies this replay view model from useAuditReplay. The
+  // fallback preserves direct-render test fixtures without introducing a timer
+  // or a second replay lifecycle owner.
+  const derivedDisplayedHistory = useMemo(() => {
     if (showFailedAttempts) return chronologicalHistory;
     return chronologicalHistory.filter((e) => e.action !== "failed_change");
   }, [chronologicalHistory, showFailedAttempts]);
+  const displayedHistory = suppliedDisplayedHistory ?? derivedDisplayedHistory;
 
-  const isAnchoredSelected = Boolean(
+  const isAnchoredSelected = suppliedIsAnchoredSelected ?? Boolean(
     anchoredHop &&
-    selectedHistoryEventId === anchoredHop.id &&
-    !displayedHistory.some((event) => event.id === anchoredHop.id),
+      selectedHistoryEventId === anchoredHop.id &&
+      !displayedHistory.some((event) => event.id === anchoredHop.id),
   );
 
-  const selectedHistoryIndex = useMemo(() => {
+  const derivedSelectedHistoryIndex = useMemo(() => {
     if (isAnchoredSelected) return -1;
     if (!displayedHistory.length) return -1;
     if (selectedHistoryEventId === null) return displayedHistory.length - 1;
     const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
     return index >= 0 ? index : displayedHistory.length - 1;
   }, [displayedHistory, isAnchoredSelected, selectedHistoryEventId]);
+  const selectedHistoryIndex = suppliedSelectedHistoryIndex ?? derivedSelectedHistoryIndex;
 
   const selectedHistoryEvent = isAnchoredSelected
     ? anchoredHop
@@ -180,7 +178,7 @@ export function CwdRouteHistory({
     ? selectedHistoryEvent?.hopNumber
     : (selectedHistoryEvent?.successfulHopNumber ?? selectedHistoryEvent?.hopNumber);
 
-  const displayedHistoryMetrics = useMemo(
+  const derivedDisplayedHistoryMetrics = useMemo(
     () => getHistoryWindowMetrics(
       displayedHistory.length,
       showFailedAttempts ? historyTotalItems : historyTotalSuccessfulItems,
@@ -190,6 +188,7 @@ export function CwdRouteHistory({
     [displayedHistory.length, historyTotalItems, historyTotalSuccessfulItems, selectedHistoryIndex, showFailedAttempts, explicitHopNumber],
   );
 
+  const displayedHistoryMetrics = suppliedDisplayedHistoryMetrics ?? derivedDisplayedHistoryMetrics;
   const derivedReplayTimeline = useMemo(
     () => buildReplayTimeline(
       displayedHistory,
@@ -201,7 +200,7 @@ export function CwdRouteHistory({
   );
   const replayTimeline = suppliedReplayTimeline ?? derivedReplayTimeline;
 
-  const timeMetrics = useMemo(() => {
+  const derivedTimeMetrics = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
       const hopNum = explicitHopNumber ?? 1;
       const progressPercent =
@@ -223,6 +222,10 @@ export function CwdRouteHistory({
     }
     return replayTimeline;
   }, [anchoredHop, displayedHistoryMetrics.totalItems, explicitHopNumber, isAnchoredSelected, replayTimeline]);
+  const timeMetrics = {
+    hopMetrics: suppliedHopTimeMetrics ?? derivedTimeMetrics.hopMetrics,
+    summary: suppliedSessionTimeSummary ?? derivedTimeMetrics.summary,
+  };
 
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
@@ -252,8 +255,6 @@ export function CwdRouteHistory({
       onPause();
     } else if (onTogglePlay) {
       if (isPlaying) onTogglePlay();
-    } else {
-      setInternalIsPlaying(false);
     }
   }, [isPlaying, onPause, onTogglePlay]);
 
@@ -275,48 +276,10 @@ export function CwdRouteHistory({
   const handleTogglePlay = useCallback(() => {
     if (onTogglePlay) {
       onTogglePlay();
-    } else {
-      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-      }
-      setInternalIsPlaying((prev) => !prev);
+    } else if (selectedHistoryIndex >= displayedHistory.length - 1) {
+      onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
     }
   }, [displayedHistory, onSelectHistoryEventId, onTogglePlay, selectedHistoryIndex]);
-
-  // Auto-play timer with dynamic realistic pacing (only active if not controlled externally by parent)
-  useEffect(() => {
-    if (controlledIsPlaying !== undefined) return;
-    if (!isPlaying) return;
-
-    if (selectedHistoryIndex >= displayedHistory.length - 1) {
-      return;
-    }
-
-    const nextIndex = selectedHistoryIndex + 1;
-    const nextEvent = displayedHistory[nextIndex];
-    if (!nextEvent) return;
-
-    const nextMetric = timeMetrics.hopMetrics[nextIndex];
-    const delay = calculateReplayPacingDelay(nextMetric?.deltaMs ?? 0, playbackSpeed, pacingMode);
-
-    const timer = setTimeout(() => {
-      onSelectHistoryEventId(nextEvent.id);
-      if (nextIndex >= displayedHistory.length - 1) {
-        setInternalIsPlaying(false);
-      }
-    }, delay);
-
-    return () => clearTimeout(timer);
-  }, [
-    controlledIsPlaying,
-    isPlaying,
-    selectedHistoryIndex,
-    displayedHistory,
-    playbackSpeed,
-    pacingMode,
-    timeMetrics.hopMetrics,
-    onSelectHistoryEventId,
-  ]);
 
   const sidebarTabColumn = SIDEBAR_TAB_COLUMN[sidebarTab];
   const sidebarContentDirection = shouldReduceMotion ? 0 : sidebarTabDirection;
@@ -324,7 +287,7 @@ export function CwdRouteHistory({
   const handleSidebarTabChange = (nextTab: SidebarTab) => {
     if (nextTab === sidebarTab) return;
     setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
-    setSidebarTab(nextTab);
+    onTabChange?.(nextTab);
   };
 
   return (
@@ -504,57 +467,7 @@ export function CwdRouteHistory({
                 </div>
               ) : sidebarTab === "actions" ? (
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
-            <div className="rounded-xl border border-border bg-surface-subtle p-3 space-y-2.5">
-              <div className="text-xs font-semibold text-text">Selected session</div>
-              <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                <div className="rounded bg-surface p-2 border border-border">
-                  <div className="text-xs text-text-subtle">Source IP</div>
-                  <div className="font-semibold text-text mt-0.5 truncate">{selectedSession.sourceIp}</div>
-                </div>
-                <div className="rounded bg-surface p-2 border border-border">
-                  <div className="text-xs text-text-subtle">Session ID</div>
-                  <div className="font-bold text-text mt-0.5 truncate">{selectedSession.sessionId.slice(0, 10)}…</div>
-                </div>
-              </div>
-            </div>
-            {visibleTerminateAction && (
-              <div className={`rounded-xl border p-3 ${visibleTerminateAction.status === "verified" ? "border-success-border bg-success-subtle" : visibleTerminateAction.status === "failed" ? "border-danger-border bg-danger-subtle" : "border-warning-border bg-warning-subtle"}`} aria-live="polite">
-                <div className="flex items-center gap-2">
-                  {visibleTerminateAction.status === "verified" ? <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" /> : <Power className={`h-4 w-4 ${visibleTerminateAction.status === "failed" ? "text-danger" : "text-warning"}`} aria-hidden="true" />}
-                  <span className="text-xs font-semibold text-text">
-                    {visibleTerminateAction.status === "verified" ? "Disconnect verified" : visibleTerminateAction.status === "failed" ? "Disconnect failed" : visibleTerminateAction.status === "requested" ? "Reconciling session state" : "Disconnect in progress"}
-                  </span>
-                </div>
-                <p className="mt-1.5 text-xs leading-5 text-text-muted">
-                  {visibleTerminateAction.status === "verified" ? "Cowrie confirmed that this exact transport closed." : visibleTerminateAction.status === "failed" ? `No verified closure${visibleTerminateAction.failureCategory ? ` (${visibleTerminateAction.failureCategory.replaceAll("_", " ")})` : ""}.` : visibleTerminateAction.status === "requested" ? "The transport changed state during delivery; awaiting authoritative lifecycle confirmation." : "Request delivered to the Pi; awaiting the session-closed event."}
-                </p>
-              </div>
-            )}
-            {visibleTerminateCapability === "loading" ? (
-              <RegionState kind="loading" title="Checking response channel" />
-            ) : visibleTerminateCapability === "forbidden" ? (
-              <RegionState kind="empty" title="Admin access required" description="Only an Admin operator can disconnect a live Cowrie session." />
-            ) : visibleTerminateCapability === "unconfigured" ? (
-              <RegionState kind="empty" title="Response channel not configured" description="Configure the dashboard-to-Pi response agent before operational controls become available." />
-            ) : visibleTerminateCapability === "error" ? (
-              <RegionState kind="error" title="Response channel unavailable" description="The control capability could not be verified. No request was sent." />
-            ) : !sessionIsLive ? (
-              <RegionState kind="empty" title="Session already closed" description="Response actions are disabled for retained audit sessions." />
-            ) : visibleTerminateAction && ["requested", "delivered", "verified"].includes(visibleTerminateAction.status) ? null : (
-              <div className="rounded-xl border border-danger-border bg-danger-subtle p-3">
-                <div className="flex items-start gap-2.5">
-                  <Power className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-text">Disconnect this Cowrie session</p>
-                    <p className="mt-1 text-xs leading-5 text-text-muted">Closes only transport <span className="font-mono text-text">{selectedSession.sessionId}</span>. It does not block the source IP or run a shell command.</p>
-                  </div>
-                </div>
-                <button type="button" className="ui-button ui-button-danger mt-3 w-full" onClick={() => { setTerminateError(undefined); setTerminateDialogOpen(true); }}>
-                  <Power className="h-4 w-4" aria-hidden="true" />
-                  Disconnect session
-                </button>
-              </div>
-            )}
+                  {responsePanel}
                 </div>
               ) : (
                 /* Tab 1: Route Replay with alert support */
@@ -673,8 +586,6 @@ export function CwdRouteHistory({
                     onClick={() => {
                       if (onToggleSpeed) {
                         onToggleSpeed();
-                      } else {
-                        setInternalPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
                       }
                     }}
                     className="ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0"
@@ -688,8 +599,6 @@ export function CwdRouteHistory({
                     onClick={() => {
                       if (onTogglePacingMode) {
                         onTogglePacingMode();
-                      } else {
-                        setInternalPacingMode((current) => (current === "realistic" ? "uniform" : "realistic"));
                       }
                     }}
                     className={`ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0 flex items-center gap-1 ${
@@ -1073,19 +982,6 @@ export function CwdRouteHistory({
           </>
         )}
       </div>
-      <ConfirmDialog
-        open={terminateDialogOpen}
-        onOpenChange={setTerminateDialogOpen}
-        onConfirm={handleTerminateSession}
-        title="Disconnect this live Cowrie session?"
-        description={`This immediately closes session ${selectedSession?.sessionId ?? ""} from ${selectedSession?.sourceIp ?? "the selected source"}. The source IP is not blocked and Cowrie remains online.`}
-        confirmLabel="Disconnect session"
-        confirmVariant="danger"
-        isProcessing={terminateProcessing}
-        processingLabel="Sending request…"
-        errorMessage={terminateError}
-      />
-      {operationToast && <OperationToast {...operationToast} onDismiss={() => setOperationToast(null)} />}
     </div>
   );
 }

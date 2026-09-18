@@ -25,7 +25,9 @@ import type {
 } from "@/lib/dashboardTypes";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
-import { CwdRouteHistory } from "./CwdRouteHistory";
+import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
+import { ResponseActionPanel } from "./ResponseActionPanel";
+import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { TimelineSplitter } from "./TimelineSplitter";
 import {
@@ -63,6 +65,8 @@ interface NavigationApplicationErrorState {
   message: string;
 }
 
+type ForensicTab = "replay" | "commands" | "actions";
+
 export function FilesystemActivity() {
   const shouldReduceMotion = useReducedMotion();
 
@@ -92,6 +96,7 @@ export function FilesystemActivity() {
   });
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
   const [showFailedAttempts, setShowFailedAttempts] = useState(true);
+  const [activeForensicTab, setActiveForensicTab] = useState<ForensicTab>("replay");
 
   // Cross-cutting refs
   const selectedSessionIdRef = useRef<string | null>(null);
@@ -333,6 +338,9 @@ export function FilesystemActivity() {
     displayedHistory,
     selectedHistoryIndex,
     displayedHistoryMetrics,
+    isAnchoredSelected,
+    hopTimeMetrics,
+    sessionTimeSummary,
     activeHop,
     handlePrevHop,
     handleNextHop,
@@ -467,6 +475,30 @@ export function FilesystemActivity() {
   const selectedSession = useMemo(
     () => sessionById.get(selectedSessionId ?? "") ?? null,
     [selectedSessionId, sessionById],
+  );
+
+  // Explicit page-level response lifecycle owner. CwdRouteHistory only renders
+  // the supplied response view model and never starts capability requests or polling.
+  const responseAction = useResponseActionController({
+    selectedSession,
+    sessionIsLive: Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId)),
+    enabled: viewMode === "audit" && activeForensicTab === "actions" && Boolean(selectedSession),
+  });
+  const responsePanel = (
+    <ResponseActionPanel
+      selectedSession={selectedSession}
+      sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
+      visibleTerminateAction={responseAction.visibleTerminateAction}
+      visibleTerminateCapability={responseAction.visibleTerminateCapability}
+      terminateDialogOpen={responseAction.terminateDialogOpen}
+      onTerminateDialogOpenChange={responseAction.setTerminateDialogOpen}
+      terminateProcessing={responseAction.terminateProcessing}
+      terminateError={responseAction.terminateError}
+      onTerminateErrorChange={responseAction.setTerminateError}
+      operationToast={responseAction.operationToast}
+      onOperationToastChange={responseAction.setOperationToast}
+      onTerminateSession={responseAction.handleTerminateSession}
+    />
   );
 
   const selectedClosedSession = useMemo(() => {
@@ -1275,26 +1307,11 @@ export function FilesystemActivity() {
               />
             )}
 
-            {/* Right Timeline: Smoothly collapsible & resizable sidebar */}
-            <div
-              inert={isTimelineCollapsed ? true : undefined}
-              aria-hidden={isTimelineCollapsed}
-              style={{ width: isTimelineCollapsed ? 0 : timelineWidth }}
-              className={`h-full flex flex-col shrink-0 overflow-hidden ${
-                isDraggingTimeline
-                  ? "transition-none"
-                  : "transition-[width,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none"
-              } ${
-                isTimelineCollapsed
-                  ? "opacity-0 pointer-events-none ml-0"
-                  : "opacity-100 ml-2 sm:ml-2.5"
-              }`}
-            >
-              <div
-                style={{ width: timelineWidth }}
-                className="h-full flex flex-col min-h-0"
-              >
-                <CwdRouteHistory
+            <FilesystemTimelinePanel
+              collapsed={isTimelineCollapsed}
+              isDragging={isDraggingTimeline}
+              width={timelineWidth}
+              variant="fullscreen"
                   selectedSession={selectedSession}
                   sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
@@ -1306,7 +1323,9 @@ export function FilesystemActivity() {
                   historyComplete={historyComplete}
                   replayTimeline={replayTimeline}
                   selectedHistoryEventId={selectedHistoryEventId}
-                  layout="sidebar"
+                  activeTab={activeForensicTab}
+                  onTabChange={setActiveForensicTab}
+                  responsePanel={responsePanel}
                   hopResolutionStatus={hopResolutionStatus}
                   requestedHop={requestedHop}
                   onClearHop={clearRequestedHop}
@@ -1324,9 +1343,13 @@ export function FilesystemActivity() {
                   onTogglePacingMode={handleTogglePacingMode}
                   showFailedAttempts={showFailedAttempts}
                   onToggleShowFailedAttempts={setShowFailedAttempts}
-                />
-              </div>
-            </div>
+                  displayedHistory={displayedHistory}
+                  selectedHistoryIndex={selectedHistoryIndex}
+                  displayedHistoryMetrics={displayedHistoryMetrics}
+                  isAnchoredSelected={isAnchoredSelected}
+                  hopTimeMetrics={hopTimeMetrics}
+                  sessionTimeSummary={sessionTimeSummary}
+            />
           </div>
         </div>
       ) : (
@@ -1602,29 +1625,11 @@ export function FilesystemActivity() {
               />
             )}
 
-            {/* Smooth Collapsible & Resizable Sidebar */}
-            <div
-              inert={isTimelineCollapsed ? true : undefined}
-              aria-hidden={isTimelineCollapsed}
-              style={{
-                ['--timeline-width' as string]: `${timelineWidth}px`,
-                width: isTimelineCollapsed ? 0 : undefined,
-              }}
-              className={`flex flex-col shrink-0 overflow-hidden ${
-                isDraggingTimeline
-                  ? "transition-none"
-                  : "transition-all duration-300 ease-in-out motion-reduce:transition-none"
-              } ${
-                isTimelineCollapsed
-                  ? "max-h-0 lg:max-h-none lg:w-0 opacity-0 pointer-events-none mt-0 lg:mt-0 lg:ml-0"
-                  : "max-h-[800px] lg:max-h-none w-full lg:w-[var(--timeline-width)] opacity-100 mt-4 lg:mt-0 lg:ml-2.5"
-              }`}
-            >
-              <div
-                style={{ ['--timeline-width' as string]: `${timelineWidth}px` }}
-                className="w-full lg:w-[var(--timeline-width)] h-full flex flex-col min-h-0"
-              >
-                <CwdRouteHistory
+            <FilesystemTimelinePanel
+              collapsed={isTimelineCollapsed}
+              isDragging={isDraggingTimeline}
+              width={timelineWidth}
+              variant="page"
                   selectedSession={selectedSession}
                   sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
                   history={history}
@@ -1636,7 +1641,9 @@ export function FilesystemActivity() {
                   historyComplete={historyComplete}
                   replayTimeline={replayTimeline}
                   selectedHistoryEventId={selectedHistoryEventId}
-                  layout="sidebar"
+                  activeTab={activeForensicTab}
+                  onTabChange={setActiveForensicTab}
+                  responsePanel={responsePanel}
                   hopResolutionStatus={hopResolutionStatus}
                   requestedHop={requestedHop}
                   onClearHop={clearRequestedHop}
@@ -1654,9 +1661,13 @@ export function FilesystemActivity() {
                   onTogglePacingMode={handleTogglePacingMode}
                   showFailedAttempts={showFailedAttempts}
                   onToggleShowFailedAttempts={setShowFailedAttempts}
-                />
-              </div>
-            </div>
+                  displayedHistory={displayedHistory}
+                  selectedHistoryIndex={selectedHistoryIndex}
+                  displayedHistoryMetrics={displayedHistoryMetrics}
+                  isAnchoredSelected={isAnchoredSelected}
+                  hopTimeMetrics={hopTimeMetrics}
+                  sessionTimeSummary={sessionTimeSummary}
+            />
           </div>
         </div>
       )}
