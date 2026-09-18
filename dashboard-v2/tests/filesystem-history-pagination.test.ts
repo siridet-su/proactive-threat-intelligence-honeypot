@@ -91,6 +91,7 @@ function malformedDocuments(): RawHistoryDocument[] {
     eventDocument({ _id: "bad-date", eventId: "bad-date", at: "not-a-date" }),
     eventDocument({ _id: "bad-session", eventId: "bad-session", sessionId: "other-session" }),
     eventDocument({ _id: "", eventId: "   " }),
+    eventDocument({ _id: "   ", eventId: "   " }),
     eventDocument({ _id: "bad-time-type", eventId: "bad-time-type", at: 1234 }),
   ];
 }

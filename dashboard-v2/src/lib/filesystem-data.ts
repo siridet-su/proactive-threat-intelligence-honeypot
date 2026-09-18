@@ -100,6 +100,35 @@ function validHistoryDateExpression(field: string): Document {
   };
 }
 
+function validHistoryIdFallbackExpression(): Document {
+  const convertedId = {
+    $convert: {
+      input: "$_id",
+      to: "string",
+      onError: null,
+      onNull: null,
+    },
+  };
+  return {
+    $let: {
+      vars: { convertedId },
+      in: {
+        $cond: [
+          { $ne: ["$$convertedId", null] },
+          {
+            $cond: [
+              { $ne: [{ $trim: { input: "$$convertedId" } }, ""] },
+              "$$convertedId",
+              null,
+            ],
+          },
+          null,
+        ],
+      },
+    },
+  };
+}
+
 /**
  * Builds the database-side valid-event contract used by history pagination.
  *
@@ -131,14 +160,7 @@ export function buildSessionCwdHistoryPipeline(
   const effectiveEventId = {
     $ifNull: [
       validHistoryStringExpression("$eventId"),
-      {
-        $convert: {
-          input: "$_id",
-          to: "string",
-          onError: null,
-          onNull: null,
-        },
-      },
+      validHistoryIdFallbackExpression(),
     ],
   };
 
