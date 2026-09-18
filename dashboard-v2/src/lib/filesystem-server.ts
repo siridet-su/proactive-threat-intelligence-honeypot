@@ -26,6 +26,7 @@ import {
   normalizeSessionAuditSummary,
 } from "@/lib/filesystem-data";
 import { deriveLatestTelemetryAt } from "@/lib/filesystem-freshness";
+import { createBoundedLruCache } from "@/lib/bounded-lru-cache";
 import { getMongoClient } from "@/lib/mongodb";
 
 // CWD is operational Cowrie telemetry. It intentionally remains outside the
@@ -38,12 +39,20 @@ const TOPOLOGY_LIMIT = 500;
 // of recently closed sessions; the complete searchable/paginated closed directory
 // is accessed via the dedicated audit sessions API.
 const RECENT_CLOSED_BUFFER_LIMIT = 12;
+// Keep at least two complete recent-session windows warm while bounding the
+// process-wide memory used by immutable closed-session audit summaries. A
+// smaller bound reduces memory but causes more cwd_events aggregation refetches.
+export const CLOSED_AUDIT_PATHS_CACHE_MAX_ENTRIES = RECENT_CLOSED_BUFFER_LIMIT * 2;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
 
-// Closed session audit paths are immutable once closed; cached in-memory
-// to avoid querying and aggregating cwd_events on high-frequency live CWD ticks.
-const closedAuditPathsCache = new Map<string, AggregatedAuditPaths>();
+// Closed session audit paths are immutable once closed; cached in-memory to
+// avoid querying and aggregating cwd_events on high-frequency live CWD ticks.
+// `null` is a deliberate negative-cache value for a closed session with no
+// matching aggregation row, avoiding repeated work for an immutable absence.
+export const closedAuditPathsCache = createBoundedLruCache<string, AggregatedAuditPaths | null>({
+  maxEntries: CLOSED_AUDIT_PATHS_CACHE_MAX_ENTRIES,
+});
 interface TopologySubscriber {
   changed: (snapshot: FilesystemTopologySnapshot) => void;
   unavailable: () => void;
@@ -214,23 +223,24 @@ async function buildFilesystemTopology(): Promise<FilesystemTopologySnapshot> {
     .filter((sessionId): sessionId is string => sessionId !== null);
 
   // Closed sessions are immutable; read cached audit summaries and only aggregate
-  // active sessions and uncached recent closed sessions.
+  // active sessions and uncached recent closed sessions. The audit-directory
+  // search APIs use their own pipelines and do not populate this cache.
   const uncachedClosedIds = closedSessionIds.filter((id) => !closedAuditPathsCache.has(id));
   const neededIds = [...liveSessionIds, ...uncachedClosedIds];
   const fetchedAuditPaths = await aggregateSessionAuditPaths(neededIds);
 
   for (const id of uncachedClosedIds) {
-    const row = fetchedAuditPaths.get(id);
-    if (row) closedAuditPathsCache.set(id, row);
+    closedAuditPathsCache.set(id, fetchedAuditPaths.get(id) ?? null);
   }
 
-  const getAuditPaths = (id: string) => fetchedAuditPaths.get(id) ?? closedAuditPathsCache.get(id);
+  const getLiveAuditPaths = (id: string) => fetchedAuditPaths.get(id);
+  const getClosedAuditPaths = (id: string) => fetchedAuditPaths.get(id) ?? closedAuditPathsCache.get(id) ?? undefined;
 
   const sessions = liveDocuments
-    .map((document) => toTopologySession(document, getAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
+    .map((document) => toTopologySession(document, getLiveAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
     .filter((item): item is FilesystemTopologySession => item !== null);
   const recentClosedSessions = closedDocuments
-    .map((document) => toClosedSession(document, getAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
+    .map((document) => toClosedSession(document, getClosedAuditPaths(asString(document.sessionId) ?? asString(document.session_id) ?? "")))
     .filter((item): item is FilesystemClosedSession => item !== null);
   const nodes = new Map<string, FilesystemTopologyNode>();
 
