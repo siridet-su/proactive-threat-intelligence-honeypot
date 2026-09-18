@@ -2747,13 +2747,14 @@ def load_session_report_pdf(
     *,
     _storage: Any = None,
 ) -> Tuple[Optional[bytes], Dict[str, str]]:
-    """Render the exact stored report for one session as a PDF.
+    """Render the exact stored report plus read-only presentation context.
 
     This endpoint is deliberately read-only. It uses the canonical stored
-    report and session payload, renders into a temporary directory, and never
-    writes MongoDB or the persistent report directory. A report must already
-    exist; the endpoint never invents an assessment for a session without a
-    completed analysis job.
+    report and session payload together with already-materialized external-TI
+    and AI-advisory projections, renders into a temporary directory, and never
+    invokes a provider/model or writes MongoDB/the persistent report directory.
+    A report must already exist; the endpoint never invents an assessment for
+    a session without a completed analysis job.
     """
 
     clean_session_id = str(session_id or "").strip()
@@ -2791,7 +2792,40 @@ def load_session_report_pdf(
             }
         session_payload = _session_payload(session_rows[0])
         session_payload.setdefault("session_id", clean_session_id)
-        return render_pdf_report_bytes(report_payload, session_payload), {}
+        try:
+            external_ti_projection = build_session_ti_projection(
+                storage,
+                clean_session_id,
+                config=config.production_config,
+            )
+        except Exception:
+            external_ti_projection = {
+                "ok": False,
+                "schema_version": SESSION_TI_SCHEMA,
+                "status": "TI_UNAVAILABLE",
+                "error_code": "projection_unavailable",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        try:
+            ai_advisory_projection = load_ai_advisory_detail(
+                config,
+                clean_session_id,
+                _storage=storage,
+            )
+        except Exception:
+            ai_advisory_projection = {
+                "ok": False,
+                "status": "unavailable",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        return render_pdf_report_bytes(
+            report_payload,
+            session_payload,
+            external_ti_projection=external_ti_projection,
+            ai_advisory_projection=ai_advisory_projection,
+        ), {}
     except Exception as exc:
         return None, {
             "error_code": "pdf_render_failed",
