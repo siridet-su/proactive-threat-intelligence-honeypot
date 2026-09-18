@@ -1,7 +1,15 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+import {
+  makeFilesystemHistoryTestDatabase,
+  validateFilesystemHistoryTestTarget,
+} from "./filesystem-history-test-target.mjs";
 
 const containerName = `pti-fa010-mongo-${process.pid}`;
 const dashboardPath = new URL("../", import.meta.url).pathname;
+const runId = `${process.pid.toString(36)}${Date.now().toString(36)}${randomUUID().replaceAll("-", "")}`.toLowerCase();
+const databaseName = makeFilesystemHistoryTestDatabase(runId);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -12,7 +20,31 @@ function run(command, args, options = {}) {
 }
 
 let containerStarted = false;
+let cleanupComplete = false;
+
+function cleanupContainer() {
+  if (!containerStarted || cleanupComplete) return;
+  cleanupComplete = true;
+  const cleanup = spawnSync("docker", ["rm", "--force", containerName], { encoding: "utf8" });
+  if (cleanup.status !== 0 && process.exitCode === undefined) process.exitCode = cleanup.status ?? 1;
+}
+
+process.once("SIGINT", () => {
+  cleanupContainer();
+  process.exit(130);
+});
+process.once("SIGTERM", () => {
+  cleanupContainer();
+  process.exit(143);
+});
+
 try {
+  const portPlaceholder = 27017;
+  const preflightTarget = validateFilesystemHistoryTestTarget({
+    uri: `mongodb://127.0.0.1:${portPlaceholder}/${databaseName}`,
+    databaseName,
+    runId,
+  });
   run("docker", [
     "run",
     "--detach",
@@ -49,6 +81,11 @@ try {
   if (!portMatch) throw new Error(`could not determine temporary MongoDB port from: ${portOutput}`);
 
   const npmCommand = process.env.npm_execpath || "npm";
+  const testUri = `mongodb://127.0.0.1:${portMatch[1]}/${databaseName}`;
+  const validatedTarget = validateFilesystemHistoryTestTarget({
+    ...preflightTarget,
+    uri: testUri,
+  });
   const testResult = spawnSync(npmCommand, [
     "run",
     "test",
@@ -57,13 +94,15 @@ try {
   ], {
     cwd: dashboardPath,
     encoding: "utf8",
-    env: { ...process.env, FA010_MONGO_URI: `mongodb://127.0.0.1:${portMatch[1]}/honeypot_db` },
+    env: {
+      ...process.env,
+      FA010_MONGO_URI: validatedTarget.uri,
+      FA010_MONGO_TEST_DB: validatedTarget.databaseName,
+      FA010_MONGO_RUN_ID: validatedTarget.runId,
+    },
     stdio: "inherit",
   });
   if (testResult.status !== 0) process.exitCode = testResult.status ?? 1;
 } finally {
-  if (containerStarted) {
-    const cleanup = spawnSync("docker", ["rm", "--force", containerName], { encoding: "utf8" });
-    if (cleanup.status !== 0 && process.exitCode === undefined) process.exitCode = cleanup.status ?? 1;
-  }
+  cleanupContainer();
 }

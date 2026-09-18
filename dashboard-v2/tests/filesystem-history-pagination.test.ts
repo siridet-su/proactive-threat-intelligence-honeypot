@@ -5,6 +5,12 @@ vi.mock("server-only", () => ({}));
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import { MongoClient, ObjectId, type Collection, type Document } from "mongodb";
 import {
+  FILESYSTEM_HISTORY_TEST_DATABASE_PREFIX,
+  makeFilesystemHistoryTestDatabase,
+  runWithValidatedFilesystemHistoryTarget,
+  validateFilesystemHistoryTestTarget,
+} from "../scripts/filesystem-history-test-target.mjs";
+import {
   buildSessionCwdHistoryPipeline,
   normalizeHistoryEvent,
 } from "@/lib/filesystem-data";
@@ -228,11 +234,52 @@ describe("FA-010 application history facet decoding", () => {
   });
 });
 
+describe("FA-010 destructive-target safety guards", () => {
+  const runId = "runabc123";
+  const databaseName = makeFilesystemHistoryTestDatabase(runId);
+  const safeConfig = {
+    uri: `mongodb://127.0.0.1:27017/${databaseName}`,
+    databaseName,
+    runId,
+  };
+
+  it("accepts the wrapper-generated loopback URI and matching test database token", () => {
+    expect(validateFilesystemHistoryTestTarget(safeConfig)).toEqual(safeConfig);
+    expect(databaseName).toBe(`${FILESYSTEM_HISTORY_TEST_DATABASE_PREFIX}${runId}`);
+  });
+
+  for (const [name, unsafeConfig, message] of [
+    ["non-loopback hostname", { ...safeConfig, uri: `mongodb://db.example.test:27017/${databaseName}` }, "hostname"],
+    ["production database", { ...safeConfig, databaseName: "honeypot_db", uri: "mongodb://127.0.0.1:27017/honeypot_db" }, "test-only"],
+    ["unprefixed database", { ...safeConfig, databaseName: "history_fixture", uri: "mongodb://127.0.0.1:27017/history_fixture" }, "test-only"],
+    ["mismatched run identifier", { ...safeConfig, runId: "differentrun" }, "does not match"],
+    ["missing run identifier", { ...safeConfig, runId: undefined }, "missing"],
+  ] as const) {
+    it(`rejects ${name} before any connection or destructive operation`, () => {
+      let connections = 0;
+      let destructiveOperations = 0;
+      expect(() => runWithValidatedFilesystemHistoryTarget(unsafeConfig, () => {
+        connections += 1;
+        destructiveOperations += 1;
+      })).toThrow(message);
+      expect(connections).toBe(0);
+      expect(destructiveOperations).toBe(0);
+    });
+  }
+});
+
 const integrationUri = process.env.FA010_MONGO_URI;
+const integrationDatabase = process.env.FA010_MONGO_TEST_DB;
+const integrationRunId = process.env.FA010_MONGO_RUN_ID;
+const integrationConfigPresent = [integrationUri, integrationDatabase, integrationRunId].some((value) => value !== undefined);
+const integrationTarget = integrationConfigPresent
+  ? validateFilesystemHistoryTestTarget({ uri: integrationUri, databaseName: integrationDatabase, runId: integrationRunId })
+  : null;
 const describeMongoIntegration = integrationUri ? describe : describe.skip;
 
 describeMongoIntegration("FA-010 MongoDB aggregation integration", () => {
   let client: MongoClient;
+  let testDatabase: ReturnType<MongoClient["db"]>;
   let collection: Collection<Document>;
   const aggregateCommands: Document[] = [];
 
@@ -244,9 +291,14 @@ describeMongoIntegration("FA-010 MongoDB aggregation integration", () => {
       }
     });
     await client.connect();
-    collection = client.db("honeypot_db").collection("cwd_events");
+    testDatabase = client.db(integrationTarget!.databaseName);
+    collection = testDatabase.collection("cwd_events");
     await collection.deleteMany({});
-    vi.spyOn(mongo, "getMongoClient").mockResolvedValue(client as unknown as ReturnType<typeof mongo.getMongoClient>);
+    const productionPathClient = {
+      ...client,
+      db: (name: string) => name === "honeypot_db" ? testDatabase : client.db(name),
+    };
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue(productionPathClient as unknown as ReturnType<typeof mongo.getMongoClient>);
   });
 
   beforeEach(async () => {
@@ -255,7 +307,7 @@ describeMongoIntegration("FA-010 MongoDB aggregation integration", () => {
   });
 
   afterAll(async () => {
-    await collection.drop();
+    await testDatabase.dropDatabase();
     await client.close();
     vi.restoreAllMocks();
   });

@@ -184,6 +184,31 @@ passed against the temporary MongoDB instance, with the container removed
 afterward. FA-010 remains `IN PROGRESS` pending re-audit.
 FA-011 and later items remain `TODO` and untouched.
 
+### FA-010 fixture safety follow-up (2026-09-19)
+
+The integration fixture target is now fail-closed. The wrapper generates a
+lowercase alphanumeric run token and uses the unique database name
+`pti_fa010_test_<runId>`. Before any MongoDB client is created or destructive
+operation is possible, the target validator requires all of the following:
+
+- a `mongodb://` URI whose hostname is exactly `127.0.0.1`, `localhost`, or
+  `::1`;
+- a database name with the `pti_fa010_test_` prefix;
+- a run identifier whose derived database name exactly matches the URI path and
+  supplied test database name; and
+- rejection of `honeypot_db`, non-loopback hosts, missing identifiers, and
+  mismatched/unprefixed databases.
+
+The integration suite connects to the validated unique database, while a
+test-only client adapter maps the production `db("honeypot_db")` request from
+`getSessionCwdHistory` to that validated database. No production database name
+is used as a destructive target. Safety tests assert rejected configurations
+invoke zero connection/destructive callbacks. The wrapper also removes the
+temporary container in `finally` and on SIGINT/SIGTERM. The normal guarded run
+executed 14 tests successfully (6 application, 6 safety, 2 MongoDB integration)
+and left no `pti-fa010-mongo-*` container running. FA-010 remains `IN PROGRESS`;
+FA-011 and later items remain `TODO` and untouched.
+
 ## Required validation gate
 
 Before declaring this audit remediation complete, record results for all of the
