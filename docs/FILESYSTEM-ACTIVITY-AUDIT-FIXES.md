@@ -40,7 +40,7 @@ and the corrective work are not conflated.
 
 ## Current focus
 
-**In progress:** `FA-014` — reconcile audit and working-state tracker metadata and evidence.
+**In progress:** `FA-015` — verify repository and change hygiene after the accepted remediation chain.
 
 ## Remediation backlog
 
@@ -59,9 +59,17 @@ and the corrective work are not conflated.
 | `FA-011` | `P2` | `DONE` | `FS-007` | The process-wide closed-session audit-path cache has no size or expiry bound. Topology refreshes populate it from `cwd_session_state`'s recent closed-session buffer after `cwd_events` aggregation; historical audit-directory searches use separate pipelines and do not populate this cache. Rolling closed sessions can therefore grow the cache for the lifetime of the server process. | Cache has an explicit memory bound or expiry policy; eviction cannot corrupt immutable-session results; cache behavior and operational trade-offs are documented and tested. | Final audit accepted on commit `d716bd48e504b376482961c555657971c23d4987` (`fix(filesystem): bound closed-session audit cache (FA-011)`). |
 | `FA-012` | `P2` | `DONE` | `FS-016` | Hooks were extracted, but the three feature components remain oversized and `CwdRouteHistory` still owns response-action data flow alongside replay presentation. | Response actions, replay orchestration, topology rendering, and page composition have explicit ownership; presentational components receive data/actions through focused props; refactor does not duplicate timers or requests. | Accepted commit chain `356f48d74f64db7019cd622cca424676d42a7e4d` → `5779e32a739a6df1a45322c7172d17dd9086c14b` → `5ec0bf9ee0e28cd4b0eff50519045063e3efe470`: `useAuditReplay` owns the typed `AuditReplayPresentation` contract, `CwdRouteHistory` consumes it without fallback derivation/state/actions, `FilesystemActivity` owns response capability/polling through `useResponseActionController`, and `TopologyCanvas` requires page-owned `freshnessState` without a fallback clock/classifier. Existing production-path happy-dom evidence covers the real timeline/tab composition, response request deduplication/abort/reopen, one autoplay advance after rerender/layout changes, and zero topology fallback timers. |
 | `FA-013` | `P1` | `DONE` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | Accepted implementation chain `0f688ec85787707dc611891a7e80c1c904f713e7` → `bee351b6195d2c44b831a5faa5c0204d138af33d` → `439da30105868f2eccea5de480e9529e7616d591` → `da2822960fea66b060540bb4c44d3f76c78949a0` → `9286e6fa99f5403c3522d28923369e9b99380389`; integration merge `cc04dc03b2ec300d5259807b92ac10aff88b1e29`. Independent final audit: Chromium 6/6 under the normal configured timeout; Vitest 22 files, 460 passed, 2 skipped; ESLint 0 errors and 0 warnings; Next.js production build passed; all five `agents/*` Go modules passed `go test -count=1 ./...`; `git diff --check` passed; working tree was clean; no repository `test-results` or `playwright-report` artifacts. No manual/live validation was performed. FA-013 is accepted DONE; manual response-agent and large live-data gates remain outstanding.
-| `FA-014` | `P2` | `IN PROGRESS` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded historical evidence does not match current repository validation. | Both trackers have one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; affected original FS items have concise supersession references and FS-007 is qualified while FA-016 remains TODO. | This documentation reconciliation is the sole current remediation focus. Pending re-audit; no production source or test files changed. |
-| `FA-015` | `P2` | `TODO` | `Change hygiene` | `git diff --check` reports blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large historical change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | — |
+| `FA-014` | `P2` | `DONE` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded historical evidence does not match current repository validation. | Both trackers have one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; affected original FS items have concise supersession references and FS-007 is qualified while FA-016 remains TODO. | Accepted DONE on commit `24d84fa4531460c2f2983ce1b47380c95ab3cdca`; both tracker contexts were reconciled, historical claims were qualified, and no production source or test files changed. |
+| `FA-015` | `P2` | `IN PROGRESS` | `Change hygiene` | `git diff --check` reported blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large historical change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | Current audit evidence: [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md). Pending final re-audit; no production behavior changes are in scope. |
 | `FA-016` | `P1` | `TODO` | `FS-007` | Full-scan summary aggregation and cursor skip on 1,878+ documents | Index optimization and execution plan bounds for large directory collections | — |
+
+### FA-014 acceptance record (2026-09-19)
+
+FA-014 is accepted `DONE` on commit `24d84fa4531460c2f2983ce1b47380c95ab3cdca`
+(`docs(filesystem): reconcile audit tracker state (FA-014)`). The audit and
+working-state tracker contexts now agree on accepted FA statuses, current focus,
+historical qualification, and the explicit `FS-007` partial state while FA-016
+remains TODO. FA-015 is the sole current focus pending final re-audit.
 
 ### FA-008 accepted evidence (2026-09-18)
 
@@ -503,7 +511,7 @@ Recorded on 2026-09-16 before remediation:
 | Next.js production build | Passed |
 | `git diff --check` | Failed: three blank-line-at-EOF findings |
 | Browser/component interaction coverage | Insufficient for the claimed acceptance criteria |
-| Working tree | Large uncommitted FS-001–FS-019 change set at the 2026-09-16 historical baseline |
+| Working tree | Historical 2026-09-16 state: large uncommitted FS-001–FS-019 change set; later checkpointed in `ba9efb7` and corrected in recoverable FA-specific commits |
 
 ## Update log
 

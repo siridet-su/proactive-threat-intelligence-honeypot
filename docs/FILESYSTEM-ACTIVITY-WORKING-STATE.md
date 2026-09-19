@@ -43,11 +43,12 @@ Reproducible test results belong in [`validation/`](validation/).
 
 ## Current focus
 
-**In progress:** `FA-014` — reconcile the filesystem remediation and working-state trackers.
+**In progress:** `FA-015` — verify repository and change hygiene after the accepted remediation chain.
 
-**Why now:** FA-001 through FA-013 are accepted DONE. FA-014 is the sole active
-remediation focus pending re-audit. FA-015 and FA-016 remain TODO; no production
-code or tests are being changed by this tracker reconciliation.
+**Why now:** FA-001 through FA-014 are accepted DONE. FA-015 is the sole active
+remediation focus pending final re-audit. FA-016 remains TODO, and FS-007 remains
+PARTIAL until that large-collection work is completed. No production behavior is
+being changed by this change-hygiene validation.
 
 ## Historical baseline
 
@@ -146,13 +147,14 @@ claims about the 2026-09-15 historical baseline.
 | --- | --- | --- |
 | 2026-09-15 | Start with `FS-001`; defer visual additions until Audit filtering is authoritative. | Incorrect result sets would invalidate later selection, count, and topology UX. |
 | 2026-09-15 | Keep this tracker separate from design and validation evidence. | Work status changes frequently; architecture and evidence must remain durable and independently reviewable. |
-| 2026-09-19 | Keep FA-014 as the sole remediation focus while preserving FA-015 and FA-016 as TODO. | Tracker hygiene must be re-audited before further change hygiene or large-collection optimization work begins. |
+| 2026-09-19 | Move the sole remediation focus to FA-015 after accepting FA-014; preserve FA-016 as TODO and FS-007 as PARTIAL. | Repository/change hygiene must be verified before large-collection optimization work begins. |
 
 ## Update log
 
 | Date | Change | Evidence |
 | --- | --- | --- |
+| 2026-09-19 | Accepted FA-014 and started FA-015 as the sole current focus; retained FA-016 as TODO and FS-007 as PARTIAL. | FA-014 accepted on `24d84fa4531460c2f2983ce1b47380c95ab3cdca`; FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md). |
 | 2026-09-19 | Accepted FA-013 and reconciled this tracker to FA-014; qualified FS-007 as partial because FA-016 remains TODO and retained FS-020+ as backlog. | Accepted FA-013 chain and independent final audit evidence are recorded in `FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`; FA-014 remains the sole current focus pending re-audit. |
 | 2026-09-16 | Completed `FS-019`; started `FS-020`. | Historical implementation note: 164-test time-based scrubber result; superseded for corrective acceptance by FA-009 and FA-013. |
-| 2026-09-16 | Completed `FS-018`; started `FS-019`. | Historical implementation note: 158-test foundation result; the “100% complete” wording is historical and is not current because FA-014 is active and FA-015/FA-016 remain TODO. |
+| 2026-09-16 | Completed `FS-018`; started `FS-019`. | Historical implementation note: 158-test foundation result; the “100% complete” wording and FA-014/FA-015/FA-016 focus state describe that earlier checkpoint and are superseded by the current backlog above. |
 | 2026-09-15 | Created the live working state from the Filesystem Activity code/UX/logic review. | Historical baseline recorded above; its clean-tree statement applies only to that review point. |
