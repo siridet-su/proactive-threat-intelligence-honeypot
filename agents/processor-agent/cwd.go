@@ -436,6 +436,11 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	if mw.auditAfterCwdEventPending != nil {
 		mw.auditAfterCwdEventPending()
 	}
+	if mw.auditBeforeCwdEventUpsert != nil {
+		if err := mw.auditBeforeCwdEventUpsert(); err != nil {
+			return fmt.Errorf("before CWD event upsert: %w", err)
+		}
+	}
 	_, err = mw.db.Collection("cwd_events").UpdateOne(
 		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": event}, options.Update().SetUpsert(true),
 	)
@@ -459,6 +464,7 @@ func cwdEventIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
 		{Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
+		{Keys: bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "_id", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPending": true})},
 		{Keys: bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "sessionId", Value: 1}}},
 		{Keys: bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "session_id", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},

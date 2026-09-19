@@ -212,6 +212,7 @@ func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
 	indexes := cwdEventIndexModels()
 	hasCanonical := false
 	hasLegacy := false
+	hasPendingMarker := false
 
 	for _, idx := range indexes {
 		keys, ok := idx.Keys.(bson.D)
@@ -224,6 +225,9 @@ func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
 		if sameIndexKeys(keys, bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}) {
 			hasLegacy = true
 		}
+		if sameIndexKeys(keys, bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "_id", Value: 1}}) {
+			hasPendingMarker = true
+		}
 	}
 
 	if !hasCanonical {
@@ -231,6 +235,9 @@ func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
 	}
 	if !hasLegacy {
 		t.Fatal("expected legacy session_id compound index in cwd_events index models to support mixed-schema rank aggregation")
+	}
+	if !hasPendingMarker {
+		t.Fatal("expected indexed auditProjectionPending outbox marker")
 	}
 }
 

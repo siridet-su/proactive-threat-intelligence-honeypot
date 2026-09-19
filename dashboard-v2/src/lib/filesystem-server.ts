@@ -568,7 +568,7 @@ async function auditProjectionIsReady(): Promise<boolean> {
   );
   if (pending !== null) return false;
 
-  const pendingEvent = await db.collection<Document>(SESSIONS_COLLECTION).findOne(
+  const pendingEvent = await db.collection<Document>(HISTORY_COLLECTION).findOne(
     buildAuditProjectionEventReadinessQuery(),
     { projection: { _id: 1 } },
   );

@@ -7,6 +7,7 @@ import {
   buildAuditProjectionCountPipeline,
   buildAuditProjectionItemPipeline,
   buildAuditProjectionSummaryPipeline,
+  buildAuditProjectionEventReadinessQuery,
   buildAuditProjectionReadinessQuery,
   encodeAuditSessionCursor,
 } from "@/lib/filesystem-data";
@@ -70,9 +71,9 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     await sourceState.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, session_id: -1 });
     await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionVersion: 1 });
     await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionPendingGeneration: 1 }, { partialFilterExpression: { auditProjectionPendingGeneration: { $exists: true } } });
-    await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionPendingEventCount: 1 }, { partialFilterExpression: { auditProjectionPendingEventCount: { $gt: 0 } } });
     await sourceState.createIndex({ "cwdState.path": 1 });
     await sourceState.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    await database.collection("cwd_events").createIndex({ auditProjectionPending: 1, _id: 1 }, { partialFilterExpression: { auditProjectionPending: true } });
 
     const docs = Array.from({ length: sessionCount }, (_, index) => {
       const sessionId = `session-${String(index).padStart(5, "0")}`;
@@ -193,6 +194,31 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(maxMetric(steady, "totalDocsExamined")).toBeLessThanOrEqual(1);
     process.stderr.write(`FA016_READINESS steady ${JSON.stringify({ docsExamined: maxMetric(steady, "totalDocsExamined"), keysExamined: maxMetric(steady, "totalKeysExamined") })}\n`);
 
+    const events = database.collection("cwd_events");
+    const explainPendingEvents = () => events.find(buildAuditProjectionEventReadinessQuery()).project({ _id: 1 }).limit(1).explain("executionStats");
+    const noPendingEvents = await explainPendingEvents();
+    expect(JSON.stringify(noPendingEvents)).not.toContain("COLLSCAN");
+    expect(maxMetric(noPendingEvents, "totalDocsExamined")).toBeLessThanOrEqual(1);
+    await events.insertMany([
+      { _id: "pending-explain-1", sessionId: "ready-1", auditProjectionPending: true },
+    ]);
+    const onePendingEvent = await explainPendingEvents();
+    expect(JSON.stringify(onePendingEvent)).not.toContain("COLLSCAN");
+    expect(maxMetric(onePendingEvent, "totalDocsExamined")).toBeLessThanOrEqual(1);
+    await events.insertMany([
+      { _id: "pending-explain-2", sessionId: "ready-2", auditProjectionPending: true },
+      { _id: "pending-explain-3", sessionId: "ready-3", auditProjectionPending: true },
+    ]);
+    const multiplePendingEvents = await explainPendingEvents();
+    expect(JSON.stringify(multiplePendingEvents)).not.toContain("COLLSCAN");
+    expect(maxMetric(multiplePendingEvents, "totalDocsExamined")).toBeLessThanOrEqual(1);
+    await events.deleteMany({});
+    process.stderr.write(`FA016_READINESS events ${JSON.stringify({
+      zero: maxMetric(noPendingEvents, "totalDocsExamined"),
+      one: maxMetric(onePendingEvent, "totalDocsExamined"),
+      multiple: maxMetric(multiplePendingEvents, "totalDocsExamined"),
+    })}\n`);
+
     await states.insertOne({
       _id: "pending-v2", sessionId: "pending-v2", cwdState: { path: "/etc/pending" }, lifecycle: { status: "closed", closedAt },
       auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionGeneration: 2, auditProjectionReadyGeneration: 1, auditProjectionPendingGeneration: 2,
@@ -221,7 +247,9 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
 
     commandEvents.length = 0;
     await getAuditSessions({ limit: 25 });
-    expect(commandEvents.some(({ commandName, command }) => commandName === "find" && command.find === "cwd_events")).toBe(false);
+    // The converged request still performs the bounded indexed pending-marker
+    // existence probe; it must not run an authoritative history aggregation.
+    expect(commandEvents.some(({ commandName, command }) => commandName === "aggregate" && command.aggregate === "cwd_events")).toBe(false);
 
     // Restore the deterministic 1,900-row source fixture for the following
     // projection-summary cases; this test intentionally exercises its own
@@ -334,6 +362,11 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     // the separate cutover probe must force the authoritative fallback rather
     // than silently dropping either canonical or legacy-schema row.
     await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION });
+    await database.collection("cwd_events").insertOne({ _id: "readiness-pending-event", eventId: "readiness-pending-event", sessionId: "migration-canonical", action: "changed", fromPath: "/home/cowrie", toPath: "/etc", at: new Date("2026-09-18T00:00:01Z"), auditProjectionPending: true });
+    const pendingMarkerPage = await getAuditSessions({ limit: 25 });
+    expect(pendingMarkerPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy"]);
+    expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
+    await database.collection("cwd_events").deleteOne({ _id: "readiness-pending-event" });
     let insertedByOldWriter = false;
     setAuditProjectionReadinessTestHook(async () => {
       if (insertedByOldWriter) return;
@@ -361,7 +394,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     commandEvents.length = 0;
     const convergedPage = await getAuditSessions({ limit: 25 });
     expect(convergedPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer", "migration-old-legacy"]);
-    expect(commandEvents.some(({ commandName, command }) => commandName === "find" && command.find === "cwd_events")).toBe(false);
+    expect(commandEvents.some(({ commandName, command }) => commandName === "aggregate" && command.aggregate === "cwd_events")).toBe(false);
   });
 
   it("keeps overflow exact and scoped to its session while normal pages stay projection-backed", async () => {

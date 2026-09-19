@@ -413,13 +413,9 @@ export function buildAuditProjectionReadinessQuery(options: { includeVersionMigr
   };
 }
 
-/** Separate indexed probe for history writers that have reserved event work. */
+/** Separate indexed probe for the authoritative event-level outbox. */
 export function buildAuditProjectionEventReadinessQuery(): Document {
-  return {
-    "lifecycle.status": "closed",
-    $expr: auditSourceEligibilityExpression(),
-    auditProjectionPendingEventCount: { $gt: 0 },
-  };
+  return { auditProjectionPending: true };
 }
 
 /**

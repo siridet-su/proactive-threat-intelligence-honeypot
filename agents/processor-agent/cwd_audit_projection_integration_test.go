@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -32,7 +34,7 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	defer cancel()
 	var cwdEventFinds int
 	monitor := &event.CommandMonitor{Started: func(_ context.Context, started *event.CommandStartedEvent) {
-		if started.CommandName == "find" && started.Command.Lookup("find").StringValue() == "cwd_events" {
+		if cwdEventHistoryFind(started) {
 			cwdEventFinds++
 		}
 	}}
@@ -759,7 +761,7 @@ func TestFA016PaddedCanonicalBackfillConvergesOnce(t *testing.T) {
 	defer cancel()
 	var historyFinds int
 	monitor := &event.CommandMonitor{Started: func(_ context.Context, started *event.CommandStartedEvent) {
-		if started.CommandName == "find" && started.Command.Lookup("find").StringValue() == "cwd_events" {
+		if cwdEventHistoryFind(started) {
 			historyFinds++
 		}
 	}}
@@ -941,6 +943,255 @@ func TestFA016EventOutboxSurvivesCloseBeforeHistoryInsert(t *testing.T) {
 	}
 }
 
+func TestFA016PendingEventFailureRetryAndCrashRecovery(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "retry-session", SourceEventID: "retry-initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	failed := errors.New("injected event upsert failure")
+	mw.auditBeforeCwdEventUpsert = func() error { return failed }
+	transition := cwdObservation{SessionID: "retry-session", SourceEventID: "retry-transition", At: base.Add(time.Minute), FromPath: "/origin", Path: "/after", Action: "changed", Status: "confirmed"}
+	if err := mw.recordCwdObservation(ctx, transition, retention); !errors.Is(err, failed) {
+		t.Fatalf("expected deterministic pre-upsert failure, got %v", err)
+	}
+	mw.auditBeforeCwdEventUpsert = nil
+	state := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "retry-session"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := state["auditProjectionPendingEventCount"]; exists {
+		t.Fatalf("retired source counter was recreated after failed reservation: %#v", state)
+	}
+	if count, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:retry-transition"}); err != nil || count != 0 {
+		t.Fatalf("failed event upsert became durable unexpectedly count=%d err=%v", count, err)
+	}
+
+	if err := mw.closeCwdSession(ctx, "retry-session", base.Add(2*time.Minute), retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.recordCwdObservation(ctx, transition, retention); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:retry-transition", "auditProjectionPending": true}); err != nil || pending != 0 {
+		t.Fatalf("successful retry did not converge its event marker pending=%d err=%v", pending, err)
+	}
+	projection := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "retry-session"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(projection["auditEventCount"]) != 1 || !containsString(stringSlice(projection["auditTransitionPaths"]), "/origin") || !containsString(stringSlice(projection["auditTransitionPaths"]), "/after") {
+		t.Fatalf("retry did not rebuild exact projection facts: %#v", projection)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "retry-session"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := state["auditProjectionPendingEventCount"]; exists || state["auditProjectionReadyGeneration"] != state["auditProjectionGeneration"] {
+		t.Fatalf("retry left source ownership dirty: %#v", state)
+	}
+	if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "crash-session", SourceEventID: "crash-initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.closeCwdSession(ctx, "crash-session", base.Add(2*time.Minute), retention); err != nil {
+		t.Fatal(err)
+	}
+	durable := make(chan struct{})
+	release := make(chan struct{})
+	mw.auditAfterCwdEventWrite = func() {
+		close(durable)
+		<-release
+	}
+	crashCtx, crashCancel := context.WithCancel(context.Background())
+	crashed := make(chan error, 1)
+	go func() {
+		crashed <- mw.recordCwdObservation(crashCtx, cwdObservation{SessionID: "crash-session", SourceEventID: "crash-transition", At: base.Add(3 * time.Minute), FromPath: "/origin", Path: "/crash-after-insert", Action: "changed", Status: "confirmed"}, retention)
+	}()
+	<-durable
+	if pending, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:crash-transition", "auditProjectionPending": true}); err != nil || pending != 1 {
+		t.Fatalf("crash barrier did not leave a durable pending event pending=%d err=%v", pending, err)
+	}
+	crashCancel()
+	close(release)
+	if err := <-crashed; err == nil {
+		t.Fatal("crashed writer unexpectedly projected after its context was cancelled")
+	}
+	mw.auditAfterCwdEventWrite = nil
+	if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:crash-transition", "auditProjectionPending": true}); err != nil || pending != 0 {
+		t.Fatalf("reconciliation did not clear crash-recovered event pending=%d err=%v", pending, err)
+	}
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "crash-session"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(projection["auditEventCount"]) != 1 || !containsString(stringSlice(projection["auditTransitionPaths"]), "/crash-after-insert") {
+		t.Fatalf("crash recovery did not rebuild exact facts: %#v", projection)
+	}
+}
+
+func TestFA016ConcurrentReconcilersOwnPendingMarkersExactlyOnce(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mwA := &MongoWriter{enabled: true, db: db}
+	mwB := &MongoWriter{enabled: true, db: db}
+	if err := mwA.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 20, 9, 0, 0, 0, time.UTC)
+	if err := mwA.recordCwdObservation(ctx, cwdObservation{SessionID: "marker-race", SourceEventID: "marker-initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := mwA.closeCwdSession(ctx, "marker-race", base.Add(time.Minute), retention); err != nil {
+		t.Fatal(err)
+	}
+
+	makeDurablePending := func(mw *MongoWriter, writerContext context.Context, eventID, path string) (<-chan struct{}, func() error) {
+		durable := make(chan struct{})
+		release := make(chan struct{})
+		mw.auditAfterCwdEventWrite = func() {
+			close(durable)
+			<-release
+		}
+		done := make(chan error, 1)
+		go func() {
+			done <- mw.recordCwdObservation(writerContext, cwdObservation{SessionID: "marker-race", SourceEventID: eventID, At: base.Add(2 * time.Minute), FromPath: "/origin", Path: path, Action: "changed", Status: "confirmed"}, retention)
+		}()
+		return durable, func() error {
+			close(release)
+			err := <-done
+			mw.auditAfterCwdEventWrite = nil
+			return err
+		}
+	}
+	writerCtxA, cancelA := context.WithCancel(context.Background())
+	writerCtxB, cancelB := context.WithCancel(context.Background())
+	durableA, finishA := makeDurablePending(mwA, writerCtxA, "marker-a", "/a")
+	<-durableA
+	durableB, finishB := makeDurablePending(mwB, writerCtxB, "marker-b", "/b")
+	<-durableB
+	cancelA()
+	cancelB()
+	if err := finishA(); err == nil {
+		t.Fatal("writer A unexpectedly projected after cancellation")
+	}
+	if err := finishB(); err == nil {
+		t.Fatal("writer B unexpectedly projected after cancellation")
+	}
+	if pending, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"auditProjectionPending": true}); err != nil || pending != 2 {
+		t.Fatalf("expected two durable pending events pending=%d err=%v", pending, err)
+	}
+
+	firstRead := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var readOnce sync.Once
+	mwA.auditBackfillAfterHistoryRead = func() {
+		readOnce.Do(func() {
+			close(firstRead)
+			<-releaseFirst
+		})
+	}
+	reconciledA := make(chan error, 1)
+	reconciledB := make(chan error, 1)
+	go func() { reconciledA <- mwA.backfillCwdAuditProjection(ctx, retention) }()
+	<-firstRead
+	go func() { reconciledB <- mwB.backfillCwdAuditProjection(ctx, retention) }()
+	if err := <-reconciledB; err != nil {
+		t.Fatal(err)
+	}
+	close(releaseFirst)
+	if err := <-reconciledA; err != nil {
+		t.Fatal(err)
+	}
+	mwA.auditBackfillAfterHistoryRead = nil
+
+	if pending, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"auditProjectionPending": true}); err != nil || pending != 0 {
+		t.Fatalf("concurrent reconcilers did not converge both markers pending=%d err=%v", pending, err)
+	}
+	projection := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "marker-race"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	paths := stringSlice(projection["auditTransitionPaths"])
+	if bsonInt64(projection["auditEventCount"]) != 2 || !containsString(paths, "/a") || !containsString(paths, "/b") {
+		t.Fatalf("concurrent reconcilers lost exact event facts: %#v", projection)
+	}
+	state := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "marker-race"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := state["auditProjectionPendingEventCount"]; exists || state["auditProjectionReadyGeneration"] != state["auditProjectionGeneration"] {
+		t.Fatalf("concurrent reconciliation left retired/dirty source ownership: %#v", state)
+	}
+
+	if _, err := db.Collection("cwd_events").InsertOne(ctx, bson.M{"_id": "ownership-only", "eventId": "ownership-only", "sessionId": "marker-race", "auditProjectionPending": true}); err != nil {
+		t.Fatal(err)
+	}
+	ownedResults := make(chan bool, 2)
+	errorResults := make(chan error, 2)
+	go func() {
+		owned, clearErr := mwA.clearCwdEventProjectionWork(ctx, "ownership-only")
+		ownedResults <- owned
+		errorResults <- clearErr
+	}()
+	go func() {
+		owned, clearErr := mwB.clearCwdEventProjectionWork(ctx, "ownership-only")
+		ownedResults <- owned
+		errorResults <- clearErr
+	}()
+	ownedCount := 0
+	for range 2 {
+		if <-ownedResults {
+			ownedCount++
+		}
+		if clearErr := <-errorResults; clearErr != nil {
+			t.Fatal(clearErr)
+		}
+	}
+	if ownedCount != 1 {
+		t.Fatalf("marker ownership CAS was not exclusive: %d owners", ownedCount)
+	}
+}
+
 func TestFA016RejectedObservedCannotStealGenerationOwnership(t *testing.T) {
 	target, skip := fa016IntegrationTarget(t)
 	if skip {
@@ -1080,7 +1331,7 @@ func TestFA016OldWriterCutoverConvergesCanonicalAndLegacyRows(t *testing.T) {
 	defer cancel()
 	var historyFinds int32
 	monitor := &event.CommandMonitor{Started: func(_ context.Context, started *event.CommandStartedEvent) {
-		if started.CommandName == "find" && started.Command.Lookup("find").StringValue() == "cwd_events" {
+		if cwdEventHistoryFind(started) {
 			atomic.AddInt32(&historyFinds, 1)
 		}
 	}}
@@ -1159,6 +1410,16 @@ func fa016IntegrationTarget(t *testing.T) (fa016MongoTarget, bool) {
 		t.Fatal(err)
 	}
 	return target, false
+}
+
+func cwdEventHistoryFind(started *event.CommandStartedEvent) bool {
+	if started.CommandName != "find" || started.Command.Lookup("find").StringValue() != "cwd_events" {
+		return false
+	}
+	// The pending-marker cursor and final existence probe are bounded outbox
+	// probes, not authoritative history reads. Only count session/action
+	// history filters for the steady-state assertions.
+	return !strings.Contains(started.Command.Lookup("filter").String(), "auditProjectionPending")
 }
 
 func containsString(values []string, want string) bool {
