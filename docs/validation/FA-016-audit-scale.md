@@ -127,6 +127,7 @@ The processor provisions and verifies:
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "sessionId": 1 }` and the matching `session_id` index for bounded missing-projection repair cursors;
 - `cwd_session_state`: `{ "auditCanonicalSessionId": 1 }` for bounded source-presence checks during orphan cleanup;
+- `cwd_session_state`: `{ "sessionId": 1 }` and `{ "session_id": 1 }` for bounded legacy source-presence compatibility checks;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;

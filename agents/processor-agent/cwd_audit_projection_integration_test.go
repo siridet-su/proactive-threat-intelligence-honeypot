@@ -1499,9 +1499,12 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		filter     bson.M
 		sort       bson.D
 	}{
-		"repair":          {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
-		"cleanup":         {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
-		"source-presence": {"cwd_session_state", indexedCwdStateCanonicalQuery(sessionID), nil},
+		"repair":           {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
+		"cleanup":          {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
+		"source-canonical": {"cwd_session_state", indexedCwdStateCanonicalQuery(sessionID), nil},
+		"source-id":        {"cwd_session_state", bson.M{"_id": sessionID}, nil},
+		"source-session":   {"cwd_session_state", bson.M{"sessionId": sessionID}, nil},
+		"source-legacy":    {"cwd_session_state", bson.M{"session_id": sessionID}, nil},
 	} {
 		var explained bson.M
 		find := bson.D{{Key: "find", Value: spec.collection}, {Key: "filter", Value: spec.filter}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
@@ -1518,7 +1521,7 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		if examined := maxExplainMetric(explained, "totalDocsExamined"); examined > int64(cwdAuditProjectionRepairBatchSize) {
 			t.Fatalf("explain %s exceeded the %d-document repair/cleanup bound: %d", name, cwdAuditProjectionRepairBatchSize, examined)
 		}
-		fmt.Printf("FA016_RETENTION %s docsExamined=%d keysExamined=%d\n", name, maxExplainMetric(explained, "totalDocsExamined"), maxExplainMetric(explained, "totalKeysExamined"))
+		fmt.Fprintf(os.Stderr, "FA016_RETENTION %s docsExamined=%d keysExamined=%d\n", name, maxExplainMetric(explained, "totalDocsExamined"), maxExplainMetric(explained, "totalKeysExamined"))
 	}
 
 	// Source-owned cleanup removes an expired orphan only after its source is
