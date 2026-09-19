@@ -188,5 +188,7 @@ converged, pending, stale-version, and malformed fixtures. Full repository
 validation passed `npm test`, lint, build, all five Go modules, and
 `git diff --check`; the isolated wrapper left no `pti-fa016-mongo-*` container
 and no Playwright/test-result artifacts. Final clean-tree status and commit
-hashes are recorded after the logical commits below. FA-016 remains
+Implementation commit `8d67ae6` and evidence/tracker commit `05018e1` were
+created without modifying prior commits. Final clean-tree status is recorded
+after those commits. FA-016 remains
 `IN PROGRESS` and FS-007 remains `PARTIAL` pending final re-audit.
