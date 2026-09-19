@@ -1,0 +1,160 @@
+{
+  "schema_version": "external_ti_source_ip_governance_amendment.v1",
+  "policy_id": "honeypot-thesis-data-lifecycle.source-ip.external-ti",
+  "version": "1.0.0",
+  "status": "ACTIVE_BOUNDED_PREFLIGHT_ONLY",
+  "parent_policy": {
+    "policy_id": "honeypot-thesis-data-lifecycle",
+    "version": "1.0.0",
+    "source_path": "configs/data_lifecycle_policy.v1.json",
+    "active_runtime_path": "/opt/honeypot/configs/data_lifecycle_policy.v1.json",
+    "sha256": "5c7d76556310a913879c8a53f509f44d10b823213e0f8189eca32c0fcfa9e7f2",
+    "source_ip_external_sharing_allowed_before_amendment": false,
+    "preserved_immutable": true
+  },
+  "amendment_scope": {
+    "purpose": "non-authoritative threat-intelligence context for honeypot analysis",
+    "data_owner": "rubchek (authorized honeypot-analysis project operator)",
+    "authorized_providers": ["shodan", "abuseipdb"],
+    "allowed_outbound_fields": ["normalized_source_ip"],
+    "source_role": "production_honeypot_observed_source_ip",
+    "destination_role": "provider_lookup_endpoint",
+    "lookup_only": true,
+    "active_scanning": false,
+    "reporting_or_submission": false,
+    "continuous_processing": false,
+    "arbitrary_external_ip_input": false
+  },
+  "eligibility": {
+    "requires_existing_canonical_event": true,
+    "requires_source_event_provenance": true,
+    "requires_session_or_sensor_link": true,
+    "requires_syntactically_valid_ip": true,
+    "requires_ipv4_or_ipv6_global_routability": true,
+    "exclude_private_rfc1918": true,
+    "exclude_loopback": true,
+    "exclude_link_local": true,
+    "exclude_multicast": true,
+    "exclude_unspecified_reserved": true,
+    "exclude_carrier_grade_nat": true,
+    "exclude_overlay_or_internal_addresses": true,
+    "exclude_lab_controlled_fixture_addresses": true,
+    "exclude_operator_owned_test_infrastructure": true,
+    "destination_addresses_are_never_eligible": true,
+    "selection_rule": "latest_naturally_observed_eligible_event; not selected for provider-result interest"
+  },
+  "privacy_and_data_lifecycle": {
+    "source_ip_is_public_routing_information": true,
+    "combined_honeypot_context_sensitivity": "HIGH",
+    "provider_retention_and_terms_reviewed": true,
+    "provider_destinations": {
+      "shodan": "https://api.shodan.io/shodan/host/{ip}",
+      "abuseipdb": "https://api.abuseipdb.com/api/v2/check"
+    },
+    "outbound_payload_minimization": "normalized_source_ip_only",
+    "raw_provider_response_persisted": false,
+    "normalized_bounded_fields_only": true,
+    "local_campaign_receipt_persistence": "bounded_normalized_metadata_only",
+    "canonical_mongodb_enrichment_record_write": false,
+    "provider_request_audit": "provider, fixed endpoint id, UTC time, outcome, request budget, source-ip digest only",
+    "source_ip_retained_in_receipt": false,
+    "response_access": "campaign operator evidence only; no raw provider body",
+    "incident_rule": "disable this amendment and preserve the parent policy if disclosure or provider transport deviates"
+  },
+  "prohibited_outbound_fields": [
+    "command_text",
+    "command_hash",
+    "username",
+    "password",
+    "credential",
+    "session_id",
+    "event_id",
+    "event_payload",
+    "cowrie_raw_json",
+    "file_hash",
+    "filename",
+    "file_contents",
+    "url",
+    "domain",
+    "hostname",
+    "internal_private_topology",
+    "telemetry",
+    "report",
+    "attack_prediction",
+    "model1_output",
+    "model2_output",
+    "analyst_notes",
+    "destination_ip"
+  ],
+  "provider_transport_review": {
+    "shodan": {
+      "endpoint_id": "shodan_host_v1",
+      "official_authentication_form": "key query parameter",
+      "active_adapter_authentication_form": "key query parameter",
+      "active_adapter_automatic_internetdb_fallback": true,
+      "query_secret_requirement_gate": "FAIL",
+      "preflight_transport_compatible": false,
+      "real_request_allowed_by_this_amendment": false
+    },
+    "abuseipdb": {
+      "endpoint_id": "abuseipdb_check_v2",
+      "official_authentication_form": "Key HTTP header",
+      "active_adapter_authentication_form": "Key HTTP header",
+      "active_adapter_transport_compatible": true,
+      "request_method": "GET",
+      "report_endpoint_or_method_permitted": false,
+      "real_request_allowed_by_this_amendment": true
+    }
+  },
+  "request_budgets": {
+    "shodan": {
+      "max_new_real_requests": 1,
+      "max_attempts": 1,
+      "retries": 0,
+      "max_eligible_source_ips": 1,
+      "active_scans": 0,
+      "fallback_requests": 0,
+      "continuous_activation": false
+    },
+    "abuseipdb": {
+      "max_new_real_requests": 1,
+      "max_attempts": 1,
+      "retries": 0,
+      "max_eligible_source_ips": 1,
+      "report_requests": 0,
+      "continuous_activation": false
+    },
+    "future_activation_design": {
+      "deduplication_key": "provider plus normalized source IP",
+      "minimum_refresh_interval_seconds": 86400,
+      "daily_budget_default": 0,
+      "negative_result_cache_seconds": 86400,
+      "retry_limit": 0,
+      "failure_backoff": "provider-local bounded backoff; no retry in this pilot",
+      "kill_switch": "provider enablement false and amendment inactive"
+    }
+  },
+  "authority": {
+    "eti_authority": "NON_AUTHORITATIVE_CONTEXT_ONLY",
+    "trusted_attck_writes": 0,
+    "trusted_history_writes": 0,
+    "canonical_classification_overrides": 0,
+    "response_actions": 0,
+    "blocking_retaliation_attribution_exploitation": false
+  },
+  "rollback": {
+    "rollback_to_policy_id": "honeypot-thesis-data-lifecycle",
+    "rollback_to_policy_version": "1.0.0",
+    "rollback_to_policy_sha256": "5c7d76556310a913879c8a53f509f44d10b823213e0f8189eca32c0fcfa9e7f2",
+    "rollback_action": "mark amendment inactive; do not modify parent policy",
+    "parent_artifact_mutation": false
+  },
+  "activation": {
+    "activated_at_utc": "2026-09-05T07:40:29Z",
+    "activation_scope": "one bounded provider preflight per authorized provider",
+    "operator_authorization_provenance": "direct user authorization in EXTERNAL_TI_SOURCE_IP_GOVERNANCE_AMENDMENT_AND_BOUNDED_PROVIDER_PREFLIGHT_V1",
+    "runtime_service_config_mutated": false,
+    "runtime_worker_restarted": false,
+    "activation_receipt_required": true
+  }
+}

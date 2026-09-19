@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from production.enrichment.enrichment_providers import EnrichmentProvider, ProviderResult
+from production.enrichment.external_ti_contract import default_external_ti_provider_configs
 from production.enrichment.local_snapshot import load_local_enrichment_snapshot
 from production.storage import open_storage
 from production.utils.config import ProductionConfig
@@ -143,9 +144,10 @@ def test_local_enrichment_snapshot_is_bounded_hashed_and_expiring(tmp_path) -> N
 
 
 class _ExternalProbe(EnrichmentProvider):
-    name = "probe"
-    supported_types = {"ip", "domain"}
+    name = "otx"
+    supported_types = {"ip", "hash"}
     external = True
+    api_key = "unit-test-key"
 
     def __init__(self) -> None:
         self.calls = []
@@ -157,9 +159,22 @@ class _ExternalProbe(EnrichmentProvider):
 
 def test_external_enrichment_profile_never_shares_source_ip(tmp_path) -> None:
     probe = _ExternalProbe()
+    provider_configs = default_external_ti_provider_configs()
+    provider_configs["otx"].update(
+        {
+            "enabled": True,
+            "max_attempts": 1,
+            "max_new_requests": 1,
+            "minute_limit": 1,
+            "daily_budget": 1,
+        }
+    )
     config = ProductionConfig(
         database_url=f"sqlite:///{tmp_path / 'state.db'}",
         external_enrichment_profile="non_ip_observables",
+        external_ti_enabled=True,
+        external_ti_provider_allowlist=["otx"],
+        external_ti_provider_configs=provider_configs,
     )
     worker = EnrichmentWorker(config, providers=[probe])
 
@@ -167,8 +182,20 @@ def test_external_enrichment_profile_never_shares_source_ip(tmp_path) -> None:
     assert probe.calls == []
     assert blocked[0].status == "policy_prohibited"
 
-    allowed = worker._run_providers("domain", "example.invalid")
-    assert probe.calls == [("domain", "example.invalid")]
+    value = "a" * 64
+    allowed = worker._run_providers(
+        "hash",
+        value,
+        sighting={
+            "observable_type": "hash",
+            "observable_value": value,
+            "role": "file_hash",
+            "source": "cowrie_event",
+            "algorithm": "sha256",
+            "timestamp": "2026-09-19T00:00:00Z",
+        },
+    )
+    assert probe.calls == [("hash", value)]
     assert allowed[0].status == "ok"
 
 

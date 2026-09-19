@@ -104,105 +104,28 @@ def test_worker_completes_claim_only_after_durable_session_save(
     assert effects["session_saved"] is True
 
 
-def test_prediction_snapshot_never_persists_response_guidance_or_creates_alert(
+def test_session_worker_does_not_persist_retired_prediction_or_response_authority(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The forecast persistence path cannot become a guidance authority."""
+    """The retired prediction path is not a session-worker authority."""
 
-    class _Predictor:
-        enabled = True
-
-        def predict(self, _features: object, *, event_id: str = "") -> dict:
-            return {
-                "snapshot_id": "guidance-free-snapshot",
-                "session_id": "guidance-free-session",
-                "src_ip": "203.0.113.27",
-                "event_id": event_id,
-                "prediction": ["execution"],
-                "final_ranking": [{"tactic": "execution", "score": 0.9}],
-            }
-
-    worker = SessionWorker(_config(tmp_path))
-    worker.prediction_engine = _Predictor()
-    monkeypatch.setattr(worker, "_apply_campaign_clustering", lambda *_args, **_kwargs: {})
-    state = SessionState(
-        session_id="guidance-free-session",
-        src_ip="203.0.113.27",
-        start_time="2026-07-27T00:00:00Z",
-        commands=["whoami"],
+    config = _config(tmp_path)
+    storage = open_storage(config.database_url)
+    storage.store_event(
+        "sensor-a",
+        _event(
+            "guidance-free-session",
+            "cowrie.command.input",
+            0,
+            input="whoami",
+            success=1,
+        ),
     )
+    worker = SessionWorker(config)
     try:
-        assert worker._save_prediction_snapshot_unobserved(
-            state,
-            {"eventid": "cowrie.command.input", "input": "whoami"},
-            event_id="event-guidance-free",
-            evidence_cutoff={
-                "schema_version": "prediction_evidence_cutoff.v1",
-                "received_at": "2026-07-27T00:00:01.000000+00:00",
-                "event_id": "event-guidance-free",
-            },
-        )
-        saved = worker.storage.get_latest_prediction_snapshot("guidance-free-session")
-        assert saved is not None
-        payload = saved["payload"]
-        assert "response_guidance" not in payload
-        assert "response_guidance_v3" not in payload
-        assert "smb_decision" not in payload
-        assert "recommended_actions" not in payload
-        assert payload["predictive_alert"]["status"] == "prohibited"
-        assert worker.storage.list_rows("alerts", limit=20) == []
-    finally:
-        worker.close()
-
-
-def test_invalid_v3_prediction_is_rejected_and_recorded_in_outbox(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _InvalidPredictor:
-        enabled = True
-
-        def predict(self, _features: object, *, event_id: str = "") -> dict:
-            return {
-                "schema_version": "prediction_snapshot.v3",
-                "snapshot_id": "prediction_corrupt",
-                "snapshot_sha256": "0" * 64,
-                "session_id": "integrity-session",
-                "session_status": "active",
-                "event_id": event_id,
-                "prediction_status": "predicted",
-                "prediction": ["execution"],
-            }
-
-    worker = SessionWorker(_config(tmp_path))
-    worker.prediction_engine = _InvalidPredictor()
-    monkeypatch.setattr(
-        worker,
-        "_apply_campaign_clustering",
-        lambda *_args, **_kwargs: {},
-    )
-    state = SessionState(
-        session_id="integrity-session",
-        src_ip="203.0.113.27",
-        start_time="2026-07-27T00:00:00Z",
-        commands=["whoami"],
-    )
-    try:
-        assert worker._save_prediction_snapshot_unobserved(
-            state,
-            {"eventid": "cowrie.command.input", "input": "whoami"},
-            event_id="event-integrity",
-            evidence_cutoff={
-                "schema_version": "prediction_evidence_cutoff.v1",
-                "received_at": "2026-07-27T00:00:01.000000+00:00",
-                "event_id": "event-integrity",
-            },
-        )
-        row = worker.storage.list_rows("prediction_outbox", limit=1)[0]
-        assert row["status"] == "dead_letter"
-        assert row["last_error_code"] == "prediction_snapshot_integrity_error"
-        assert worker.storage.list_rows("prediction_snapshots", limit=1) == []
+        assert not hasattr(worker, "prediction_engine")
+        assert not hasattr(worker, "_save_prediction_snapshot_unobserved")
+        assert worker.process_unprocessed() == 1
     finally:
         worker.close()
 
@@ -508,11 +431,10 @@ class _RecoveryCoordinator:
         )
 
 
-def test_active_session_restart_preserves_ordered_analysis_and_prediction_history(
+def test_active_session_restart_preserves_ordered_analysis_and_current_history(
     tmp_path: Path,
 ) -> None:
     config = _config(tmp_path)
-    config.prediction_policy = ProductionConfig().prediction_policy
     storage = open_storage(config.database_url)
     events = [
         _event("session-restart", "cowrie.session.connect", 0),
@@ -531,7 +453,8 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
             success=1,
         ),
     ]
-    first_event_ids = [storage.store_event("sensor-a", event)[0] for event in events]
+    for event in events:
+        storage.store_event("sensor-a", event)
     first = SessionWorker(config)
     try:
         assert first.process_unprocessed() == 3
@@ -541,7 +464,7 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     finally:
         first.close()
 
-    second_command_id, _ = storage.store_event(
+    storage.store_event(
         "sensor-a",
         _event(
             "session-restart",
@@ -561,7 +484,8 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
         recovered = restarted.monitor.get_session("session-restart")
         assert recovered is not None
         assert recovered.commands == ["whoami"]
-        assert len(restarted._session_prediction_snapshots["session-restart"]) == 2
+        assert not hasattr(restarted, "_session_prediction_snapshots")
+        assert not hasattr(restarted, "prediction_engine")
         assert restarted.process_unprocessed() == 2
     finally:
         restarted.close()
@@ -583,27 +507,12 @@ def test_active_session_restart_preserves_ordered_analysis_and_prediction_histor
     }
     assert {"T1033", "T1087.001"} <= trusted_ttps
 
-    snapshots = storage.list_rows_for_session(
+    assert storage.list_rows_for_session(
         "prediction_snapshots",
         "session-restart",
         limit=20,
-    )
-    snapshot_event_ids = {row["event_id"] for row in snapshots}
-    assert first_event_ids[1] in snapshot_event_ids
-    assert first_event_ids[2] in snapshot_event_ids
-    assert second_command_id in snapshot_event_ids
-    assert close_id in snapshot_event_ids
-    for row in snapshots:
-        snapshot_payload = json.loads(row["payload_json"])
-        cutoff = snapshot_payload["evidence_cutoff"]
-        assert cutoff["event_id"] == row["event_id"]
-
-    prediction_tasks = storage.list_rows("prediction_outbox", limit=20)
-    assert prediction_tasks
-    for row in prediction_tasks:
-        task = json.loads(row["payload_json"])
-        assert task["schema_version"] == "prediction_outbox_task.v2"
-        assert task["evidence_cutoff"]["event_id"] == task["event_id"]
+    ) == []
+    assert storage.list_rows("prediction_outbox", limit=20) == []
 
     jobs = storage.list_rows("analysis_jobs", limit=10)
     assert len(jobs) == 1

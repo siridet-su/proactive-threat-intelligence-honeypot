@@ -33,6 +33,8 @@ SOURCE_IP_PROFILE = "source_ip_observables"
 SOURCE_IP_POLICY_ID = "honeypot-thesis-data-lifecycle.source-ip.external-ti"
 SOURCE_IP_POLICY_VERSION = "1.0.0"
 SOURCE_IP_AMENDMENT_SCHEMA = "external_ti_source_ip_governance_amendment.v1"
+SOURCE_IP_PRODUCTION_POLICY_VERSION = "2.0.0"
+SOURCE_IP_PRODUCTION_SCHEMA = "external_ti_source_ip_governance.v2"
 SOURCE_IP_AMENDMENT_SHA256 = "b8e292d9eeb80e10af8695fe4b3e0a74216894191eca9790c8e75182203beace"
 SOURCE_IP_ENRICHMENT_MODE = "NEW_ELIGIBLE_SIGHTINGS_ONLY"
 SOURCE_IP_CUTOFF_TIMESTAMP_FIELD = "timestamp"
@@ -237,12 +239,18 @@ class SourceIPGovernance:
     authorized_providers: Tuple[str, ...]
     allowed_outbound_fields: Tuple[str, ...]
     canonical_mongodb_enrichment_record_write: bool = False
+    continuous_processing: bool = False
+    minimum_refresh_interval_seconds: int = 86_400
+    max_distinct_source_ips_per_utc_day: int = 1
 
     def authorizes_provider(self, provider: str = "") -> bool:
         name = str(provider or "").strip().lower()
         if not name:
             return True
-        return _SOURCE_IP_POLICY_PROVIDER.get(name, name) in self.authorized_providers
+        return (
+            name in self.authorized_providers
+            or _SOURCE_IP_POLICY_PROVIDER.get(name, name) in self.authorized_providers
+        )
 
 
 def load_source_ip_governance_amendment(
@@ -270,17 +278,32 @@ def load_source_ip_governance_amendment(
         raise ValueError("source-IP governance amendment is malformed") from exc
     if not isinstance(document, Mapping):
         raise ValueError("source-IP governance amendment must be an object")
-    if (
-        document.get("schema_version") != SOURCE_IP_AMENDMENT_SCHEMA
-        or document.get("policy_id") != SOURCE_IP_POLICY_ID
-        or document.get("version") != SOURCE_IP_POLICY_VERSION
+    schema_version = str(document.get("schema_version") or "")
+    policy_version = str(document.get("version") or "")
+    is_preflight = (
+        schema_version == SOURCE_IP_AMENDMENT_SCHEMA
+        and policy_version == SOURCE_IP_POLICY_VERSION
+    )
+    is_production = (
+        schema_version == SOURCE_IP_PRODUCTION_SCHEMA
+        and policy_version == SOURCE_IP_PRODUCTION_POLICY_VERSION
+    )
+    if document.get("policy_id") != SOURCE_IP_POLICY_ID or not (
+        is_preflight or is_production
     ):
         raise ValueError("source-IP governance amendment identity mismatch")
     scope = document.get("amendment_scope")
     if not isinstance(scope, Mapping):
         raise ValueError("source-IP governance amendment scope is missing")
     authorized = scope.get("authorized_providers")
-    if not isinstance(authorized, list) or {str(item).strip().lower() for item in authorized} != {"shodan", "abuseipdb"}:
+    expected_providers = (
+        {"shodan", "abuseipdb"}
+        if is_preflight
+        else {"shodan_official", "abuseipdb"}
+    )
+    if not isinstance(authorized, list) or {
+        str(item).strip().lower() for item in authorized
+    } != expected_providers:
         raise ValueError("source-IP governance provider scope is invalid")
     fields = scope.get("allowed_outbound_fields")
     if fields != ["normalized_source_ip"]:
@@ -289,7 +312,7 @@ def load_source_ip_governance_amendment(
         "lookup_only": True,
         "active_scanning": False,
         "reporting_or_submission": False,
-        "continuous_processing": False,
+        "continuous_processing": is_production,
         "arbitrary_external_ip_input": False,
     }
     if any(scope.get(key) is not value for key, value in required_scope.items()):
@@ -322,12 +345,31 @@ def load_source_ip_governance_amendment(
     authority = document.get("authority")
     if not isinstance(authority, Mapping) or authority.get("eti_authority") != EXTERNAL_TI_AUTHORITY or any(authority.get(key) != 0 for key in ("trusted_attck_writes", "trusted_history_writes", "canonical_classification_overrides", "response_actions")):
         raise ValueError("source-IP authority controls are invalid")
+    minimum_refresh = 86_400
+    max_daily_targets = 1
+    if is_production:
+        budgets = document.get("request_budgets")
+        if not isinstance(budgets, Mapping):
+            raise ValueError("source-IP production request budget is missing")
+        minimum_refresh = int(budgets.get("minimum_refresh_interval_seconds") or 0)
+        max_daily_targets = int(
+            budgets.get("max_distinct_source_ips_per_utc_day") or 0
+        )
+        if minimum_refresh < 86_400:
+            raise ValueError("source-IP production refresh interval is too short")
+        if max_daily_targets < 1 or max_daily_targets > 100:
+            raise ValueError("source-IP production daily target limit is invalid")
+        if document.get("status") != "ACTIVE_BOUNDED_PRODUCTION":
+            raise ValueError("source-IP production policy is not active")
     return SourceIPGovernance(
         policy_id=SOURCE_IP_POLICY_ID,
-        version=SOURCE_IP_POLICY_VERSION,
+        version=policy_version,
         sha256=digest,
         authorized_providers=tuple(sorted({str(item).strip().lower() for item in authorized})),
         allowed_outbound_fields=("normalized_source_ip",),
+        continuous_processing=is_production,
+        minimum_refresh_interval_seconds=minimum_refresh,
+        max_distinct_source_ips_per_utc_day=max_daily_targets,
     )
 
 

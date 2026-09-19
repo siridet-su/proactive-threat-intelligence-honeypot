@@ -26,7 +26,10 @@ from production.prediction.prediction_snapshot_contract import (
     require_valid_prediction_snapshot,
     validate_prediction_snapshot_integrity,
 )
-from production.storage.backend import StorageError
+from production.storage.backend import (
+    StorageError,
+    _merge_enrichment_job_payload_json,
+)
 from production.storage.job_materialization import (
     materialize_ai_advisory_job_claim,
     materialize_analysis_job_claim,
@@ -58,6 +61,7 @@ PREDICTION_OUTBOX_TERMINAL_SCHEMA_VERSION = "prediction_outbox_terminal.v1"
 # the digest of the original task.
 PREDICTION_OUTBOX_COMPACTED_PAYLOAD = "{}"
 _PRIORITY_RANK = {"low": 0, "normal": 1, "high": 2, "urgent": 3}
+MAX_SOURCE_IP_SIGHTING_IDS = 100
 _SESSION_TABLES = {
     "sessions",
     "events",
@@ -1043,6 +1047,234 @@ class MongoDBRuntimeOperations:
         self.database.enrichment_records.replace_one({"_id": identity}, {"_id": identity, "schema_version": "mongodb_enrichment_record.v1", "observable_type": observable_type, "observable_value": observable_value, "payload_json": body, "payload_sha256": hashlib.sha256(body.encode()).hexdigest(), "provider_status_json": provider, "first_seen": old.get("first_seen") if old else current, "last_seen": current, "expires_at": expires_at, "updated_at": current}, upsert=True)
 
     @staticmethod
+    def _external_ti_source_ip_cache_key(
+        provider: str,
+        normalized_observable_identity: str,
+    ) -> str:
+        from production.enrichment.enrichment_cache import source_ip_cache_key
+
+        return source_ip_cache_key(provider, normalized_observable_identity)
+
+    def get_external_ti_source_ip_cache(
+        self,
+        provider: str,
+        normalized_observable_identity: str,
+        provider_config_identity: str = "",
+        *,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one provider-specific cache row without creating a collection."""
+
+        del provider_config_identity, now
+        cache_key = self._external_ti_source_ip_cache_key(
+            provider, normalized_observable_identity
+        )
+        document = self.database["external_ti_source_ip_cache"].find_one(
+            {"_id": cache_key}
+        )
+        item = _row(document)
+        if item is None:
+            return None
+        if not isinstance(item.get("normalized_context"), dict) or not isinstance(
+            item.get("provenance"), dict
+        ):
+            raise StorageError("external TI source-IP cache row is malformed")
+        return item
+
+    def upsert_external_ti_source_ip_cache(self, entry: Dict[str, Any]) -> None:
+        """Atomically upsert one bounded non-canonical provider/IP cache row."""
+
+        provider = str(entry.get("provider") or "").strip().lower()
+        identity = str(entry.get("normalized_observable_identity") or "").strip()
+        cache_key = str(entry.get("cache_key") or "")
+        expected_key = self._external_ti_source_ip_cache_key(provider, identity)
+        if not cache_key or cache_key != expected_key:
+            raise StorageError("external TI source-IP cache key is invalid")
+        document = dict(entry)
+        document.pop("_id", None)
+        document["_id"] = cache_key
+        old = self.database["external_ti_source_ip_cache"].find_one(
+            {"_id": cache_key}, {"created_at": 1}
+        )
+        if old and old.get("created_at"):
+            document["created_at"] = old["created_at"]
+        self.database["external_ti_source_ip_cache"].replace_one(
+            {"_id": cache_key}, document, upsert=True
+        )
+
+    @staticmethod
+    def _external_ti_proof_guard_row(document: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+        from production.enrichment.external_ti_proof_guard import validate_guard_record
+
+        item = _row(document)
+        if item is None:
+            raise StorageError("external TI proof guard row is missing")
+        try:
+            return validate_guard_record(item)
+        except Exception as exc:
+            raise StorageError("external TI proof guard row is malformed") from exc
+
+    def _claim_external_ti_proof_guard(
+        self,
+        entry: Dict[str, Any],
+        *,
+        expected_claim_type: str,
+    ) -> Dict[str, Any]:
+        from pymongo.errors import DuplicateKeyError
+        from production.enrichment.external_ti_proof_guard import validate_guard_record
+
+        clean = validate_guard_record(entry)
+        if clean["claim_type"] != expected_claim_type:
+            raise StorageError("external TI proof guard claim type is invalid")
+        collection = self.database["external_ti_provider_proof_guard"]
+        if expected_claim_type == "provider":
+            target = collection.find_one({"_id": clean["target_guard_id"]})
+            target_row = self._external_ti_proof_guard_row(target)
+            if (
+                target_row["claim_type"] != "target"
+                or target_row["proof_campaign_id"] != clean["proof_campaign_id"]
+                or target_row["mode"] != clean["mode"]
+                or target_row["cutoff_utc"] != clean["cutoff_utc"]
+                or target_row["normalized_source_ip_digest"]
+                != clean["normalized_source_ip_digest"]
+            ):
+                raise StorageError("external TI proof provider target binding is invalid")
+        document = dict(clean)
+        document["_id"] = clean["guard_id"]
+        inserted = False
+        try:
+            result = collection.insert_one(document)
+            if not bool(getattr(result, "acknowledged", False)):
+                raise StorageError("external TI proof guard claim was not acknowledged")
+            inserted = True
+        except DuplicateKeyError:
+            inserted = False
+        stored = self._external_ti_proof_guard_row(
+            collection.find_one({"_id": clean["guard_id"]})
+        )
+        binding_fields = (
+            "schema_version",
+            "authority",
+            "claim_type",
+            "proof_campaign_id",
+            "provider",
+            "mode",
+            "normalized_observable_type",
+            "normalized_source_ip_digest",
+            "cutoff_utc",
+            "target_guard_id",
+        )
+        if any(stored.get(field) != clean.get(field) for field in binding_fields):
+            if (
+                expected_claim_type == "target"
+                and stored.get("proof_campaign_id") == clean.get("proof_campaign_id")
+                and stored.get("claim_type") == "target"
+                and stored.get("normalized_source_ip_digest")
+                != clean.get("normalized_source_ip_digest")
+            ):
+                return {"decision": "TARGET_MISMATCH", "record": stored}
+            raise StorageError("conflicting duplicate external TI proof guard identity")
+        if expected_claim_type == "target":
+            decision = "CLAIMED" if inserted else "EXISTING"
+        elif inserted:
+            decision = "CLAIMED"
+        elif stored["state"] == "CLAIMED":
+            decision = "REQUEST_CLAIMED_OUTCOME_UNKNOWN"
+        elif stored["state"] == "REQUEST_COMPLETED":
+            decision = "ALREADY_COMPLETED"
+        else:
+            raise StorageError("external TI proof provider claim state is invalid")
+        return {"decision": decision, "record": stored}
+
+    def claim_external_ti_proof_target(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self._claim_external_ti_proof_guard(entry, expected_claim_type="target")
+
+    def claim_external_ti_proof_provider(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self._claim_external_ti_proof_guard(entry, expected_claim_type="provider")
+
+    def complete_external_ti_proof_provider(
+        self,
+        *,
+        proof_campaign_id: str,
+        provider: str,
+        result_class: str,
+        http_status: Optional[int] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool:
+        from production.enrichment.external_ti_proof_guard import (
+            PROOF_GUARD_RESULT_CLASSES,
+            provider_guard_id,
+        )
+
+        outcome = str(result_class or "").strip().upper()
+        if outcome not in PROOF_GUARD_RESULT_CLASSES:
+            raise StorageError("external TI proof result class is invalid")
+        if http_status is not None and not 100 <= int(http_status) <= 599:
+            raise StorageError("external TI proof HTTP status is invalid")
+        identity = provider_guard_id(proof_campaign_id, provider)
+        completed = str(completed_at or utc_now()).strip()
+        collection = self.database["external_ti_provider_proof_guard"]
+        row = self._external_ti_proof_guard_row(collection.find_one({"_id": identity}))
+        if row["state"] == "REQUEST_COMPLETED":
+            return False
+        if row["state"] != "CLAIMED":
+            raise StorageError("external TI proof provider claim is not claimable")
+        result = collection.update_one(
+            {"_id": identity, "state": "CLAIMED"},
+            {
+                "$set": {
+                    "state": "REQUEST_COMPLETED",
+                    "completed_at": completed,
+                    "result_class": outcome,
+                    "http_status": http_status,
+                    "updated_at": completed,
+                }
+            },
+        )
+        if not bool(getattr(result, "acknowledged", False)) or int(result.matched_count) != 1:
+            raise StorageError("external TI proof completion was not durable")
+        return True
+
+    def list_external_ti_proof_guard(
+        self,
+        proof_campaign_id: str = "",
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        bounded_limit = max(0, min(int(limit), 1_000))
+        query = {}
+        if str(proof_campaign_id or "").strip():
+            query["proof_campaign_id"] = str(proof_campaign_id).strip()
+        cursor = self.database["external_ti_provider_proof_guard"].find(query).sort(
+            [("claimed_at", 1), ("_id", 1)]
+        ).limit(bounded_limit)
+        return [
+            self._external_ti_proof_guard_row(document)
+            for document in cursor
+        ]
+
+    def prune_external_ti_source_ip_cache(
+        self,
+        *,
+        now: Any = None,
+        max_records: int = 1_000,
+    ) -> int:
+        """Delete only expired cache rows in a bounded maintenance batch."""
+
+        current = _utc(now)
+        limit = max(1, min(int(max_records), 1_000))
+        expired = self.database["external_ti_source_ip_cache"].find(
+            {"expires_at": {"$lte": current}}, {"_id": 1}
+        ).sort([("expires_at", 1), ("_id", 1)]).limit(limit)
+        identities = [item["_id"] for item in expired]
+        if not identities:
+            return 0
+        return int(
+            self.database["external_ti_source_ip_cache"].delete_many(
+                {"_id": {"$in": identities}}
+            ).deleted_count
+        )
+
+    @staticmethod
     def _priority(value: str) -> str:
         selected = str(value or "normal").strip().lower()
         if selected not in _PRIORITY_RANK:
@@ -1064,13 +1296,47 @@ class MongoDBRuntimeOperations:
         current = utc_now()
         existing = self.database.enrichment_jobs.find_one({"_id": job_id})
         if existing:
-            update = {"payload_json": stable_json(body), "session_id": session_id or existing.get("session_id"), "updated_at": current, "error": None, "next_retry_at": None}
+            existing_status = str(existing.get("status") or "").strip().lower()
+            active_statuses = {"queued", "running", "retry"}
+            # A terminal job is already the durable result for this
+            # observable.  Source-IP ETI deliberately has no canonical
+            # enrichment-record write, so using that record as the sole
+            # duplicate-enqueue gate would reopen a succeeded job on every
+            # repeated observation and consume its attempt budget without a
+            # lease failure.  Only an explicit force is allowed to begin a
+            # fresh attempt generation; this also preserves failed predecessor
+            # evidence during ordinary duplicate enqueue.
+            if existing_status not in active_statuses and not force:
+                return job_id, False
+            update = {
+                "payload_json": _merge_enrichment_job_payload_json(
+                    existing.get("payload_json") or "{}",
+                    body,
+                ),
+                "session_id": session_id or existing.get("session_id"),
+                "updated_at": current,
+                "error": None,
+                "next_retry_at": None,
+            }
             if _PRIORITY_RANK[selected] > _PRIORITY_RANK.get(str(existing.get("priority")), 0):
                 update.update({"priority": selected, "priority_rank": _PRIORITY_RANK[selected], "priority_reason": priority_reason or None})
-            if existing.get("status") not in {"queued", "running", "retry"}:
-                update["status"] = "queued"
-            self.database.enrichment_jobs.update_one({"_id": job_id}, {"$set": update})
-            return job_id, True
+            unset = {}
+            if existing_status not in active_statuses:
+                update.update({"status": "queued", "attempts": 0})
+                unset = {
+                    "claim_owner": "",
+                    "claim_token": "",
+                    "claim_expires_at": "",
+                    "completed_at": "",
+                    "last_error_code": "",
+                    "last_error_type": "",
+                    "last_error_at": "",
+                }
+            result = self.database.enrichment_jobs.update_one(
+                {"_id": job_id, "status": existing_status},
+                {"$set": update, "$unset": unset},
+            )
+            return job_id, result.matched_count == 1
         document = {"_id": job_id, "schema_version": "mongodb_enrichment_job.v1", "job_id": job_id, "observable_type": observable_type, "observable_value": observable_value, "session_id": session_id or None, "status": "queued", "priority": selected, "priority_rank": _PRIORITY_RANK[selected], "priority_reason": priority_reason or None, "payload_json": stable_json(body), "attempts": 0, "next_retry_at": None, "error": None, "created_at": current, "updated_at": current}
         try:
             self.database.enrichment_jobs.insert_one(document)
@@ -1135,6 +1401,52 @@ class MongoDBRuntimeOperations:
             return identity
         return self._transaction(write)
 
+    def list_session_observable_sightings(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        selected_limit = min(max(int(limit), 0), 100)
+        if not selected_limit:
+            return []
+        cursor = self.database.observable_sightings.find(
+            {"session_id": str(session_id)},
+            _SESSION_DETAIL_PROJECTION,
+        ).sort(
+            [("timestamp", -1), ("created_at", -1), ("sighting_id", 1)]
+        ).limit(selected_limit)
+        output: List[Dict[str, Any]] = []
+        for document in cursor:
+            item = _row(document) or {}
+            item["payload"] = _payload(document)
+            output.append(item)
+        return output
+
+    def list_observable_sightings(
+        self,
+        observable_type: str,
+        observable_value: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        selected_limit = min(max(int(limit), 0), 100)
+        if not selected_limit:
+            return []
+        cursor = self.database.observable_sightings.find(
+            {
+                "observable_type": str(observable_type).strip().lower(),
+                "observable_value": str(observable_value).strip(),
+            },
+            _SESSION_DETAIL_PROJECTION,
+        ).sort(
+            [("timestamp", -1), ("created_at", -1), ("sighting_id", 1)]
+        ).limit(selected_limit)
+        output: List[Dict[str, Any]] = []
+        for document in cursor:
+            item = _row(document) or {}
+            item["payload"] = _payload(document)
+            output.append(item)
+        return output
+
     def enqueue_threat_hunt_job(self, session_id: str, observable_type: str, observable_value: str, trigger_reason: str = "", payload: Optional[Dict[str, Any]] = None) -> tuple[str, bool]:
         from pymongo.errors import DuplicateKeyError
 
@@ -1178,15 +1490,155 @@ class MongoDBRuntimeOperations:
         return self.fail_job("threat_hunt", job_id, owner, token, error_code, error_type, retryable, max_attempts, retry_delay_seconds, now=now)
 
     def find_sessions_by_observable(self, observable_type: str, observable_value: str, exclude_session_id: str = "", limit: int = 100) -> List[Dict[str, Any]]:
+        selected_limit = min(max(int(limit), 0), 100)
+        if not selected_limit:
+            return []
+        # The session-TI projection requests at most 20 linked sessions and
+        # examines at most 100 sightings for each session.  Keep the backing
+        # cursor bounded as well; otherwise grouping in Python would turn an
+        # exact-entity lookup into an unbounded read under a hot observable.
+        candidate_limit = min(selected_limit * 100, 10_000)
         groups: Dict[str, List[Dict[str, Any]]] = {}
-        for row in self.database.observable_sightings.find({"observable_type": observable_type, "observable_value": observable_value, "session_id": {"$ne": exclude_session_id}}).sort([("timestamp", -1)]):
+        cursor = self.database.observable_sightings.find(
+            {
+                "observable_type": observable_type,
+                "observable_value": observable_value,
+                "session_id": {"$ne": exclude_session_id},
+            }
+        ).sort([("timestamp", -1), ("created_at", -1), ("session_id", 1)])
+        for row in cursor.limit(candidate_limit):
             groups.setdefault(str(row["session_id"]), []).append(row)
         output = []
         for session_id, rows in groups.items():
             session = self.database.sessions.find_one({"_id": session_id}) or {}
             times = [str(item.get("timestamp") or item.get("created_at") or "") for item in rows]
             output.append({"session_id": session_id, "sighting_count": len(rows), "first_seen": min(times), "last_seen": max(times), "roles": sorted({str(item.get("role") or "") for item in rows if item.get("role")}), "sources": sorted({str(item.get("source") or "") for item in rows if item.get("source")}), "src_ip": session.get("src_ip"), "ended": bool(session.get("ended")), "updated_at": session.get("updated_at"), "payload": _payload(session) if session else {}})
-        return sorted(output, key=lambda item: (str(item["last_seen"]), item["session_id"]), reverse=True)[: max(0, int(limit))]
+        return sorted(output, key=lambda item: (str(item["last_seen"]), item["session_id"]), reverse=True)[:selected_limit]
+
+    def find_sessions_by_source_ip(
+        self,
+        normalized_source_ip: str,
+        exclude_session_id: str = "",
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return safe summaries for an exact normalized source-IP pivot.
+
+        This method intentionally does not read session documents or payloads.
+        Only source-IP/session-source-IP sighting roles participate, so a
+        destination IP that happens to equal the lookup value cannot create a
+        cross-session relation.  It is a bounded read and does not create an
+        index, collection, provider call, or canonical write.
+        """
+
+        selected_limit = min(max(int(limit), 0), 20)
+        if not selected_limit:
+            return []
+        query = {
+            "observable_type": "ip",
+            "observable_value": str(normalized_source_ip).strip(),
+            "role": {"$in": ["source_ip", "session_source_ip"]},
+            "session_id": {"$ne": str(exclude_session_id or "")},
+        }
+        projection = {
+            "_id": 0,
+            "sighting_id": 1,
+            "session_id": 1,
+            "sensor_id": 1,
+            "role": 1,
+            "source": 1,
+            "timestamp": 1,
+            "created_at": 1,
+        }
+        candidate_limit = min(selected_limit * 100, 500)
+        cursor = self.database.observable_sightings.find(query, projection).sort(
+            [("timestamp", -1), ("created_at", -1), ("session_id", 1), ("sighting_id", 1)]
+        ).limit(candidate_limit)
+        groups: Dict[str, Dict[str, Any]] = {}
+        seen_ids: Dict[str, set[str]] = {}
+        for row in cursor:
+            session_id = str(row.get("session_id") or "").strip()
+            if not session_id:
+                continue
+            sighting_id = str(row.get("sighting_id") or row.get("_id") or "").strip()
+            seen = seen_ids.setdefault(session_id, set())
+            if sighting_id and sighting_id in seen:
+                continue
+            if sighting_id:
+                seen.add(sighting_id)
+            timestamp = str(row.get("timestamp") or row.get("created_at") or "")
+            item = groups.setdefault(
+                session_id,
+                {
+                    "session_id": session_id,
+                    "sighting_count": 0,
+                    "first_seen": timestamp,
+                    "last_seen": timestamp,
+                    "roles": set(),
+                    "sources": set(),
+                    "sensor_ids": set(),
+                    "sighting_ids": [],
+                },
+            )
+            item["sighting_count"] += 1
+            item["first_seen"] = min(str(item["first_seen"] or timestamp), timestamp)
+            item["last_seen"] = max(str(item["last_seen"] or timestamp), timestamp)
+            role = str(row.get("role") or "").strip()
+            source = str(row.get("source") or "").strip()
+            sensor_id = str(row.get("sensor_id") or "").strip()
+            if role:
+                item["roles"].add(role)
+            if source:
+                item["sources"].add(source)
+            if sensor_id:
+                item["sensor_ids"].add(sensor_id)
+            if sighting_id and len(item["sighting_ids"]) < MAX_SOURCE_IP_SIGHTING_IDS:
+                item["sighting_ids"].append(sighting_id)
+        output: List[Dict[str, Any]] = []
+        for item in groups.values():
+            output.append(
+                {
+                    "session_id": item["session_id"],
+                    "sighting_count": int(item["sighting_count"]),
+                    "first_seen": str(item["first_seen"] or ""),
+                    "last_seen": str(item["last_seen"] or ""),
+                    "roles": sorted(item["roles"]),
+                    "sources": sorted(item["sources"]),
+                    "sensor_ids": sorted(item["sensor_ids"]),
+                    "sighting_ids": sorted(item["sighting_ids"]),
+                }
+            )
+        return sorted(
+            output,
+            key=lambda item: (str(item.get("last_seen") or ""), str(item.get("session_id") or "")),
+            reverse=True,
+        )[:selected_limit]
+
+    def find_sessions_by_observables(
+        self,
+        observables: Any,
+        exclude_session_id: str = "",
+        limit_per_observable: int = 20,
+    ) -> List[Dict[str, Any]]:
+        output: List[Dict[str, Any]] = []
+        selected_limit = min(max(int(limit_per_observable), 0), 20)
+        for observable_type, observable_value in list(observables or [])[:50]:
+            kind = str(observable_type or "").strip().lower()
+            value = str(observable_value or "").strip()
+            if not kind or not value or not selected_limit:
+                continue
+            output.append(
+                {
+                    "observable_type": kind,
+                    "observable_value": value,
+                    "sessions": self.find_sessions_by_observable(
+                        kind,
+                        value,
+                        exclude_session_id=exclude_session_id,
+                        limit=selected_limit,
+                    ),
+                }
+            )
+        return output
 
     def save_session_link(self, link_payload: Dict[str, Any]) -> str:
         a, b = _required(link_payload.get("session_id_a"), "session_id_a"), _required(link_payload.get("session_id_b"), "session_id_b")

@@ -317,6 +317,93 @@ def _normalize_model2_item(label: str, item: Mapping[str, Any], top_status: str)
     }
 
 
+T1046_NOT_OBSERVED_REASONS = frozenset(
+    {
+        "t1046_not_observed",
+        "t1046_multiservice_scan_evidence_missing",
+        "t1046_scan_evidence_invalid",
+    }
+)
+
+
+def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
+    """Return whether a V5 result has real, bound T1046 evidence.
+
+    The V5 artifact remains one 32-feature, three-output model. This gate is
+    an applicability check at the evidence boundary; it does not alter the
+    model output or turn a missing scan into a negative label. Ordinary
+    Cowrie SSH traffic is not a network-service scan, so T1046 is unavailable
+    unless the result carries an explicit, same-run multiservice observation.
+
+    The marker is deliberately stricter than a source-IP or generic flow
+    count. A future producer may provide it at the top level or under
+    ``measurement_evidence`` as ``t1046``/``scan``. It must identify at least
+    two destination ports, attest the exact PCAP/Zeek binding, and declare
+    ``binding_mode=EXACT_MEASUREMENT_IDENTITY``.
+    """
+
+    marker = None
+    direct = value.get("t1046_observation")
+    if isinstance(direct, Mapping):
+        marker = direct
+    else:
+        measurement = value.get("measurement_evidence")
+        if isinstance(measurement, Mapping):
+            for key in ("t1046", "scan"):
+                candidate = measurement.get(key)
+                if isinstance(candidate, Mapping):
+                    marker = candidate
+                    break
+    if marker is None:
+        for count_key in ("sensor_flow_count", "scan_flow_count"):
+            count = value.get(count_key)
+            if (
+                isinstance(count, (int, float))
+                and not isinstance(count, bool)
+                and count == 0
+            ):
+                return False, "t1046_not_observed"
+        return False, "t1046_multiservice_scan_evidence_missing"
+    if marker.get("observed") is not True:
+        return False, "t1046_not_observed"
+    if _clean(marker.get("scope")).upper() not in {
+        "MULTISERVICE_SCAN",
+        "NETWORK_SERVICE_SCAN",
+    }:
+        return False, "t1046_scan_evidence_invalid"
+    if marker.get("binding_mode") != "EXACT_MEASUREMENT_IDENTITY":
+        return False, "t1046_scan_evidence_invalid"
+    if marker.get("pcap_binding") != "PASS" or marker.get("zeek_binding") != "PASS":
+        return False, "t1046_scan_evidence_invalid"
+    if marker.get("source_ip_only_binding") is not False:
+        return False, "t1046_scan_evidence_invalid"
+    if marker.get("cross_session_contamination") != "NO":
+        return False, "t1046_scan_evidence_invalid"
+    flow_uids = marker.get("flow_uids")
+    if (
+        not isinstance(flow_uids, list)
+        or len(flow_uids) < 2
+        or any(not isinstance(uid, str) or not uid.strip() for uid in flow_uids)
+        or len(set(flow_uids)) != len(flow_uids)
+    ):
+        return False, "t1046_scan_evidence_invalid"
+    ports = marker.get("destination_ports")
+    if ports is None:
+        ports = marker.get("unique_destination_ports")
+    if (
+        not isinstance(ports, list)
+        or len(ports) < 2
+        or len({str(port) for port in ports}) < 2
+    ):
+        return False, "t1046_scan_evidence_invalid"
+    for field in ("session_id", "run_id", "measurement_id", "episode_id"):
+        marker_value = _clean(marker.get(field))
+        result_value = _clean(value.get(field))
+        if marker_value and marker_value != result_value:
+            return False, "t1046_scan_evidence_invalid"
+    return True, "exact_bound_multiservice_scan"
+
+
 def normalize_model2_completed_run_evidence(
     value: Any,
     *,
@@ -485,11 +572,28 @@ def normalize_model2_v5_shadow_result(
     if not isinstance(outputs, Mapping) or set(outputs) != set(SHARED_TECHNIQUES):
         raise EnsembleContractError("V5 Model2 result must contain all shared outputs")
     normalized: dict[str, dict[str, Any]] = {}
+    unavailable_heads: dict[str, str] = {}
     available_at = _timestamp(value.get("available_at") or value.get("completed_at"))
     for label in SHARED_TECHNIQUES:
         item = outputs.get(label)
         if not isinstance(item, Mapping) or _clean(item.get("availability")) != "AVAILABLE":
             raise EnsembleContractError(f"V5 Model2 output is unavailable: {label}")
+        if label == "T1046":
+            observed, reason = _t1046_observation_status(value)
+            if not observed:
+                unavailable_heads[label] = reason
+                normalized[label] = {
+                    "technique_id": label,
+                    "available": False,
+                    "result": None,
+                    "score": None,
+                    "score_type": "raw_score",
+                    "status": MODEL2_V5_SHADOW_STATUS,
+                    "availability_reason": reason,
+                    "calibrated_probability": None,
+                    "available_at": _timestamp(item.get("available_at")) or available_at,
+                }
+                continue
         result = _result(item.get("decision"))
         score = _finite_float(item.get("raw_score"))
         if result is None or score is None:
@@ -510,7 +614,9 @@ def normalize_model2_v5_shadow_result(
         "run_id": bound["run_id"],
         "measurement_id": bound["measurement_id"],
         "episode_id": bound["episode_id"],
-        "available": True,
+        "available": bool(normalized),
+        "availability": "PARTIAL" if unavailable_heads else "AVAILABLE",
+        "unavailable_heads": unavailable_heads,
         "status": MODEL2_V5_SHADOW_STATUS,
         "artifact_id": _clean(value.get("model_version")),
         "artifact_sha256": expected_model,
@@ -757,12 +863,21 @@ def compute_ensemble_evidence(
         m2_item = _model2_item(model2, label) if model2_available else None
         m2_result = _result(m2_item.get("result")) if m2_item else None
         item_available = bool(model2_available and m2_item and m2_result is not None)
+        model2_unavailable_reason = (
+            _clean(m2_item.get("availability_reason"))
+            if isinstance(m2_item, Mapping)
+            else ""
+        )
         if not model1_applicable:
             state = "MODEL1_NOT_APPLICABLE"
             model2_relation = "MODEL2_ONLY" if item_available and m2_result == "PRESENT" else "NO_EVIDENCE"
         elif not item_available:
             state = "MODEL2_UNAVAILABLE"
-            model2_relation = "UNAVAILABLE"
+            model2_relation = (
+                "NOT_OBSERVED"
+                if label == "T1046" and model2_unavailable_reason in T1046_NOT_OBSERVED_REASONS
+                else "UNAVAILABLE"
+            )
         elif m1_result == "PRESENT" and m2_result == "PRESENT":
             state = "AGREE"
             model2_relation = "CORROBORATES"
@@ -800,6 +915,7 @@ def compute_ensemble_evidence(
                 "model2_score": _finite_float(m2_item.get("score")) if item_available and m2_item else None,
                 "model2_score_type": _clean(m2_item.get("score_type")) if item_available and m2_item else None,
                 "model2_status": model2_status,
+                "model2_unavailable_reason": model2_unavailable_reason or None,
                 "model2_calibrated_probability": None,
                 "model2_available_at": _timestamp(
                     (m2_item.get("available_at") if item_available and m2_item else "")
@@ -846,6 +962,14 @@ def compute_ensemble_evidence(
         },
         "model2": {
             "available": model2_available,
+            "availability": _clean(model2.get("availability")) or (
+                "AVAILABLE" if model2_available else "UNAVAILABLE"
+            ),
+            "unavailable_heads": (
+                dict(model2.get("unavailable_heads"))
+                if isinstance(model2.get("unavailable_heads"), Mapping)
+                else {}
+            ),
             "status": model2_status,
             "artifact_id": _clean(model2.get("artifact_id")),
             "artifact_sha256": _clean(model2.get("artifact_sha256")),
