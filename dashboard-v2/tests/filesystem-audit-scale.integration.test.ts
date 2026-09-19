@@ -7,6 +7,7 @@ import {
   buildAuditProjectionCountPipeline,
   buildAuditProjectionItemPipeline,
   buildAuditProjectionSummaryPipeline,
+  buildAuditProjectionReadinessQuery,
   encodeAuditSessionCursor,
 } from "@/lib/filesystem-data";
 import { getAuditDirectorySummary, getAuditSessions, setAuditProjectionReadinessTestHook } from "@/lib/filesystem-server";
@@ -63,6 +64,14 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     await projection.createIndex({ "lifecycle.status": 1, auditVisitedPaths: 1, "lifecycle.closedAt": -1, sessionId: -1 });
     await projection.createIndex({ auditPathsOverflow: 1 });
     await projection.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    const sourceState = database.collection("cwd_session_state");
+    await sourceState.createIndex({ "lifecycle.status": 1, updatedAt: -1, sessionId: -1 });
+    await sourceState.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, sessionId: -1 });
+    await sourceState.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, session_id: -1 });
+    await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionVersion: 1 });
+    await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionPendingGeneration: 1 }, { partialFilterExpression: { auditProjectionPendingGeneration: { $exists: true } } });
+    await sourceState.createIndex({ "cwdState.path": 1 });
+    await sourceState.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
 
     const docs = Array.from({ length: sessionCount }, (_, index) => {
       const sessionId = `session-${String(index).padStart(5, "0")}`;
@@ -88,7 +97,8 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
       cwdState: doc.cwdState,
       lifecycle: doc.lifecycle,
       auditProjectionVersion: AUDIT_PROJECTION_VERSION,
-      auditProjectionDirty: false,
+      auditProjectionGeneration: 1,
+      auditProjectionReadyGeneration: 1,
       expires_at: doc.expires_at,
     })), { ordered: true });
     await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION, backfillCompletedAt: new Date() });
@@ -161,6 +171,73 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     // The request has two bounded readiness probes and two bounded projection
     // aggregates; no command contains the retained 1,900-session identifier set.
     expect(JSON.stringify(commandEvents).length).toBeLessThan(2_000_000);
+  });
+
+  it("proves readiness execution bounds for converged, pending, stale, and malformed rows", async () => {
+    const states = database.collection("cwd_session_state");
+    await states.deleteMany({});
+    const closedAt = new Date("2026-09-19T10:00:00.000Z");
+    await states.insertMany(Array.from({ length: 1900 }, (_, index) => ({
+      _id: `ready-${index}`,
+      sessionId: `ready-${index}`,
+      cwdState: { path: "/etc/passwd" },
+      lifecycle: { status: "closed", closedAt },
+      auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+      auditProjectionGeneration: 1,
+      auditProjectionReadyGeneration: 1,
+    })));
+    const explain = async (query: Document) => states.find(query).project({ _id: 1 }).limit(1).explain("executionStats");
+    const steady = await explain(buildAuditProjectionReadinessQuery());
+    expect(JSON.stringify(steady)).not.toContain("COLLSCAN");
+    expect(maxMetric(steady, "totalDocsExamined")).toBeLessThanOrEqual(1);
+    process.stderr.write(`FA016_READINESS steady ${JSON.stringify({ docsExamined: maxMetric(steady, "totalDocsExamined"), keysExamined: maxMetric(steady, "totalKeysExamined") })}\n`);
+
+    await states.insertOne({
+      _id: "pending-v2", sessionId: "pending-v2", cwdState: { path: "/etc/pending" }, lifecycle: { status: "closed", closedAt },
+      auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionGeneration: 2, auditProjectionReadyGeneration: 1, auditProjectionPendingGeneration: 2,
+    });
+    const pending = await explain(buildAuditProjectionReadinessQuery());
+    expect(JSON.stringify(pending)).not.toContain("COLLSCAN");
+    expect(maxMetric(pending, "totalDocsExamined")).toBeLessThanOrEqual(2);
+    process.stderr.write(`FA016_READINESS pending-v2 ${JSON.stringify({ docsExamined: maxMetric(pending, "totalDocsExamined"), keysExamined: maxMetric(pending, "totalKeysExamined") })}\n`);
+
+    await states.insertOne({
+      _id: "stale-version", sessionId: "stale-version", cwdState: { path: "/etc/stale" }, lifecycle: { status: "closed", closedAt },
+      auditProjectionVersion: "cwd_audit_projection.v1", auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1,
+    });
+    const stale = await explain(buildAuditProjectionReadinessQuery({ includeVersionMigration: true }));
+    expect(JSON.stringify(stale)).not.toContain("COLLSCAN");
+    expect(maxMetric(stale, "totalDocsExamined")).toBeLessThanOrEqual(1905);
+    process.stderr.write(`FA016_READINESS stale-version ${JSON.stringify({ docsExamined: maxMetric(stale, "totalDocsExamined"), keysExamined: maxMetric(stale, "totalKeysExamined") })}\n`);
+
+    await states.insertOne({
+      _id: "malformed", sessionId: "   ", cwdState: { path: "relative" }, lifecycle: { status: "closed", closedAt },
+      auditProjectionVersion: "cwd_audit_projection.v1", auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1, auditProjectionPendingGeneration: 1,
+    });
+    const malformed = await explain(buildAuditProjectionReadinessQuery());
+    expect(JSON.stringify(malformed)).not.toContain("COLLSCAN");
+    process.stderr.write(`FA016_READINESS malformed ${JSON.stringify({ docsExamined: maxMetric(malformed, "totalDocsExamined"), keysExamined: maxMetric(malformed, "totalKeysExamined") })}\n`);
+
+    commandEvents.length = 0;
+    await getAuditSessions({ limit: 25 });
+    expect(commandEvents.some(({ commandName, command }) => commandName === "find" && command.find === "cwd_events")).toBe(false);
+
+    // Restore the deterministic 1,900-row source fixture for the following
+    // projection-summary cases; this test intentionally exercises its own
+    // readiness population.
+    const baselineProjectionRows = await projection.find({}).toArray();
+    await states.deleteMany({});
+    await states.insertMany(baselineProjectionRows.map((row) => ({
+      _id: row._id,
+      sessionId: row.sessionId,
+      sourceIp: row.sourceIp,
+      cwdState: row.cwdState,
+      lifecycle: row.lifecycle,
+      auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+      auditProjectionGeneration: 1,
+      auditProjectionReadyGeneration: 1,
+      expires_at: row.expires_at,
+    })));
   });
 
   it("returns authoritative totals, filters, and distinct paths from projection facts", async () => {
@@ -260,7 +337,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     setAuditProjectionReadinessTestHook(async () => {
       if (insertedByOldWriter) return;
       insertedByOldWriter = true;
-      await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") } });
+      await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") }, auditProjectionGeneration: 1, auditProjectionPendingGeneration: 1 });
     });
     const rollingPage = await getAuditSessions({ limit: 25 });
     setAuditProjectionReadinessTestHook(null);
@@ -308,7 +385,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     const overflowItem = page.items.find((item) => item.sessionId === "overflow-session");
     expect(overflowItem?.auditSummary.visitedPaths).toContain("/overflow/619");
     expect(overflowItem?.auditSummary.visitedPaths.length).toBeGreaterThan(512);
-    expect(aggregateCommands.some((command) => !JSON.stringify(command.pipeline).includes("$lookup"))).toBe(true);
+    expect(aggregateCommands.some((command) => JSON.stringify(command.pipeline).includes("$unionWith"))).toBe(true);
 
     const exact = await getAuditSessions({ targetPath: "/overflow/619", limit: 25 });
     expect(exact.totalItems).toBe(1);
@@ -317,6 +394,83 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(summary.matchingCount).toBe(1);
     expect((await projection.findOne({ _id: "overflow-session" }))?.auditVisitedPaths).toHaveLength(512);
   });
+
+  it("traverses a mixed multi-page overflow population exactly once with all filters", async () => {
+    await Promise.all([
+      database.collection("cwd_session_state").deleteMany({}),
+      database.collection("cwd_events").deleteMany({}),
+      projection.deleteMany({}),
+      database.collection("cwd_audit_projection_meta").deleteMany({}),
+    ]);
+    const closedAt = new Date("2026-09-19T23:30:00.000Z");
+    const sourceStates: Document[] = [];
+    const history: Document[] = [];
+    const projectionDocs: Document[] = [];
+    for (let index = 0; index < 80; index += 1) {
+      const sessionId = `mixed-${String(index).padStart(3, "0")}`;
+      const overflow = index % 2 === 0;
+      const homeOnly = index === 2;
+      const currentPath = homeOnly ? "/home/cowrie" : `/var/current-${index}`;
+      const visitedPaths = homeOnly ? ["/home/cowrie"] : [currentPath, "/etc/passwd"];
+      sourceStates.push({
+        _id: sessionId, sessionId, sourceIp: `203.0.113.${index}`,
+        cwdState: { path: currentPath, status: "confirmed" }, lifecycle: { status: "closed", closedAt },
+        auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+        auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1,
+        expires_at: new Date("2099-01-01T00:00:00Z"),
+      });
+      if (overflow) {
+        history.push({
+          _id: `${sessionId}-target`, eventId: `${sessionId}-target`, sessionId, action: "changed",
+          fromPath: homeOnly ? "/home/cowrie" : `/overflow-target/${index}`, toPath: currentPath, at: closedAt,
+        });
+      }
+      projectionDocs.push({
+        _id: sessionId, sessionId, sourceIp: `203.0.113.${index}`,
+        cwdState: { path: currentPath, status: "confirmed" }, lifecycle: { status: "closed", closedAt },
+        auditVisitedPaths: overflow ? Array.from({ length: 512 }, (_, pathIndex) => `/overflow/${index}/${pathIndex}`) : visitedPaths,
+        auditTransitionPaths: overflow ? Array.from({ length: 512 }, (_, pathIndex) => `/overflow/${index}/${pathIndex}`) : visitedPaths,
+        auditPathsOverflow: overflow, auditHomeOnly: homeOnly, auditEventCount: overflow ? 1 : 0,
+        auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z"),
+      });
+    }
+    await database.collection("cwd_session_state").insertMany(sourceStates);
+    await database.collection("cwd_events").insertMany(history);
+    await projection.insertMany(projectionDocs);
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION, backfillCompletedAt: new Date() });
+
+    const ids: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page = await getAuditSessions({ limit: 25, cursor });
+      expect(page.totalItems).toBe(80);
+      ids.push(...page.items.map((item) => item.sessionId));
+      cursor = page.nextCursor;
+      pages += 1;
+    } while (cursor !== null);
+    expect(pages).toBe(4);
+    expect(ids).toHaveLength(80);
+    expect(new Set(ids).size).toBe(80);
+    expect(ids).toEqual([...ids].sort((left, right) => right.localeCompare(left)));
+    expect(aggregateCommands.some((command) => JSON.stringify(command.pipeline).includes("$unionWith"))).toBe(true);
+
+    const olderOverflow = await getAuditSessions({ targetPath: "/overflow-target/0", limit: 25 });
+    expect(olderOverflow.totalItems).toBe(1);
+    expect(olderOverflow.items.map((item) => item.sessionId)).toEqual(["mixed-000"]);
+    expect((await getAuditSessions({ search: "mixed-000", limit: 25 })).items.map((item) => item.sessionId)).toEqual(["mixed-000"]);
+    expect((await getAuditSessions({ hideHome: true, limit: 100 })).totalItems).toBe(79);
+    expect((await getAuditDirectorySummary({ targetPath: "/overflow-target/0" })).matchingCount).toBe(1);
+
+    await projection.updateMany({}, { $set: { auditPathsOverflow: false } });
+    aggregateCommands.length = 0;
+    await getAuditSessions({ limit: 25 });
+    expect(aggregateCommands.length).toBe(2);
+    for (const command of aggregateCommands) {
+      expect(JSON.stringify(command.pipeline)).not.toContain("$lookup");
+      expect(JSON.stringify(command.pipeline)).not.toContain("$unionWith");
+    }
+  }, 120_000);
 
   it("computes the global top 100 after combining overflow populations", async () => {
     await Promise.all([
@@ -334,7 +488,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
       for (const path of competitors.map((value) => `/${population}-${value.slice(1)}`)) {
         for (let index = 0; index < 5; index += 1) {
           const sessionId = `${population}-${path.slice(path.lastIndexOf("/") + 1)}-${index}`;
-          sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionDirty: false, expires_at: new Date("2099-01-01T00:00:00Z") });
+          sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1, expires_at: new Date("2099-01-01T00:00:00Z") });
           history.push({ _id: `${sessionId}-event`, eventId: `${sessionId}-event`, sessionId, action: "entered", fromPath: path, toPath: path, at: closedAt });
           projectionDocs.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditVisitedPaths: [path], auditTransitionPaths: [path], auditPathsOverflow: population === "overflow", auditHomeOnly: false, auditEventCount: 1, auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z") });
         }
@@ -344,7 +498,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
       for (let index = 0; index < 4; index += 1) {
         const sessionId = `${population}-target-${index}`;
         const path = "/globally-top";
-        sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionDirty: false, expires_at: new Date("2099-01-01T00:00:00Z") });
+        sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1, expires_at: new Date("2099-01-01T00:00:00Z") });
         history.push({ _id: `${sessionId}-event`, eventId: `${sessionId}-event`, sessionId, action: "entered", fromPath: path, toPath: path, at: closedAt });
         projectionDocs.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditVisitedPaths: [path], auditTransitionPaths: [path], auditPathsOverflow: population === "overflow", auditHomeOnly: false, auditEventCount: 1, auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z") });
       }

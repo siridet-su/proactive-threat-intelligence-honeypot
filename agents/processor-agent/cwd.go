@@ -211,17 +211,23 @@ func cwdStateDocument(observation cwdObservation, retention time.Duration) bson.
 			"status":    "active",
 			"startedAt": observation.At,
 		},
-		"updatedAt":            observation.At,
-		"expires_at":           expiryAt(observation.At, retention),
-		"auditProjectionDirty": true,
+		"updatedAt":                        observation.At,
+		"expires_at":                       expiryAt(observation.At, retention),
+		"auditProjectionGeneration":        int64(1),
+		"auditProjectionPendingGeneration": int64(1),
 	}
 }
 
-func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M {
+func nextAuditProjectionGenerationExpression() bson.M {
+	return bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$auditProjectionGeneration", int64(0)}}, int64(1)}}
+}
+
+func cwdStateUpdate(observation cwdObservation, retention time.Duration) mongo.Pipeline {
 	document := cwdStateDocument(observation, retention)
 	delete(document, "_id")
-	return bson.M{
-		"$set": bson.M{
+	nextGeneration := nextAuditProjectionGenerationExpression()
+	return mongo.Pipeline{
+		bson.D{{Key: "$set", Value: bson.M{
 			"schemaVersion":      document["schemaVersion"],
 			"sessionId":          document["sessionId"],
 			"sourceIp":           document["sourceIp"],
@@ -231,34 +237,50 @@ func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M 
 			// cwdStateOrderFilter rejects a closed state, so an authoritative CWD
 			// observation can safely activate a legacy projection that predates
 			// lifecycle metadata without reviving a closed session.
-			"lifecycle.status":     "active",
-			"updatedAt":            document["updatedAt"],
-			"expires_at":           document["expires_at"],
-			"auditProjectionDirty": true,
-		},
-		// Preserve the actual first CWD observation, while giving legacy
-		// documents lifecycle metadata the first time they receive v2 telemetry.
-		"$min": bson.M{"lifecycle.startedAt": observation.At},
+			"lifecycle.status":                 "active",
+			"updatedAt":                        document["updatedAt"],
+			"expires_at":                       document["expires_at"],
+			"auditProjectionGeneration":        nextGeneration,
+			"auditProjectionPendingGeneration": nextGeneration,
+		}}},
+		bson.D{{Key: "$set", Value: bson.M{
+			// Preserve the actual first CWD observation, while giving legacy
+			// documents lifecycle metadata the first time they receive v2 telemetry.
+			"lifecycle.startedAt": bson.M{"$cond": bson.A{
+				bson.M{"$or": bson.A{
+					bson.M{"$eq": bson.A{bson.M{"$type": "$lifecycle.startedAt"}, "missing"}},
+					bson.M{"$eq": bson.A{"$lifecycle.startedAt", nil}},
+					bson.M{"$gt": bson.A{"$lifecycle.startedAt", observation.At}},
+				}},
+				observation.At,
+				"$lifecycle.startedAt",
+			}},
+		}}},
 	}
 }
 
-func cwdSessionCloseUpdate(sessionID string, closedAt time.Time, retention time.Duration) bson.M {
-	return bson.M{
-		"$set": bson.M{
-			"lifecycle.status":     "closed",
-			"lifecycle.closedAt":   closedAt,
-			"updatedAt":            closedAt,
-			"expires_at":           expiryAt(closedAt, retention),
-			"auditProjectionDirty": true,
-		},
-		// A close can be observed before an initial CWD event reaches this
-		// consumer. The tombstone makes that ordering safe: a later CWD insert
-		// hits the duplicate key path and is rejected by cwdStateOrderFilter.
-		"$setOnInsert": bson.M{
-			"schemaVersion": cwdStateSchemaVersion,
-			"sessionId":     sessionID,
-		},
-	}
+func cwdSessionCloseUpdate(sessionID string, closedAt time.Time, retention time.Duration) mongo.Pipeline {
+	nextGeneration := nextAuditProjectionGenerationExpression()
+	return mongo.Pipeline{bson.D{{Key: "$set", Value: bson.M{
+		"schemaVersion":                    cwdStateSchemaVersion,
+		"sessionId":                        sessionID,
+		"lifecycle.status":                 "closed",
+		"lifecycle.closedAt":               closedAt,
+		"updatedAt":                        closedAt,
+		"expires_at":                       expiryAt(closedAt, retention),
+		"auditProjectionGeneration":        nextGeneration,
+		"auditProjectionPendingGeneration": nextGeneration,
+	}}}}
+}
+
+type cwdProjectionWork struct {
+	accepted   bool
+	sourceID   any
+	generation int64
+}
+
+func projectionWorkFromState(state bson.M, accepted bool) cwdProjectionWork {
+	return cwdProjectionWork{accepted: accepted, sourceID: state["_id"], generation: bsonInt64(state["auditProjectionGeneration"])}
 }
 
 func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, closedAt time.Time, retention time.Duration) error {
@@ -288,34 +310,57 @@ func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, cl
 			return findErr
 		}
 	}
-	return mw.closeCwdAuditProjection(ctx, sessionID, closedAt, retention)
+	var state bson.M
+	if err := states.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&state); err != nil {
+		return err
+	}
+	return mw.closeCwdAuditProjection(ctx, state["_id"], sessionID, bsonInt64(state["auditProjectionGeneration"]), closedAt, retention)
 }
 
 // updateLatestCwdState performs a compare-and-set without a read/write race.
 // Update-first handles existing sessions; insert-then-retry handles concurrent
 // first observations without allowing a stale observation to win permanently.
-func updateLatestCwdState(ctx context.Context, states *mongo.Collection, observation cwdObservation, retention time.Duration) (bool, error) {
+func updateLatestCwdState(ctx context.Context, states *mongo.Collection, observation cwdObservation, retention time.Duration) (cwdProjectionWork, error) {
 	filter := cwdStateOrderFilter(observation)
 	update := cwdStateUpdate(observation, retention)
-	result, err := states.UpdateOne(ctx, filter, update)
-	if err != nil {
-		return false, err
+	var updated bson.M
+	err := states.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&updated)
+	if err == mongo.ErrNoDocuments {
+		err = nil
 	}
-	if result.MatchedCount > 0 {
-		return true, nil
+	if err != nil {
+		return cwdProjectionWork{}, err
+	}
+	if updated != nil {
+		return projectionWorkFromState(updated, true), nil
 	}
 
 	if _, err := states.InsertOne(ctx, cwdStateDocument(observation, retention)); err == nil {
-		return true, nil
+		var inserted bson.M
+		if err := states.FindOne(ctx, bson.M{"_id": observation.SessionID}).Decode(&inserted); err != nil {
+			return cwdProjectionWork{}, err
+		}
+		return projectionWorkFromState(inserted, true), nil
 	} else if !mongo.IsDuplicateKeyError(err) {
-		return false, err
+		return cwdProjectionWork{}, err
 	}
 
 	// Another worker inserted the session between UpdateOne and InsertOne. A
 	// final ordered update makes the newer observation win; zero matches means
 	// this observation is stale and is intentionally ignored.
-	result, err = states.UpdateOne(ctx, filter, update)
-	return result.MatchedCount > 0, err
+	updated = nil
+	err = states.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&updated)
+	if err == mongo.ErrNoDocuments {
+		var current bson.M
+		if findErr := states.FindOne(ctx, bson.M{"_id": observation.SessionID}).Decode(&current); findErr != nil {
+			return cwdProjectionWork{}, findErr
+		}
+		return projectionWorkFromState(current, false), nil
+	}
+	if err != nil {
+		return cwdProjectionWork{}, err
+	}
+	return projectionWorkFromState(updated, true), nil
 }
 
 func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwdObservation, retention time.Duration) error {
@@ -323,7 +368,7 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		return fmt.Errorf("MongoDB is disabled; refusing to acknowledge CWD telemetry")
 	}
 
-	stateChanged, err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention)
+	stateWork, err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention)
 	if err != nil {
 		return fmt.Errorf("update CWD state: %w", err)
 	}
@@ -335,7 +380,7 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	// Cowrie-emitted transitions so the audit trail never infers cd semantics
 	// from attacker-controlled command text or cross-event state changes.
 	if observation.Action == "observed" {
-		if err := mw.updateCwdAuditProjection(ctx, observation, "", stateChanged, false, retention); err != nil {
+		if err := mw.updateCwdAuditProjection(ctx, observation, stateWork.sourceID, stateWork.generation, "", stateWork.accepted, false, retention); err != nil {
 			return fmt.Errorf("update CWD audit projection: %w", err)
 		}
 		return nil
@@ -362,13 +407,22 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		"status":     observation.Status,
 		"expires_at": expiryAt(observation.At, retention),
 	}
+	// Establish the generation-owned pending marker before the durable history
+	// write. This closes the non-transactional crash window for stale events.
+	eventWork, err := mw.advanceCwdProjectionGeneration(ctx, stateWork.sourceID)
+	if err != nil {
+		return fmt.Errorf("mark CWD history projection pending: %w", err)
+	}
 	eventResult, err := mw.db.Collection("cwd_events").UpdateOne(
 		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": event}, options.Update().SetUpsert(true),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert CWD event: %w", err)
 	}
-	if err := mw.updateCwdAuditProjection(ctx, observation, eventID, stateChanged, eventResult.UpsertedCount > 0, retention); err != nil {
+	if mw.auditAfterCwdEventWrite != nil {
+		mw.auditAfterCwdEventWrite()
+	}
+	if err := mw.updateCwdAuditProjection(ctx, observation, eventWork.sourceID, eventWork.generation, eventID, stateWork.accepted, eventResult.UpsertedCount > 0, retention); err != nil {
 		return fmt.Errorf("update CWD audit projection: %w", err)
 	}
 	return nil

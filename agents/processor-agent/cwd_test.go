@@ -173,16 +173,18 @@ func TestCwdStateDocumentStoresDateAndOrderMetadata(t *testing.T) {
 func TestCwdSessionCloseUpdateCreatesRetentionBoundedTombstone(t *testing.T) {
 	closedAt := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 	update := cwdSessionCloseUpdate("session-1", closedAt, 24*time.Hour)
-	set, ok := update["$set"].(bson.M)
+	if len(update) != 1 {
+		t.Fatalf("close update must be a single generation-owning pipeline: %#v", update)
+	}
+	set, ok := update[0][0].Value.(bson.M)
 	if !ok || set["lifecycle.status"] != "closed" || set["lifecycle.closedAt"] != closedAt {
 		t.Fatalf("closed lifecycle state missing: %#v", update)
 	}
 	if set["expires_at"] != closedAt.Add(24*time.Hour) {
 		t.Fatalf("close tombstone must retain only for the configured duration: %#v", update)
 	}
-	insert, ok := update["$setOnInsert"].(bson.M)
-	if !ok || insert["sessionId"] != "session-1" || insert["schemaVersion"] != cwdStateSchemaVersion {
-		t.Fatalf("close tombstone insert metadata missing: %#v", update)
+	if set["auditProjectionPendingGeneration"] == nil || set["auditProjectionGeneration"] == nil {
+		t.Fatalf("close tombstone generation metadata missing: %#v", update)
 	}
 }
 

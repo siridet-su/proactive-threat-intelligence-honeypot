@@ -27,11 +27,12 @@ persisted `entered`/`changed` transition history contributes transition paths;
 Event delivery is at-least-once: `cwd_events._id` is the idempotency key, and
 duplicate retries reconcile from source history. The projection no longer
 stores an unbounded `auditEventIds` array. Distinct transition paths are capped
-at 512 per projection document; `auditPathsOverflow=true` causes bounded exact
-item fallback for affected page candidates and an authoritative source summary
-fallback, so truncation is never presented as authoritative. MongoDB
-computes the global top 100 after combining both retained populations, while
-ordinary item pages remain projection-backed with bounded overflow candidates.
+at 512 per projection document; `auditPathsOverflow=true` causes an exact
+cursor-aware `$unionWith` composition of every overflow source row with the
+normal projection population, so no overflow session is omitted from pages,
+filters, or totals. MongoDB computes the global top 100 after combining both
+retained populations, while the ordinary no-overflow item pipeline remains
+projection-backed with no `$lookup`.
 The resulting projection path storage is at most 512 transition paths plus the
 current path; source events remain TTL-retained for crash recovery and
 reconciliation.
@@ -44,9 +45,12 @@ closed lifecycle time plus retention. The processor repairs an existing
 `{expires_at:1}` index when it lacks `expireAfterSeconds: 0`.
 
 Backfill checks every history cursor error before accepting a result, selects
-only eligible dirty/stale-version source rows, updates source readiness only
-after the projection write, and publishes the marker only after one bounded
-pending-source probe. Current-state and backfill writes carry `stateSequence`
+only eligible pending-generation/stale-version source rows, updates source
+readiness only after the projection write, and publishes the marker only after
+one bounded pending-source probe. Each source row owns monotonic
+`auditProjectionGeneration`, `auditProjectionPendingGeneration`, and
+`auditProjectionReadyGeneration` markers; readiness is an exact `_id` plus
+generation CAS, so an older writer cannot clear newer work. Current-state and backfill writes carry `stateSequence`
 plus `stateSourceEventId` and use atomic MongoDB guards; a monotonic
 `auditHistoryRevision` CAS protects transition paths, overflow, visited paths,
 home-only, and exact event count as one history generation. Duplicate retries
@@ -76,7 +80,7 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
-- `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "auditProjectionDirty": 1 }` for incremental reconciliation;
+- `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
@@ -110,6 +114,14 @@ been removed; the prior full-fan-out behavior remains reproducible through the
 legacy production pipeline and is explicitly the migration fallback, not an
 accepted steady-state bound.
 
+The readiness fixture separately provisions the production source indexes and
+records `executionStats` for the required branches: fully converged `1,900`
+rows examined `0` documents and keys; one pending v2 row examined `1/1`; one
+stale-version migration row examined `1/1`; and malformed rows remained
+outside the eligible contract with `2/2` bounded examination in the combined
+pending probe. All plans were index-backed. A steady-state reconciliation pass
+also performed no `cwd_events` reads for converged rows.
+
 ## Isolated integration safety and validation
 
 `npm run test:filesystem-audit-integration` starts an ephemeral `mongo:8.0`
@@ -135,25 +147,26 @@ truthfully in the trackers.
 ## Follow-up remediation evidence (2026-09-19)
 
 Preflight on `feat/cwd-filesystem-telemetry` found a clean worktree at
-`26ec180`. The first sandboxed `git fetch origin --prune` could not write
+`5aeb4c0`. The first sandboxed `git fetch origin --prune` could not write
 `.git/FETCH_HEAD`; the approved retry succeeded. `origin/main` was already an
 ancestor, so no merge was required. The pre-edit dashboard baseline passed:
-22 Vitest files, 463 passing tests, and 9 skipped tests.
+22 Vitest files, 463 passing tests, and 12 skipped tests.
 
 The isolated FA-016 integration now seeds real v1 state, projection, and
 metadata documents, proves the old marker is not ready, migrates them to v2,
 removes `auditEventIds`, and verifies the v2 marker. It also covers equal-time
-source-event ordering with a database-boundary barrier, close-versus-active
-interleavings, a history-read barrier with a late event, retry payload
-idempotency, TTL repair, missing expiry, incremental reconciliation with zero
-steady-state `cwd_events` reads, and a 620-event overflow session. The
-dashboard fixture proves a 1,900-source-row ordinary request has bounded
-readiness commands, validates the rolling old-writer cutover hook, applies the
-canonical valid-row matrix, and proves a locally omitted path becomes global
-top-ranked only when the source populations are combined.
+source-event ordering, generation-owned rolling-writer CAS, close-versus-active
+interleavings, stale and accepted event crash barriers with reconciliation,
+duplicate retry idempotency, padded canonical/legacy identifiers with a source
+`_id` different from the canonical ID, TTL repair, missing expiry, incremental
+reconciliation with zero steady-state `cwd_events` reads, and a 620-event
+overflow session. The dashboard fixture proves an exact four-page mixed
+overflow traversal with equal timestamps, filters, counts, cursor exhaustion,
+and older overflow matches outside any bounded sample; it also provisions the
+production source indexes and records readiness `executionStats`.
 
 Observed isolated command output: `npm run test:filesystem-audit-integration`
-passed 10 dashboard tests and the three processor FA-016 integration tests.
+passed 12 dashboard tests and six processor FA-016 integration tests.
 Dashboard explain evidence remained `26/26` documents for item pages, `1,900/1,900`
 for exact count and summary, and no `$skip`, `$lookup`, or `COLLSCAN` in the
 projection plans. Full repository validation and final clean-tree checks remain

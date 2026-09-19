@@ -394,15 +394,23 @@ function auditSourceEligibilityExpression(): Document {
   };
 }
 
-/** Bounded readiness probe shared by the dashboard and processor contract. */
-export function buildAuditProjectionReadinessQuery(): Document {
+/**
+ * Bounded readiness probe shared by the dashboard and processor contract.
+ *
+ * Once the v2 marker exists, the generation-owned pending field is the only
+ * steady-state branch. The version branch is retained for the one-time
+ * migration probe and is intentionally selected by the caller before the
+ * completion marker is published.
+ */
+export function buildAuditProjectionReadinessQuery(options: { includeVersionMigration?: boolean } = {}): Document {
+  const pending = { auditProjectionPendingGeneration: { $exists: true } };
+  const work = options.includeVersionMigration
+    ? { $or: [{ auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION } }, pending] }
+    : pending;
   return {
     "lifecycle.status": "closed",
     $expr: auditSourceEligibilityExpression(),
-    $or: [
-      { auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION } },
-      { auditProjectionDirty: true },
-    ],
+    ...work,
   };
 }
 
@@ -763,6 +771,83 @@ export function buildAuditProjectionItemPipeline(options: AuditSessionsPipelineO
 
 export function buildAuditProjectionCountPipeline(options: AuditScopingPipelineOptions): Document[] {
   return [...buildAuditProjectionBaseStages(options), { $count: "count" }];
+}
+
+function buildAuditProjectionOverflowSourceStages(options: AuditScopingPipelineOptions): Document[] {
+  const stages = buildAuditScopingStages({ ...options, projectionOverflow: undefined });
+  stages.push(
+    { $match: { matchesFilter: true } },
+    {
+      $lookup: {
+        from: "cwd_audit_projection",
+        let: { sessionId: "$effectiveSessionId" },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: ["$sessionId", "$$sessionId"] },
+                  { $eq: ["$auditProjectionVersion", AUDIT_PROJECTION_VERSION] },
+                  { $eq: ["$auditPathsOverflow", true] },
+                  { $eq: ["$lifecycle.status", "closed"] },
+                ],
+              },
+            },
+          },
+          { $project: { _id: 1 } },
+        ],
+        as: "overflowProjection",
+      },
+    },
+    { $match: { $expr: { $gt: [{ $size: "$overflowProjection" }, 0] } } },
+    {
+      $set: {
+        sessionId: "$effectiveSessionId",
+        "lifecycle.closedAt": "$effectiveClosedAt",
+        auditVisitedPaths: "$visitedPaths",
+        auditHomeOnly: "$homeOnly",
+        auditEventCount: "$eventCount",
+      },
+    },
+    { $unset: "overflowProjection" },
+  );
+  return stages;
+}
+
+function buildAuditProjectionOverflowUnionStages(options: AuditSessionsPipelineOptions): Document[] {
+  const stages = buildAuditProjectionBaseStages({ ...options, projectionOverflow: "exclude" });
+  stages.push({
+    $unionWith: {
+      coll: "cwd_session_state",
+      pipeline: buildAuditProjectionOverflowSourceStages({
+        search: options.search,
+        targetPath: options.targetPath,
+        hideHome: options.hideHome,
+        historyCollectionName: options.historyCollectionName,
+      }),
+    },
+  });
+  const cursorMatch = buildAuditProjectionCursorMatch(options);
+  if (cursorMatch) stages.push({ $match: cursorMatch });
+  return stages;
+}
+
+/**
+ * Exact overflow composition for the exceptional path population. The normal
+ * path remains projection-backed; only when an overflow projection exists do
+ * we join the bounded projection population to authoritative source rows.
+ */
+export function buildAuditProjectionOverflowItemPipeline(options: AuditSessionsPipelineOptions): Document[] {
+  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+  return [
+    ...buildAuditProjectionOverflowUnionStages(options),
+    { $sort: { "lifecycle.closedAt": -1, sessionId: -1 } },
+    { $limit: limit + 1 },
+  ];
+}
+
+export function buildAuditProjectionOverflowCountPipeline(options: AuditScopingPipelineOptions): Document[] {
+  return [...buildAuditProjectionOverflowUnionStages({ ...options, cursor: null } as AuditSessionsPipelineOptions), { $count: "count" }];
 }
 
 // Compatibility name for callers that only need the item plan. Counts are no

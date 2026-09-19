@@ -62,7 +62,8 @@ try {
   const npmCommand = process.env.npm_execpath || "npm";
   const dashboard = spawnSync(npmCommand, ["run", "test", "--", "tests/filesystem-audit-scale.integration.test.ts"], { cwd: dashboardPath, env, encoding: "utf8", stdio: "inherit" });
   if (dashboard.status !== 0) process.exitCode = dashboard.status ?? 1;
-  const go = spawnSync("go", ["test", "-count=1", "-run", "TestFA016", "./..."], { cwd: processorPath, env, encoding: "utf8", stdio: "inherit" });
+  const goArgs = ["test", "-count=1", "-run", process.env.FA016_GO_TEST_PATTERN || "TestFA016", "./..."];
+  const go = spawnSync("go", goArgs, { cwd: processorPath, env, encoding: "utf8", stdio: "inherit" });
   if (go.status !== 0) process.exitCode = go.status ?? 1;
 } finally {
   cleanup();

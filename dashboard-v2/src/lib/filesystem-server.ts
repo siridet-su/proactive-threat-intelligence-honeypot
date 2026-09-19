@@ -20,6 +20,8 @@ import {
   buildAuditSessionsPipeline,
   buildAuditProjectionCountPipeline,
   buildAuditProjectionItemPipeline,
+  buildAuditProjectionOverflowCountPipeline,
+  buildAuditProjectionOverflowItemPipeline,
   buildAuditProjectionReadinessQuery,
   buildAuditProjectionSummaryPipeline,
   buildAuditSummaryPipeline,
@@ -565,32 +567,11 @@ async function auditProjectionIsReady(): Promise<boolean> {
   return pending === null;
 }
 
-async function getOverflowSessionIds(client: Awaited<ReturnType<typeof getMongoClient>>, limit: number): Promise<string[]> {
-  const rows = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).find({
-    lifecycle: { $exists: true },
-    "lifecycle.status": "closed",
-    auditProjectionVersion: AUDIT_PROJECTION_VERSION,
-    auditPathsOverflow: true,
-  }, { projection: { sessionId: 1 } }).sort({ "lifecycle.closedAt": -1, sessionId: -1 }).limit(limit).toArray();
-  return [...new Set(rows.map((row) => asString(row.sessionId)).filter((id): id is string => Boolean(id)))];
-}
-
 async function hasOverflowProjection(client: Awaited<ReturnType<typeof getMongoClient>>): Promise<boolean> {
   return (await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).findOne(
     { "lifecycle.status": "closed", auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditPathsOverflow: true },
     { projection: { _id: 1 } },
   )) !== null;
-}
-
-function sortAuditDocuments(documents: Document[]): Document[] {
-  return [...documents].sort((left, right) => {
-    const leftAt = asDateString(left.lifecycle?.closedAt) ?? "";
-    const rightAt = asDateString(right.lifecycle?.closedAt) ?? "";
-    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
-    const leftID = asString(left.effectiveSessionId) ?? asString(left.sessionId) ?? asString(left.session_id) ?? "";
-    const rightID = asString(right.effectiveSessionId) ?? asString(right.sessionId) ?? asString(right.session_id) ?? "";
-    return rightID.localeCompare(leftID);
-  });
 }
 
 async function getAuditDirectorySummaryFromSource(client: Awaited<ReturnType<typeof getMongoClient>>, options: { search?: string | null; targetPath?: string | null; hideHome?: boolean } = {}): Promise<AuditDirectorySummary> {
@@ -665,25 +646,22 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
   };
   if (!useProjection) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
 
-  const overflowIds = await getOverflowSessionIds(client, limit + 1);
-  const projectionOptions = { ...queryOptions, projectionOverflow: overflowIds.length ? "exclude" as const : undefined };
+  const hasOverflow = await hasOverflowProjection(client);
   const projectionCollection = client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION);
   const [projectionItems, projectionCount, summary] = await Promise.all([
-    projectionCollection.aggregate<Document>(buildAuditProjectionItemPipeline(projectionOptions), { allowDiskUse: true }).toArray(),
-    projectionCollection.aggregate<{ count: number }>(buildAuditProjectionCountPipeline(projectionOptions), { allowDiskUse: true }).toArray(),
+    projectionCollection.aggregate<Document>(
+      hasOverflow ? buildAuditProjectionOverflowItemPipeline(queryOptions) : buildAuditProjectionItemPipeline(queryOptions),
+      { allowDiskUse: true },
+    ).toArray(),
+    projectionCollection.aggregate<{ count: number }>(
+      hasOverflow ? buildAuditProjectionOverflowCountPipeline(queryOptions) : buildAuditProjectionCountPipeline(queryOptions),
+      { allowDiskUse: true },
+    ).toArray(),
     options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome }) : Promise.resolve(undefined),
   ]);
 
-  let rawItems = projectionItems;
-  let totalItems = projectionCount[0]?.count ?? 0;
-  if (overflowIds.length) {
-    const sourceResult = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{ total: Array<{ count: number }>; items: Document[] }>(
-      buildAuditSessionsPipeline({ ...queryOptions, sessionIds: overflowIds }),
-      { allowDiskUse: true },
-    ).toArray();
-    rawItems = sortAuditDocuments([...projectionItems, ...(sourceResult[0]?.items ?? [])]);
-    totalItems += sourceResult[0]?.total?.[0]?.count ?? 0;
-  }
+  const rawItems = projectionItems;
+  const totalItems = projectionCount[0]?.count ?? 0;
 
   // The readiness check and the page read form one mixed-source contract. A
   // row created by an old writer during the read invalidates the projection
