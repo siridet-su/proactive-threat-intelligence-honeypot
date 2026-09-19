@@ -47,8 +47,8 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	if err := db.Drop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a rolling deployment that left the right key pattern without a
-	// TTL option. The authoritative owner must repair, not silently accept it.
+	// Simulate a rolling deployment that left the right key pattern with the
+	// retired TTL option. The authoritative owner must remove it.
 	if _, err := db.Collection(cwdAuditProjectionCollection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -57,8 +57,8 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Keep the retained fixtures ahead of the wall clock so Mongo's TTL monitor
-	// cannot remove them while the integration assertions are running.
+	// Keep the retained fixtures ahead of the wall clock. Source rows remain
+	// TTL-retained; projection expiry is only a source-owned cleanup watermark.
 	closedAt := time.Date(2026, 9, 19, 23, 0, 0, 0, time.UTC)
 	const v1ProjectionVersion = "cwd_audit_projection.v1"
 	_, err = db.Collection("cwd_session_state").InsertMany(ctx, []any{
@@ -177,14 +177,14 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	if err := indexCursor.All(ctx, &indexes); err != nil {
 		t.Fatal(err)
 	}
-	foundTTL := false
+	foundProjectionExpiryIndex := false
 	for _, index := range indexes {
-		if index["name"] == "expires_at_1" && index["expireAfterSeconds"] == int32(0) {
-			foundTTL = true
+		if index["name"] == "expires_at_1" && index["expireAfterSeconds"] == nil {
+			foundProjectionExpiryIndex = true
 		}
 	}
-	if !foundTTL {
-		t.Fatalf("projection TTL index was not provisioned: %#v", indexes)
+	if !foundProjectionExpiryIndex {
+		t.Fatalf("projection cleanup watermark index was not provisioned without TTL: %#v", indexes)
 	}
 
 	base := closedAt.Add(2 * time.Hour)
@@ -1397,6 +1397,139 @@ func TestFA016OldWriterCutoverConvergesCanonicalAndLegacyRows(t *testing.T) {
 	}
 }
 
+func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	closedAt := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	expiresAt := closedAt.Add(retention)
+	const sessionID = "retention-ordering-race"
+	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_session_state").InsertOne(ctx, bson.M{
+		"_id": sessionID, "sessionId": sessionID, "sourceIp": "198.51.100.77",
+		"cwdState":      bson.M{"path": "/current", "status": "confirmed", "observedAt": closedAt, "sourceEventId": "state-current"},
+		"stateSequence": closedAt.UnixNano(), "stateSourceEventId": "state-current",
+		"lifecycle":              bson.M{"status": "closed", "startedAt": closedAt.Add(-time.Minute), "closedAt": closedAt},
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(7), "auditProjectionReadyGeneration": int64(7),
+		"expires_at": expiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_events").InsertMany(ctx, []any{
+		bson.M{"_id": "retention-ordering-entered", "eventId": "retention-ordering-entered", "sessionId": sessionID, "action": "entered", "fromPath": "/", "toPath": "/home/cowrie", "at": closedAt.Add(-2 * time.Minute), "expires_at": expiresAt},
+		bson.M{"_id": "retention-ordering-changed", "eventId": "retention-ordering-changed", "sessionId": sessionID, "action": "changed", "fromPath": "/home/cowrie", "toPath": "/etc", "at": closedAt.Add(-time.Minute), "expires_at": expiresAt},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection(cwdAuditProjectionCollection).InsertOne(ctx, bson.M{
+		"_id": sessionID, "sessionId": sessionID, "sourceIp": "198.51.100.77",
+		"cwdState": bson.M{"path": "/current", "status": "confirmed"}, "lifecycle": bson.M{"status": "closed", "startedAt": closedAt.Add(-time.Minute), "closedAt": closedAt},
+		"auditTransitionPaths": bson.A{"/home/cowrie", "/etc"}, "auditVisitedPaths": bson.A{"/current", "/home/cowrie", "/etc"}, "auditHomeOnly": false, "auditEventCount": int64(2), "auditHistoryRevision": int64(2),
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(7), "expires_at": expiresAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate projection-first deletion while deliberately preserving the
+	// ready source row. The production repair path, not a close retry, must
+	// rebuild this session.
+	if _, err := db.Collection(cwdAuditProjectionCollection).DeleteOne(ctx, bson.M{"_id": sessionID}); err != nil {
+		t.Fatal(err)
+	}
+	state := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": sessionID}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending || bsonInt64(state["auditProjectionReadyGeneration"]) != 7 {
+		t.Fatalf("fixture did not preserve the ready/no-pending source state: %#v", state)
+	}
+
+	results := make(chan error, 2)
+	go func() { results <- mw.backfillCwdAuditProjection(ctx, retention) }()
+	go func() { results <- mw.backfillCwdAuditProjection(ctx, retention) }()
+	for i := 0; i < 2; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	repaired := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": sessionID}).Decode(&repaired); err != nil {
+		t.Fatalf("production reconciliation did not reconstruct the projection: %v", err)
+	}
+	if repaired["sessionId"] != sessionID || repaired["auditProjectionVersion"] != cwdAuditProjectionVersion || bsonInt64(repaired["auditEventCount"]) != 2 || !testBSONTime(repaired["expires_at"]).Equal(expiresAt) {
+		t.Fatalf("reconstructed projection facts are not exact: %#v", repaired)
+	}
+	if got := stringSlice(repaired["auditTransitionPaths"]); !containsString(got, "/home/cowrie") || !containsString(got, "/etc") {
+		t.Fatalf("reconstructed transition paths are incomplete: %#v", repaired)
+	}
+	if got := stringSlice(repaired["auditVisitedPaths"]); !containsString(got, "/current") || !containsString(got, "/home/cowrie") || !containsString(got, "/etc") {
+		t.Fatalf("reconstructed visited paths are incomplete: %#v", repaired)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": sessionID}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending || bsonInt64(state["auditProjectionReadyGeneration"]) != 7 {
+		t.Fatalf("reconciliation did not republish the exact ready marker: %#v", state)
+	}
+
+	// Explain evidence for both new bounded probes. The source repair query is
+	// limited to one batch and the cleanup query is limited to one batch.
+	for name, spec := range map[string]struct {
+		collection string
+		filter     bson.M
+		sort       bson.D
+	}{
+		"repair":  {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
+		"cleanup": {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
+	} {
+		var explained bson.M
+		if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: bson.D{{Key: "find", Value: spec.collection}, {Key: "filter", Value: spec.filter}, {Key: "sort", Value: spec.sort}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explained); err != nil {
+			t.Fatalf("explain %s: %v", name, err)
+		}
+		planText := fmt.Sprint(explained)
+		if strings.Contains(planText, "COLLSCAN") || !strings.Contains(planText, "IXSCAN") {
+			t.Fatalf("explain %s used COLLSCAN: %#v", name, explained)
+		}
+		if examined := maxExplainMetric(explained, "totalDocsExamined"); examined > int64(cwdAuditProjectionRepairBatchSize) {
+			t.Fatalf("explain %s exceeded the %d-document repair/cleanup bound: %d", name, cwdAuditProjectionRepairBatchSize, examined)
+		}
+	}
+
+	// Source-owned cleanup removes an expired orphan only after its source is
+	// gone; it never deletes a projection while the source is retained.
+	orphanID := "retention-ordering-orphan"
+	if _, err := db.Collection(cwdAuditProjectionCollection).InsertOne(ctx, bson.M{"_id": orphanID, "sessionId": orphanID, "expires_at": time.Now().UTC().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC())
+	if err != nil || deleted != 1 {
+		t.Fatalf("orphan cleanup did not delete exactly one source-less projection: deleted=%d err=%v", deleted, err)
+	}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": sessionID}).Err(); err != nil {
+		t.Fatalf("retained source projection was cleaned up: %v", err)
+	}
+}
+
 func fa016IntegrationTarget(t *testing.T) (fa016MongoTarget, bool) {
 	uri := os.Getenv("FA016_MONGO_URI")
 	databaseName := os.Getenv("FA016_MONGO_DB")
@@ -1429,6 +1562,49 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func maxExplainMetric(value any, key string) int64 {
+	var max int64
+	var visit func(any)
+	visit = func(current any) {
+		switch typed := current.(type) {
+		case bson.M:
+			if raw, ok := typed[key]; ok {
+				switch number := raw.(type) {
+				case int32:
+					if int64(number) > max {
+						max = int64(number)
+					}
+				case int64:
+					if number > max {
+						max = number
+					}
+				case int:
+					if int64(number) > max {
+						max = int64(number)
+					}
+				case float64:
+					if int64(number) > max {
+						max = int64(number)
+					}
+				}
+			}
+			for _, item := range typed {
+				visit(item)
+			}
+		case bson.A:
+			for _, item := range typed {
+				visit(item)
+			}
+		case []any:
+			for _, item := range typed {
+				visit(item)
+			}
+		}
+	}
+	visit(value)
+	return max
 }
 
 func stringSlice(value any) []string {

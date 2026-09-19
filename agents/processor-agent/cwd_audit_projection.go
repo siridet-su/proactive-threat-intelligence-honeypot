@@ -14,9 +14,10 @@ import (
 )
 
 const (
-	cwdAuditProjectionCollection = "cwd_audit_projection"
-	cwdAuditProjectionVersion    = "cwd_audit_projection.v2"
-	cwdAuditProjectionMetaID     = "audit-directory"
+	cwdAuditProjectionCollection      = "cwd_audit_projection"
+	cwdAuditProjectionVersion         = "cwd_audit_projection.v2"
+	cwdAuditProjectionMetaID          = "audit-directory"
+	cwdAuditProjectionRepairBatchSize = 256
 	// A projection remains a bounded page/read accelerator. If a session has
 	// more distinct transition paths, the overflow bit forces authoritative
 	// source fallback for exact filters/summary while keeping this document
@@ -35,7 +36,10 @@ func cwdAuditProjectionIndexModels() []mongo.IndexModel {
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditHomeOnly", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditVisitedPaths", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
 		{Keys: bson.D{{Key: "auditPathsOverflow", Value: 1}}},
-		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+		// Projection expiry is an indexed cleanup watermark, not an independent
+		// TTL. cwd_session_state owns retention; cleanup removes this row only
+		// after the source row is gone.
+		{Keys: bson.D{{Key: "expires_at", Value: 1}}},
 	}
 }
 
@@ -46,6 +50,8 @@ func cwdStateIndexModels() []mongo.IndexModel {
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "session_id", Value: -1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionPendingGeneration", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}})},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "sessionId", Value: 1}}},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "session_id", Value: 1}}},
 		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
@@ -501,12 +507,159 @@ func (mw *MongoWriter) backfillCwdAuditProjection(ctx context.Context, retention
 		}
 		return fmt.Errorf("CWD audit event work did not converge")
 	}
+	if err := mw.repairMissingCwdAuditProjections(ctx, retention); err != nil {
+		return err
+	}
+	if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC()); err != nil {
+		return err
+	}
 	_, err = mw.db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": time.Now().UTC()}}, options.Update().SetUpsert(true))
 	if err != nil {
 		return err
 	}
 	log.Printf("CWD audit projection backfill complete")
 	return nil
+}
+
+// repairMissingCwdAuditProjections is the recovery half of the retention
+// protocol. A projection is not independently TTL-managed, but a crash,
+// operator action, or an old deployment can still leave a v2-ready source row
+// without its read model. Each pass examines at most one indexed batch per
+// canonical source field and stores a resumable cursor in the readiness meta
+// document. Repeated/concurrent passes may claim the same row; the generation
+// and history CAS operations make that duplicate work idempotent.
+func (mw *MongoWriter) repairMissingCwdAuditProjections(ctx context.Context, retention time.Duration) error {
+	marker := bson.M{}
+	if err := mw.db.Collection("cwd_audit_projection_meta").FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, options.FindOne().SetProjection(bson.M{"missingProjectionSessionCursor": 1, "missingProjectionLegacyCursor": 1})).Decode(&marker); err != nil && err != mongo.ErrNoDocuments {
+		return err
+	}
+	if err := mw.repairMissingCwdAuditProjectionField(ctx, retention, "sessionId", "missingProjectionSessionCursor", marker); err != nil {
+		return err
+	}
+	return mw.repairMissingCwdAuditProjectionField(ctx, retention, "session_id", "missingProjectionLegacyCursor", marker)
+}
+
+func missingCwdAuditProjectionQuery(field, cursor string) bson.M {
+	match := bson.M{
+		"lifecycle.status":                 "closed",
+		"auditProjectionVersion":           cwdAuditProjectionVersion,
+		"auditProjectionReadyGeneration":   bson.M{"$exists": true},
+		"auditProjectionPendingGeneration": bson.M{"$exists": false},
+		field:                              bson.M{"$type": "string", "$ne": ""},
+	}
+	if cursor != "" {
+		match[field] = bson.M{"$type": "string", "$gt": cursor}
+	}
+	return match
+}
+
+func (mw *MongoWriter) repairMissingCwdAuditProjectionField(ctx context.Context, retention time.Duration, field, cursorKey string, marker bson.M) error {
+	cursor, _ := marker[cursorKey].(string)
+	states := mw.db.Collection("cwd_session_state")
+	findBatch := func(after string) ([]bson.M, error) {
+		findOptions := options.Find().SetProjection(bson.M{"_id": 1, "sessionId": 1, "session_id": 1, "sourceIp": 1, "cwdState": 1, "lifecycle": 1, "stateSequence": 1, "stateSourceEventId": 1, "auditProjectionGeneration": 1, "auditProjectionReadyGeneration": 1, "auditProjectionVersion": 1, "expires_at": 1}).SetSort(bson.D{{Key: field, Value: 1}}).SetLimit(cwdAuditProjectionRepairBatchSize)
+		cursorResult, err := states.Find(ctx, missingCwdAuditProjectionQuery(field, after), findOptions)
+		if err != nil {
+			return nil, err
+		}
+		defer cursorResult.Close(ctx)
+		var batch []bson.M
+		if err := cursorResult.All(ctx, &batch); err != nil {
+			return nil, err
+		}
+		return batch, nil
+	}
+
+	batch, err := findBatch(cursor)
+	if err != nil {
+		return err
+	}
+	if len(batch) == 0 && cursor != "" {
+		cursor = ""
+		batch, err = findBatch(cursor)
+		if err != nil {
+			return err
+		}
+	}
+	last := cursor
+	for _, state := range batch {
+		sessionID := auditProjectionSessionID(state)
+		if sessionID == "" {
+			continue
+		}
+		var projection bson.M
+		if err := mw.db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": sessionID}, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&projection); err == nil {
+			if value, ok := state[field].(string); ok {
+				last = strings.TrimSpace(value)
+			}
+			continue
+		} else if err != mongo.ErrNoDocuments {
+			return err
+		}
+		claimed, err := mw.claimCwdAuditProjectionState(ctx, state)
+		if err != nil {
+			return err
+		}
+		if claimed != nil {
+			if err := mw.backfillCwdAuditProjectionState(ctx, claimed, retention); err != nil {
+				return err
+			}
+		}
+		if value, ok := state[field].(string); ok {
+			last = strings.TrimSpace(value)
+		}
+	}
+
+	update := bson.M{"$set": bson.M{cursorKey: last}}
+	if len(batch) == 0 {
+		update = bson.M{"$unset": bson.M{cursorKey: ""}}
+	}
+	_, err = mw.db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, update, options.Update().SetUpsert(true))
+	return err
+}
+
+// cleanupOrphanedCwdAuditProjections is intentionally source-authoritative:
+// an expired projection is deleted only after an indexed source lookup proves
+// that cwd_session_state is absent. A source row delayed by MongoDB's TTL
+// monitor therefore keeps its projection, and orphan cleanup remains bounded
+// by cwdAuditProjectionRepairBatchSize per reconciliation pass.
+func cwdAuditProjectionCleanupQuery(now time.Time) bson.M {
+	return bson.M{"expires_at": bson.M{"$lte": now}}
+}
+
+func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, now time.Time) (int64, error) {
+	projections := mw.db.Collection(cwdAuditProjectionCollection)
+	findOptions := options.Find().SetProjection(bson.M{"_id": 1, "sessionId": 1, "session_id": 1, "expires_at": 1}).SetSort(bson.D{{Key: "expires_at", Value: 1}}).SetLimit(cwdAuditProjectionRepairBatchSize)
+	rows, err := projections.Find(ctx, cwdAuditProjectionCleanupQuery(now), findOptions)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close(ctx)
+	var deleted int64
+	for rows.Next(ctx) {
+		var projection bson.M
+		if err := rows.Decode(&projection); err != nil {
+			return deleted, err
+		}
+		sessionID := auditProjectionSessionID(projection)
+		if sessionID == "" {
+			continue
+		}
+		if _, err := mw.findCwdStateByCanonicalID(ctx, sessionID); err == nil {
+			continue
+		} else if err != mongo.ErrNoDocuments {
+			return deleted, err
+		}
+		result, err := projections.DeleteOne(ctx, bson.M{"_id": projection["_id"], "expires_at": bson.M{"$lte": now}})
+		if err != nil {
+			return deleted, err
+		}
+		deleted += result.DeletedCount
+	}
+	if err := rows.Err(); err != nil {
+		return deleted, err
+	}
+	return deleted, rows.Close(ctx)
 }
 
 func (mw *MongoWriter) claimCwdAuditProjectionState(ctx context.Context, state bson.M) (bson.M, error) {

@@ -64,7 +64,9 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     await projection.createIndex({ "lifecycle.status": 1, auditHomeOnly: 1, "lifecycle.closedAt": -1, sessionId: -1 });
     await projection.createIndex({ "lifecycle.status": 1, auditVisitedPaths: 1, "lifecycle.closedAt": -1, sessionId: -1 });
     await projection.createIndex({ auditPathsOverflow: 1 });
-    await projection.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
+    // Projection expiry is a source-owned cleanup watermark. Only
+    // cwd_session_state has an independent TTL monitor.
+    await projection.createIndex({ expires_at: 1 });
     const sourceState = database.collection("cwd_session_state");
     await sourceState.createIndex({ "lifecycle.status": 1, updatedAt: -1, sessionId: -1 });
     await sourceState.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, sessionId: -1 });
@@ -320,17 +322,14 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     }
   });
 
-  it("keeps the projection retention contract explicit", async () => {
+  it("keeps the source-owned projection retention contract explicit", async () => {
     const indexes = await projection.listIndexes().toArray();
-    const ttl = indexes.find((index) => index.key?.expires_at === 1);
-    expect(ttl?.expireAfterSeconds).toBe(0);
+    const expiryIndex = indexes.find((index) => index.key?.expires_at === 1);
+    expect(expiryIndex?.expireAfterSeconds).toBeUndefined();
     const expiredId = "expired-projection";
     await projection.insertOne({ _id: expiredId, sessionId: expiredId, lifecycle: { status: "closed", closedAt: new Date() }, cwdState: { path: "/tmp" }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date(Date.now() - 60_000) });
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      if (!(await projection.findOne({ _id: expiredId }))) return;
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    throw new Error("projection TTL did not remove the expired document within the isolated test bound");
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    expect(await projection.findOne({ _id: expiredId })).not.toBeNull();
   }, 15_000);
 
   it("uses the explicit migration fallback for canonical and legacy source documents", async () => {

@@ -241,7 +241,7 @@ func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
 	}
 }
 
-func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndTTL(t *testing.T) {
+func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndSourceOwnedCleanup(t *testing.T) {
 	indexes := cwdAuditProjectionIndexModels()
 	want := []bson.D{
 		{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
@@ -257,8 +257,8 @@ func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndTTL(t *testing.T) {
 			if ok && sameIndexKeys(keys, expected) {
 				found = true
 				if sameIndexKeys(expected, bson.D{{Key: "expires_at", Value: 1}}) {
-					if index.Options == nil || index.Options.ExpireAfterSeconds == nil || *index.Options.ExpireAfterSeconds != 0 {
-						t.Fatal("projection expires_at index must use expireAfterSeconds=0")
+					if index.Options != nil && index.Options.ExpireAfterSeconds != nil {
+						t.Fatal("projection expires_at index must not be a TTL index")
 					}
 				}
 			}
@@ -318,5 +318,8 @@ func TestTTLIndexCompatibilityRejectsNonTTLIndex(t *testing.T) {
 	}
 	if !indexOptionsCompatible(&existingIndex{Name: "expires_at_1", ExpireAfterSeconds: &ttl}, wanted) {
 		t.Fatal("valid TTL index was rejected")
+	}
+	if indexOptionsCompatible(&existingIndex{Name: "expires_at_1", ExpireAfterSeconds: &ttl}, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}}) {
+		t.Fatal("retired TTL index was accepted for a source-owned cleanup watermark")
 	}
 }

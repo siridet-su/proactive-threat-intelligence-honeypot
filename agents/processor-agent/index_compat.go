@@ -76,8 +76,9 @@ func matchingIndex(existing []existingIndex, wanted bson.D) *existingIndex {
 }
 
 func indexOptionsCompatible(existing *existingIndex, wanted mongo.IndexModel) bool {
-	if wanted.Options == nil || wanted.Options.ExpireAfterSeconds == nil {
-		return true
+	wantedTTL := wanted.Options != nil && wanted.Options.ExpireAfterSeconds != nil
+	if !wantedTTL {
+		return existing.ExpireAfterSeconds == nil
 	}
 	return existing.ExpireAfterSeconds != nil && *existing.ExpireAfterSeconds == *wanted.Options.ExpireAfterSeconds
 }
