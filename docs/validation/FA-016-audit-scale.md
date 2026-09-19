@@ -59,23 +59,40 @@ lifecycle time plus retention.
 the projection collection has no TTL index. Therefore a projection cannot be
 TTL-deleted while its source row is retained, regardless of MongoDB's
 cross-collection TTL scheduling. Reconciliation runs at startup and every 15
-seconds. It examines at most 256 v2-ready source rows per canonical and legacy
-session-ID cursor, checks the projection by canonical `_id`, claims missing
-work through the existing generation CAS, and rebuilds exact current state,
+seconds. Before a v2-ready generation is published or treated as converged,
+the source row is normalized under an identity/generation/state-order guard:
+an eligible closed row with a missing or non-Date expiry receives exactly
+`lifecycle.closedAt + retention`, while an already valid closed expiry is never
+moved forward or backward. This normalization also runs when an otherwise
+ready projection already exists.
+
+Missing-projection repair examines at most 256 v2-ready source rows per
+canonical and legacy session-ID cursor. Each cursor stores the exact raw
+session-field value and `_id` in the same `(raw field, _id)` order used by the
+query; invalid/whitespace rows advance the cursor before being skipped.
+Cursor writes use an exact compare-and-set filter, so concurrent passes may
+duplicate bounded work but cannot regress progress. The cursor wraps after an
+end-of-range scan so rows inserted before a saved boundary are eventually
+examined. Repair checks the projection by canonical `_id`, claims missing work
+through the existing generation CAS, and rebuilds exact current state,
 transition paths, event count, lifecycle, and expiry facts from authoritative
-source/history. The resumable cursors are stored in the readiness metadata;
-duplicate and concurrent passes are safe because projection history and source
-readiness retain their existing CAS rules.
+source/history.
 
 Each reconciliation pass also examines at most 256 expired projection
-watermarks through `{ expires_at: 1 }`. It deletes a projection only after an
-indexed canonical/legacy source lookup proves `cwd_session_state` is absent;
-source TTL lag therefore retains the projection, and orphan cleanup converges
-without permanent projection documents. This is the exact invariant:
+watermarks through a resumable `(expires_at, _id)` keyset cursor backed by the
+compound index. The cursor advances for retained source-backed rows and wraps
+at the end, so a retained head cannot starve later orphans. It deletes a
+projection only after an indexed canonical/legacy source lookup proves
+`cwd_session_state` is absent, repeats that lookup immediately before a
+`(_id, expires_at <= now)` delete CAS, and keeps the watermark ordinary until
+the source is gone. Duplicate and concurrent passes are safe because the
+cursor CAS, generation CAS, history CAS, source recheck, and delete predicate
+all tolerate retries. This is the exact invariant:
 
-> A source session is eligible and ready only when its generation is clean and
-> its required projection is durable; a retained source row never loses its
-> projection to an independent TTL monitor, and any missing projection is
+> A source session is eligible and ready only when its generation is clean, its
+> source `expires_at` is a valid BSON Date, and its required projection is
+> durable with the same retention boundary; a retained source row never loses
+> its projection to an independent TTL monitor, and any missing projection is
 > claimed and reconstructed by the bounded startup/periodic repair cursor
 > before that source generation is republished ready.
 
@@ -125,7 +142,7 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
-- `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "sessionId": 1 }` and the matching `session_id` index for bounded missing-projection repair cursors;
+- `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "sessionId": 1, "_id": 1 }` and the matching `session_id` index for bounded raw-keyset missing-projection repair cursors;
 - `cwd_session_state`: `{ "auditCanonicalSessionId": 1 }` for bounded source-presence checks during orphan cleanup;
 - `cwd_session_state`: `{ "sessionId": 1 }` and `{ "session_id": 1 }` for bounded legacy source-presence compatibility checks;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
@@ -133,7 +150,7 @@ The processor provisions and verifies:
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditVisitedPaths": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "auditPathsOverflow": 1 }` for bounded-readiness checks;
-- `cwd_audit_projection`: `{ "expires_at": 1 }` without `expireAfterSeconds`, used only as the bounded orphan-cleanup watermark;
+- `cwd_audit_projection`: `{ "expires_at": 1 }` and `{ "expires_at": 1, "_id": 1 }` without `expireAfterSeconds`, used only as the bounded orphan-cleanup watermark and its stable keyset order;
 - `cwd_events`: partial `{ "auditProjectionPending": 1, "_id": 1 }` for the bounded event outbox probe;
 - canonical and legacy `cwd_events` session compound indexes, canonical/legacy pending-event indexes, plus its TTL index.
 
@@ -288,24 +305,67 @@ Vitest files, 463 tests, and 14 skipped tests before edits. The root-level
 This continuation removes the independent TTL monitor from
 `cwd_audit_projection`. The source-state TTL remains authoritative, while the
 projection expiry index is a bounded cleanup watermark. Startup and the 15
-second production reconciliation loop now use resumable 256-row canonical and
-legacy source cursors to repair v2-ready rows whose projection is absent,
-without a close retry. Orphan cleanup examines at most 256 expired projection
-rows and deletes only after an indexed source lookup proves the source is
-gone. Existing event outbox ownership, generation CAS, history CAS, and
-bounded projection-backed dashboard item/count/summary paths are unchanged.
+second production reconciliation loop now use resumable 256-row raw keyset
+cursors `(sessionId|session_id, _id)` to repair v2-ready rows whose projection
+is absent, without a close retry. The same pass normalizes missing/invalid
+source expiry to the deterministic closedAt-plus-retention boundary, including
+rows whose ready projection already exists. Orphan cleanup uses a resumable
+`(expires_at, _id)` cursor, advances past retained sources, wraps safely, and
+deletes only after an indexed source lookup and immediate delete CAS prove the
+source is gone. Existing event outbox ownership, generation CAS, history CAS,
+and bounded projection-backed dashboard item/count/summary paths are unchanged.
 
-The new production Mongo integration test inserts a closed v2 source and
-matching ready projection with no pending markers, deletes only the projection,
-runs two concurrent production reconciliation passes, and verifies one exact
-projection containing current path, both transition paths, event count,
-lifecycle, and the original expiry. It verifies the ready generation is
-republished, explains both the 256-row repair and cleanup queries with
-`executionStats` and rejects `COLLSCAN`/missing `IXSCAN`, and verifies orphan
-cleanup removes a source-less projection while retaining the repaired source
-projection. The dashboard integration now verifies projection expiry is not a
-TTL deletion contract. The isolated harness passed all 12 dashboard tests and
-executed all 11 `TestFA016*` processor tests plus 2 target-safety tests, with
-none skipped.
+The production Mongo integration tests directly cover projection-first removal
+with a ready source and no pending markers, invalid source expiry with an
+already-existing v2 projection, canonical/legacy/padded identifiers, more than
+256 eligible rows, padded boundary values, repeated raw session values,
+whitespace-only rows, duplicate/concurrent repair, cleanup starvation behind
+256 retained projections, concurrent cleanup, and source recreation between
+cleanup checks. They verify exact source and projection expiry, current path,
+transition paths, event count, lifecycle, logical one-projection results, and
+eventual cleanup after source removal. `executionStats` assertions reject
+`COLLSCAN` and bound documents/keys for both repair and cleanup plans. The
+fixture genuinely creates the retired projection TTL index, then verifies
+`ensureIndexes()` removes the TTL option, preserves documents, and is
+idempotent. The dashboard integration also verifies the resulting projection
+expiry index is not a TTL deletion contract. The isolated harness passed all 12
+dashboard tests and executed all 11 `TestFA016*` processor tests plus 2
+target-safety tests, with none skipped.
+
+FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
+
+## Source-expiry and stable-cursor remediation evidence (2026-09-20)
+
+This continuation started at exact HEAD
+`e575ede761dfeb4c8fad74b7d735a4de5b675eeb` on
+`feat/cwd-filesystem-telemetry`. The working tree was clean; `git fetch origin
+--prune` succeeded; `origin/main`
+(`4390d886b6fc18420b224464a553e4bfeaab0d8a`) was already the merge base, so no
+merge was required. The dashboard baseline passed before edits with 22 Vitest
+files, 463 passing tests, and 14 skipped tests.
+
+The source TTL authority is now normalized before a ready generation is
+treated as converged. Missing or invalid source `expires_at` is set under
+`_id`, raw source identity, lifecycle, generation, and state-order guards to
+`closedAt + retention`; valid closed boundaries are preserved exactly. This
+also repairs an existing v2-ready projection rather than checking only for a
+missing projection. Repair scans use raw `(sessionId|session_id, _id)` keysets,
+store the same BSON cursor document, advance over malformed rows, use CAS
+marker updates, and wrap at end-of-range. Orphan cleanup uses a CAS-owned
+`(expires_at, _id)` cursor, advances across retained sources, wraps, rechecks
+source presence immediately before delete, and retains only source-backed
+projections.
+
+The production integration suite directly exercises the projection-first
+retention race, v2-ready invalid expiry, v1/unversioned/legacy/canonical and
+padded identifiers, more than 256 rows over multiple batches, padded boundary
+values, repeated raw session values, 256 whitespace rows, duplicate and
+concurrent reconcilers, cleanup starvation after 256 retained rows, concurrent
+cleanup, source recreation, eventual cleanup after source removal, and the
+retired-TTL-to-ordinary-index migration. Explain-statistics assertions verify
+the intended raw-field/`_id` and `expires_at`/`_id` indexes, no `COLLSCAN`, and
+at most 256 documents and keys examined per bounded batch. The isolated
+harness passed 12/12 dashboard integration tests and all 11 `TestFA016*`
+processor tests plus 2 target-safety tests, with none skipped.
 
 FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.

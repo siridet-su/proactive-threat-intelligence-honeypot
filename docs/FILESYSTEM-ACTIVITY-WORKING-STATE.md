@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity live working state
 status: active
-last_updated: 2026-09-19
+last_updated: 2026-09-20
 owner: Dashboard Filesystem workstream
 ---
 
@@ -139,7 +139,9 @@ isolated MongoDB command passed its 1,900-session dashboard and processor
 coverage, including v1-to-v2 migration, monotonic interleavings, event-outbox
 close races, rejected-observation ownership, old canonical/legacy writers, and
 scoped overflow coverage, with separate item/count/summary and retention-repair
-execution bounds recorded there. FA-016
+execution bounds recorded there. Retention coverage now also includes source
+expiry normalization, raw stable repair keysets, resumable orphan cleanup, and
+TTL-ordering/source-recreation races. FA-016
 remains IN PROGRESS pending final re-audit; FS-007 remains PARTIAL.
 
 The current repository validation is the independent final FA-013 audit dated
@@ -175,3 +177,4 @@ claims about the 2026-09-15 historical baseline.
 | 2026-09-15 | Created the live working state from the Filesystem Activity code/UX/logic review. | Historical baseline recorded above; its clean-tree statement applies only to that review point. |
 | 2026-09-19 | Continued only FA-016: replaced the non-atomic source event counter with the indexed event outbox marker, closed failed-upsert/crash/concurrent-reconciler ownership gaps, and added exact dashboard pending-marker plan coverage. | Clean preflight at `7ef06f1`; fetch succeeded; `origin/main` `4390d88` was already an ancestor; implementation commits `53c9cc6` and `bd351b1`; isolated integration passed 12 dashboard tests and executed 11 production FA-016 Mongo tests plus 2 loopback-target safety tests with none skipped; full dashboard validation and all five Go modules passed. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-19 | Continued only FA-016: made source-state TTL authoritative for projection retention, added bounded resumable repair and source-checked orphan cleanup, and covered projection-first deletion with concurrent reconciliation and exact projection facts. | Clean preflight at `5036d03`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed before edits; isolated retention integration passed with no skipped FA-016 cases. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
+| 2026-09-20 | Continued only FA-016: normalized eligible source expiry, replaced trimmed repair cursors with raw `(session field, _id)` keysets, and made orphan cleanup resumable with source-recreation rechecks. | Preflight started clean at `e575ede`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed; production Mongo coverage passed all required retention/cursor cases with no skips. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
