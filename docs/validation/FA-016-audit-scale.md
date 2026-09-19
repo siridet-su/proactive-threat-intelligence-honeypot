@@ -131,8 +131,8 @@ accepted steady-state bound.
 The readiness fixture separately provisions the production source and event
 indexes and records `executionStats` for the required branches: fully
 converged `1,900` rows examined `0` documents and keys; the indexed pending
-event probe examined `0/0` for zero pending events, `0/0` for one pending event,
-and `0/0` for multiple pending events under its limit-one existence contract;
+event probe examined `0/0` for zero pending events, `0/1` for one pending event,
+and `0/1` for multiple pending events under its limit-one existence contract;
 one pending v2 row examined `1/1`; one stale-version migration row examined
 `1/1`; and malformed rows remained outside the eligible contract with `2/2`
 bounded examination in the combined pending probe. All plans were

@@ -214,9 +214,9 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(maxMetric(multiplePendingEvents, "totalDocsExamined")).toBeLessThanOrEqual(1);
     await events.deleteMany({});
     process.stderr.write(`FA016_READINESS events ${JSON.stringify({
-      zero: maxMetric(noPendingEvents, "totalDocsExamined"),
-      one: maxMetric(onePendingEvent, "totalDocsExamined"),
-      multiple: maxMetric(multiplePendingEvents, "totalDocsExamined"),
+      zero: { docsExamined: maxMetric(noPendingEvents, "totalDocsExamined"), keysExamined: maxMetric(noPendingEvents, "totalKeysExamined") },
+      one: { docsExamined: maxMetric(onePendingEvent, "totalDocsExamined"), keysExamined: maxMetric(onePendingEvent, "totalKeysExamined") },
+      multiple: { docsExamined: maxMetric(multiplePendingEvents, "totalDocsExamined"), keysExamined: maxMetric(multiplePendingEvents, "totalKeysExamined") },
     })}\n`);
 
     await states.insertOne({
