@@ -39,7 +39,7 @@ def test_production_policy_is_hash_bound_and_bounded() -> None:
     assert policy.version == SOURCE_IP_PRODUCTION_POLICY_VERSION
     assert policy.continuous_processing is True
     assert policy.minimum_refresh_interval_seconds == 86_400
-    assert policy.max_distinct_source_ips_per_utc_day == 10
+    assert policy.max_distinct_source_ips_per_utc_day == 100
     assert policy.canonical_mongodb_enrichment_record_write is False
     assert set(policy.authorized_providers) == {"abuseipdb", "shodan_official"}
     assert policy.authorizes_provider("shodan_official")

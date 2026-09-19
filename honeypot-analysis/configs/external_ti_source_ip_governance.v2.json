@@ -1,7 +1,7 @@
 {
   "schema_version": "external_ti_source_ip_governance.v2",
   "policy_id": "honeypot-thesis-data-lifecycle.source-ip.external-ti",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "status": "ACTIVE_BOUNDED_PRODUCTION",
   "parent_policy": {
     "policy_id": "honeypot-thesis-data-lifecycle",
@@ -98,7 +98,7 @@
   },
   "request_budgets": {
     "minimum_refresh_interval_seconds": 86400,
-    "max_distinct_source_ips_per_utc_day": 10,
+    "max_distinct_source_ips_per_utc_day": 100,
     "max_attempts_per_provider_per_source_ip_per_window": 1,
     "retries": 0,
     "negative_result_cache_seconds": 86400,
@@ -121,8 +121,9 @@
     "cached_context_may_expire_naturally": true
   },
   "activation": {
-    "activation_scope": "bounded production lookups for newly observed eligible source IPs",
+    "activation_scope": "bounded production lookups for newly observed eligible source IPs with a maximum of 100 distinct targets per UTC day",
     "owner_authorization": "explicit owner direction to activate useful ETI without Censys",
+    "policy_revision_reason": "owner-authorized removal of the former 10-target test cap; durable provider proof remains at-most-once per source/provider campaign window",
     "runtime_service_config_requires_hash_binding": true,
     "health_check_and_rollback_required": true
   }
