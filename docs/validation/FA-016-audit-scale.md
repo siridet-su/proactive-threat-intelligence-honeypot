@@ -49,10 +49,41 @@ reconciliation.
 
 Accepted active observations advance both source and projection expiry. Stale
 observations do not change state or expiry; late events after close never move
-the closed expiry boundary. Close reconstructs a missing/TTL-deleted
-projection from source state and history. Missing legacy expiry is derived from
-closed lifecycle time plus retention. The processor repairs an existing
-`{expires_at:1}` index when it lacks `expireAfterSeconds: 0`.
+the closed expiry boundary. Missing legacy expiry is derived from closed
+lifecycle time plus retention.
+
+### Deterministic retained-projection protocol
+
+`cwd_session_state` is the sole TTL authority for a retained CWD session.
+`cwd_audit_projection.expires_at` is an ordinary indexed cleanup watermark;
+the projection collection has no TTL index. Therefore a projection cannot be
+TTL-deleted while its source row is retained, regardless of MongoDB's
+cross-collection TTL scheduling. Reconciliation runs at startup and every 15
+seconds. It examines at most 256 v2-ready source rows per canonical and legacy
+session-ID cursor, checks the projection by canonical `_id`, claims missing
+work through the existing generation CAS, and rebuilds exact current state,
+transition paths, event count, lifecycle, and expiry facts from authoritative
+source/history. The resumable cursors are stored in the readiness metadata;
+duplicate and concurrent passes are safe because projection history and source
+readiness retain their existing CAS rules.
+
+Each reconciliation pass also examines at most 256 expired projection
+watermarks through `{ expires_at: 1 }`. It deletes a projection only after an
+indexed canonical/legacy source lookup proves `cwd_session_state` is absent;
+source TTL lag therefore retains the projection, and orphan cleanup converges
+without permanent projection documents. This is the exact invariant:
+
+> A source session is eligible and ready only when its generation is clean and
+> its required projection is durable; a retained source row never loses its
+> projection to an independent TTL monitor, and any missing projection is
+> claimed and reconstructed by the bounded startup/periodic repair cursor
+> before that source generation is republished ready.
+
+Close still reconstructs immediately for the normal close path, but recovery
+does not depend on another close event. A deliberately deleted projection is
+the integration-test crash/TTL-first simulation: reconciliation reconstructs
+it before the ready-path assertion. No cross-collection TTL ordering is
+claimed.
 
 Backfill checks every history cursor error before accepting a result, selects
 separate bounded generation-pending and v1/unversioned cutover branches,
@@ -94,18 +125,19 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
+- `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "sessionId": 1 }` and the matching `session_id` index for bounded missing-projection repair cursors;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditVisitedPaths": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "auditPathsOverflow": 1 }` for bounded-readiness checks;
-- `cwd_audit_projection`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
+- `cwd_audit_projection`: `{ "expires_at": 1 }` without `expireAfterSeconds`, used only as the bounded orphan-cleanup watermark;
 - `cwd_events`: partial `{ "auditProjectionPending": 1, "_id": 1 }` for the bounded event outbox probe;
 - canonical and legacy `cwd_events` session compound indexes, canonical/legacy pending-event indexes, plus its TTL index.
 
 Go unit tests assert exact key patterns/options. Integration setup first creates
-an incorrect non-TTL projection expiry index and verifies the authoritative
-owner repairs it.
+the retired projection TTL index and verifies the authoritative owner converts
+it to the non-TTL cleanup watermark.
 
 ## Reproducible explain evidence
 
@@ -155,8 +187,9 @@ methods are exercised. Coverage includes 1,900 sessions, canonical/legacy
 records, equal timestamps, complete keyset traversal, cursor exhaustion and
 invalid cursors, exact totals/distinct paths, `hideHome`, target path, session
 ID, source IP, CWD search, late history, duplicate retries, missing expiry,
-TTL deletion, incorrect TTL repair, bounded path storage, migration fallback,
-and item/count/summary/filtered execution plans.
+source-owned cleanup, bounded missing-projection repair, retired-TTL index
+migration, bounded path storage, migration fallback, and item/count/summary/
+filtered execution plans.
 
 No live/production database or manual response-agent validation was used. The
 outstanding manual response-agent gate remains unrelated and recorded
@@ -238,3 +271,39 @@ modules. `git diff --check` passed; the isolated wrapper left no
 Implementation commits are `53c9cc6` and `bd351b1`; tracker/evidence updates
 are in `912784f` and `36fa589`. FA-016 remains `IN PROGRESS` and
 FS-007 remains `PARTIAL` pending re-audit.
+
+## Retention-ordering remediation evidence (2026-09-19)
+
+Preflight for this continuation started clean on
+`5036d03be131572de32476a9422d9f022c58858a`. The branch was
+`feat/cwd-filesystem-telemetry`; `git fetch origin --prune` succeeded;
+`origin/main` was `4390d886b6fc18420b224464a553e4bfeaab0d8a`, already the merge
+base, so no merge was required. The required dashboard baseline passed 22
+Vitest files, 463 tests, and 14 skipped tests before edits. The root-level
+`npm test` command remains inapplicable because this repository has no root
+`package.json`; the dashboard package is `dashboard-v2`.
+
+This continuation removes the independent TTL monitor from
+`cwd_audit_projection`. The source-state TTL remains authoritative, while the
+projection expiry index is a bounded cleanup watermark. Startup and the 15
+second production reconciliation loop now use resumable 256-row canonical and
+legacy source cursors to repair v2-ready rows whose projection is absent,
+without a close retry. Orphan cleanup examines at most 256 expired projection
+rows and deletes only after an indexed source lookup proves the source is
+gone. Existing event outbox ownership, generation CAS, history CAS, and
+bounded projection-backed dashboard item/count/summary paths are unchanged.
+
+The new production Mongo integration test inserts a closed v2 source and
+matching ready projection with no pending markers, deletes only the projection,
+runs two concurrent production reconciliation passes, and verifies one exact
+projection containing current path, both transition paths, event count,
+lifecycle, and the original expiry. It verifies the ready generation is
+republished, explains both the 256-row repair and cleanup queries with
+`executionStats` and rejects `COLLSCAN`/missing `IXSCAN`, and verifies orphan
+cleanup removes a source-less projection while retaining the repaired source
+projection. The dashboard integration now verifies projection expiry is not a
+TTL deletion contract. The isolated harness passed all 12 dashboard tests and
+executed all 11 `TestFA016*` processor tests plus 2 target-safety tests, with
+none skipped.
+
+FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
