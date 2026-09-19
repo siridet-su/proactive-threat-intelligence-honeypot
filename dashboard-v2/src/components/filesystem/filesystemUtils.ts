@@ -835,7 +835,13 @@ export function calloutsForGraph(
   for (const session of sessions) {
     if (!session.cwdState.path) continue;
     let effectivePath: string | null = session.cwdState.path;
+    const visitedPaths = new Set<string>();
     while (effectivePath && !graphNodeByPath.has(effectivePath)) {
+      if (visitedPaths.has(effectivePath)) {
+        effectivePath = null;
+        break;
+      }
+      visitedPaths.add(effectivePath);
       const slashIndex = effectivePath.lastIndexOf("/");
       effectivePath = slashIndex <= 0 ? (slashIndex === 0 ? "/" : null) : effectivePath.slice(0, slashIndex);
     }

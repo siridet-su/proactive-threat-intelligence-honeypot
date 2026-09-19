@@ -382,6 +382,43 @@ narrow allowlist is the intentionally intercepted HTTP 500 for the
 `error-hop` recovery scenario. Direct audit, filter, session, and hop URLs are
 opened under this policy and passed without hydration/runtime errors.
 
+### FA-013 Scenario C lifecycle remediation (2026-09-19)
+
+The expanded Scenario C exposed a production lifecycle defect at the final
+Back from Audit to the canonical blank Live entry. Instrumentation of the
+production page established that browser traversal itself completed: the URL
+was `/filesystem-activity`, `page.goBack()` returned the expected same-document
+null response, and no page error or unexpected console error occurred. The
+Live restoration then rendered with the previous Audit session still selected.
+Its retained session path (`/var/log`) was not represented in the intercepted
+empty topology node map. `calloutsForGraph` walked that path to `/`, then kept
+walking `/` forever because no represented ancestor existed. That main-thread
+loop made the Live DOM and browser operations appear hung. The stale selection
+also left passive URL synchronization able to compete with the same-document
+restoration, so it was an independent ownership violation even when the graph
+was complete.
+
+The production fix has two parts. `FilesystemNavigationCoordinator` now treats
+a blank Live popstate as a session-free scope: it defers the domain reset until
+the popstate transaction applies, clears the selected/requested/expired Audit
+session and hop/history state, and only then marks the transaction terminal.
+Passive synchronization recognizes a completed restoration whose state already
+matches the popped target and performs no history write; passive replacements
+preserve Next.js app-router history state. User-driven navigation remains the
+only path that pushes an intentional entry. Separately, the topology ancestor
+walk now tracks visited paths and drops a source when no represented ancestor
+exists, guaranteeing termination.
+
+The regression suite includes a real Chromium production sequence
+`Live -> Audit -> Back -> Live -> Forward -> Audit`, exact URL and tab/UI
+assertions, no push or non-canonical replacement feedback after Back, and
+page-error enforcement. The coordinator test proves that a blank Live popstate
+clears a selected Audit session before passive synchronization and emits zero
+replacement writes; the layout test proves orphan topology paths terminate.
+The complete Scenario C and the accepted same-document delayed retained-session
+A/B race remain in the browser suite. FA-013 remains `IN PROGRESS` pending
+final re-audit; FA-014 and later items remain `TODO` and were not started.
+
 Browser portability and isolation: `playwright.config.mjs` defaults to the
 pinned Playwright-managed Chromium. Machines that require a system browser may
 set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; the reproducible managed install is
@@ -391,26 +428,26 @@ MongoDB, or response agents, and writes Playwright output to
 `/tmp/proactive-threat-intelligence-fa013-playwright` so browser reports do not
 dirty the repository.
 
-Validation recorded for this follow-up: from `dashboard-v2`, `npm test` passed
-22 files with 458 passing and 2 skipped tests (460 total), and
+Validation recorded for this remediation: from `dashboard-v2`, `npm test`
+passed 22 files with 460 passing and 2 skipped tests (462 total), and the
+focused minimal Chromium regression passed in 5.5 seconds. The complete
+Scenario C passed in 10.6 seconds, and
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`
-passed 5 Chromium tests in 25.9 seconds. `npm run lint` passed with 0 errors
-and 0 warnings; `npm run build` passed TypeScript, static generation, and route
-optimization; `git diff --check` passed; and
+passed all 6 Chromium tests in 27.6 seconds. `npm run lint` passed with 0
+errors and 0 warnings; `npm run build` passed TypeScript, static generation,
+and route optimization; `git diff --check` passed; and
 `go test -count=1 ./...` passed in each of the five Go modules
 (`collector-agent`, `hardware-agent`, `processor-agent`, `response-agent`, and
 `ti-worker`). The browser command is the repository's `npm run test:browser`
 script; this environment used the documented explicit system-browser override
 because its Playwright-managed binary is not installed. Current preflight began
-at `bee351b6195d2c44b831a5faa5c0204d138af33d` on
+at `da2822960fea66b060540bb4c44d3f76c78949a0` on
 `feat/cwd-filesystem-telemetry` with a clean tree. `git fetch origin --prune`
-failed exactly with `git@github.com: Permission denied (publickey).` and
-`fatal: Could not read from remote repository.`; the existing local
-`origin/main` (`4e90071c788ec7f1d61b4756ed527a445d993973`) was already an
-ancestor of HEAD, so no merge was required and the remote was not claimed
-current. No manual/live validation was performed. FA-013 remains `IN PROGRESS`
-pending audit.
-FA-014 and later items remain `TODO` and were not started.
+succeeded; `origin/main` was already an ancestor of HEAD, so no merge was
+required. No manual/live validation was performed. The repository contains no
+`test-results` or `playwright-report` directories. FA-013 remains `IN PROGRESS`
+pending final re-audit. FA-014 and later items remain `TODO` and were not
+started.
 
 ## Required validation gate
 

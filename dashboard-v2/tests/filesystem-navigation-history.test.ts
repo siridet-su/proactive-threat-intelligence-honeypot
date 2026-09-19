@@ -512,6 +512,34 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     expect(pushStateSpy.mock.calls[0]?.[2]).toBe("/filesystem-activity?view=audit&sessionId=sess-2");
   });
 
+  it("Scenario 9b: Blank Live popstate clears the audit scope before passive sync can rewrite it", async () => {
+    const {
+      navCoordinator,
+      replaceStateSpy,
+      resetRequestedHopState,
+      resetHistory,
+      getState,
+    } = setupCoordinatorHarness("/filesystem-activity?view=audit&sessionId=sess-1&hop=hop-1");
+
+    replaceStateSpy.mockClear();
+    navCoordinator.handlePopState("");
+    await Promise.resolve();
+
+    expect(getState()).toMatchObject({
+      viewMode: "live",
+      selectedSessionId: null,
+      selectedHistoryEventId: null,
+      requestedHop: null,
+      requestedSessionId: null,
+    });
+    expect(resetRequestedHopState).toHaveBeenCalledTimes(1);
+    expect(resetHistory).toHaveBeenCalledTimes(1);
+
+    navCoordinator.synchronizeUrlState();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("");
+  });
+
   // =========================================================================
   // Scenario 10: Popstate to a delayed retained-session lookup keeps the popped URL unchanged while the request is pending
   // =========================================================================

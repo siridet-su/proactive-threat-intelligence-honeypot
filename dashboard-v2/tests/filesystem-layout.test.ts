@@ -242,6 +242,15 @@ describe("calloutsForGraph render limits", () => {
     expect(result.length).toBe(15);
   });
 
+  it("drops a source whose path has no represented topology ancestor", () => {
+    const result = calloutsForGraph(
+      [makeSession("sess-orphan", "192.0.2.44", "/var/log")],
+      new Map(),
+    );
+
+    expect(result).toEqual([]);
+  });
+
   it("prioritizes selectedSessionId so its callout is never omitted even if sorted outside top limit", () => {
     // 10 sessions. 10.0.0.99 sorts last alphabetically.
     const sessions = [

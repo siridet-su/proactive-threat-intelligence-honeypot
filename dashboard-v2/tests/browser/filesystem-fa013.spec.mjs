@@ -248,6 +248,42 @@ async function selectTargetPath(page) {
 }
 
 test.describe("FA-013 real-browser evidence", () => {
+  test("production minimal: Live -> Audit -> Back -> Live -> Forward -> Audit", async ({ page }) => {
+    monitorBrowserFailures(page);
+    await installApiFixtures(page);
+    await page.addInitScript(() => {
+      window.__fa013HistoryWrites = [];
+      for (const method of ["pushState", "replaceState"]) {
+        const original = window.history[method];
+        window.history[method] = function (...args) {
+          window.__fa013HistoryWrites.push({ method, url: args[2] ?? null });
+          return original.apply(this, args);
+        };
+      }
+    });
+    await page.goto("/filesystem-activity");
+    await expect(page.getByRole("tab", { name: "Live Topology" })).toBeVisible({ timeout: 15_000 });
+    await page.evaluate(() => { window.__fa013HistoryWrites.length = 0; });
+    await page.getByRole("tab", { name: "Session Audit & Replay" }).evaluate((element) => element.click());
+    await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toBeVisible();
+    await expect(page).toHaveURL("/filesystem-activity?view=audit&sessionId=live-session");
+    expect(await page.evaluate(() => window.__fa013HistoryWrites.filter(({ method }) => method === "pushState"))).toHaveLength(1);
+    await page.evaluate(() => { window.__fa013HistoryWrites.length = 0; });
+    await page.goBack();
+    await expect(page.getByRole("tab", { name: "Live Topology" })).toBeVisible({ timeout: 15_000 });
+    await expect(page).toHaveURL("/filesystem-activity");
+    const writesAfterBack = await page.evaluate(() => window.__fa013HistoryWrites);
+    expect(writesAfterBack.filter(({ method }) => method === "pushState")).toEqual([]);
+    expect(writesAfterBack.filter(({ method, url }) => method === "replaceState" && url !== "/filesystem-activity")).toEqual([]);
+    await expect(page.getByRole("toolbar", { name: "Global filesystem controls" })).toBeVisible();
+    await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toHaveCount(0);
+    await expect(page.getByText("No observed working directories yet", { exact: true })).toBeVisible();
+    await page.goForward();
+    await expect(page.getByRole("tab", { name: "Session Audit & Replay", selected: true })).toBeVisible();
+    await expect(page).toHaveURL("/filesystem-activity?view=audit&sessionId=live-session");
+    await assertNoBrowserFailures(page);
+  });
+
   test("A: the real FilesystemActivity owner performs scoped remote pagination and discards stale pages", async ({ page }) => {
     const fixtures = await openAuditPage(page);
     await page.getByRole("button", { name: /Exclude home-only/ }).click();

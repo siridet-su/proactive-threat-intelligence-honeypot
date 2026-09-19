@@ -260,7 +260,10 @@ export class FilesystemNavigationCoordinator {
       // Explicit user navigation invalidates any pending popstate transaction
       this.activeTransaction = null;
     } else {
-      window.history.replaceState(null, "", targetUrl);
+      // Passive reconciliation must preserve Next.js' current app-router
+      // state. Passing null makes Next treat the replacement as an external
+      // history mutation while a same-document traversal may be in flight.
+      window.history.replaceState(window.history.state, "", targetUrl);
     }
     return true;
   }
@@ -585,12 +588,16 @@ export class FilesystemNavigationCoordinator {
       targetHopId: effectiveHop,
     });
 
-    // Synchronously update view & filter state
-    this.options.setViewMode(nextView);
-    this.options.setHideHomeOnly(Boolean(parsed.hideHome));
-    this.options.setTargetPathFilter(parsed.targetPath ?? null);
-    this.options.setRequestedHop(effectiveHop);
-    this.options.setSelectedHistoryEventId(effectiveHop);
+    const deferLiveRestoration = nextView === "live" && !parsed.sessionId;
+    if (!deferLiveRestoration) {
+      // Synchronously update view & filter state for audit restoration and
+      // retain the existing pending-lookup semantics.
+      this.options.setViewMode(nextView);
+      this.options.setHideHomeOnly(Boolean(parsed.hideHome));
+      this.options.setTargetPathFilter(parsed.targetPath ?? null);
+      this.options.setRequestedHop(effectiveHop);
+      this.options.setSelectedHistoryEventId(effectiveHop);
+    }
 
     if (parsed.sessionId) {
       this.options.setRequestedSessionId(parsed.sessionId);
@@ -633,12 +640,28 @@ export class FilesystemNavigationCoordinator {
         this.markTransactionTerminal(txId);
       }
     } else {
-      this.options.setRequestedSessionId(null);
-      this.options.setExpiredSessionId(null);
-      if (nextView === "audit") {
-        this.options.setSelectedSessionId(null);
-      }
-      this.markTransactionTerminal(txId);
+      queueMicrotask(() => {
+        if (this.activeTransaction?.id !== txId) return;
+        this.options.setViewMode(nextView);
+        this.options.setHideHomeOnly(Boolean(parsed.hideHome));
+        this.options.setTargetPathFilter(parsed.targetPath ?? null);
+        this.options.setRequestedHop(effectiveHop);
+        this.options.setSelectedHistoryEventId(effectiveHop);
+        this.options.setRequestedSessionId(null);
+        this.options.setExpiredSessionId(null);
+        if (nextView === "audit") {
+          this.options.setSelectedSessionId(null);
+        } else {
+          // Live is a session-free scope. Clear the domain selection and its
+          // retained route before completing the restoration so a stale audit
+          // session cannot participate in the next render or URL sync pass.
+          this.options.setSelectedSessionId(null);
+          this.options.resetRequestedHopState();
+          this.options.resetHistory();
+        }
+        this.markTransactionTerminal(txId);
+      });
+      return;
     }
   }
 
@@ -791,9 +814,22 @@ export class FilesystemNavigationCoordinator {
     const currentSearch = window.location.search;
     const targetSearch = buildAuditUrlSearch(targetParams);
 
+    // A completed browser restoration owns its popped canonical URL. When the
+    // reconciled state already matches that target, passive effects must not
+    // feed the same URL back through the history API while Next is completing
+    // its same-document traversal.
+    if (
+      this.activeTransaction?.status === "terminal" &&
+      areAuditUrlParamsEqual(currentParams, this.activeTransaction.target) &&
+      areAuditUrlParamsEqual(targetParams, this.activeTransaction.target) &&
+      currentSearch === targetSearch
+    ) {
+      return;
+    }
+
     if (currentSearch !== targetSearch || !areAuditUrlParamsEqual(currentParams, targetParams)) {
       const targetUrl = buildAuditTargetUrl(targetParams);
-      window.history.replaceState(null, "", targetUrl);
+      window.history.replaceState(window.history.state, "", targetUrl);
     }
   }
 }
