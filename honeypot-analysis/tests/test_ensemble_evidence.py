@@ -351,6 +351,106 @@ def test_v5_result_requires_exact_measurement_binding_and_preserves_one_model() 
     assert value["no_numeric_score_fusion"] is True
 
 
+def test_v5_result_does_not_treat_cowrie_only_traffic_as_t1046() -> None:
+    normalized = normalize_model2_v5_shadow_result(
+        _v5_result(),
+        binding={
+            "session_id": "session-a",
+            "run_id": "run-a",
+            "measurement_id": "measurement-a",
+            "episode_id": "episode-a",
+        },
+        expected_model_sha256="c" * 64,
+        expected_feature_contract_sha256="d" * 64,
+    )
+
+    assert normalized["available"] is True
+    assert normalized["availability"] == "PARTIAL"
+    assert normalized["unavailable_heads"] == {
+        "T1046": "t1046_multiservice_scan_evidence_missing"
+    }
+    assert normalized["outputs"]["T1046"]["available"] is False
+    assert normalized["outputs"]["T1046"]["result"] is None
+
+    value = compute_ensemble_evidence(
+        session_id="session-a",
+        run_id="run-a",
+        model1=_model1(),
+        model2=normalized,
+    )
+    row = next(row for row in value["results"] if row["technique_id"] == "T1046")
+    assert row["evidence_state"] == "MODEL2_UNAVAILABLE"
+    assert row["model2_relation"] == "NOT_OBSERVED"
+    assert row["model2_result"] is None
+
+
+def test_v5_result_accepts_only_explicit_bound_multiservice_t1046_evidence() -> None:
+    result = _v5_result()
+    result["t1046_observation"] = {
+        "observed": True,
+        "scope": "MULTISERVICE_SCAN",
+        "binding_mode": "EXACT_MEASUREMENT_IDENTITY",
+        "pcap_binding": "PASS",
+        "zeek_binding": "PASS",
+        "source_ip_only_binding": False,
+        "cross_session_contamination": "NO",
+        "flow_uids": ["flow-a", "flow-b"],
+        "destination_ports": [80, 443],
+        "session_id": "session-a",
+        "run_id": "run-a",
+        "measurement_id": "measurement-a",
+        "episode_id": "episode-a",
+    }
+    normalized = normalize_model2_v5_shadow_result(
+        result,
+        binding={
+            "session_id": "session-a",
+            "run_id": "run-a",
+            "measurement_id": "measurement-a",
+            "episode_id": "episode-a",
+        },
+        expected_model_sha256="c" * 64,
+        expected_feature_contract_sha256="d" * 64,
+    )
+
+    assert normalized["availability"] == "AVAILABLE"
+    assert normalized["unavailable_heads"] == {}
+    assert normalized["outputs"]["T1046"]["available"] is True
+    assert normalized["outputs"]["T1046"]["result"] == "ABSENT"
+
+
+def test_t1046_source_time_marker_without_exact_identity_fails_closed() -> None:
+    result = _v5_result()
+    result["t1046_observation"] = {
+        "observed": True,
+        "scope": "MULTISERVICE_SCAN",
+        "binding_mode": "SOURCE_IP_AND_TIME",
+        "pcap_binding": "PASS",
+        "zeek_binding": "PASS",
+        "source_ip_only_binding": True,
+        "cross_session_contamination": "NO",
+        "flow_uids": ["flow-a", "flow-b"],
+        "destination_ports": [80, 443],
+    }
+    normalized = normalize_model2_v5_shadow_result(
+        result,
+        binding={
+            "session_id": "session-a",
+            "run_id": "run-a",
+            "measurement_id": "measurement-a",
+            "episode_id": "episode-a",
+        },
+        expected_model_sha256="c" * 64,
+        expected_feature_contract_sha256="d" * 64,
+    )
+
+    assert normalized["availability"] == "PARTIAL"
+    assert normalized["unavailable_heads"] == {
+        "T1046": "t1046_scan_evidence_invalid"
+    }
+    assert normalized["outputs"]["T1046"]["result"] is None
+
+
 def test_v5_result_rejects_cross_session_identity() -> None:
     with pytest.raises(CrossSessionEvidenceError):
         normalize_model2_v5_shadow_result(
