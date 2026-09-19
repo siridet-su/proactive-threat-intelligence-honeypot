@@ -647,42 +647,51 @@ function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptio
  * durable projection. The source-state pipeline above remains the explicit
  * migration fallback until the processor writes its completion marker.
  */
-export function buildAuditProjectionSessionsPipeline(options: AuditSessionsPipelineOptions): Document[] {
-  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+function buildAuditProjectionCursorMatch(options: AuditSessionsPipelineOptions): Document | null {
+  if (typeof options.cursor !== "string" || !options.cursor.trim()) return null;
+  const decoded = decodeAuditSessionCursor(options.cursor);
+  if (decoded) {
+    const cursorDate = new Date(decoded.closedAt);
+    return !Number.isNaN(cursorDate.getTime()) && decoded.sessionId
+      ? {
+          $or: [
+            { "lifecycle.closedAt": { $lt: cursorDate } },
+            { "lifecycle.closedAt": cursorDate, sessionId: { $lt: decoded.sessionId } },
+          ],
+        }
+      : { $expr: false };
+  }
+  return { $expr: false };
+}
+
+function buildAuditProjectionBaseStages(options: AuditScopingPipelineOptions): Document[] {
   const stages: Document[] = [{ $match: buildAuditProjectionBaseMatch() }];
   const filterMatch = buildAuditProjectionFilterMatch(options);
   if (Object.keys(filterMatch).length) stages.push({ $match: filterMatch });
-
-  let cursorMatch: Document | null = null;
-  if (typeof options.cursor === "string" && options.cursor.trim()) {
-    const decoded = decodeAuditSessionCursor(options.cursor);
-    if (decoded) {
-      const cursorDate = new Date(decoded.closedAt);
-      cursorMatch = !Number.isNaN(cursorDate.getTime()) && decoded.sessionId
-        ? {
-            $or: [
-              { "lifecycle.closedAt": { $lt: cursorDate } },
-              { "lifecycle.closedAt": cursorDate, sessionId: { $lt: decoded.sessionId } },
-            ],
-          }
-        : { $expr: false };
-    } else {
-      cursorMatch = { $expr: false };
-    }
-  }
-
-  stages.push({
-    $facet: {
-      total: [{ $count: "count" }],
-      items: [
-        ...(cursorMatch ? [{ $match: cursorMatch }] : []),
-        { $sort: { "lifecycle.closedAt": -1, sessionId: -1 } },
-        { $limit: limit + 1 },
-      ],
-    },
-  });
   return stages;
 }
+
+/**
+ * The page query is intentionally separate from the exact count query. This
+ * keeps cursor/sort/limit before materialization for the common indexed path.
+ */
+export function buildAuditProjectionItemPipeline(options: AuditSessionsPipelineOptions): Document[] {
+  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+  const stages = buildAuditProjectionBaseStages(options);
+  const cursorMatch = buildAuditProjectionCursorMatch(options);
+  if (cursorMatch) stages.push({ $match: cursorMatch });
+  stages.push({ $sort: { "lifecycle.closedAt": -1, sessionId: -1 } }, { $limit: limit + 1 });
+  return stages;
+}
+
+export function buildAuditProjectionCountPipeline(options: AuditScopingPipelineOptions): Document[] {
+  return [...buildAuditProjectionBaseStages(options), { $count: "count" }];
+}
+
+// Compatibility name for callers that only need the item plan. Counts are no
+// longer combined with this pipeline, so explain output cannot imply that a
+// page-sized item query also bounded the exact count.
+export const buildAuditProjectionSessionsPipeline = buildAuditProjectionItemPipeline;
 
 export function buildAuditProjectionSummaryPipeline(options: AuditScopingPipelineOptions): Document[] {
   return [

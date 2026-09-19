@@ -129,10 +129,14 @@ These remain product backlog items and are not the active remediation focus.
 
 ## Current validation and evidence policy
 
+FA-015 was accepted `DONE` on `725102189587477bd9eafe13c8ac2d6e2e97e20c`.
+FA-016 is the sole `IN PROGRESS` item, and FS-007 remains `PARTIAL` pending
+its final re-audit. The manual response-agent validation remains unrelated.
+
 FA-016 implementation evidence is recorded in
 [`validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). The
 isolated MongoDB command passed its 1,900-session dashboard and processor
-coverage, with the exact before/after execution bounds recorded there. FA-016
+coverage, with separate item/count/summary execution bounds recorded there. FA-016
 remains IN PROGRESS pending final re-audit; FS-007 remains PARTIAL.
 
 The current repository validation is the independent final FA-013 audit dated
@@ -159,7 +163,7 @@ claims about the 2026-09-15 historical baseline.
 
 | Date | Change | Evidence |
 | --- | --- | --- |
-| 2026-09-19 | Accepted FA-015 on `725102189587477bd9eafe13c8ac2d6e2e97e20c` and started FA-016 as the sole current focus; retained FS-007 as PARTIAL. | FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md); FA-016 implementation and final audit remain pending. |
+| 2026-09-19 | Accepted FA-015 on `725102189587477bd9eafe13c8ac2d6e2e97e20c` and continued FA-016 as the sole current focus; retained FS-007 as PARTIAL. | FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md); FA-016 remediation evidence is recorded in [`docs/validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md) and remains pending final re-audit. |
 | 2026-09-19 | Accepted FA-013 and reconciled this tracker to FA-014; qualified FS-007 as partial because FA-016 remains TODO and retained FS-020+ as backlog. | Accepted FA-013 chain and independent final audit evidence are recorded in `FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`; FA-014 remains the sole current focus pending re-audit. |
 | 2026-09-16 | Completed `FS-019`; started `FS-020`. | Historical implementation note: 164-test time-based scrubber result; superseded for corrective acceptance by FA-009 and FA-013. |
 | 2026-09-16 | Completed `FS-018`; started `FS-019`. | Historical implementation note: 158-test foundation result; the “100% complete” wording and FA-014/FA-015/FA-016 focus state describe that earlier checkpoint and are superseded by the current backlog above. |

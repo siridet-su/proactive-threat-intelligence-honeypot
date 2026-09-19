@@ -318,7 +318,7 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	// Cowrie-emitted transitions so the audit trail never infers cd semantics
 	// from attacker-controlled command text or cross-event state changes.
 	if observation.Action == "observed" {
-		if err := mw.updateCwdAuditProjection(ctx, observation, "", stateChanged, retention); err != nil {
+		if err := mw.updateCwdAuditProjection(ctx, observation, "", stateChanged, false, retention); err != nil {
 			return fmt.Errorf("update CWD audit projection: %w", err)
 		}
 		return nil
@@ -345,12 +345,13 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		"status":     observation.Status,
 		"expires_at": expiryAt(observation.At, retention),
 	}
-	if _, err := mw.db.Collection("cwd_events").UpdateOne(
+	eventResult, err := mw.db.Collection("cwd_events").UpdateOne(
 		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": event}, options.Update().SetUpsert(true),
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("upsert CWD event: %w", err)
 	}
-	if err := mw.updateCwdAuditProjection(ctx, observation, eventID, stateChanged, retention); err != nil {
+	if err := mw.updateCwdAuditProjection(ctx, observation, eventID, stateChanged, eventResult.UpsertedCount > 0, retention); err != nil {
 		return fmt.Errorf("update CWD audit projection: %w", err)
 	}
 	return nil

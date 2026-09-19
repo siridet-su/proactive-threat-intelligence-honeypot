@@ -103,6 +103,9 @@ func main() {
 		ensureConsumerGroup(ctx, rdb, stream, cfg.GroupName)
 	}
 	go hardwareRollupLoop(ctx, rdb, mw, cfg)
+	if mw.enabled {
+		go auditProjectionReconciliationLoop(ctx, mw, cfg.EventRetention)
+	}
 
 	log.Printf(
 		"processor started redis=%s group=%s consumer=%s lookup_dir=%s mongo_enabled=%v",
@@ -115,6 +118,21 @@ func main() {
 
 	go recoverPendingLoop(ctx, rdb, mw, lookups, cfg)
 	processLoop(ctx, rdb, mw, lookups, cfg)
+}
+
+func auditProjectionReconciliationLoop(ctx context.Context, mw *MongoWriter, retention time.Duration) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+				log.Printf("CWD audit projection reconciliation deferred: %v", err)
+			}
+		}
+	}
 }
 
 func loadConfig() Config {

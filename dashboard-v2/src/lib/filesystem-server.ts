@@ -18,7 +18,8 @@ import {
   asStatus,
   asString,
   buildAuditSessionsPipeline,
-  buildAuditProjectionSessionsPipeline,
+  buildAuditProjectionCountPipeline,
+  buildAuditProjectionItemPipeline,
   buildAuditProjectionSummaryPipeline,
   buildAuditSummaryPipeline,
   buildSessionCwdHistoryPipeline,
@@ -535,10 +536,29 @@ function mapDocumentToClosedSession(document: Document): FilesystemClosedSession
 
 async function auditProjectionIsReady(): Promise<boolean> {
   const client = await getMongoClient();
-  const marker = await client.db(DATABASE_NAME)
+  const db = client.db(DATABASE_NAME);
+  const marker = await db
     .collection<Document & { _id: string }>(AUDIT_PROJECTION_META_COLLECTION)
     .findOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION }, { projection: { _id: 1 } });
-  return marker !== null;
+  if (!marker) return false;
+
+  // A high-cardinality session is intentionally bounded in the projection.
+  // Exact path filters and summaries use the source fallback until that
+  // session is reconciled, so truncation is never exposed as authoritative.
+  const overflow = await db.collection<Document>(AUDIT_PROJECTION_COLLECTION).findOne(
+    { auditPathsOverflow: true },
+    { projection: { _id: 1 } },
+  );
+  if (overflow) return false;
+
+  // The marker is only a readiness hint. A rolling old writer can create a
+  // closed source state after it was published, so reads must fall back until
+  // every source row has a valid projection version again.
+  const missing = await db.collection<Document>(SESSIONS_COLLECTION).findOne({
+    "lifecycle.status": "closed",
+    auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION },
+  }, { projection: { _id: 1 } });
+  return missing === null;
 }
 
 export async function getAuditDirectorySummary(options: {
@@ -580,21 +600,39 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
   const limit = Math.max(1, Math.min(100, options.limit ?? 25));
   const client = await getMongoClient();
   const useProjection = await auditProjectionIsReady();
-  const pipeline = (useProjection ? buildAuditProjectionSessionsPipeline : buildAuditSessionsPipeline)({
+  const queryOptions = {
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
     cursor: options.cursor,
     limit,
     historyCollectionName: HISTORY_COLLECTION,
-  });
+  };
 
   const states = client.db(DATABASE_NAME).collection<Document>(useProjection ? AUDIT_PROJECTION_COLLECTION : SESSIONS_COLLECTION);
-  const [aggregationResult, summary] = await Promise.all([
-    states.aggregate<{
-      total: Array<{ count: number }>;
-      items: Document[];
-    }>(pipeline, { allowDiskUse: true }).toArray(),
+  if (!useProjection) {
+    const pipeline = buildAuditSessionsPipeline({ ...queryOptions });
+    const [aggregationResult, summary] = await Promise.all([
+      states.aggregate<{ total: Array<{ count: number }>; items: Document[] }>(pipeline, { allowDiskUse: true }).toArray(),
+      options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome }) : Promise.resolve(undefined),
+    ]);
+    const facet = aggregationResult[0];
+    const rawItems = facet?.items ?? [];
+    const pageDocs = rawItems.slice(0, limit);
+    const lastDoc = pageDocs.at(-1);
+    return {
+      items: pageDocs.map(mapDocumentToClosedSession).filter((item): item is FilesystemClosedSession => item !== null),
+      totalItems: facet?.total?.[0]?.count ?? 0,
+      nextCursor: rawItems.length > limit && lastDoc
+        ? encodeAuditSessionCursor(asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(), asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "")
+        : null,
+      summary,
+    };
+  }
+
+  const [rawItems, countResult, summary] = await Promise.all([
+    states.aggregate<Document>(buildAuditProjectionItemPipeline(queryOptions), { allowDiskUse: true }).toArray(),
+    states.aggregate<{ count: number }>(buildAuditProjectionCountPipeline(queryOptions), { allowDiskUse: true }).toArray(),
     options.includeSummary
       ? getAuditDirectorySummary({
           search: options.search,
@@ -604,10 +642,7 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
       : Promise.resolve(undefined),
   ]);
 
-  const facet = aggregationResult[0];
-  const totalItems = facet?.total?.[0]?.count ?? 0;
-  const rawItems = facet?.items ?? [];
-
+  const totalItems = countResult[0]?.count ?? 0;
   const hasMore = rawItems.length > limit;
   const pageDocs = rawItems.slice(0, limit);
 

@@ -4,7 +4,8 @@ vi.mock("server-only", () => ({}));
 
 import { MongoClient, type Collection, type Document } from "mongodb";
 import {
-  buildAuditProjectionSessionsPipeline,
+  buildAuditProjectionCountPipeline,
+  buildAuditProjectionItemPipeline,
   buildAuditProjectionSummaryPipeline,
   encodeAuditSessionCursor,
 } from "@/lib/filesystem-data";
@@ -58,6 +59,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     await projection.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, sessionId: -1 });
     await projection.createIndex({ "lifecycle.status": 1, auditHomeOnly: 1, "lifecycle.closedAt": -1, sessionId: -1 });
     await projection.createIndex({ "lifecycle.status": 1, auditVisitedPaths: 1, "lifecycle.closedAt": -1, sessionId: -1 });
+    await projection.createIndex({ auditPathsOverflow: 1 });
     await projection.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
 
     const docs = Array.from({ length: sessionCount }, (_, index) => {
@@ -73,7 +75,6 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
         auditVisitedPaths: homeOnly ? ["/home/cowrie"] : ["/etc/passwd", "/var/tmp"],
         auditHomeOnly: homeOnly,
         auditEventCount: homeOnly ? 1 : 2,
-        auditEventIds: homeOnly ? [`event-${index}`] : [`event-${index}-1`, `event-${index}-2`],
         auditProjectionVersion: AUDIT_PROJECTION_VERSION,
         expires_at: new Date("2099-01-01T00:00:00.000Z"),
       };
@@ -112,7 +113,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(ids).toHaveLength(sessionCount);
     expect(new Set(ids).size).toBe(sessionCount);
     expect(ids).toEqual([...ids].sort((left, right) => right.localeCompare(left)));
-    expect(aggregateCommands.length).toBe(pageCount);
+    expect(aggregateCommands.length).toBe(pageCount * 2);
     for (const command of aggregateCommands) {
       const serialized = JSON.stringify(command.pipeline);
       expect(serialized).not.toContain("$skip");
@@ -149,27 +150,33 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(searchedSession.items[0]?.sessionId).toBe("session-00017");
     const searchedPath = await getAuditSessions({ search: "/etc/passwd", limit: 25 });
     expect(searchedPath.totalItems).toBe(1425);
+    const searchedIp = await getAuditSessions({ search: "198.51.100.7", limit: 25 });
+    expect(searchedIp.totalItems).toBe(95);
     const hiddenPage = await getAuditSessions({ hideHome: true, limit: 25 });
     expect(hiddenPage.totalItems).toBe(1425);
   });
 
-  it("proves page, deep-page, summary, and filtered plans scan projection rows but do no foreign history work", async () => {
+  it("reports item, count, summary, and filtered plans separately with truthful bounds", async () => {
     const collection = database.collection("cwd_audit_projection");
     const cases = [
-      ["page", buildAuditProjectionSessionsPipeline({ limit: 25 })],
-      ["deep", buildAuditProjectionSessionsPipeline({ limit: 25, cursor: encodeAuditSessionCursor("2026-09-19T09:59:00.000Z", "session-00000") })],
+      ["item", buildAuditProjectionItemPipeline({ limit: 25 })],
+      ["deep-item", buildAuditProjectionItemPipeline({ limit: 25, cursor: encodeAuditSessionCursor("2026-09-19T10:07:00.000Z", "session-00000") })],
+      ["count", buildAuditProjectionCountPipeline({})],
       ["summary", buildAuditProjectionSummaryPipeline({})],
-      ["filtered", buildAuditProjectionSessionsPipeline({ hideHome: true, targetPath: "/etc", search: "198.51.100.7", limit: 25 })],
+      ["filtered-item", buildAuditProjectionItemPipeline({ hideHome: true, targetPath: "/etc", search: "198.51.100.7", limit: 25 })],
+      ["filtered-count", buildAuditProjectionCountPipeline({ hideHome: true, targetPath: "/etc", search: "198.51.100.7", limit: 25 })],
     ] as const;
     for (const [label, pipeline] of cases) {
       const explain = await collection.aggregate(pipeline, { allowDiskUse: true }).explain("executionStats");
       const serialized = JSON.stringify(explain);
       expect(serialized).not.toContain("$lookup");
       expect(serialized).not.toContain("COLLSCAN");
-      expect(maxMetric(explain, "totalDocsExamined")).toBeLessThanOrEqual(sessionCount);
+      const docsExamined = maxMetric(explain, "totalDocsExamined");
+      if (label === "item" || label === "deep-item") expect(docsExamined).toBeLessThanOrEqual(100);
+      else expect(docsExamined).toBeLessThanOrEqual(sessionCount);
       expect(maxMetric(explain, "totalKeysExamined")).toBeGreaterThan(0);
       process.stderr.write(`FA016_AFTER ${label} ${JSON.stringify({
-        docsExamined: maxMetric(explain, "totalDocsExamined"),
+        docsExamined,
         keysExamined: maxMetric(explain, "totalKeysExamined"),
         nReturned: maxMetric(explain, "nReturned"),
       })}\n`);
@@ -201,6 +208,15 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     ]);
     const page = await getAuditSessions({ limit: 25 });
     expect(page.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy"]);
+    expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
+
+    // An old rolling writer can publish a closed source row after the marker.
+    // Readiness must detect it and use the exact mixed-schema fallback rather
+    // than silently dropping the new session from the directory.
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION });
+    await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") } });
+    const rollingPage = await getAuditSessions({ limit: 25 });
+    expect(rollingPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer"]);
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
   });
 });

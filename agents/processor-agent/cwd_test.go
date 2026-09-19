@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func cwdEventForTest(eventID string) map[string]any {
@@ -236,6 +238,7 @@ func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndTTL(t *testing.T) {
 		{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
 		{{Key: "lifecycle.status", Value: 1}, {Key: "auditHomeOnly", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
 		{{Key: "lifecycle.status", Value: 1}, {Key: "auditVisitedPaths", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "auditPathsOverflow", Value: 1}},
 		{{Key: "expires_at", Value: 1}},
 	}
 	for _, expected := range want {
@@ -265,5 +268,46 @@ func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndTTL(t *testing.T) {
 	}
 	if !foundLegacy {
 		t.Fatal("missing legacy session_id closed-time state index")
+	}
+}
+
+func TestFA016MongoTargetRejectsUnsafeConfigurationsBeforeCallback(t *testing.T) {
+	cases := []struct{ name, uri, database, runID string }{
+		{"missing uri", "", "pti_fa016_test_abc", "abc"},
+		{"missing db", "mongodb://127.0.0.1:27017/pti_fa016_test_abc", "", "abc"},
+		{"missing run id", "mongodb://127.0.0.1:27017/pti_fa016_test_abc", "pti_fa016_test_abc", ""},
+		{"uppercase run id", "mongodb://127.0.0.1:27017/pti_fa016_test_ABC", "pti_fa016_test_ABC", "ABC"},
+		{"wrong prefix", "mongodb://127.0.0.1:27017/honeypot_db", "honeypot_db", "abc"},
+		{"uri database mismatch", "mongodb://127.0.0.1:27017/pti_fa016_test_other", "pti_fa016_test_abc", "abc"},
+		{"remote host", "mongodb://db.example/pti_fa016_test_abc", "pti_fa016_test_abc", "abc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			if err := runWithValidatedFA016Target(tc.uri, tc.database, tc.runID, func(fa016MongoTarget) error { called = true; return nil }); err == nil {
+				t.Fatal("unsafe target was accepted")
+			}
+			if called {
+				t.Fatal("rejected target executed connection/destructive callback")
+			}
+		})
+	}
+}
+
+func TestFA016MongoTargetAcceptsExactLoopbackTarget(t *testing.T) {
+	target, err := validateFA016MongoTarget("mongodb://127.0.0.1:27017/pti_fa016_test_abc", "pti_fa016_test_abc", "abc")
+	if err != nil || target.Database != "pti_fa016_test_abc" {
+		t.Fatalf("valid target rejected: %#v %v", target, err)
+	}
+}
+
+func TestTTLIndexCompatibilityRejectsNonTTLIndex(t *testing.T) {
+	ttl := int32(0)
+	wanted := mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}
+	if indexOptionsCompatible(&existingIndex{Name: "expires_at_1"}, wanted) {
+		t.Fatal("non-TTL index was accepted as the TTL contract")
+	}
+	if !indexOptionsCompatible(&existingIndex{Name: "expires_at_1", ExpireAfterSeconds: &ttl}, wanted) {
+		t.Fatal("valid TTL index was rejected")
 	}
 }
