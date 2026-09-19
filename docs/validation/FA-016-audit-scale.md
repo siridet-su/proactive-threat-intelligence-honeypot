@@ -66,28 +66,36 @@ an eligible closed row with a missing or non-Date expiry receives exactly
 moved forward or backward. This normalization also runs when an otherwise
 ready projection already exists.
 
-Missing-projection repair examines at most 256 v2-ready source rows per
-canonical and legacy session-ID cursor. Each cursor stores the exact raw
-session-field value and `_id` in the same `(raw field, _id)` order used by the
-query; invalid/whitespace rows advance the cursor before being skipped.
-Cursor writes use an exact compare-and-set filter, so concurrent passes may
-duplicate bounded work but cannot regress progress. The cursor wraps after an
-end-of-range scan so rows inserted before a saved boundary are eventually
-examined. Repair checks the projection by canonical `_id`, claims missing work
-through the existing generation CAS, and rebuilds exact current state,
-transition paths, event count, lifecycle, and expiry facts from authoritative
-source/history.
+Missing-projection repair reads at most 256 raw source rows per canonical and
+legacy session-ID cursor. The bounded keyset scan is ordered by the indexed
+`(lifecycle.status, raw session field, _id)` tuple; it deliberately fetches
+non-ready, malformed, and whitespace rows in that raw batch and advances past
+them in application code without claiming them. Each cursor stores the exact
+raw session-field value and `_id` in the same order used by the query.
+Cursor writes use dotted CAS predicates on the stored `value` and `id` fields,
+not whole embedded-document equality, so either BSON field order remains
+compatible with existing markers. Concurrent passes may duplicate bounded work
+but cannot regress a newer cursor. The cursor wraps after an end-of-range scan
+so rows inserted before a saved boundary are eventually examined. Repair checks
+the projection by canonical `_id`, claims missing work through the existing
+generation CAS, and rebuilds exact current state, transition paths, event
+count, lifecycle, and expiry facts from authoritative source/history.
 
 Each reconciliation pass also examines at most 256 expired projection
 watermarks through a resumable `(expires_at, _id)` keyset cursor backed by the
 compound index. The cursor advances for retained source-backed rows and wraps
-at the end, so a retained head cannot starve later orphans. It deletes a
-projection only after an indexed canonical/legacy source lookup proves
-`cwd_session_state` is absent, repeats that lookup immediately before a
-`(_id, expires_at <= now)` delete CAS, and keeps the watermark ordinary until
-the source is gone. Duplicate and concurrent passes are safe because the
-cursor CAS, generation CAS, history CAS, source recheck, and delete predicate
-all tolerate retries. This is the exact invariant:
+at the end, so a retained head cannot starve later orphans. A separate
+resumable `_id` keyset migration examines at most 256 rows for missing or
+non-Date projection expiry: it rebuilds a source-backed row from the
+authoritative source, or deletes a source-less malformed orphan after the same
+source-presence recheck. This uses MongoDB's built-in `_id_` index and never
+puts malformed values in the Date-ordered cursor. Valid rows are deleted only
+after an indexed canonical/legacy source lookup proves `cwd_session_state` is
+absent, with the lookup repeated immediately before an exact `(_id,
+expires_at)` delete CAS. Duplicate and concurrent passes are safe because all
+cursor reset/advance/wrap operations use dotted CAS predicates and inspect
+`MatchedCount`; the generation CAS, history CAS, source recheck, and delete
+predicate all tolerate retries. This is the exact invariant:
 
 > A source session is eligible and ready only when its generation is clean, its
 > source `expires_at` is a valid BSON Date, and its required projection is
@@ -142,7 +150,7 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
-- `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1, "sessionId": 1, "_id": 1 }` and the matching `session_id` index for bounded raw-keyset missing-projection repair cursors;
+- `cwd_session_state`: `{ "lifecycle.status": 1, "sessionId": 1, "_id": 1 }` and the matching `session_id` index for bounded raw-keyset missing-projection repair cursors; readiness is intentionally filtered in application code after this raw bounded batch;
 - `cwd_session_state`: `{ "auditCanonicalSessionId": 1 }` for bounded source-presence checks during orphan cleanup;
 - `cwd_session_state`: `{ "sessionId": 1 }` and `{ "session_id": 1 }` for bounded legacy source-presence compatibility checks;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
@@ -150,7 +158,7 @@ The processor provisions and verifies:
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditVisitedPaths": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "auditPathsOverflow": 1 }` for bounded-readiness checks;
-- `cwd_audit_projection`: `{ "expires_at": 1 }` and `{ "expires_at": 1, "_id": 1 }` without `expireAfterSeconds`, used only as the bounded orphan-cleanup watermark and its stable keyset order;
+- `cwd_audit_projection`: `{ "expires_at": 1 }` and `{ "expires_at": 1, "_id": 1 }` without `expireAfterSeconds`, used only as the bounded orphan-cleanup watermark and its stable keyset order; malformed expiry migration uses the automatic `_id_` index and a separate `_id` keyset;
 - `cwd_events`: partial `{ "auditProjectionPending": 1, "_id": 1 }` for the bounded event outbox probe;
 - canonical and legacy `cwd_events` session compound indexes, canonical/legacy pending-event indexes, plus its TTL index.
 
@@ -361,13 +369,39 @@ projections.
 The production integration suite directly exercises the projection-first
 retention race, v2-ready invalid expiry, v1/unversioned/legacy/canonical and
 padded identifiers, more than 256 rows over multiple batches, padded boundary
-values, repeated raw session values, 256 whitespace rows, duplicate and
-concurrent reconcilers, cleanup starvation after 256 retained rows, concurrent
-cleanup, source recreation, eventual cleanup after source removal, and the
+values, repeated raw session values, 256 whitespace-only rows, 1,000 non-ready
+rows ahead of eligible canonical and legacy rows, duplicate and concurrent
+reconcilers, cursor field-order permutations, wraparound and newly inserted
+rows before the saved boundary, cleanup starvation after 256 retained rows,
+malformed source-backed rebuild and source-less deletion, concurrent cleanup,
+source recreation, eventual cleanup after source removal, and the
 retired-TTL-to-ordinary-index migration. Explain-statistics assertions verify
-the intended raw-field/`_id` and `expires_at`/`_id` indexes, no `COLLSCAN`, and
-at most 256 documents and keys examined per bounded batch. The isolated
-harness passed 12/12 dashboard integration tests and all 14 `TestFA016*`
-processor tests plus 2 target-safety tests, with none skipped.
+the intended raw-field/`_id`, `expires_at`/`_id`, and `_id_` indexes, no
+`COLLSCAN`, and at most 256 documents and keys examined per bounded batch. The
+single isolated harness run passed 12/12 dashboard integration tests and all
+15 production FA-016 Mongo tests plus the dotted-CAS and two target-safety
+tests, with none skipped.
+
+The targeted cursor command was then repeated 20 times against a fresh
+temporary MongoDB 7 container with `--ulimit nofile=65536:65536`:
+`go test -count=20 -run
+'TestFA016(RepairCursorsNormalizeExpiryAndConvergeAcrossBatches|CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource|CursorCASUsesDottedFields)$'
+./...` returned `ok honeypot/processor-agent 76.131s`. An initial repeat
+container exited with WiredTiger exit 14 (`Too many open files`) after several
+successful iterations; that infrastructure run was discarded, and no test
+assertion failed in it. The replacement run completed all 20 repetitions.
+
+Verbose execution evidence recorded against MongoDB 7.0.43 was: repair
+`sessionId` and `session_id` each used their raw-field/`_id` indexes with
+`totalDocsExamined=256` and `totalKeysExamined=256`; valid cleanup used
+`expires_at_1__id_1` with `256/256`; malformed cleanup used `_id_` with
+`256/256`; canonical source lookup used `auditCanonicalSessionId_1` with
+`1/1`; session-field lookups used their respective indexes with `1/1`; the
+exact `_id` source lookup used MongoDB's `IDHACK` with `1/1`; and the
+projection-first cleanup probe examined `0/0`. The dashboard plan evidence
+remained item `26/26`, deep item `26/26`, count `1900/1900`, summary
+`1900/1900`, filtered item `513/513`, and filtered count `1425/1426` for
+documents/keys, respectively. All plans were index-backed and no `COLLSCAN`
+was accepted.
 
 FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
