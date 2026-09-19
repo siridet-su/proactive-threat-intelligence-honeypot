@@ -13,6 +13,8 @@ blocks, defers, or materially changes any tracked item.
 
 The architectural contract remains in
 [`dashboard-v2/docs/REALTIME_CWD_TRACKING.md`](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md).
+The canonical corrective-remediation status and detailed acceptance evidence
+remain in [`FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`](FILESYSTEM-ACTIVITY-AUDIT-FIXES.md).
 Reproducible test results belong in [`validation/`](validation/).
 
 ## Working rules
@@ -34,76 +36,86 @@ Reproducible test results belong in [`validation/`](validation/).
 | --- | --- |
 | `TODO` | Accepted work that has not started. |
 | `IN PROGRESS` | Current implementation or validation focus. |
+| `PARTIAL` | Some acceptance scope is complete, but a named corrective item or gate remains outstanding. |
 | `BLOCKED` | Cannot progress until the recorded dependency is resolved. |
 | `DONE` | Acceptance criteria passed and evidence is recorded. |
 | `DEFERRED` | Intentionally outside the current workstream. |
 
 ## Current focus
 
-**In progress:** `FA-012` — establish explicit filesystem feature ownership boundaries.
+**In progress:** `FA-014` — reconcile the filesystem remediation and working-state trackers.
 
-**Why now:** The original `FS-016` hook extraction remains complete. This follow-up
-remediation is not accepted yet: it is isolating the response-action controller,
-replay timer, topology presentation, and shared page composition without changing
-the original filesystem behavior contracts.
+**Why now:** FA-001 through FA-013 are accepted DONE. FA-014 is the sole active
+remediation focus pending re-audit. FA-015 and FA-016 remain TODO; no production
+code or tests are being changed by this tracker reconciliation.
 
-## Baseline
+## Historical baseline
 
-Reviewed on 2026-09-15 against the unmodified working tree after commit
-`78ce21c`.
+The following is historical baseline evidence, not current repository
+validation. It was recorded on 2026-09-15 against the then-unmodified working
+tree after commit `78ce21c`.
 
-| Check | Result |
+| Check | Historical result |
 | --- | --- |
 | Filesystem Vitest suites | Passed: 2 files, 9 tests |
 | Filesystem-scoped ESLint | Passed |
 | Next.js production build | Passed |
 | Working tree after review | Clean |
 
-The baseline passing does not close the findings below; current tests do not
-cover their product semantics or browser interactions.
+The baseline passing did not close the findings. Its test count and clean-tree
+state must not be read as evidence about the current repository.
 
-## Now — correctness and truthful UI
+## Current remediation state
 
-| ID | Status | Work | Acceptance criteria | Evidence |
-| --- | --- | --- | --- | --- |
-| `FS-001` | `DONE` | Replace client-inferred Audit filters with complete per-session audit summaries. | `homeOnly` and path-touch results include active and closed history, do not depend on the selected session's loaded page, and have unit/integration coverage. | Server `auditSummary` contract; 15 focused Vitest tests; scoped ESLint; Next production build (uncommitted). |
-| `FS-002` | `DONE` | Make history completeness explicit. | API returns total/completeness metadata; Replay never claims to show all history while earlier pages remain unloaded; hop numbering stays stable as pages load. | API completeness contract; absolute-window regression tests; 18 focused Vitest tests; scoped ESLint; Next production build (uncommitted). |
-| `FS-003` | `DONE` | Decouple Response and Command tabs from CWD-history state. | An authorized operator can inspect response capability and disconnect any eligible live session even when route history is empty, loading, or unavailable. | Independent sidebar content gating; full 29-test Vitest suite; full ESLint; Next production build (uncommitted). |
-| `FS-004` | `DONE` | Expose topology render limits. | UI shows rendered versus available sources/paths and offers a clear way to focus or expand omitted data; no limit is silent. | Rendered vs available indicators in footer & sidebar with Show all / Compact controls; selectedSessionId prioritization; rail gap relaxation; 37 Vitest tests, ESLint, and Next production build passed. |
-| `FS-005` | `DONE` | Resolve filtered-selection semantics. | A `0/N` result cannot look like a matching topology; either clear the selection into a filter empty state or label the retained item prominently as pinned outside the result set. | Filtered-selection and 0/N empty state resolved; prominent 'Pinned outside filter' banner on canvas; contextual empty states in TopologyCanvas and AuditSessionSelect; 40 Vitest tests, ESLint, and Next production build passed. |
-| `FS-006` | `DONE` | Synchronize Audit navigation state with the URL. | View, session, filters, and selected hop survive reload/share; Back and Forward restore coherent state; expired session links show a specific state instead of silently choosing another session. | Full URL state synchronization (`view`, `sessionId`, `hideHome`, `targetPath`, `hop`) with `popstate` support, danger banner for expired sessions without silent hijacking; 49 Vitest tests, ESLint, and Next production build passed. |
+The original FS rows below retain their historical implementation evidence.
+Their corrective acceptance and current validation are cross-referenced to the
+canonical audit tracker; the final FA-013 audit evidence is recorded there to
+avoid duplicating a large evidence block.
 
-## Next — data flow, scale, and topology behavior
+### Now — correctness and truthful UI
 
 | ID | Status | Work | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
-| `FS-007` | `DONE` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | Live SSE closed buffer decoupled to 12 items with in-memory immutable audit path cache; dedicated keyset-paginated & regex searchable `/api/filesystem-topology/audit-sessions` endpoint; remote audit session lookup & pagination in AuditSessionSelect and FilesystemActivity; 54 Vitest tests, ESLint, and Next production build passed. |
-| `FS-008` | `DONE` | Define multi-session IP cluster interaction. | A cluster exposes every active session and path without implying that the latest path is the only route; selection behavior is deterministic and keyboard accessible. | Cluster sessions and targetPaths exposed in callouts; multi-route leader lines rendered on canvas & minimap; accessible keyboard navigation (Arrow/Escape/Enter) in callout cards; cluster accordion in SessionSourceList; sibling sessions switcher in FilesystemInspector; 57 Vitest tests, ESLint, and Next production build passed. |
-| `FS-009` | `DONE` | Replace the fit algorithm with two-dimensional world bounds. | Fit considers X/Y, rendered element sizes, manual positions outside `0..100`, minimap clearance, and compact/fullscreen canvas sizes. | Two-dimensional world bounds & viewport fit implemented; considers X and Y, rendered element sizes, manual coordinates outside 0..100 without clamping, minimap clearance, and compact/fullscreen canvas sizes; 63 Vitest tests, ESLint, and Next production build passed. |
-| `FS-010` | `DONE` | Correct count semantics. | Labels distinguish unique sources, sessions, exact-path sessions, and descendant-branch sessions; badges and their resulting lists always agree. | Unified count semantics implemented via `getDirectorySessionCounts`; node badge shows exact (branch) or ↳branch with detailed tooltip; footer distinguishes unique sources from active sessions; Directory inspector features summary metric cards (Exact, In subdirs, Unique sources), matching tab badges, and exact/subdir row tags; 68 Vitest tests, ESLint, and Next production build passed. |
-| `FS-011` | `DONE` | Reduce response-action polling cost. | Pending actions do not perform a Pi health check plus multiple MongoDB reads every second; status propagation has bounded backoff or an event stream and preserves terminal-state feedback. | In-memory TTL caching (10s) on `responseControlHealthy` bypasses outbound Pi health pings on capability probes; single-pass `getTerminateActionWithState` eliminates redundant MongoDB reads across collections; `ResponseActionLifecycleManager` enforces an identity-preserving lifecycle with monotonic backoff (1.5x up to 3.5s, 24s ceiling) that preserves current delay across live-to-closed `sessionIsLive` transitions without resetting backoff; persistent terminal toasts (verified, failed, timeout) preserved; Vitest test suite, ESLint, and Next production build passed. |
-| `FS-012` | `DONE` | Add freshness and degraded-state semantics. | Connected transport and fresh data are distinguishable; UI shows last update age, stale threshold, retry actions, and recovery without discarding the last valid snapshot. | Separated transport stream status from data freshness classification (fresh/stale/degraded/offline); guaranteed non-discarding retained snapshot on error/reconnect; floating degraded banner with update age, stale threshold, and immediate HTTP refresh / SSE reconnect controls; header transport badge and freshness badge with live age ticker; 81 Vitest tests, zero-warning ESLint, and Next.js production build passed. |
+| `FS-001` | `DONE` | Replace client-inferred Audit filters with complete per-session audit summaries. | `homeOnly` and path-touch results include active and closed history, do not depend on the selected session's loaded page, and have unit/integration coverage. | Historical implementation evidence: server `auditSummary` contract and 15 focused tests. Corrected and accepted by `FA-001` (`d4b96d5`), with final acceptance recorded in the canonical audit tracker. |
+| `FS-002` | `DONE` | Make history completeness explicit. | API returns total/completeness metadata; Replay never claims to show all history while earlier pages remain unloaded; hop numbering stays stable as pages load. | Historical implementation evidence: API completeness contract and 18 focused tests. Corrected and accepted by `FA-010` commit chain; final guarded MongoDB validation is recorded in the canonical audit tracker. |
+| `FS-003` | `DONE` | Decouple Response and Command tabs from CWD-history state. | An authorized operator can inspect response capability and disconnect any eligible live session even when route history is empty, loading, or unavailable. | Historical implementation evidence: independent sidebar gating and 29-test suite; no FA corrective item mapped to FS-003. |
+| `FS-004` | `DONE` | Expose topology render limits. | UI shows rendered versus available sources/paths and offers a clear way to focus or expand omitted data; no limit is silent. | Historical implementation evidence: render-limit indicators and 37 tests; no FA corrective item mapped to FS-004. |
+| `FS-005` | `DONE` | Resolve filtered-selection semantics. | A `0/N` result cannot look like a matching topology; either clear the selection into a filter empty state or label the retained item prominently as pinned outside the result set. | Historical implementation evidence: pinned-outside-filter and `0/N` states. Corrected and accepted by `FA-001` (`d4b96d5`); final acceptance is in the canonical audit tracker. |
+| `FS-006` | `DONE` | Synchronize Audit navigation state with the URL. | View, session, filters, and selected hop survive reload/share; Back and Forward restore coherent state; expired session links show a specific state instead of silently choosing another session. | Historical implementation evidence: initial URL/popstate implementation. Corrected and accepted by `FA-005` (`ac74c8b`) and `FA-008` accepted chain; final acceptance is in the canonical audit tracker. |
 
-## Later — UX, accessibility, and maintainability
+### Next — data flow, scale, and topology behavior
 
 | ID | Status | Work | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
-| `FS-013` | `DONE` | Consolidate Session and Path selectors on an accessible combobox/popover primitive. | Arrow navigation, typeahead, Escape, focus return, listbox semantics, screen readers, and reduced motion work consistently in both selectors. | Unified accessible ComboboxPopover primitive and useComboboxNavigation hook with WAI-ARIA listbox semantics, circular ArrowDown/ArrowUp and Home/End navigation, multi-character typeahead buffer, focus return, outside-click detection, and useReducedMotion support; adopted across AuditFilterControls (Path selector) and AuditSessionSelect (Session selector); 96 Vitest tests, zero-warning ESLint, and Next production build passed. |
-| `FS-014` | `DONE` | Simplify toolbar hierarchy and responsive behavior. | Global view controls, canvas navigation, layout editing, and replay actions remain visually distinct without wrapping into ambiguous rows at supported breakpoints. | Four distinct toolbar domains (Global view controls, Canvas navigation, Layout editing, Replay actions) separated into semantic containers with WAI-ARIA roles (toolbar, group, tablist, region) and accessible labels; Canvas navigation (Zoom In/Out/%, Fit view, Center IP) and Layout editing (Explore/Arrange, Undo, Options menu) encapsulated in atomic non-wrapping pill groups; Replay controls structured with dedicated scrubber, panel toggle, and fullscreen actions across mobile, tablet, and widescreen breakpoints; 101 Vitest tests, zero-warning ESLint, and Next.js production build passed. |
-| `FS-015` | `DONE` | Add density-aware topology modes. | Small sets render fully; medium sets cluster by source/branch; large sets aggregate and expand on focus while preserving visible hidden-item counts. | Density-aware topology modes (`detailed` <= 15 nodes / 4 sources, `clustered` <= 42 nodes / 10 sources, `aggregated` > 42 nodes / 10 sources) with `auto` preference; expand-on-focus subtree expansion; truthful node `hiddenChildCount` badges (`+N`) and footer breakdown (`N of Total paths (M aggregated in branches)`) with `Expand all` and `Reset to auto` actions; accessible Density mode toolbar group; 109 Vitest tests (8 new density tests), zero-warning ESLint, and Next.js production build passed. |
-| `FS-016` | `DONE` | Refactor the three oversized feature components. | Streaming, Audit/replay state, URL state, response actions, and layout math are isolated into testable hooks/modules; presentational components do not own unrelated data flow. | Isolated 7 custom hooks (`useFilesystemStreaming`, `useSessionCwdHistory`, `useFilesystemUrlState`, `useAuditReplay`, `useResponseAction`, `useTopologyViewport`, `useTopologyArrange`); decoupled oversized feature components; 122 Vitest tests (12 new hook helper tests) passed 100%, zero ESLint warnings/errors, Next.js production build passed. |
-| `FS-017` | `DONE` | Harden layout persistence. | Blocked/corrupt storage cannot crash rendering; stale entries are pruned or version-migrated; live and per-session Audit layouts remain isolated. | Resilient `layoutPersistence` module with `getLocalStorageSafe` SecurityError protection, schema envelope v1 and zero-loss legacy v0 migration, finite coordinate bounds validation (±400), isolated Live and per-session Audit storage keys, and 14-day / 30-entry auto-pruning with QuotaExceeded retry; 139 Vitest tests (17 new persistence tests) passed 100%, zero-warning ESLint, clean Next.js production build passed. |
-| `FS-018` | `DONE` | Expand automated coverage. | Tests cover filter truth, pagination completeness, empty-history Response, URL restoration, topology limits, cluster selection, 2D fit, fullscreen/sidebar behavior, keyboard use, touch gestures, and reduced motion. | Expanded automated test suite in `tests/filesystem-coverage-expansion.test.ts` (19 tests) covering filter truth (`isHomeOnlySession`, `sessionTouchesPath`, `getDistinctSessionPaths`), session selection anti-hijacking, replay boundary clamping & failure route anchoring, empty-history terminate capability resolution, URL roundtrip fidelity, 2D world bounds & minimap clearance fit, responsive sidebar clamping (360–760px / 65%), arrow key pan steps, touch pinch scaling, and reduced motion duration; 158 Vitest tests passed 100%, zero-warning ESLint, clean Next.js production build. |
+| `FS-007` | `PARTIAL` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | Original transport/search implementation is accepted by `FA-001`, `FA-002`, and `FA-011`. `FA-016` remains TODO for large-collection summary/cursor index optimization, so this row is explicitly partial; final scale work is not accepted indirectly. |
+| `FS-008` | `DONE` | Define multi-session IP cluster interaction. | A cluster exposes every active session and path without implying that the latest path is the only route; selection behavior is deterministic and keyboard accessible. | Historical implementation evidence: cluster disclosure, multi-route rendering, and 57 tests; no FA corrective item mapped to FS-008. |
+| `FS-009` | `DONE` | Replace the fit algorithm with two-dimensional world bounds. | Fit considers X/Y, rendered element sizes, manual positions outside `0..100`, minimap clearance, and compact/fullscreen canvas sizes. | Historical implementation evidence: 2D bounds and 63 tests; no FA corrective item mapped to FS-009. |
+| `FS-010` | `DONE` | Correct count semantics. | Labels distinguish unique sources, sessions, exact-path sessions, and descendant-branch sessions; badges and their resulting lists always agree. | Historical implementation evidence: unified count semantics and 68 tests; no FA corrective item mapped to FS-010. |
+| `FS-011` | `DONE` | Reduce response-action polling cost. | Pending actions do not perform a Pi health check plus multiple MongoDB reads every second; status propagation has bounded backoff or an event stream and preserves terminal-state feedback. | Historical implementation evidence: cache, single-pass state read, and bounded polling. Corrected and accepted by `FA-003`/`FA-004`; manual live response-agent smoke validation remains an outstanding gate, as recorded canonically. |
+| `FS-012` | `DONE` | Add freshness and degraded-state semantics. | Connected transport and fresh data are distinguishable; UI shows last update age, stale threshold, retry actions, and recovery without discarding the last valid snapshot. | Historical implementation evidence: freshness/degraded implementation and 81 tests. Corrected and accepted by `FA-006` (`2098af3`); final acceptance is in the canonical audit tracker. |
+
+### Later — UX, accessibility, and maintainability
+
+| ID | Status | Work | Acceptance criteria | Evidence |
+| --- | --- | --- | --- | --- |
+| `FS-013` | `DONE` | Consolidate Session and Path selectors on an accessible combobox/popover primitive. | Arrow navigation, typeahead, Escape, focus return, listbox semantics, screen readers, and reduced motion work consistently in both selectors. | Historical implementation evidence: shared combobox primitive and 96 tests. Corrected and accepted by `FA-007`; final component/browser acceptance is recorded under `FA-013` in the canonical audit tracker. |
+| `FS-014` | `DONE` | Simplify toolbar hierarchy and responsive behavior. | Global view controls, canvas navigation, layout editing, and replay actions remain visually distinct without wrapping into ambiguous rows at supported breakpoints. | Historical implementation evidence: four toolbar domains and 101 tests. FA-013 adds accepted Chromium responsive/reduced-motion coverage; details are in the canonical audit tracker. |
+| `FS-015` | `DONE` | Add density-aware topology modes. | Small sets render fully; medium sets cluster by source/branch; large sets aggregate and expand on focus while preserving visible hidden-item counts. | Historical implementation evidence: density-aware modes and 109 tests; no FA corrective item mapped to FS-015. |
+| `FS-016` | `DONE` | Refactor the three oversized feature components. | Streaming, Audit/replay state, URL state, response actions, and layout math are isolated into testable hooks/modules; presentational components do not own unrelated data flow. | Historical implementation evidence: seven modular hooks and 122 tests. Corrected and accepted by `FA-012` commit chain; final ownership evidence is in the canonical audit tracker. |
+| `FS-017` | `DONE` | Harden layout persistence. | Blocked/corrupt storage cannot crash rendering; stale entries are pruned or version-migrated; live and per-session Audit layouts remain isolated. | Historical implementation evidence: persistence hardening and 139 tests; no FA corrective item mapped to FS-017. |
+| `FS-018` | `DONE` | Expand automated coverage. | Tests cover filter truth, pagination completeness, empty-history Response, URL restoration, topology limits, cluster selection, 2D fit, fullscreen/sidebar behavior, keyboard use, touch gestures, and reduced motion. | Historical implementation evidence: initial 158-test expansion. Corrected and accepted by `FA-007`, `FA-008`, and `FA-013`; final component/browser evidence is in the canonical audit tracker. |
 
 ## Product additions after the foundation is correct
 
+These remain product backlog items and are not the active remediation focus.
+
 | ID | Status | Addition | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
-| `FS-019` | `DONE` | Time-based replay scrubber. | Shows real event time and gaps, supports jump/step/play, and does not imply uniform attacker timing. | Time-aware forensic scrubber with interactive range slider, dual progress indication (step + time elapsed), dwell interval badges and pause detection (>60s) in timeline list, dynamic realistic playback pacing (delays scale with real dwell time clamped 300ms–3200ms) with realistic vs uniform mode toggle; 164 Vitest tests (6 new time helper & pacing tests) passed 100%, zero ESLint warnings, clean Next.js production build. |
-| `FS-020` | `TODO` | Focus controls. | Operator can focus a session or directory branch and return to live/global context in one predictable action. | — |
-| `FS-021` | `TODO` | Exact historical transition overlay. | Repeated visits and lateral jumps are represented as actual event transitions rather than only first-visit node badges. | — |
-| `FS-022` | `TODO` | Correlated command and file telemetry. | Command/file events are shown only when joined by authoritative identifiers, with provenance and explicit unavailable states. | — |
-| `FS-023` | `TODO` | Forensic export and shareable evidence links. | Exported JSON/CSV preserves session, event IDs, timestamps, status, and filter scope; shared links open the same session/hop without embedding sensitive data. | — |
+| `FS-019` | `DONE` | Time-based replay scrubber. | Shows real event time and gaps, supports jump/step/play, and does not imply uniform attacker timing. | Historical implementation evidence: initial time-aware scrubber and 164 tests. Corrected and accepted by `FA-009`; final component/browser evidence is recorded under `FA-013` in the canonical audit tracker. |
+| `FS-020` | `TODO` | Focus controls. | Operator can focus a session or directory branch and return to live/global context in one predictable action. | Backlog; not part of FA-014. |
+| `FS-021` | `TODO` | Exact historical transition overlay. | Repeated visits and lateral jumps are represented as actual event transitions rather than only first-visit node badges. | Backlog; not part of FA-014. |
+| `FS-022` | `TODO` | Correlated command and file telemetry. | Command/file events are shown only when joined by authoritative identifiers, with provenance and explicit unavailable states. | Backlog; not part of FA-014. |
+| `FS-023` | `TODO` | Forensic export and shareable evidence links. | Exported JSON/CSV preserves session, event IDs, timestamps, status, and filter scope; shared links open the same session/hop without embedding sensitive data. | Backlog; not part of FA-014. |
 
 ## Deferred outside this workstream
 
@@ -114,35 +126,33 @@ cover their product semantics or browser interactions.
 - Do not expand the scoped Response surface beyond approved, allow-listed
   operations as part of a Filesystem UI change.
 
+## Current validation and evidence policy
+
+The current repository validation is the independent final FA-013 audit dated
+2026-09-19 and is recorded in the canonical audit tracker. It ran these
+reproducible commands: `cd dashboard-v2 && npm test`,
+`cd dashboard-v2 && npm run test:browser`, `cd dashboard-v2 && npm run lint`,
+`cd dashboard-v2 && npm run build`, and `go test -count=1 ./...` in each of the
+five `agents/*` Go modules. It recorded 22 Vitest files with 460 passing and 2
+skipped tests, 6/6 Chromium tests, zero ESLint errors/warnings, a passing
+production build, all five Go modules passing, and `git diff --check` passing.
+No manual/live validation was performed. The repository had no test-results or
+playwright-report artifacts. These are current audit results, not replacement
+claims about the 2026-09-15 historical baseline.
+
 ## Decision log
 
 | Date | Decision | Reason |
 | --- | --- | --- |
 | 2026-09-15 | Start with `FS-001`; defer visual additions until Audit filtering is authoritative. | Incorrect result sets would invalidate later selection, count, and topology UX. |
 | 2026-09-15 | Keep this tracker separate from design and validation evidence. | Work status changes frequently; architecture and evidence must remain durable and independently reviewable. |
+| 2026-09-19 | Keep FA-014 as the sole remediation focus while preserving FA-015 and FA-016 as TODO. | Tracker hygiene must be re-audited before further change hygiene or large-collection optimization work begins. |
 
 ## Update log
 
 | Date | Change | Evidence |
 | --- | --- | --- |
-| 2026-09-15 | Created the live working state from the Filesystem Activity code/UX/logic review. | Baseline checks recorded above. |
-| 2026-09-15 | Started `FS-001`. | Implementation and validation in progress. |
-| 2026-09-15 | Completed `FS-001`; started `FS-002`. | Filter regression tests, scoped ESLint, and production build passed. |
-| 2026-09-15 | Completed `FS-002`; started `FS-003`. | Completeness/absolute-hop regression tests, scoped ESLint, and production build passed. |
-| 2026-09-15 | Completed `FS-003`; started `FS-004`. | Full 29-test suite, full ESLint, and production build passed; compact graph limit paths inspected. |
-| 2026-09-15 | Completed `FS-004`; started `FS-005`. | Full 37-test suite, full ESLint, and Next production build passed; render limit controls verified. |
-| 2026-09-15 | Completed `FS-005`; started `FS-006`. | Full 40-test suite, full ESLint, and Next production build passed; pinned outside filter & 0/N empty states verified. |
-| 2026-09-15 | Completed `FS-006`; started `FS-007`. | Full 49-test suite, full ESLint, and Next production build passed; URL sync, popstate, and session expiration verified. |
-| 2026-09-16 | Completed `FS-007`; started `FS-008`. | Full 54-test suite, full ESLint, and Next production build passed; live SSE buffer decoupled to 12 items with in-memory caching, keyset pagination & remote search endpoint implemented, deep-link remote lookup verified. |
-| 2026-09-16 | Completed `FS-008`; started `FS-009`. | Full 57-test suite, full ESLint, and Next production build passed; multi-session cluster callout disclosure, leader lines to all active routes, sibling inspector switcher, and keyboard navigation verified. |
-| 2026-09-16 | Completed `FS-009`; started `FS-010`. | Full 63-test suite, full ESLint, and Next production build passed; 2D world bounds, unscaled plane pixel fitting, Y-centering, element bounds inclusion, and minimap clearance verified. |
-| 2026-09-16 | Completed `FS-010`; started `FS-011`. | Full 68-test suite, full ESLint, and Next production build passed; exact vs descendant count semantics, matching directory inspector badges/cards, and ↳branch badges verified. |
-| 2026-09-16 | Completed `FS-011`; started `FS-012`. | Full 70-test suite, full ESLint, and Next production build passed; Pi health TTL caching, single-pass action state read, bounded exponential polling backoff, and SSE sessionIsLive acceleration verified. |
-| 2026-09-16 | Completed `FS-012`; started `FS-013`. | Full 81-test suite, full zero-warning ESLint, and Next production build passed; transport vs data freshness separation, retained snapshot on error/reconnect, degraded banner with refresh/reconnect actions verified. |
-| 2026-09-16 | Completed `FS-013`; started `FS-014`. | Full 96-test suite (15 new combobox unit tests), zero-warning ESLint, and Next production build passed; unified ComboboxPopover primitive and circular typeahead navigation verified. |
-| 2026-09-16 | Completed `FS-014`; started `FS-015`. | Full 101-test suite (5 new toolbar hierarchy tests), zero-warning ESLint, and Next production build passed; 4 distinct toolbar domains, atomic non-wrapping groups, and responsive breakpoint behavior verified. |
-| 2026-09-16 | Completed `FS-015`; started `FS-016`. | Full 109-test suite (8 new density tests), zero-warning ESLint, and Next.js production build passed; density-aware modes, expand-on-focus subtree expansion, and hidden-item counts verified. |
-| 2026-09-16 | Completed `FS-016`; started `FS-017`. | Full 122-test suite (12 new hook unit tests), zero-warning ESLint, and Next.js production build passed; isolated 7 modular hooks, cleanly decoupled FilesystemActivity, TopologyCanvas, and CwdRouteHistory. |
-| 2026-09-16 | Completed `FS-017`; started `FS-018`. | Full 139-test suite (17 new persistence tests), zero-warning ESLint, and Next.js production build passed; hardened layout persistence with SecurityError safety, versioned envelopes, bounds validation, isolated keys, and 14-day auto-pruning. |
-| 2026-09-16 | Completed `FS-018`; started `FS-019`. | Full 158-test suite (19 new comprehensive coverage tests), zero-warning ESLint, and Next.js production build passed; foundational roadmap (FS-001 through FS-018) 100% complete. |
-| 2026-09-16 | Completed `FS-019`; started `FS-020`. | Full 164-test suite (6 new time replay tests), zero-warning ESLint, and Next.js production build passed; time-based scrubber, dwell intervals, dynamic proportional pacing, and interactive scrub range slider verified. |
+| 2026-09-19 | Accepted FA-013 and reconciled this tracker to FA-014; qualified FS-007 as partial because FA-016 remains TODO and retained FS-020+ as backlog. | Accepted FA-013 chain and independent final audit evidence are recorded in `FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`; FA-014 remains the sole current focus pending re-audit. |
+| 2026-09-16 | Completed `FS-019`; started `FS-020`. | Historical implementation note: 164-test time-based scrubber result; superseded for corrective acceptance by FA-009 and FA-013. |
+| 2026-09-16 | Completed `FS-018`; started `FS-019`. | Historical implementation note: 158-test foundation result; the “100% complete” wording is historical and is not current because FA-014 is active and FA-015/FA-016 remain TODO. |
+| 2026-09-15 | Created the live working state from the Filesystem Activity code/UX/logic review. | Historical baseline recorded above; its clean-tree statement applies only to that review point. |
