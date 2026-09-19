@@ -81,6 +81,17 @@ the projection by canonical `_id`, claims missing work through the existing
 generation CAS, and rebuilds exact current state, transition paths, event
 count, lifecycle, and expiry facts from authoritative source/history.
 
+Application-level repair readiness is evaluated from one explicit projected
+source contract. The projection includes every field read by the predicate:
+current `auditProjectionVersion`, positive typed
+`auditProjectionGeneration`, `auditProjectionReadyGeneration`,
+`auditProjectionPendingGeneration`, `auditProjectionDirty`, and
+`auditProjectionPendingEventCount`. A row is repair-ready only when the
+version is v2, ready generation exactly equals projection generation, and all
+three dirty/ownership markers are absent. Pending and generation-mismatched
+rows still advance the raw cursor but cannot be normalized, claimed, rebuilt,
+or marked ready.
+
 Each reconciliation pass also examines at most 256 expired projection
 watermarks through a resumable `(expires_at, _id)` keyset cursor backed by the
 compound index. The cursor advances for retained source-backed rows and wraps
@@ -341,6 +352,36 @@ idempotent. The dashboard integration also verifies the resulting projection
 expiry index is not a TTL deletion contract. The isolated harness passed all 12
 dashboard tests and executed all 11 `TestFA016*` processor tests plus 2
 target-safety tests, with none skipped.
+
+FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
+
+## Repair-readiness ownership correction (2026-09-20)
+
+This narrowly scoped continuation started at exact HEAD
+`3015b8b34fd6ef88f292941db8bf3095290c295a2` on
+`feat/cwd-filesystem-telemetry`. The worktree was clean; fetch succeeded;
+`origin/main` (`4390d886b6fc18420b224464a553e4bfeaab0d8a`) was already the
+merge base, so no merge was required. The dashboard baseline passed 22 Vitest
+files, 463 tests, and 14 skips before editing.
+
+The repair scan now uses a named projected source-field contract containing
+all eligibility/readiness inputs. Its pure predicate is exactly: v2 version,
+positive typed generation, ready generation equal to generation, and absent
+`auditProjectionPendingGeneration`, `auditProjectionDirty`, and
+`auditProjectionPendingEventCount`. The Mongo query remains the raw bounded
+`(sessionId|session_id, _id)` keyset; application filtering advances over
+non-ready rows without touching ownership.
+
+Production Mongo coverage includes canonical and legacy pending-generation
+rows, generation-mismatched rows, exact-ready repair, cursor advancement,
+concurrent repair passes, the paused production writer/event-outbox race, and
+the complete prior retention/cursor suite. The repeated targeted command
+covered ownership, event-outbox, repair, cleanup, and dotted-CAS tests 20
+times and returned `ok honeypot/processor-agent 86.808s`. Verbose ownership
+plans examined `3/3` documents/keys for each small fixture and the adversarial
+repair plans remained `256/256`; both used the intended raw-field/`_id`
+indexes with no `COLLSCAN`. The isolated harness passed 12/12 dashboard tests
+and all selected processor FA-016 cases with no required skips.
 
 FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
 

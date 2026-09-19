@@ -932,6 +932,31 @@ func TestFA016EventOutboxSurvivesCloseBeforeHistoryInsert(t *testing.T) {
 	if count, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:transition"}); err != nil || count != 0 {
 		t.Fatalf("history event committed before the ownership barrier count=%d err=%v", count, err)
 	}
+	if _, err := db.Collection(cwdAuditProjectionCollection).DeleteOne(ctx, bson.M{"_id": "event-outbox"}); err != nil {
+		t.Fatal(err)
+	}
+	repairResults := make(chan error, 2)
+	go func() {
+		repairResults <- mw.repairMissingCwdAuditProjectionField(ctx, retention, "sessionId", "missingProjectionSessionCursor", bson.M{})
+	}()
+	go func() {
+		repairResults <- mw.repairMissingCwdAuditProjectionField(ctx, retention, "session_id", "missingProjectionLegacyCursor", bson.M{})
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-repairResults; err != nil {
+			t.Fatal(err)
+		}
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(state["auditProjectionPendingGeneration"]) != ownedGeneration || bsonInt64(state["auditProjectionReadyGeneration"]) == ownedGeneration {
+		t.Fatalf("repair stole or cleared the paused writer ownership: %#v", state)
+	}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "event-outbox"}).Err(); err != mongo.ErrNoDocuments {
+		t.Fatalf("repair rebuilt a source with active writer ownership: %v", err)
+	}
 
 	// The close writer advances and converges its newer generation while the
 	// original history writer is still paused before cwd_events upsert.
@@ -1595,6 +1620,127 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 	}
 }
 
+func TestFA016RepairReadinessOwnershipContract(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	retention := time.Hour
+	addSource := func(id, field, sessionID string, generation, ready int64, pending any) bson.M {
+		doc := bson.M{
+			"_id": id, field: sessionID, "sourceIp": "198.51.100.88", "cwdState": bson.M{"path": "/ownership/" + sessionID},
+			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(retention),
+			"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": generation, "auditProjectionReadyGeneration": ready,
+		}
+		if pending != nil {
+			doc["auditProjectionPendingGeneration"] = pending
+		}
+		return doc
+	}
+	sources := []any{
+		addSource("canonical-pending-source", "sessionId", "a-pending-canonical", 2, 1, int64(2)),
+		addSource("canonical-mismatch-source", "sessionId", "a-mismatch-canonical", 2, 1, nil),
+		addSource("canonical-ready-source", "sessionId", "a-ready-canonical", 2, 2, nil),
+		addSource("legacy-pending-source", "session_id", "a-pending-legacy", 2, 1, int64(2)),
+		addSource("legacy-mismatch-source", "session_id", "a-mismatch-legacy", 2, 1, nil),
+		addSource("legacy-ready-source", "session_id", "a-ready-legacy", 2, 2, nil),
+	}
+	if _, err := db.Collection("cwd_session_state").InsertMany(ctx, sources); err != nil {
+		t.Fatal(err)
+	}
+	for _, sessionID := range []string{"a-ready-canonical", "a-ready-legacy"} {
+		if _, err := db.Collection("cwd_events").InsertOne(ctx, bson.M{
+			"_id": "ownership-event-" + sessionID, "eventId": "ownership-event-" + sessionID,
+			"sessionId": sessionID, "action": "changed", "fromPath": "/ownership/before", "toPath": "/ownership/" + sessionID,
+			"at": closedAt, "expires_at": closedAt.Add(retention),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	results := make(chan error, 4)
+	for _, work := range []struct{ field, cursorKey string }{{"sessionId", "missingProjectionSessionCursor"}, {"session_id", "missingProjectionLegacyCursor"}} {
+		go func(field, cursorKey string) {
+			results <- mw.repairMissingCwdAuditProjectionField(ctx, retention, field, cursorKey, bson.M{})
+		}(work.field, work.cursorKey)
+		go func(field, cursorKey string) {
+			results <- mw.repairMissingCwdAuditProjectionField(ctx, retention, field, cursorKey, bson.M{})
+		}(work.field, work.cursorKey)
+	}
+	for i := 0; i < 4; i++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	projection := db.Collection(cwdAuditProjectionCollection)
+	for _, sessionID := range []string{"a-pending-canonical", "a-mismatch-canonical", "a-pending-legacy", "a-mismatch-legacy"} {
+		if err := projection.FindOne(ctx, bson.M{"_id": sessionID}).Err(); err != mongo.ErrNoDocuments {
+			t.Fatalf("non-ready source %s was rebuilt: %v", sessionID, err)
+		}
+	}
+	for _, sessionID := range []string{"a-ready-canonical", "a-ready-legacy"} {
+		var rebuilt bson.M
+		if err := projection.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&rebuilt); err != nil {
+			t.Fatalf("exact ready source %s was not repaired: %v", sessionID, err)
+		}
+		if bsonInt64(rebuilt["auditEventCount"]) != 1 || rebuilt["auditProjectionVersion"] != cwdAuditProjectionVersion {
+			t.Fatalf("ready source %s has incorrect repaired facts: %#v", sessionID, rebuilt)
+		}
+	}
+	for _, sourceID := range []string{"canonical-pending-source", "canonical-mismatch-source", "legacy-pending-source", "legacy-mismatch-source"} {
+		var state bson.M
+		if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": sourceID}).Decode(&state); err != nil {
+			t.Fatal(err)
+		}
+		if sourceID == "canonical-pending-source" || sourceID == "legacy-pending-source" {
+			if bsonInt64(state["auditProjectionPendingGeneration"]) != 2 || bsonInt64(state["auditProjectionReadyGeneration"]) != 1 {
+				t.Fatalf("pending ownership changed for %s: %#v", sourceID, state)
+			}
+		} else if bsonInt64(state["auditProjectionGeneration"]) != 2 || bsonInt64(state["auditProjectionReadyGeneration"]) != 1 {
+			t.Fatalf("generation-mismatched source changed for %s: %#v", sourceID, state)
+		}
+	}
+	marker := bson.M{}
+	if err := db.Collection("cwd_audit_projection_meta").FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}).Decode(&marker); err != nil {
+		t.Fatal(err)
+	}
+	for _, cursorKey := range []string{"missingProjectionSessionCursor", "missingProjectionLegacyCursor"} {
+		cursor := decodeCwdRepairCursor(marker[cursorKey])
+		if cursor == nil || !strings.HasPrefix(cursor.Value, "a-ready-") {
+			t.Fatalf("%s did not advance over non-ready rows: %#v", cursorKey, marker)
+		}
+	}
+	for _, field := range []string{"sessionId", "session_id"} {
+		var explain bson.M
+		find := bson.D{{Key: "find", Value: "cwd_session_state"}, {Key: "filter", Value: missingCwdAuditProjectionKeysetQuery(field, nil)}, {Key: "sort", Value: bson.D{{Key: field, Value: 1}, {Key: "_id", Value: 1}}}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
+		if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: find}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explain); err != nil {
+			t.Fatal(err)
+		}
+		if planText := fmt.Sprint(explain); strings.Contains(planText, "COLLSCAN") || !strings.Contains(planText, "IXSCAN") || maxExplainMetric(explain, "totalDocsExamined") > int64(cwdAuditProjectionRepairBatchSize) || maxExplainMetric(explain, "totalKeysExamined") > int64(cwdAuditProjectionRepairBatchSize) {
+			t.Fatalf("ownership repair %s plan exceeded 256-row bound: %#v", field, explain)
+		}
+		fmt.Fprintf(os.Stderr, "FA016_OWNERSHIP_REPAIR %s indexes=%v docsExamined=%d keysExamined=%d\n", field, explainIndexNames(explain), maxExplainMetric(explain, "totalDocsExamined"), maxExplainMetric(explain, "totalKeysExamined"))
+	}
+}
+
 func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T) {
 	target, skip := fa016IntegrationTarget(t)
 	if skip {
@@ -1615,7 +1761,7 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 	if err := mw.ensureIndexes(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection(cwdAuditProjectionMetaID).InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
+	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
 		t.Fatal(err)
 	}
 	repairCASCursor := &cwdRepairCursor{Value: "raw-cursor", ID: "repair-cursor-id"}
@@ -1623,15 +1769,15 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 		{{Key: "value", Value: repairCASCursor.Value}, {Key: "id", Value: repairCASCursor.ID}},
 		{{Key: "id", Value: repairCASCursor.ID}, {Key: "value", Value: repairCASCursor.Value}},
 	} {
-		if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"missingProjectionSessionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
+		if _, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"missingProjectionSessionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
 			t.Fatal(err)
 		}
-		result, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, cwdRepairCursorCASFilter("missingProjectionSessionCursor", repairCASCursor), bson.M{"$set": bson.M{"missingProjectionSessionCursor": cwdRepairCursorDocument(repairCASCursor)}})
+		result, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, cwdRepairCursorCASFilter("missingProjectionSessionCursor", repairCASCursor), bson.M{"$set": bson.M{"missingProjectionSessionCursor": cwdRepairCursorDocument(repairCASCursor)}})
 		if err != nil || result.MatchedCount != 1 {
 			t.Fatalf("repair cursor dotted CAS failed for field order %#v: matched=%d err=%v", stored, result.MatchedCount, err)
 		}
 	}
-	if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"missingProjectionSessionCursor": ""}}); err != nil {
+	if _, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"missingProjectionSessionCursor": ""}}); err != nil {
 		t.Fatal(err)
 	}
 	closedAt := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
@@ -1787,15 +1933,15 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 		{{Key: "expiresAt", Value: cleanupCASCursor.ExpiresAt}, {Key: "id", Value: cleanupCASCursor.ID}},
 		{{Key: "id", Value: cleanupCASCursor.ID}, {Key: "expiresAt", Value: cleanupCASCursor.ExpiresAt}},
 	} {
-		if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"cleanupProjectionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
+		if _, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"cleanupProjectionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
 			t.Fatal(err)
 		}
-		result, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, cwdCleanupCursorCASFilter("cleanupProjectionCursor", cleanupCASCursor), bson.M{"$set": bson.M{"cleanupProjectionCursor": cwdCleanupCursorDocument(cleanupCASCursor)}})
+		result, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, cwdCleanupCursorCASFilter("cleanupProjectionCursor", cleanupCASCursor), bson.M{"$set": bson.M{"cleanupProjectionCursor": cwdCleanupCursorDocument(cleanupCASCursor)}})
 		if err != nil || result.MatchedCount != 1 {
 			t.Fatalf("cleanup cursor dotted CAS failed for field order %#v: matched=%d err=%v", stored, result.MatchedCount, err)
 		}
 	}
-	if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"cleanupProjectionCursor": ""}}); err != nil {
+	if _, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"cleanupProjectionCursor": ""}}); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

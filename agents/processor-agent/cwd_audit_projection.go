@@ -613,6 +613,32 @@ type cwdRepairCursor struct {
 	ID    any
 }
 
+var cwdAuditRepairSourceProjectionFields = []string{
+	"_id",
+	"sessionId",
+	"session_id",
+	"sourceIp",
+	"cwdState",
+	"lifecycle",
+	"stateSequence",
+	"stateSourceEventId",
+	"expires_at",
+	"auditProjectionVersion",
+	"auditProjectionGeneration",
+	"auditProjectionReadyGeneration",
+	"auditProjectionPendingGeneration",
+	"auditProjectionDirty",
+	"auditProjectionPendingEventCount",
+}
+
+func cwdAuditRepairSourceProjection() bson.M {
+	projection := bson.M{}
+	for _, field := range cwdAuditRepairSourceProjectionFields {
+		projection[field] = 1
+	}
+	return projection
+}
+
 func missingCwdAuditProjectionKeysetQuery(field string, cursor *cwdRepairCursor) bson.M {
 	match := bson.M{
 		"lifecycle.status": "closed",
@@ -658,7 +684,7 @@ func cwdRepairCursorCASFilter(cursorKey string, cursor *cwdRepairCursor) bson.M 
 func (mw *MongoWriter) repairMissingCwdAuditProjectionField(ctx context.Context, retention time.Duration, field, cursorKey string, marker bson.M) error {
 	start := decodeCwdRepairCursor(marker[cursorKey])
 	states := mw.db.Collection("cwd_session_state")
-	findOptions := options.Find().SetProjection(bson.M{"_id": 1, "sessionId": 1, "session_id": 1, "sourceIp": 1, "cwdState": 1, "lifecycle": 1, "stateSequence": 1, "stateSourceEventId": 1, "auditProjectionGeneration": 1, "auditProjectionReadyGeneration": 1, "auditProjectionVersion": 1, "expires_at": 1}).SetSort(bson.D{{Key: field, Value: 1}, {Key: "_id", Value: 1}}).SetLimit(cwdAuditProjectionRepairBatchSize)
+	findOptions := options.Find().SetProjection(cwdAuditRepairSourceProjection()).SetSort(bson.D{{Key: field, Value: 1}, {Key: "_id", Value: 1}}).SetLimit(cwdAuditProjectionRepairBatchSize)
 	cursorResult, err := states.Find(ctx, missingCwdAuditProjectionKeysetQuery(field, start), findOptions)
 	if err != nil {
 		return err
@@ -752,14 +778,36 @@ func (mw *MongoWriter) repairMissingCwdAuditProjectionField(ctx context.Context,
 }
 
 func cwdAuditSourceReadyForRepair(state bson.M) bool {
-	if state["auditProjectionVersion"] != cwdAuditProjectionVersion {
+	version, versionOK := state["auditProjectionVersion"].(string)
+	if !versionOK || version != cwdAuditProjectionVersion {
 		return false
 	}
-	if _, ready := state["auditProjectionReadyGeneration"]; !ready {
+	generation, generationOK := validCwdAuditProjectionGeneration(state["auditProjectionGeneration"])
+	readyGeneration, readyOK := validCwdAuditProjectionGeneration(state["auditProjectionReadyGeneration"])
+	if !generationOK || !readyOK || generation != readyGeneration {
 		return false
 	}
-	_, pending := state["auditProjectionPendingGeneration"]
-	return !pending
+	for _, dirtyMarker := range []string{"auditProjectionPendingGeneration", "auditProjectionDirty", "auditProjectionPendingEventCount"} {
+		if _, present := state[dirtyMarker]; present {
+			return false
+		}
+	}
+	return true
+}
+
+func validCwdAuditProjectionGeneration(value any) (int64, bool) {
+	var generation int64
+	switch typed := value.(type) {
+	case int64:
+		generation = typed
+	case int32:
+		generation = int64(typed)
+	case int:
+		generation = int64(typed)
+	default:
+		return 0, false
+	}
+	return generation, generation > 0
 }
 
 func validCwdAuditRepairState(state bson.M, sessionID string) bool {

@@ -315,6 +315,54 @@ func TestFA016CursorCASUsesDottedFields(t *testing.T) {
 	}
 }
 
+func TestFA016RepairReadinessProjectionContract(t *testing.T) {
+	projection := cwdAuditRepairSourceProjection()
+	for _, field := range cwdAuditRepairSourceProjectionFields {
+		if projection[field] != 1 {
+			t.Fatalf("repair readiness projection omitted %q: %#v", field, projection)
+		}
+	}
+	base := bson.M{
+		"auditProjectionVersion":         cwdAuditProjectionVersion,
+		"auditProjectionGeneration":      int64(2),
+		"auditProjectionReadyGeneration": int64(2),
+	}
+	ready := func(overrides bson.M) bson.M {
+		state := bson.M{}
+		for key, value := range base {
+			state[key] = value
+		}
+		for key, value := range overrides {
+			if value == nil {
+				delete(state, key)
+				continue
+			}
+			state[key] = value
+		}
+		return state
+	}
+	cases := []struct {
+		name  string
+		state bson.M
+		want  bool
+	}{
+		{name: "exact ready", state: ready(nil), want: true},
+		{name: "pending owns generation", state: ready(bson.M{"auditProjectionPendingGeneration": int64(2)}), want: false},
+		{name: "ready generation is stale", state: ready(bson.M{"auditProjectionReadyGeneration": int64(1)}), want: false},
+		{name: "generation is missing", state: ready(bson.M{"auditProjectionGeneration": nil}), want: false},
+		{name: "version is legacy", state: ready(bson.M{"auditProjectionVersion": "cwd_audit_projection.v1"}), want: false},
+		{name: "dirty marker", state: ready(bson.M{"auditProjectionDirty": true}), want: false},
+		{name: "pending event marker", state: ready(bson.M{"auditProjectionPendingEventCount": int64(1)}), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cwdAuditSourceReadyForRepair(tc.state); got != tc.want {
+				t.Fatalf("readiness=%v want=%v state=%#v", got, tc.want, tc.state)
+			}
+		})
+	}
+}
+
 func TestFA016MongoTargetRejectsUnsafeConfigurationsBeforeCallback(t *testing.T) {
 	cases := []struct{ name, uri, database, runID string }{
 		{"missing uri", "", "pti_fa016_test_abc", "abc"},
