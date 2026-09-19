@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, Tuple
+from typing import Any, Dict, Tuple
 
 from production.utils.serialization import stable_json
 
@@ -17,6 +18,79 @@ DEFAULT_MONGODB_SCHEMA_MANIFEST = (
 
 class MongoDBManifestError(ValueError):
     pass
+
+
+COMPATIBLE_OPTIONAL_PERFORMANCE_INDEX = (
+    "COMPATIBLE_OPTIONAL_PERFORMANCE_INDEX"
+)
+
+
+@dataclass(frozen=True)
+class MongoDBSchemaCompatibility:
+    """Semantic compatibility result for a candidate manifest and live schema.
+
+    ``schema_identity`` remains the content address of the declared manifest.
+    This result deliberately answers a different question: whether the live
+    schema satisfies the candidate's required persistence contract.
+    """
+
+    missing_collections: Tuple[str, ...] = ()
+    validator_mismatches: Tuple[str, ...] = ()
+    missing_required_indexes: Tuple[Dict[str, str], ...] = ()
+    required_index_mismatches: Tuple[Dict[str, Any], ...] = ()
+    compatible_optional_extras: Tuple[Dict[str, Any], ...] = ()
+    rejected_extra_indexes: Tuple[Dict[str, Any], ...] = ()
+
+    @property
+    def required_schema_match(self) -> bool:
+        return not (
+            self.missing_collections
+            or self.validator_mismatches
+            or self.missing_required_indexes
+            or self.required_index_mismatches
+        )
+
+    @property
+    def schema_compatible(self) -> bool:
+        return self.required_schema_match and not self.rejected_extra_indexes
+
+    def failure_message(self) -> str:
+        failures = []
+        if self.missing_collections:
+            failures.append(
+                "missing collections=" + ",".join(self.missing_collections)
+            )
+        if self.validator_mismatches:
+            failures.append(
+                "validator mismatches=" + ",".join(self.validator_mismatches)
+            )
+        if self.missing_required_indexes:
+            failures.append(
+                "missing required indexes="
+                + ",".join(
+                    f"{item['collection']}.{item['index']}"
+                    for item in self.missing_required_indexes
+                )
+            )
+        if self.required_index_mismatches:
+            failures.append(
+                "required index mismatches="
+                + ",".join(
+                    f"{item['collection']}.{item['index']}"
+                    for item in self.required_index_mismatches
+                )
+            )
+        if self.rejected_extra_indexes:
+            failures.append(
+                "rejected extra indexes="
+                + ",".join(
+                    f"{item['collection']}.{item['index']}"
+                    for item in self.rejected_extra_indexes
+                )
+            )
+        return "canonical MongoDB schema compatibility failed: " + "; ".join(
+            failures or ["unknown incompatibility"]
+        )
 
 
 @dataclass(frozen=True)
@@ -86,15 +160,7 @@ def _validate_collection(collection: Any) -> None:
         _validate_keys(index.get("keys"), collection=name, index=index_name)
 
 
-def load_mongodb_schema_manifest(
-    path: str | Path = DEFAULT_MONGODB_SCHEMA_MANIFEST,
-) -> MongoDBSchemaManifest:
-    selected = Path(path)
-    try:
-        raw = selected.read_bytes()
-        document = json.loads(raw)
-    except (OSError, json.JSONDecodeError) as exc:
-        raise MongoDBManifestError("MongoDB schema manifest is unreadable") from exc
+def _validated_manifest(document: Any) -> MongoDBSchemaManifest:
     if not isinstance(document, dict):
         raise MongoDBManifestError("MongoDB schema manifest must be an object")
     if document.get("schema_version") != MONGODB_SCHEMA_MANIFEST_VERSION:
@@ -144,6 +210,39 @@ def load_mongodb_schema_manifest(
     )
 
 
+def load_mongodb_schema_manifest_payload(
+    payload_json: str,
+    *,
+    expected_sha256: str = "",
+) -> MongoDBSchemaManifest:
+    """Load and verify a content-addressed manifest payload from MongoDB."""
+
+    if not isinstance(payload_json, str):
+        raise MongoDBManifestError("MongoDB schema manifest payload must be text")
+    try:
+        document = json.loads(payload_json)
+    except json.JSONDecodeError as exc:
+        raise MongoDBManifestError("MongoDB schema manifest payload is unreadable") from exc
+    if stable_json(document) != payload_json:
+        raise MongoDBManifestError("MongoDB schema manifest payload is not canonical")
+    manifest = _validated_manifest(document)
+    if expected_sha256 and manifest.sha256 != expected_sha256:
+        raise MongoDBManifestError("MongoDB schema manifest payload hash mismatch")
+    return manifest
+
+
+def load_mongodb_schema_manifest(
+    path: str | Path = DEFAULT_MONGODB_SCHEMA_MANIFEST,
+) -> MongoDBSchemaManifest:
+    selected = Path(path)
+    try:
+        raw = selected.read_bytes()
+        document = json.loads(raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MongoDBManifestError("MongoDB schema manifest is unreadable") from exc
+    return _validated_manifest(document)
+
+
 def collection_validator(collection: Dict[str, Any]) -> Dict[str, Any]:
     required = list(collection["required_fields"])
     return {
@@ -171,6 +270,190 @@ def collection_validator(collection: Dict[str, Any]) -> Dict[str, Any]:
             ]
         }]
     }
+
+
+_INDEX_METADATA_FIELDS = frozenset(
+    {"name", "key", "keys", "unique", "v", "ns", "hidden"}
+)
+
+
+def _index_key_pairs(index: Mapping[str, Any]) -> Tuple[Tuple[str, Any], ...] | None:
+    raw_keys = index.get("key", index.get("keys"))
+    if isinstance(raw_keys, Mapping):
+        return tuple((str(field), direction) for field, direction in raw_keys.items())
+    if isinstance(raw_keys, (list, tuple)):
+        pairs = []
+        for item in raw_keys:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                return None
+            pairs.append((str(item[0]), item[1]))
+        return tuple(pairs)
+    return None
+
+
+def _index_semantic_violations(
+    index: Mapping[str, Any], *, reject_unique: bool
+) -> Tuple[str, ...]:
+    """Return index options that could affect persistence correctness."""
+
+    violations = []
+    keys = _index_key_pairs(index)
+    if not keys or any(
+        not field or field == "$**" or direction not in (-1, 1)
+        for field, direction in keys
+    ):
+        violations.append("unsupported_key_pattern")
+    if reject_unique and bool(index.get("unique", False)):
+        violations.append("unexpected_unique")
+    if "expireAfterSeconds" in index:
+        violations.append("unexpected_ttl")
+    if "partialFilterExpression" in index:
+        violations.append("incompatible_partial_index")
+    if "collation" in index:
+        violations.append("incompatible_collation")
+    if "sparse" in index:
+        violations.append("incompatible_sparse_index")
+    unknown = sorted(set(index) - _INDEX_METADATA_FIELDS)
+    if unknown:
+        violations.append("unsupported_index_options:" + ",".join(unknown))
+    return tuple(violations)
+
+
+def _index_definition_is_ordinary(index: Mapping[str, Any]) -> Tuple[str, ...]:
+    """Return safety violations for an index that is not manifest-required."""
+
+    return _index_semantic_violations(index, reject_unique=True)
+
+
+def _required_index_mismatch(
+    expected: Mapping[str, Any], actual: Mapping[str, Any]
+) -> Tuple[str, ...]:
+    violations = []
+    if _index_key_pairs(expected) != _index_key_pairs(actual):
+        violations.append("keys")
+    if bool(expected.get("unique", False)) != bool(actual.get("unique", False)):
+        violations.append("unique")
+    violations.extend(_index_semantic_violations(actual, reject_unique=False))
+    return tuple(dict.fromkeys(violations))
+
+
+def compare_mongodb_schema_compatibility(
+    manifest: MongoDBSchemaManifest,
+    *,
+    existing_collections: Iterable[str],
+    validators: Mapping[str, Any],
+    indexes: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> MongoDBSchemaCompatibility:
+    """Compare installed Mongo structures against required manifest semantics.
+
+    The input is deliberately a read-side snapshot.  This helper performs no
+    MongoDB operations and does not compare content-addressed identities.
+    Additional indexes are accepted only when they are ordinary, non-unique,
+    non-TTL B-tree indexes with no semantic options that could change query
+    correctness.
+    """
+
+    existing = set(existing_collections)
+    required_collections = {item["name"] for item in manifest.collections}
+    missing_collections = tuple(sorted(required_collections - existing))
+    validator_mismatches = []
+    missing_required_indexes = []
+    required_index_mismatches = []
+    compatible_optional_extras = []
+    rejected_extra_indexes = []
+
+    for declaration in manifest.collections:
+        collection = declaration["name"]
+        if collection in existing and validators.get(collection) != collection_validator(
+            declaration
+        ):
+            validator_mismatches.append(collection)
+
+        actual = dict(indexes.get(collection, {}))
+        expected = {
+            "_id_": {"name": "_id_", "keys": [["_id", 1]], "unique": False}
+        }
+        expected.update(
+            {
+                item["name"]: item
+                for item in declaration.get("indexes", [])
+            }
+        )
+        for index_name, expected_index in expected.items():
+            observed = actual.get(index_name)
+            if observed is None:
+                missing_required_indexes.append(
+                    {"collection": collection, "index": index_name}
+                )
+                continue
+            if index_name == "_id_":
+                if _index_key_pairs(observed) != (("_id", 1),):
+                    required_index_mismatches.append(
+                        {
+                            "collection": collection,
+                            "index": index_name,
+                            "reasons": ["keys"],
+                        }
+                    )
+                continue
+            reasons = _required_index_mismatch(expected_index, observed)
+            if reasons:
+                required_index_mismatches.append(
+                    {
+                        "collection": collection,
+                        "index": index_name,
+                        "reasons": list(reasons),
+                    }
+                )
+
+        for index_name, observed in actual.items():
+            if index_name in expected:
+                continue
+            reasons = _index_definition_is_ordinary(observed)
+            item = {
+                "collection": collection,
+                "index": index_name,
+                "keys": list(_index_key_pairs(observed) or ()),
+                "unique": bool(observed.get("unique", False)),
+            }
+            if reasons:
+                rejected_extra_indexes.append({**item, "reasons": list(reasons)})
+            else:
+                compatible_optional_extras.append(
+                    {
+                        **item,
+                        "classification": COMPATIBLE_OPTIONAL_PERFORMANCE_INDEX,
+                    }
+                )
+
+    return MongoDBSchemaCompatibility(
+        missing_collections=missing_collections,
+        validator_mismatches=tuple(sorted(set(validator_mismatches))),
+        missing_required_indexes=tuple(
+            sorted(
+                missing_required_indexes,
+                key=lambda item: (item["collection"], item["index"]),
+            )
+        ),
+        required_index_mismatches=tuple(
+            sorted(
+                required_index_mismatches,
+                key=lambda item: (item["collection"], item["index"]),
+            )
+        ),
+        compatible_optional_extras=tuple(
+            sorted(
+                compatible_optional_extras,
+                key=lambda item: (item["collection"], item["index"]),
+            )
+        ),
+        rejected_extra_indexes=tuple(
+            sorted(
+                rejected_extra_indexes,
+                key=lambda item: (item["collection"], item["index"]),
+            )
+        ),
+    )
 
 
 def iter_manifest_indexes(
