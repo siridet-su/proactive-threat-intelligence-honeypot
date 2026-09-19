@@ -19,6 +19,7 @@ import {
   asString,
   buildAuditSessionsPipeline,
   buildAuditProjectionCountPipeline,
+  buildAuditProjectionEventReadinessQuery,
   buildAuditProjectionItemPipeline,
   buildAuditProjectionOverflowCountPipeline,
   buildAuditProjectionOverflowItemPipeline,
@@ -31,6 +32,7 @@ import {
   normalizeHistoryEvent,
   normalizeSessionAuditSummary,
   AUDIT_PROJECTION_VERSION,
+  buildAuditProjectionCutoverReadinessQuery,
 } from "@/lib/filesystem-data";
 import { deriveLatestTelemetryAt } from "@/lib/filesystem-freshness";
 import { createBoundedLruCache } from "@/lib/bounded-lru-cache";
@@ -564,7 +566,22 @@ async function auditProjectionIsReady(): Promise<boolean> {
     buildAuditProjectionReadinessQuery(),
     { projection: { _id: 1 } },
   );
-  return pending === null;
+  if (pending !== null) return false;
+
+  const pendingEvent = await db.collection<Document>(SESSIONS_COLLECTION).findOne(
+    buildAuditProjectionEventReadinessQuery(),
+    { projection: { _id: 1 } },
+  );
+  if (pendingEvent !== null) return false;
+
+  // A pre-v2 writer can publish a valid closed row without knowing the
+  // generation marker. Keep this as a separate indexed bounded probe so the
+  // cutover cannot silently omit that row after the v2 marker exists.
+  const legacy = await db.collection<Document>(SESSIONS_COLLECTION).findOne(
+    buildAuditProjectionCutoverReadinessQuery(),
+    { projection: { _id: 1 } },
+  );
+  return legacy === null;
 }
 
 async function hasOverflowProjection(client: Awaited<ReturnType<typeof getMongoClient>>): Promise<boolean> {

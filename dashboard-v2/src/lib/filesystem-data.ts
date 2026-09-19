@@ -397,10 +397,9 @@ function auditSourceEligibilityExpression(): Document {
 /**
  * Bounded readiness probe shared by the dashboard and processor contract.
  *
- * Once the v2 marker exists, the generation-owned pending field is the only
- * steady-state branch. The version branch is retained for the one-time
- * migration probe and is intentionally selected by the caller before the
- * completion marker is published.
+ * The generation branch detects current-protocol work. The separate cutover
+ * branch below detects eligible v1/unversioned rows from an old rolling writer
+ * that published after the v2 marker and therefore has no pending field.
  */
 export function buildAuditProjectionReadinessQuery(options: { includeVersionMigration?: boolean } = {}): Document {
   const pending = { auditProjectionPendingGeneration: { $exists: true } };
@@ -411,6 +410,29 @@ export function buildAuditProjectionReadinessQuery(options: { includeVersionMigr
     "lifecycle.status": "closed",
     $expr: auditSourceEligibilityExpression(),
     ...work,
+  };
+}
+
+/** Separate indexed probe for history writers that have reserved event work. */
+export function buildAuditProjectionEventReadinessQuery(): Document {
+  return {
+    "lifecycle.status": "closed",
+    $expr: auditSourceEligibilityExpression(),
+    auditProjectionPendingEventCount: { $gt: 0 },
+  };
+}
+
+/**
+ * Bounded cutover probe for rows written by a pre-v2 rolling writer. Once the
+ * marker is published, any eligible row still lacking v2 is reconciliation
+ * work; rows that were present before publication were already converged by
+ * the processor before it published the marker.
+ */
+export function buildAuditProjectionCutoverReadinessQuery(): Document {
+  return {
+    "lifecycle.status": "closed",
+    $expr: auditSourceEligibilityExpression(),
+    auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION },
   };
 }
 

@@ -46,6 +46,7 @@ func cwdStateIndexModels() []mongo.IndexModel {
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "session_id", Value: -1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionPendingGeneration", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}})},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionPendingEventCount", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPendingEventCount": bson.M{"$gt": 0}})},
 		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
@@ -156,42 +157,6 @@ func auditProjectionCurrentStateUpdate(observation cwdObservation, generation in
 	return mongo.Pipeline{stage, bson.D{{Key: "$unset", Value: bson.A{"auditEventIds", "visitedPaths", "eventCount", "homeOnly"}}}}
 }
 
-func auditProjectionEventUpdate(observation cwdObservation, generation int64, eventID string, increment bool) mongo.Pipeline {
-	transitionPaths := []string{observation.FromPath}
-	if observation.Action != "failed_change" {
-		transitionPaths = append(transitionPaths, observation.Path)
-	}
-	transitionSet := auditProjectionPathSetExpression("$auditTransitionPaths", transitionPaths...)
-	boundedTransitionSet := auditProjectionBoundedPathsExpression(transitionSet)
-	currentPath := bson.D{{Key: "$map", Value: bson.D{{Key: "input", Value: bson.A{1}}, {Key: "as", Value: "ignored"}, {Key: "in", Value: "$cwdState.path"}}}}
-	visited := bson.D{{Key: "$setUnion", Value: bson.A{boundedTransitionSet, currentPath}}}
-	visited = bson.D{{Key: "$filter", Value: bson.D{{Key: "input", Value: visited}, {Key: "as", Value: "path"}, {Key: "cond", Value: bson.D{{Key: "$and", Value: bson.A{bson.D{{Key: "$ne", Value: bson.A{"$$path", nil}}}, bson.D{{Key: "$ne", Value: bson.A{"$$path", ""}}}, bson.D{{Key: "$regexMatch", Value: bson.D{{Key: "input", Value: "$$path"}, {Key: "regex", Value: "^/"}}}}}}}}}}}
-	stage := bson.D{{Key: "$set", Value: bson.D{
-		// A close can be consumed before the first CWD event. The event is
-		// still authoritative for the missing current path, but never replaces
-		// an already-known state path or lifecycle status.
-		{Key: "sessionId", Value: observation.SessionID},
-		{Key: "sourceIp", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$sourceIp", observation.SourceIP}}}},
-		{Key: "cwdState", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$cwdState", bson.D{
-			{Key: "path", Value: observation.Path},
-			{Key: "status", Value: observation.Status},
-			{Key: "observedAt", Value: observation.At},
-			{Key: "sourceEventId", Value: observation.SourceEventID},
-		}}}}},
-		{Key: "auditTransitionPaths", Value: boundedTransitionSet},
-		{Key: "auditPathsOverflow", Value: bson.D{{Key: "$or", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$auditPathsOverflow", false}}}, auditProjectionOverflowExpression(transitionSet)}}}},
-		{Key: "auditVisitedPaths", Value: visited},
-		{Key: "auditHomeOnly", Value: auditProjectionHomeOnlyExpression(visited)},
-		{Key: "auditEventCount", Value: bson.D{{Key: "$add", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$auditEventCount", 0}}}, boolInt(increment)}}}},
-		{Key: "auditHistoryRevision", Value: bson.D{{Key: "$add", Value: bson.A{bson.D{{Key: "$ifNull", Value: bson.A{"$auditHistoryRevision", 0}}}, boolInt(increment)}}}},
-		{Key: "schemaVersion", Value: cwdAuditProjectionVersion},
-		{Key: "auditProjectionVersion", Value: cwdAuditProjectionVersion},
-		{Key: "auditProjectionGeneration", Value: generation},
-		{Key: "updatedAt", Value: time.Now().UTC()},
-	}}}
-	return mongo.Pipeline{stage, bson.D{{Key: "$unset", Value: bson.A{"auditEventIds", "visitedPaths", "eventCount", "homeOnly"}}}}
-}
-
 func auditProjectionStateOrderFilter(observation cwdObservation) bson.M {
 	return bson.M{
 		"_id":              observation.SessionID,
@@ -202,13 +167,6 @@ func auditProjectionStateOrderFilter(observation cwdObservation) bson.M {
 			bson.M{"stateSequence": bson.M{"$exists": false}},
 		},
 	}
-}
-
-func boolInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
 }
 
 func (mw *MongoWriter) seedCwdAuditProjection(ctx context.Context, observation cwdObservation, generation int64, retention time.Duration) error {
@@ -267,38 +225,31 @@ func (mw *MongoWriter) seedCwdAuditProjection(ctx context.Context, observation c
 	return nil
 }
 
-func (mw *MongoWriter) updateCwdAuditProjection(ctx context.Context, observation cwdObservation, sourceID any, generation int64, eventID string, changed bool, eventInserted bool, retention time.Duration) error {
+func (mw *MongoWriter) updateCwdAuditProjection(ctx context.Context, observation cwdObservation, sourceID any, generation int64, eventID string, changed bool, retention time.Duration) error {
+	if eventID != "" {
+		// History is rebuilt from the durable event collection. The event's
+		// pending bit remains set until this authoritative pass has actually
+		// matched the projection, so a close or another writer cannot hide a
+		// late event that commits after its original generation was superseded.
+		converged, err := mw.backfillCwdAuditProjectionSessionResult(ctx, observation.SessionID, retention)
+		if err != nil {
+			return err
+		}
+		if converged {
+			if err := mw.clearCwdEventProjectionWork(ctx, sourceID, eventID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if !changed {
+		return nil
+	}
 	if err := mw.seedCwdAuditProjection(ctx, observation, generation, retention); err != nil {
 		return err
 	}
 	collection := mw.db.Collection(cwdAuditProjectionCollection)
-	if changed {
-		if _, err := collection.UpdateOne(ctx, auditProjectionStateOrderFilter(observation), auditProjectionCurrentStateUpdate(observation, generation, true, retention)); err != nil {
-			return err
-		}
-	}
-	if eventID == "" {
-		return mw.markCwdAuditSourceReady(ctx, sourceID, generation)
-	}
-	if !eventInserted {
-		// A retry payload is not authoritative. Reconcile from the persisted event
-		// history and make the post-backfill operation a true no-op.
-		if err := mw.backfillCwdAuditProjectionSession(ctx, observation.SessionID, retention); err != nil {
-			return err
-		}
-		return mw.markCwdAuditSourceReady(ctx, sourceID, generation)
-	}
-	// Reconciliation may repair the durable event while the original writer is
-	// paused after the event upsert. Generation ordering makes the resumed
-	// writer a harmless no-op instead of incrementing the exact event twice.
-	_, err := collection.UpdateOne(ctx, bson.M{
-		"_id": observation.SessionID,
-		"$or": bson.A{
-			bson.M{"auditProjectionGeneration": bson.M{"$lt": generation}},
-			bson.M{"auditProjectionGeneration": bson.M{"$exists": false}},
-		},
-	}, auditProjectionEventUpdate(observation, generation, eventID, eventInserted))
-	if err != nil {
+	if _, err := collection.UpdateOne(ctx, auditProjectionStateOrderFilter(observation), auditProjectionCurrentStateUpdate(observation, generation, true, retention)); err != nil {
 		return err
 	}
 	return mw.markCwdAuditSourceReady(ctx, sourceID, generation)
@@ -306,8 +257,9 @@ func (mw *MongoWriter) updateCwdAuditProjection(ctx context.Context, observation
 
 func (mw *MongoWriter) markCwdAuditSourceReady(ctx context.Context, sourceID any, generation int64) error {
 	result, err := mw.db.Collection("cwd_session_state").UpdateOne(ctx, bson.M{
-		"_id":                       sourceID,
-		"auditProjectionGeneration": generation,
+		"_id":                              sourceID,
+		"auditProjectionGeneration":        generation,
+		"auditProjectionPendingGeneration": generation,
 	}, bson.M{
 		"$set": bson.M{
 			"auditProjectionVersion":         cwdAuditProjectionVersion,
@@ -327,19 +279,38 @@ func (mw *MongoWriter) markCwdAuditSourceReady(ctx context.Context, sourceID any
 	return nil
 }
 
+func (mw *MongoWriter) clearCwdEventProjectionWork(ctx context.Context, sourceID any, eventID string) error {
+	if _, err := mw.db.Collection("cwd_events").UpdateOne(ctx, bson.M{"_id": eventID, "auditProjectionPending": true}, bson.M{"$unset": bson.M{"auditProjectionPending": ""}}); err != nil {
+		return err
+	}
+	_, err := mw.db.Collection("cwd_session_state").UpdateOne(ctx, bson.M{
+		"_id":                              sourceID,
+		"auditProjectionPendingEventCount": bson.M{"$gt": 0},
+	}, bson.M{"$inc": bson.M{"auditProjectionPendingEventCount": -1}})
+	return err
+}
+
 func (mw *MongoWriter) advanceCwdProjectionGeneration(ctx context.Context, sourceID any) (cwdProjectionWork, error) {
+	return mw.advanceCwdProjectionGenerationForEvent(ctx, sourceID, false)
+}
+
+func (mw *MongoWriter) advanceCwdProjectionGenerationForEvent(ctx context.Context, sourceID any, eventWork bool) (cwdProjectionWork, error) {
 	if sourceID == nil {
 		return cwdProjectionWork{}, fmt.Errorf("CWD source identity is missing")
 	}
 	nextGeneration := bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$auditProjectionGeneration", int64(0)}}, int64(1)}}
+	set := bson.M{
+		"auditProjectionGeneration":        nextGeneration,
+		"auditProjectionPendingGeneration": nextGeneration,
+	}
+	if eventWork {
+		set["auditProjectionPendingEventCount"] = bson.M{"$add": bson.A{bson.M{"$ifNull": bson.A{"$auditProjectionPendingEventCount", int64(0)}}, int64(1)}}
+	}
 	var state bson.M
 	err := mw.db.Collection("cwd_session_state").FindOneAndUpdate(
 		ctx,
 		bson.M{"_id": sourceID},
-		mongo.Pipeline{bson.D{{Key: "$set", Value: bson.M{
-			"auditProjectionGeneration":        nextGeneration,
-			"auditProjectionPendingGeneration": nextGeneration,
-		}}}},
+		mongo.Pipeline{bson.D{{Key: "$set", Value: set}}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&state)
 	if err != nil {
@@ -420,60 +391,149 @@ func auditProjectionSessionID(document bson.M) string {
 
 func (mw *MongoWriter) backfillCwdAuditProjection(ctx context.Context, retention time.Duration) error {
 	states := mw.db.Collection("cwd_session_state")
-	contract := validCwdAuditSourceFilter()
-	markerErr := mw.db.Collection("cwd_audit_projection_meta").FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}, options.FindOne().SetProjection(bson.M{"_id": 1})).Err()
-	work := bson.A{bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}}}
-	if markerErr == mongo.ErrNoDocuments {
-		work = append(work, bson.M{"auditProjectionVersion": bson.M{"$ne": cwdAuditProjectionVersion}})
-	} else if markerErr != nil {
+	marker := bson.M{}
+	markerErr := mw.db.Collection("cwd_audit_projection_meta").FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, options.FindOne().SetProjection(bson.M{"projectionVersion": 1, "backfillCompletedAt": 1})).Decode(&marker)
+	if markerErr != nil && markerErr != mongo.ErrNoDocuments {
 		return markerErr
 	}
-	contract["$or"] = work
-	cursor, err := states.Find(ctx, contract)
-	if err != nil {
-		return err
+	var eventWorkProbe bson.M
+	eventWorkProbeErr := states.FindOne(ctx, bson.M{
+		"lifecycle.status": "closed",
+		"$expr":            validCwdAuditSourceExpression(),
+		"$or": bson.A{
+			bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}},
+			bson.M{"auditProjectionPendingEventCount": bson.M{"$gt": 0}},
+		},
+	}, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&eventWorkProbe)
+	if eventWorkProbeErr != nil && eventWorkProbeErr != mongo.ErrNoDocuments {
+		return eventWorkProbeErr
 	}
-	defer cursor.Close(ctx)
+	shouldProbeEvents := eventWorkProbeErr == nil
 
-	for cursor.Next(ctx) {
-		var state bson.M
-		if err := cursor.Decode(&state); err != nil {
-			return err
-		}
-		sessionID := auditProjectionSessionID(state)
-		if sessionID == "" {
-			continue
-		}
-		claimed, err := mw.claimCwdAuditProjectionState(ctx, state)
+	processStates := func(work bson.M) error {
+		contract := validCwdAuditSourceFilter()
+		contract["$and"] = bson.A{bson.M{"$or": bson.A{work}}}
+		cursor, err := states.Find(ctx, contract, options.Find().SetBatchSize(256))
 		if err != nil {
 			return err
 		}
-		if claimed == nil {
-			continue
+		defer cursor.Close(ctx)
+		for cursor.Next(ctx) {
+			var state bson.M
+			if err := cursor.Decode(&state); err != nil {
+				return err
+			}
+			if auditProjectionSessionID(state) == "" {
+				continue
+			}
+			claimed, err := mw.claimCwdAuditProjectionState(ctx, state)
+			if err != nil {
+				return err
+			}
+			if claimed == nil {
+				continue
+			}
+			if err := mw.backfillCwdAuditProjectionState(ctx, claimed, retention); err != nil {
+				return err
+			}
 		}
-		if err := mw.backfillCwdAuditProjectionState(ctx, claimed, retention); err != nil {
-			return err
-		}
+		return cursor.Err()
 	}
-	if err := cursor.Err(); err != nil {
+
+	// These are deliberately separate bounded/index-backed cutover branches:
+	// new writers publish generation-owned pending work, while old rolling
+	// writers can still create eligible v1/unversioned rows without that field.
+	if err := processStates(bson.M{"$or": bson.A{
+		bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}},
+		bson.M{"auditProjectionPendingEventCount": bson.M{"$gt": 0}},
+	}}); err != nil {
 		return err
 	}
-	// This is a single bounded existence check, not a second scan or a
-	// projection lookup per source row. A source marker is cleared only after
-	// its projection update succeeds, so this query also covers crash windows.
-	pending := bson.M{
-		"lifecycle.status":                 "closed",
-		"$expr":                            validCwdAuditSourceExpression(),
-		"auditProjectionPendingGeneration": bson.M{"$exists": true},
+	if err := processStates(bson.M{"auditProjectionVersion": bson.M{"$ne": cwdAuditProjectionVersion}}); err != nil {
+		return err
 	}
-	var pendingState bson.M
-	if err := states.FindOne(ctx, pending, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&pendingState); err != mongo.ErrNoDocuments {
+
+	// A pending event is itself durable reconciliation work. It is intentionally
+	// queried independently of source generations so an event committed after a
+	// close writer has finished cannot disappear behind the newer generation.
+	type pendingEvent struct{ id, sessionID string }
+	pendingEvents := []pendingEvent{}
+	if shouldProbeEvents {
+		eventCursor, err := mw.db.Collection("cwd_events").Find(ctx, bson.M{"auditProjectionPending": true}, options.Find().SetProjection(bson.M{"_id": 1, "eventId": 1, "sessionId": 1, "session_id": 1}).SetBatchSize(256))
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf("CWD audit projection backfill did not converge")
+		for eventCursor.Next(ctx) {
+			var event bson.M
+			if err := eventCursor.Decode(&event); err != nil {
+				eventCursor.Close(ctx)
+				return err
+			}
+			eventID, _ := event["eventId"].(string)
+			if eventID == "" {
+				eventID = fmt.Sprint(event["_id"])
+			}
+			if sessionID := auditProjectionSessionID(event); eventID != "" && sessionID != "" {
+				pendingEvents = append(pendingEvents, pendingEvent{id: eventID, sessionID: sessionID})
+			}
+		}
+		if err := eventCursor.Err(); err != nil {
+			eventCursor.Close(ctx)
+			return err
+		}
+		if err := eventCursor.Close(ctx); err != nil {
+			return err
+		}
 	}
-	_, err = mw.db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": time.Now().UTC()}}, options.Update().SetUpsert(true))
+	for _, pending := range pendingEvents {
+		converged, err := mw.backfillCwdAuditProjectionSessionResult(ctx, pending.sessionID, retention)
+		if err != nil {
+			return err
+		}
+		if converged {
+			state, err := mw.findCwdStateByCanonicalID(ctx, pending.sessionID)
+			if err == mongo.ErrNoDocuments {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if err := mw.clearCwdEventProjectionWork(ctx, state["_id"], pending.id); err != nil {
+				return err
+			}
+		}
+	}
+
+	// These existence checks are bounded and use the same branch predicates as
+	// the reconciliation cursors. Do not publish a completion hint while either
+	// protocol can still expose work.
+	for _, pending := range []struct {
+		collection *mongo.Collection
+		filter     bson.M
+		message    string
+	}{
+		{states, bson.M{"lifecycle.status": "closed", "$expr": validCwdAuditSourceExpression(), "auditProjectionPendingGeneration": bson.M{"$exists": true}}, "CWD audit projection generation work did not converge"},
+		{states, bson.M{"lifecycle.status": "closed", "$expr": validCwdAuditSourceExpression(), "auditProjectionPendingEventCount": bson.M{"$gt": 0}}, "CWD audit event ownership work did not converge"},
+		{states, bson.M{"lifecycle.status": "closed", "$expr": validCwdAuditSourceExpression(), "auditProjectionVersion": bson.M{"$ne": cwdAuditProjectionVersion}}, "CWD audit projection cutover work did not converge"},
+	} {
+		var pendingDoc bson.M
+		if err := pending.collection.FindOne(ctx, pending.filter, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&pendingDoc); err != mongo.ErrNoDocuments {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("%s", pending.message)
+		}
+	}
+	if shouldProbeEvents {
+		var pendingEvent bson.M
+		if err := mw.db.Collection("cwd_events").FindOne(ctx, bson.M{"auditProjectionPending": true}, options.FindOne().SetProjection(bson.M{"_id": 1})).Decode(&pendingEvent); err != mongo.ErrNoDocuments {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("CWD audit event work did not converge")
+		}
+	}
+	_, err := mw.db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": time.Now().UTC()}}, options.Update().SetUpsert(true))
 	if err != nil {
 		return err
 	}
@@ -504,18 +564,31 @@ func (mw *MongoWriter) claimCwdAuditProjectionState(ctx context.Context, state b
 }
 
 func (mw *MongoWriter) backfillCwdAuditProjectionSession(ctx context.Context, sessionID string, retention time.Duration) error {
+	_, err := mw.backfillCwdAuditProjectionSessionResult(ctx, sessionID, retention)
+	return err
+}
+
+func (mw *MongoWriter) backfillCwdAuditProjectionSessionResult(ctx context.Context, sessionID string, retention time.Duration) (bool, error) {
 	state, err := mw.findCwdStateByCanonicalID(ctx, sessionID)
 	if err == mongo.ErrNoDocuments {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	claimed, err := mw.claimCwdAuditProjectionState(ctx, state)
 	if err != nil || claimed == nil {
-		return err
+		return false, err
 	}
-	return mw.backfillCwdAuditProjectionState(ctx, claimed, retention)
+	if err := mw.backfillCwdAuditProjectionState(ctx, claimed, retention); err != nil {
+		return false, err
+	}
+	var current bson.M
+	if err := mw.db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": claimed["_id"]}, options.FindOne().SetProjection(bson.M{"auditProjectionGeneration": 1, "auditProjectionReadyGeneration": 1, "auditProjectionPendingGeneration": 1})).Decode(&current); err != nil {
+		return false, err
+	}
+	generation := bsonInt64(claimed["auditProjectionGeneration"])
+	return bsonInt64(current["auditProjectionReadyGeneration"]) == generation && current["auditProjectionPendingGeneration"] == nil, nil
 }
 
 func (mw *MongoWriter) findCwdStateByCanonicalID(ctx context.Context, sessionID string) (bson.M, error) {
@@ -666,7 +739,7 @@ func (mw *MongoWriter) backfillCwdAuditProjectionState(ctx context.Context, stat
 	currentPath := bson.M{"$map": bson.M{"input": bson.A{1}, "as": "ignored", "in": statePath}}
 	visitedExpr := bson.M{"$filter": bson.M{"input": bson.M{"$setUnion": bson.A{boundedTransitionExpr, currentPath}}, "as": "path", "cond": bson.M{"$and": bson.A{bson.M{"$ne": bson.A{"$$path", nil}}, bson.M{"$ne": bson.A{"$$path", ""}}, bson.M{"$regexMatch": bson.M{"input": "$$path", "regex": "^/"}}}}}}
 	generation := bsonInt64(state["auditProjectionGeneration"])
-	set := bson.M{"schemaVersion": cwdAuditProjectionVersion, "sessionId": sessionID, "sourceIp": state["sourceIp"], "stateSequence": sequence, "stateSourceEventId": sourceEventID, "cwdState": canonicalCwdState, "lifecycle": lifecycle, "auditTransitionPaths": boundedTransitionExpr, "auditPathsOverflow": bson.M{"$gt": bson.A{bson.M{"$size": transitionExpr}, cwdAuditProjectionMaxPaths}}, "auditVisitedPaths": visitedExpr, "auditHomeOnly": auditProjectionHomeOnlyExpression(visitedExpr), "auditEventCount": eventCount, "auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": generation, "updatedAt": time.Now().UTC(), "expires_at": stateExpiry(state, retention)}
+	set := bson.M{"schemaVersion": cwdAuditProjectionVersion, "sessionId": sessionID, "sourceIp": state["sourceIp"], "stateSequence": sequence, "stateSourceEventId": sourceEventID, "cwdState": canonicalCwdState, "lifecycle": lifecycle, "auditTransitionPaths": boundedTransitionExpr, "auditPathsOverflow": bson.M{"$gt": bson.A{bson.M{"$size": transitionExpr}, cwdAuditProjectionMaxPaths}}, "auditVisitedPaths": visitedExpr, "auditHomeOnly": auditProjectionHomeOnlyExpression(visitedExpr), "auditEventCount": eventCount, "auditHistoryRevision": int64(eventCount), "auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": generation, "updatedAt": time.Now().UTC(), "expires_at": stateExpiry(state, retention)}
 	result, err := projection.UpdateOne(ctx, filter, mongo.Pipeline{{{Key: "$set", Value: set}}, {{Key: "$unset", Value: bson.A{"auditEventIds", "visitedPaths", "eventCount", "homeOnly"}}}})
 	if err != nil {
 		return err

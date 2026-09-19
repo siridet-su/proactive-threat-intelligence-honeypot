@@ -77,7 +77,9 @@ type MongoWriter struct {
 	db                            *mongo.Database
 	auditBackfillAfterHistoryRead func()
 	auditAfterCwdStateUpdate      func()
+	auditAfterCwdEventPending     func()
 	auditAfterCwdEventWrite       func()
+	auditAfterCwdCloseStateUpdate func()
 }
 
 func main() {

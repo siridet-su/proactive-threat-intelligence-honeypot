@@ -70,6 +70,7 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     await sourceState.createIndex({ "lifecycle.status": 1, "lifecycle.closedAt": -1, session_id: -1 });
     await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionVersion: 1 });
     await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionPendingGeneration: 1 }, { partialFilterExpression: { auditProjectionPendingGeneration: { $exists: true } } });
+    await sourceState.createIndex({ "lifecycle.status": 1, auditProjectionPendingEventCount: 1 }, { partialFilterExpression: { auditProjectionPendingEventCount: { $gt: 0 } } });
     await sourceState.createIndex({ "cwdState.path": 1 });
     await sourceState.createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 });
 
@@ -329,20 +330,38 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
 
     // An old rolling writer can publish a closed source row after the marker.
-    // The hook places that write between the marker read and the bounded
-    // readiness probe, so the request must use the exact mixed-schema fallback
-    // rather than silently dropping the new session from the directory.
+    // These fixtures intentionally have no generation/pending fields at all;
+    // the separate cutover probe must force the authoritative fallback rather
+    // than silently dropping either canonical or legacy-schema row.
     await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION });
     let insertedByOldWriter = false;
     setAuditProjectionReadinessTestHook(async () => {
       if (insertedByOldWriter) return;
       insertedByOldWriter = true;
-      await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") }, auditProjectionGeneration: 1, auditProjectionPendingGeneration: 1 });
+      await database.collection("cwd_session_state").insertMany([
+        { _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") } },
+        { _id: "migration-old-legacy", session_id: "migration-old-legacy", sourceIp: "203.0.113.10", cwdState: { path: "/var/tmp" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-15T00:00:00Z") } },
+      ]);
     });
     const rollingPage = await getAuditSessions({ limit: 25 });
     setAuditProjectionReadinessTestHook(null);
-    expect(rollingPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer"]);
+    expect(rollingPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer", "migration-old-legacy"]);
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
+
+    // Model the processor's exact v2 convergence for both old-writer rows and
+    // prove the next production read is projection-backed without a history
+    // collection read.
+    await projection.insertMany([
+      { _id: "migration-canonical", sessionId: "migration-canonical", sourceIp: "203.0.113.1", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-18T00:00:00Z") }, auditVisitedPaths: ["/home/cowrie"], auditHomeOnly: true, auditEventCount: 0, auditProjectionVersion: AUDIT_PROJECTION_VERSION },
+      { _id: "migration-legacy", sessionId: "migration-legacy", sourceIp: "203.0.113.2", cwdState: { path: "/etc" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-17T00:00:00Z") }, auditVisitedPaths: ["/etc"], auditHomeOnly: false, auditEventCount: 0, auditProjectionVersion: AUDIT_PROJECTION_VERSION },
+      { _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") }, auditVisitedPaths: ["/home/cowrie"], auditHomeOnly: true, auditEventCount: 0, auditProjectionVersion: AUDIT_PROJECTION_VERSION },
+      { _id: "migration-old-legacy", sessionId: "migration-old-legacy", sourceIp: "203.0.113.10", cwdState: { path: "/var/tmp" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-15T00:00:00Z") }, auditVisitedPaths: ["/var/tmp"], auditHomeOnly: false, auditEventCount: 0, auditProjectionVersion: AUDIT_PROJECTION_VERSION },
+    ]);
+    await database.collection("cwd_session_state").updateMany({}, { $set: { auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionGeneration: 1, auditProjectionReadyGeneration: 1 } });
+    commandEvents.length = 0;
+    const convergedPage = await getAuditSessions({ limit: 25 });
+    expect(convergedPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer", "migration-old-legacy"]);
+    expect(commandEvents.some(({ commandName, command }) => commandName === "find" && command.find === "cwd_events")).toBe(false);
   });
 
   it("keeps overflow exact and scoped to its session while normal pages stay projection-backed", async () => {

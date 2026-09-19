@@ -314,6 +314,9 @@ func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, cl
 	if err := states.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&state); err != nil {
 		return err
 	}
+	if mw.auditAfterCwdCloseStateUpdate != nil {
+		mw.auditAfterCwdCloseStateUpdate()
+	}
 	return mw.closeCwdAuditProjection(ctx, state["_id"], sessionID, bsonInt64(state["auditProjectionGeneration"]), closedAt, retention)
 }
 
@@ -380,10 +383,23 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	// Cowrie-emitted transitions so the audit trail never infers cd semantics
 	// from attacker-controlled command text or cross-event state changes.
 	if observation.Action == "observed" {
-		if err := mw.updateCwdAuditProjection(ctx, observation, stateWork.sourceID, stateWork.generation, "", stateWork.accepted, false, retention); err != nil {
+		// A rejected observed payload did not own a state generation. It must not
+		// seed facts or acknowledge another writer's pending work.
+		if !stateWork.accepted {
+			return nil
+		}
+		if err := mw.updateCwdAuditProjection(ctx, observation, stateWork.sourceID, stateWork.generation, "", stateWork.accepted, retention); err != nil {
 			return fmt.Errorf("update CWD audit projection: %w", err)
 		}
 		return nil
+	}
+	if stateWork.accepted {
+		// Current-state ownership and history ownership are separate writes. The
+		// state projection may become ready before the event outbox is committed;
+		// neither application is allowed to suppress the other by generation.
+		if err := mw.updateCwdAuditProjection(ctx, observation, stateWork.sourceID, stateWork.generation, "", true, retention); err != nil {
+			return fmt.Errorf("update CWD current projection: %w", err)
+		}
 	}
 
 	eventID := "cwd:" + observation.SourceEventID
@@ -400,20 +416,27 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		"at":            observation.At,
 		// Keep the nanosecond sequence as a decimal string. JavaScript cannot
 		// represent current Unix nanoseconds safely as a Number.
-		"sequence":   strconv.FormatInt(observation.At.UnixNano(), 10),
-		"fromPath":   observation.FromPath,
-		"toPath":     eventToPath,
-		"action":     observation.Action,
-		"status":     observation.Status,
-		"expires_at": expiryAt(observation.At, retention),
+		"sequence": strconv.FormatInt(observation.At.UnixNano(), 10),
+		"fromPath": observation.FromPath,
+		"toPath":   eventToPath,
+		"action":   observation.Action,
+		"status":   observation.Status,
+		// The event itself is the durable reconciliation outbox. This marker is
+		// written atomically with cwd_events, so a writer cannot commit history
+		// and then crash before leaving discoverable projection work.
+		"auditProjectionPending": true,
+		"expires_at":             expiryAt(observation.At, retention),
 	}
 	// Establish the generation-owned pending marker before the durable history
 	// write. This closes the non-transactional crash window for stale events.
-	eventWork, err := mw.advanceCwdProjectionGeneration(ctx, stateWork.sourceID)
+	eventWork, err := mw.advanceCwdProjectionGenerationForEvent(ctx, stateWork.sourceID, true)
 	if err != nil {
 		return fmt.Errorf("mark CWD history projection pending: %w", err)
 	}
-	eventResult, err := mw.db.Collection("cwd_events").UpdateOne(
+	if mw.auditAfterCwdEventPending != nil {
+		mw.auditAfterCwdEventPending()
+	}
+	_, err = mw.db.Collection("cwd_events").UpdateOne(
 		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": event}, options.Update().SetUpsert(true),
 	)
 	if err != nil {
@@ -422,7 +445,7 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	if mw.auditAfterCwdEventWrite != nil {
 		mw.auditAfterCwdEventWrite()
 	}
-	if err := mw.updateCwdAuditProjection(ctx, observation, eventWork.sourceID, eventWork.generation, eventID, stateWork.accepted, eventResult.UpsertedCount > 0, retention); err != nil {
+	if err := mw.updateCwdAuditProjection(ctx, observation, eventWork.sourceID, eventWork.generation, eventID, stateWork.accepted, retention); err != nil {
 		return fmt.Errorf("update CWD audit projection: %w", err)
 	}
 	return nil
@@ -436,6 +459,8 @@ func cwdEventIndexModels() []mongo.IndexModel {
 	return []mongo.IndexModel{
 		{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
 		{Keys: bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}},
+		{Keys: bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "sessionId", Value: 1}}},
+		{Keys: bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "session_id", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 }

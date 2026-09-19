@@ -481,12 +481,12 @@ func TestFA016BackfillHistoryRevisionBarrier(t *testing.T) {
 	}
 	readComplete := make(chan struct{})
 	resume := make(chan struct{})
-	var barrierOnce sync.Once
+	var barrierStarted atomic.Bool
 	mw.auditBackfillAfterHistoryRead = func() {
-		barrierOnce.Do(func() {
+		if barrierStarted.CompareAndSwap(false, true) {
 			close(readComplete)
 			<-resume
-		})
+		}
 	}
 	backfillDone := make(chan error, 1)
 	go func() {
@@ -719,6 +719,25 @@ func TestFA016HistoryCrashBoundariesAndDuplicateRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	mw.auditAfterCwdEventWrite = nil
+	// Inspect the first accepted delivery before any duplicate retry. The
+	// durable event outbox must already have produced the exact history facts.
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": accepted.SessionID}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(projection["auditEventCount"]) != 1 || !containsString(stringSlice(projection["auditTransitionPaths"]), "/current") || !containsString(stringSlice(projection["auditTransitionPaths"]), "/accepted") {
+		t.Fatalf("first accepted history delivery did not project exact transition facts: %#v", projection)
+	}
+	if projection["auditPathsOverflow"] != false {
+		t.Fatalf("first accepted history delivery unexpectedly overflowed: %#v", projection)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": accepted.SessionID}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending || bsonInt64(state["auditProjectionReadyGeneration"]) != bsonInt64(state["auditProjectionGeneration"]) {
+		t.Fatalf("first accepted history delivery did not converge its owned generation: %#v", state)
+	}
 	if err := mw.recordCwdObservation(ctx, accepted, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -807,6 +826,323 @@ func TestFA016PaddedCanonicalBackfillConvergesOnce(t *testing.T) {
 	}
 	if historyFinds != 0 {
 		t.Fatalf("converged padded rows performed history reads on the next reconciliation pass: %d", historyFinds)
+	}
+}
+
+func TestFA016EventOutboxSurvivesCloseBeforeHistoryInsert(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 20, 5, 0, 0, 0, time.UTC)
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "event-outbox", SourceEventID: "initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+
+	pendingOwned := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	var once sync.Once
+	mw.auditAfterCwdEventPending = func() {
+		once.Do(func() {
+			close(pendingOwned)
+			<-releaseWriter
+		})
+	}
+	writerDone := make(chan error, 1)
+	go func() {
+		writerDone <- mw.recordCwdObservation(ctx, cwdObservation{SessionID: "event-outbox", SourceEventID: "transition", At: base.Add(time.Minute), FromPath: "/origin", Path: "/after", Action: "changed", Status: "confirmed"}, retention)
+	}()
+	<-pendingOwned
+
+	state := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	ownedGeneration := bsonInt64(state["auditProjectionPendingGeneration"])
+	if ownedGeneration == 0 || bsonInt64(state["auditProjectionReadyGeneration"]) == ownedGeneration {
+		t.Fatalf("history writer did not own a distinct pending generation: %#v", state)
+	}
+	if count, err := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:transition"}); err != nil || count != 0 {
+		t.Fatalf("history event committed before the ownership barrier count=%d err=%v", count, err)
+	}
+
+	// The close writer advances and converges its newer generation while the
+	// original history writer is still paused before cwd_events upsert.
+	if err := mw.closeCwdSession(ctx, "event-outbox", base.Add(2*time.Minute), retention); err != nil {
+		t.Fatal(err)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending {
+		t.Fatalf("close did not converge its owned generation: %#v", state)
+	}
+	projection := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(projection["auditEventCount"]) != 0 {
+		t.Fatalf("close projected an event that had not committed yet: %#v", projection)
+	}
+
+	close(releaseWriter)
+	if err := <-writerDone; err != nil {
+		t.Fatal(err)
+	}
+	mw.auditAfterCwdEventPending = nil
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	paths := stringSlice(projection["auditTransitionPaths"])
+	if bsonInt64(projection["auditEventCount"]) != 1 || !containsString(paths, "/origin") || !containsString(paths, "/after") || projection["auditPathsOverflow"] != false {
+		t.Fatalf("late event did not converge exact closed projection facts: %#v", projection)
+	}
+	if lifecycle, _ := projection["lifecycle"].(bson.M); lifecycle["status"] != "closed" {
+		t.Fatalf("late event revived the closed projection: %#v", projection)
+	}
+	if pending, _ := db.Collection("cwd_events").CountDocuments(ctx, bson.M{"_id": "cwd:transition", "auditProjectionPending": true}); pending != 0 {
+		t.Fatalf("durable event outbox marker was not cleared after convergence: %d", pending)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending || bsonInt64(state["auditProjectionReadyGeneration"]) != bsonInt64(state["auditProjectionGeneration"]) {
+		t.Fatalf("late event left source generation markers dirty: %#v", state)
+	}
+
+	if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+		t.Fatal(err)
+	}
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "event-outbox"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(projection["auditEventCount"]) != 1 {
+		t.Fatalf("reconciliation was not exactly once after convergence: %#v", projection)
+	}
+}
+
+func TestFA016RejectedObservedCannotStealGenerationOwnership(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 20, 6, 0, 0, 0, time.UTC)
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "ownership-race", SourceEventID: "initial", At: base, Path: "/initial", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+
+	newerStateWritten := make(chan struct{})
+	releaseNewer := make(chan struct{})
+	var newerOnce atomic.Bool
+	mw.auditAfterCwdStateUpdate = func() {
+		if newerOnce.CompareAndSwap(false, true) {
+			close(newerStateWritten)
+			<-releaseNewer
+		}
+	}
+	newerDone := make(chan error, 1)
+	go func() {
+		newerDone <- mw.recordCwdObservation(ctx, cwdObservation{SessionID: "ownership-race", SourceEventID: "newer", At: base.Add(2 * time.Minute), Path: "/newer", Action: "observed", Status: "observed"}, retention)
+	}()
+	<-newerStateWritten
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "ownership-race", SourceEventID: "older", At: base.Add(time.Minute), Path: "/rejected", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	state := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(state["auditProjectionPendingGeneration"]) != 2 || bsonInt64(state["auditProjectionReadyGeneration"]) != 1 {
+		t.Fatalf("rejected observed payload changed newer ownership markers: %#v", state)
+	}
+	projection := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if cwdState, _ := projection["cwdState"].(bson.M); cwdState["path"] != "/initial" {
+		t.Fatalf("rejected observed payload seeded stale projection facts: %#v", projection)
+	}
+	close(releaseNewer)
+	if err := <-newerDone; err != nil {
+		t.Fatal(err)
+	}
+	mw.auditAfterCwdStateUpdate = nil
+
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if cwdState, _ := projection["cwdState"].(bson.M); cwdState["path"] != "/newer" {
+		t.Fatalf("newer accepted observation did not win after stale rejection: %#v", projection)
+	}
+
+	closeStateWritten := make(chan struct{})
+	releaseClose := make(chan struct{})
+	var closeOnce sync.Once
+	mw.auditAfterCwdCloseStateUpdate = func() {
+		closeOnce.Do(func() {
+			close(closeStateWritten)
+			<-releaseClose
+		})
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- mw.closeCwdSession(ctx, "ownership-race", base.Add(3*time.Minute), retention) }()
+	<-closeStateWritten
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(state["auditProjectionPendingGeneration"]) != 3 || bsonInt64(state["auditProjectionReadyGeneration"]) != 2 {
+		t.Fatalf("close writer did not own its pending generation: %#v", state)
+	}
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "ownership-race", SourceEventID: "rejected-after-close", At: base.Add(90 * time.Second), Path: "/still-rejected", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if bsonInt64(state["auditProjectionPendingGeneration"]) != 3 || bsonInt64(state["auditProjectionReadyGeneration"]) != 2 {
+		t.Fatalf("rejected observed payload stole close ownership: %#v", state)
+	}
+
+	// Treat the paused close owner as crashed. Reconciliation must repair the
+	// authoritative closed state and only then clear generation 3.
+	if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+		t.Fatal(err)
+	}
+	state = bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, pending := state["auditProjectionPendingGeneration"]; pending || bsonInt64(state["auditProjectionReadyGeneration"]) != 3 {
+		t.Fatalf("reconciliation did not repair the abandoned close generation: %#v", state)
+	}
+	projection = bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "ownership-race"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if cwdState, _ := projection["cwdState"].(bson.M); cwdState["path"] != "/newer" {
+		t.Fatalf("reconciliation used rejected payload instead of authoritative state: %#v", projection)
+	}
+	if lifecycle, _ := projection["lifecycle"].(bson.M); lifecycle["status"] != "closed" {
+		t.Fatalf("reconciliation did not preserve the close boundary: %#v", projection)
+	}
+	close(releaseClose)
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
+	}
+	mw.auditAfterCwdCloseStateUpdate = nil
+}
+
+func TestFA016OldWriterCutoverConvergesCanonicalAndLegacyRows(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var historyFinds int32
+	monitor := &event.CommandMonitor{Started: func(_ context.Context, started *event.CommandStartedEvent) {
+		if started.CommandName == "find" && started.Command.Lookup("find").StringValue() == "cwd_events" {
+			atomic.AddInt32(&historyFinds, 1)
+		}
+	}}
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI).SetMonitor(monitor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
+	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": closedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_session_state").InsertMany(ctx, []any{
+		bson.M{"_id": "old-canonical-source", "sessionId": "old-canonical", "sourceIp": "198.51.100.30", "cwdState": bson.M{"path": "/home/old"}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour)},
+		bson.M{"_id": "old-legacy-source", "session_id": "old-legacy", "sourceIp": "198.51.100.31", "cwdState": bson.M{"path": "/var/old"}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_events").InsertMany(ctx, []any{
+		bson.M{"_id": "old-canonical-event", "eventId": "old-canonical-event", "sessionId": "old-canonical", "action": "changed", "fromPath": "/home/old", "toPath": "/etc/old", "at": closedAt},
+		bson.M{"_id": "old-legacy-event", "eventId": "old-legacy-event", "session_id": "old-legacy", "action": "changed", "fromPath": "/var/old", "toPath": "/opt/old", "at": closedAt},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mw.backfillCwdAuditProjection(ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"old-canonical", "old-legacy"} {
+		doc := bson.M{}
+		if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": id}).Decode(&doc); err != nil {
+			t.Fatal(err)
+		}
+		if doc["sessionId"] != id || doc["auditProjectionVersion"] != cwdAuditProjectionVersion || bsonInt64(doc["auditEventCount"]) != 1 {
+			t.Fatalf("old writer row %s did not receive exact v2 projection: %#v", id, doc)
+		}
+		stateID := id + "-source"
+		state := bson.M{}
+		if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": stateID}).Decode(&state); err != nil {
+			t.Fatal(err)
+		}
+		if state["auditProjectionVersion"] != cwdAuditProjectionVersion || bsonInt64(state["auditProjectionReadyGeneration"]) != bsonInt64(state["auditProjectionGeneration"]) {
+			t.Fatalf("old writer row %s did not receive generation-owned readiness: %#v", id, state)
+		}
+		if _, pending := state["auditProjectionPendingGeneration"]; pending {
+			t.Fatalf("old writer row %s retained pending work: %#v", id, state)
+		}
+	}
+	atomic.StoreInt32(&historyFinds, 0)
+	if err := mw.backfillCwdAuditProjection(ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if got := atomic.LoadInt32(&historyFinds); got != 0 {
+		t.Fatalf("steady-state cutover reconciliation reread cwd_events for converged rows: %d", got)
 	}
 }
 
