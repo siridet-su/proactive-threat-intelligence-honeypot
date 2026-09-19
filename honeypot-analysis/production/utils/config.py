@@ -35,6 +35,17 @@ from production.storage.session_provenance import (
 )
 from production.prediction.evidence_cutoff import require_valid_evidence_cutoff
 from production.utils.http_security import parse_bearer_token
+from production.enrichment.external_ti_contract import (
+    EXTERNAL_TI_EVIDENCE_SCHEMA,
+    SOURCE_IP_AMENDMENT_SHA256,
+    SOURCE_IP_ENRICHMENT_MODE,
+    SOURCE_IP_PROFILE,
+    default_external_ti_provider_configs,
+    validate_external_ti_config,
+)
+from production.enrichment.external_ti_proof_guard import (
+    PROOF_GUARD_MODE_DISABLED,
+)
 
 
 def _validate_ai_request_options(value: Any) -> Dict[str, Any]:
@@ -467,6 +478,24 @@ class ProductionConfig:
     local_enrichment_max_records: int = 100_000
     enable_enrichment_jobs: bool = True
     external_enrichment_profile: str = "disabled"
+    # Phase 0 keeps every real external TI adapter disabled by default.  The
+    # separate contract also requires an explicit provider allowlist, fixed
+    # endpoint identity, non-zero budget and a reviewed activation before any
+    # provider request can be attempted.
+    external_ti_enabled: bool = False
+    external_ti_provider_allowlist: List[str] = field(default_factory=list)
+    external_ti_provider_configs: Dict[str, Any] = field(
+        default_factory=default_external_ti_provider_configs
+    )
+    external_ti_policy_identity: str = "external_ti_non_ip.v1"
+    external_ti_normalizer_identity: str = EXTERNAL_TI_EVIDENCE_SCHEMA
+    source_ip_enrichment_mode: str = "disabled"
+    source_ip_enrichment_not_before_utc: str = ""
+    source_ip_enrichment_cutoff_operator: str = ""
+    source_ip_governance_path: str = "configs/external_ti_source_ip_governance_amendment.v1.json"
+    source_ip_governance_sha256: str = SOURCE_IP_AMENDMENT_SHA256
+    external_ti_proof_campaign_id: str = ""
+    external_ti_proof_guard_mode: str = PROOF_GUARD_MODE_DISABLED
     enrichment_batch_size: int = 20
     enrichment_max_attempts: int = 3
     enrichment_retry_seconds: float = 300.0
@@ -525,6 +554,11 @@ class ProductionConfig:
     classifier_environment_path: str = "configs/next_behavior_classifier_environment.v1.json"
     threat_hypothesis_behavior_policy_path: str = "configs/threat_hypothesis_behavior.trusted.json"
     prediction_policy_path: str = "configs/prediction_policy.trusted.json"
+    # The former canonical next-behavior executor has been retired.  This is
+    # an invariant rather than a feature flag: any attempt to configure a
+    # live executor fails closed.  Historical prediction policy/snapshot
+    # fields remain readable for provenance and retention compatibility.
+    canonical_next_behavior_runtime: str = "disabled"
     data_lifecycle_policy_path: str = "configs/data_lifecycle_policy.v1.json"
     alert_authority_policy_path: str = "configs/alert_authority_policy.v1.json"
     prediction_snapshot_retention_days: int = 90
@@ -802,6 +836,11 @@ class ProductionConfig:
 
     def validate_event_processing(self) -> None:
         """Reject unsafe event-processing lease and retry configuration."""
+        if self.canonical_next_behavior_runtime != "disabled":
+            raise ValueError(
+                "canonical_next_behavior_runtime must remain disabled; "
+                "the canonical next-behavior executor is retired"
+            )
         positive_durations = {
             "forwarder_poll_seconds": self.forwarder_poll_seconds,
             "forwarder_timeout_seconds": self.forwarder_timeout_seconds,
@@ -915,11 +954,27 @@ class ProductionConfig:
         if self.external_enrichment_profile not in {
             "disabled",
             "non_ip_observables",
+            SOURCE_IP_PROFILE,
         }:
             raise ValueError(
-                "external_enrichment_profile must be disabled or "
-                "non_ip_observables"
+                "external_enrichment_profile must be disabled, "
+                "non_ip_observables, or source_ip_observables"
             )
+        validate_external_ti_config(
+            enabled=self.external_ti_enabled,
+            profile=self.external_enrichment_profile,
+            provider_allowlist=self.external_ti_provider_allowlist,
+            provider_configs=self.external_ti_provider_configs,
+            policy_identity=self.external_ti_policy_identity,
+            normalizer_identity=self.external_ti_normalizer_identity,
+            source_ip_enrichment_mode=self.source_ip_enrichment_mode,
+            source_ip_enrichment_not_before_utc=self.source_ip_enrichment_not_before_utc,
+            source_ip_enrichment_cutoff_operator=self.source_ip_enrichment_cutoff_operator,
+            source_ip_governance_path=self.source_ip_governance_path,
+            source_ip_governance_sha256=self.source_ip_governance_sha256,
+            proof_campaign_id=self.external_ti_proof_campaign_id,
+            proof_guard_mode=self.external_ti_proof_guard_mode,
+        )
         if (
             isinstance(self.enrichment_provider_retry_delay_seconds, bool)
             or not isinstance(self.enrichment_provider_retry_delay_seconds, Real)
@@ -1619,6 +1674,50 @@ class ProductionConfig:
             "EXTERNAL_ENRICHMENT_PROFILE",
             cfg.external_enrichment_profile,
         ).strip().lower()
+        cfg.external_ti_enabled = _env_bool(
+            "EXTERNAL_TI_ENABLED", cfg.external_ti_enabled
+        )
+        cfg.external_ti_provider_allowlist = _env_list(
+            "EXTERNAL_TI_PROVIDER_ALLOWLIST",
+            cfg.external_ti_provider_allowlist,
+        )
+        cfg.external_ti_provider_configs = _env_json(
+            "EXTERNAL_TI_PROVIDER_CONFIGS_JSON",
+            cfg.external_ti_provider_configs,
+        )
+        cfg.external_ti_policy_identity = os.getenv(
+            "EXTERNAL_TI_POLICY_IDENTITY", cfg.external_ti_policy_identity
+        )
+        cfg.external_ti_normalizer_identity = os.getenv(
+            "EXTERNAL_TI_NORMALIZER_IDENTITY", cfg.external_ti_normalizer_identity
+        )
+        cfg.source_ip_enrichment_mode = os.getenv(
+            "SOURCE_IP_ENRICHMENT_MODE", cfg.source_ip_enrichment_mode
+        ).strip()
+        cfg.source_ip_enrichment_not_before_utc = os.getenv(
+            "SOURCE_IP_ENRICHMENT_NOT_BEFORE_UTC",
+            cfg.source_ip_enrichment_not_before_utc,
+        ).strip()
+        cfg.source_ip_enrichment_cutoff_operator = os.getenv(
+            "SOURCE_IP_ENRICHMENT_CUTOFF_OPERATOR",
+            cfg.source_ip_enrichment_cutoff_operator,
+        ).strip()
+        cfg.source_ip_governance_path = os.getenv(
+            "EXTERNAL_TI_SOURCE_IP_GOVERNANCE_PATH",
+            cfg.source_ip_governance_path,
+        ).strip()
+        cfg.source_ip_governance_sha256 = os.getenv(
+            "EXTERNAL_TI_SOURCE_IP_GOVERNANCE_SHA256",
+            cfg.source_ip_governance_sha256,
+        ).strip().lower()
+        cfg.external_ti_proof_campaign_id = os.getenv(
+            "EXTERNAL_TI_PROOF_CAMPAIGN_ID",
+            cfg.external_ti_proof_campaign_id,
+        ).strip()
+        cfg.external_ti_proof_guard_mode = os.getenv(
+            "EXTERNAL_TI_PROOF_GUARD_MODE",
+            cfg.external_ti_proof_guard_mode,
+        ).strip().upper()
         cfg.enrichment_batch_size = _env_int("ENRICHMENT_BATCH_SIZE", cfg.enrichment_batch_size)
         cfg.enrichment_max_attempts = _env_int("ENRICHMENT_MAX_ATTEMPTS", cfg.enrichment_max_attempts)
         cfg.enrichment_retry_seconds = _env_float("ENRICHMENT_RETRY_SECONDS", cfg.enrichment_retry_seconds)

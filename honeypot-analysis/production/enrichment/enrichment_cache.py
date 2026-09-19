@@ -266,6 +266,7 @@ def build_source_ip_cache_entry(
     settings: Optional[Mapping[str, Any]] = None,
     *,
     now: Any = None,
+    privacy_policy_version: str = SOURCE_IP_POLICY_VERSION,
 ) -> Optional[Dict[str, Any]]:
     """Build one bounded provider-specific source-IP cache record.
 
@@ -323,7 +324,9 @@ def build_source_ip_cache_entry(
         "provider_config_identity": config_identity[:128],
         "normalizer_identity": EXTERNAL_TI_EVIDENCE_SCHEMA,
         "privacy_policy_identity": SOURCE_IP_POLICY_ID,
-        "privacy_policy_version": SOURCE_IP_POLICY_VERSION,
+        "privacy_policy_version": str(
+            privacy_policy_version or SOURCE_IP_POLICY_VERSION
+        )[:64],
         "authority": EXTERNAL_TI_AUTHORITY,
         "cache_authority": SOURCE_IP_CACHE_AUTHORITY,
     }
@@ -469,6 +472,7 @@ class SourceIPCacheService:
         settings: Optional[Mapping[str, Any]] = None,
         *,
         now: Any = None,
+        privacy_policy_version: str = SOURCE_IP_POLICY_VERSION,
     ) -> Optional[Dict[str, Any]]:
         entry = build_source_ip_cache_entry(
             provider,
@@ -476,6 +480,7 @@ class SourceIPCacheService:
             result,
             settings,
             now=now,
+            privacy_policy_version=privacy_policy_version,
         )
         if entry is None:
             return None
@@ -541,20 +546,10 @@ def source_ip_cache_session_projection(entry: Mapping[str, Any]) -> Dict[str, An
     """Return a bounded cache reference without exposing the source IP."""
 
     clean = SourceIPCacheService._clean_entry(entry)
-    try:
-        freshness_state = (
-            "STALE"
-            if _cache_datetime(clean["expires_at"]) <= _cache_datetime(None)
-            else "FRESH"
-        )
-    except SourceIPCacheEntryInvalid:
-        freshness_state = "UNKNOWN"
     return {
         "cache_key": clean["cache_key"],
         "schema_version": clean["schema_version"],
         "provider": clean["provider"],
-        "observable_type": clean["observable_type"],
-        "observable_role": "source_ip",
         "lookup_status": _cache_lookup_status(clean["lookup_status"]),
         "normalized_context": dict(clean["normalized_context"]),
         # Provenance is already bounded and secret-free in the cache contract;
@@ -562,9 +557,7 @@ def source_ip_cache_session_projection(entry: Mapping[str, Any]) -> Dict[str, An
         # a provider payload or source-IP identity into a session response.
         "provenance": dict(clean["provenance"]),
         "lookup_at": clean["lookup_at"],
-        "provider_observed_at": clean["provider_observed_at"],
         "expires_at": clean["expires_at"],
-        "freshness_state": freshness_state,
         "authority": SOURCE_IP_CACHE_AUTHORITY,
         "join": "provider_plus_normalized_source_ip_cache_key",
     }
@@ -647,6 +640,7 @@ def enqueue_event_observables(
     *,
     event_id: str = "",
     sensor_id: str = "",
+    force: bool = False,
 ) -> int:
     """Queue fast event-level observables without blocking event processing."""
     if not enabled:
@@ -660,6 +654,7 @@ def enqueue_event_observables(
             normalized[0],
             normalized[1],
             session_id=str(event.get("session", "")),
+            force=bool(force),
             payload={
                 # Source-IP provider eligibility is evaluated against this
                 # original observation, never against queue/worker time.
@@ -675,7 +670,13 @@ def enqueue_event_observables(
     return count
 
 
-def enqueue_session_observables(storage: Any, session_payload: Dict[str, Any], enabled: bool = True) -> int:
+def enqueue_session_observables(
+    storage: Any,
+    session_payload: Dict[str, Any],
+    enabled: bool = True,
+    *,
+    force_source_ip: bool = False,
+) -> int:
     """Queue all observables extracted from a closed session."""
     if not enabled:
         return 0
@@ -686,6 +687,7 @@ def enqueue_session_observables(storage: Any, session_payload: Dict[str, Any], e
             kind,
             value,
             session_id=session_id,
+            force=bool(force_source_ip and kind == "ip"),
             payload={"source": "session_close", "session_id": session_id},
         )
         count += 1

@@ -10,18 +10,22 @@ from production.enrichment.external_ti_contract import (
     EXTERNAL_TI_AUTHORITY,
     EXTERNAL_TI_EVIDENCE_SCHEMA,
     FINDING_STATES,
+    KNOWN_ENDPOINTS,
     KNOWN_PROVIDERS,
     SOURCE_IP_ENRICHMENT_MODE,
+    SOURCE_IP_POLICY_ID,
+    SOURCE_IP_POLICY_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_VERSION,
     build_external_ti_evidence,
     default_external_ti_provider_configs,
     evaluate_outbound_sighting,
     load_source_ip_governance_amendment,
     parse_source_ip_cutoff_utc,
     provider_config,
-    provider_config_identity,
 )
 from production.enrichment.enrichment_cache import (
     SOURCE_IP_CACHE_PROVIDERS,
+    SOURCE_IP_CACHE_AUTHORITY,
     SourceIPCacheService,
     SourceIPCacheUnavailable,
     source_ip_cache_session_projection,
@@ -50,6 +54,59 @@ SUPPORTED_OBSERVABLE_LOOKUP_TYPES = frozenset({"ip", "hash"})
 # distinguish lookup from the broader extractor's observable vocabulary.
 SUPPORTED_OBSERVABLE_TYPES = SUPPORTED_OBSERVABLE_LOOKUP_TYPES
 SOURCE_IP_RELATION_ROLES = frozenset({"source_ip", "session_source_ip"})
+
+# ``status`` is retained as the stable coarse compatibility field used by
+# existing callers.  ``status_reason`` is the bounded read-model explanation
+# that prevents "pending" from being mistaken for one undifferentiated state.
+TI_STATUS_REASON_TEXT = {
+    "PROVIDER_EVIDENCE_AVAILABLE": "A stored provider result is available as non-authoritative context.",
+    "NO_ELIGIBLE_OBSERVABLE": "No hash or policy-authorized source-IP observable was eligible for lookup.",
+    "NO_STORED_PROVIDER_RESULT": "An eligible observable exists, but no stored provider result is available.",
+    "POLICY_BLOCKED": "No provider lookup was executed for this session under the configured source/provider governance.",
+    "EXPIRED_STORED_RESULT": "Stored provider context exists, but it is stale or expired.",
+    "PROVIDER_UNAVAILABLE": "A provider result was attempted or recorded as unavailable, rate-limited, or errored.",
+    "PROVIDER_RESULT_PENDING": "An eligible lookup is awaiting a stored provider result.",
+}
+
+
+def _ti_status_reason(
+    *,
+    observables: Sequence[Tuple[str, str]],
+    evidence: Sequence[Mapping[str, Any]],
+    source_ip_cache_context: Sequence[Mapping[str, Any]],
+    lookup_states: Sequence[str],
+    freshness_states: Sequence[str],
+    stale_count: int,
+    has_available: bool,
+    has_error: bool,
+) -> str:
+    """Return a deterministic explanation for the coarse TI status.
+
+    This is presentation metadata only.  It does not promote a provider
+    record, authorize a lookup, or change canonical classification.
+    """
+
+    if has_available:
+        return "PROVIDER_EVIDENCE_AVAILABLE"
+    if not observables:
+        return "NO_ELIGIBLE_OBSERVABLE"
+    normalized_lookup = {str(item or "").strip().upper() for item in lookup_states}
+    # A stale stored row is historical context, not proof that the current
+    # provider policy blocked this session.  Report the freshness failure
+    # first so operators do not mistake an old policy-prohibited result for a
+    # current configuration decision.
+    normalized_freshness = {str(item or "").strip().upper() for item in freshness_states}
+    if stale_count or normalized_freshness & {"STALE", "EXPIRED"}:
+        return "EXPIRED_STORED_RESULT"
+    if normalized_lookup and normalized_lookup.issubset(
+        {"DISABLED", "AUTH_DISABLED", "INVALID_OBSERVABLE"}
+    ):
+        return "POLICY_BLOCKED"
+    if has_error:
+        return "PROVIDER_UNAVAILABLE"
+    if evidence or source_ip_cache_context:
+        return "PROVIDER_RESULT_PENDING"
+    return "NO_STORED_PROVIDER_RESULT"
 
 
 def _bounded_positive_limit(value: Any, default: int, maximum: int) -> int:
@@ -312,6 +369,93 @@ def _source_ip_binding(config: Any) -> Tuple[str, Any, Any]:
         return mode, None, None
 
 
+def _lookup_governed_source_ip_cache(
+    cache_service: SourceIPCacheService,
+    provider: str,
+    normalized_source_ip: str,
+    governance: Any,
+) -> Optional[Dict[str, Any]]:
+    """Read one production-governed cache row without provider credentials.
+
+    The monitor may not hold the worker's provider credential references, so
+    its provider-config digest can legitimately differ from the worker's.
+    That digest is therefore not used as the read-side join key here.  The
+    durable cache row must instead prove the stronger immutable binding:
+    active production policy, approved provider/endpoint/mode, canonical
+    normalizer, and non-authoritative cache authority.  A row carrying the
+    reviewed pre-production policy version remains readable as explicitly
+    non-authoritative historical context when every other binding matches;
+    this compatibility path never authorizes provider I/O or a canonical
+    write. ``lookup`` still enforces the exact normalized IP and expiry
+    boundary.
+    """
+
+    name = str(provider or "").strip().lower()
+    if (
+        name not in SOURCE_IP_CACHE_PROVIDERS
+        or governance is None
+        or str(getattr(governance, "policy_id", "") or "") != SOURCE_IP_POLICY_ID
+        or str(getattr(governance, "version", "") or "")
+        not in {SOURCE_IP_POLICY_VERSION, SOURCE_IP_PRODUCTION_POLICY_VERSION}
+        or not bool(getattr(governance, "authorizes_provider", lambda _name: False)(name))
+    ):
+        return None
+    expected_modes = {
+        "abuseipdb": "lookup",
+        "shodan_official": "official_lookup",
+    }
+    try:
+        cache_entry = cache_service.lookup(
+            name,
+            normalized_source_ip,
+            expected_config_identity="",
+        )
+    except SourceIPCacheUnavailable:
+        return None
+    if cache_entry is None:
+        return None
+    provenance = cache_entry.get("provenance")
+    if not isinstance(provenance, Mapping):
+        return None
+    if (
+        str(cache_entry.get("provider") or "").strip().lower() != name
+        or str(cache_entry.get("normalized_observable_identity") or "")
+        != str(normalized_source_ip or "")
+        or str(provenance.get("provider") or "").strip().lower() != name
+        or str(provenance.get("provider_mode") or "") != expected_modes[name]
+        or str(provenance.get("endpoint_id") or "")
+        not in KNOWN_ENDPOINTS.get(name, set())
+        or str(provenance.get("normalizer_identity") or "")
+        != EXTERNAL_TI_EVIDENCE_SCHEMA
+        or str(provenance.get("privacy_policy_identity") or "")
+        != SOURCE_IP_POLICY_ID
+        or str(provenance.get("privacy_policy_version") or "")
+        not in {
+            str(getattr(governance, "version", "") or ""),
+            SOURCE_IP_POLICY_VERSION,
+        }
+        or str(provenance.get("authority") or "") != EXTERNAL_TI_AUTHORITY
+        or str(provenance.get("cache_authority") or "")
+        != SOURCE_IP_CACHE_AUTHORITY
+    ):
+        return None
+    return cache_entry
+
+
+def _source_ip_cache_policy_binding(cache_entry: Mapping[str, Any], governance: Any) -> str:
+    """Label whether a cache row is current policy or legacy context-only data."""
+
+    recorded_version = str(
+        (cache_entry.get("provenance") or {}).get("privacy_policy_version") or ""
+    )
+    current_version = str(getattr(governance, "version", "") or "")
+    return (
+        "CURRENT_POLICY"
+        if recorded_version == current_version
+        else "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"
+    )
+
+
 def _group_source_ip_sightings(
     rows: Sequence[Mapping[str, Any]],
     normalized_source_ip: str,
@@ -440,17 +584,19 @@ def _load_source_ip_cache_context(
             or not governance.authorizes_provider(provider)
         ):
             continue
-        try:
-            cache_entry = cache_service.lookup(
-                provider,
-                normalized_source_ip,
-                expected_config_identity=provider_config_identity(provider, settings),
-            )
-        except SourceIPCacheUnavailable:
-            continue
+        cache_entry = _lookup_governed_source_ip_cache(
+            cache_service,
+            provider,
+            normalized_source_ip,
+            governance,
+        )
         if cache_entry is None:
             continue
         projected = source_ip_cache_session_projection(cache_entry)
+        projected["policy_binding"] = _source_ip_cache_policy_binding(
+            cache_entry,
+            governance,
+        )
         projected["lookup_scope"] = "observable"
         output.append(projected)
     return output[:MAX_EVIDENCE]
@@ -686,6 +832,7 @@ def build_source_ip_cross_session_projection(
         "completeness": {
             "sessions": sessions_completeness,
             "sessions_total": None,
+            "sessions_truncated": sessions_truncated,
             "semantics": "bounded_returned_sessions; total matching sessions is undetermined",
         },
         "truncation": {
@@ -1034,20 +1181,19 @@ def build_session_ti_projection(
                 settings = provider_config(provider, configured.get(provider))
                 if provider not in allowlist or not bool(settings.get("enabled", False)):
                     continue
-                try:
-                    cache_entry = cache_service.lookup(
-                        provider,
-                        value,
-                        expected_config_identity=provider_config_identity(provider, settings),
-                    )
-                except SourceIPCacheUnavailable:
-                    # Cache unavailability is fail-closed for ETI context and
-                    # does not make the canonical session unreadable.
-                    continue
+                cache_entry = _lookup_governed_source_ip_cache(
+                    cache_service,
+                    provider,
+                    value,
+                    source_ip_governance,
+                )
                 if cache_entry is not None:
-                    source_ip_cache_context.append(
-                        source_ip_cache_session_projection(cache_entry)
+                    projected = source_ip_cache_session_projection(cache_entry)
+                    projected["policy_binding"] = _source_ip_cache_policy_binding(
+                        cache_entry,
+                        source_ip_governance,
                     )
+                    source_ip_cache_context.append(projected)
                     if len(source_ip_cache_context) >= MAX_EVIDENCE:
                         break
             if len(source_ip_cache_context) >= MAX_EVIDENCE:
@@ -1134,6 +1280,16 @@ def build_session_ti_projection(
         freshness_state = "TI_FRESH"
     else:
         freshness_state = "TI_PENDING"
+    status_reason = _ti_status_reason(
+        observables=observables,
+        evidence=evidence,
+        source_ip_cache_context=source_ip_cache_context,
+        lookup_states=lookup_states,
+        freshness_states=freshness_states,
+        stale_count=stale_count,
+        has_available=has_available,
+        has_error=has_error,
+    )
     return {
         "ok": True,
         "schema_version": SESSION_TI_SCHEMA,
@@ -1141,8 +1297,12 @@ def build_session_ti_projection(
         "timestamp": utc_now(),
         "session_id": clean_session_id,
         "status": ti_status,
+        "status_reason": status_reason,
+        "status_reason_text": TI_STATUS_REASON_TEXT[status_reason],
         "external_ti_summary": {
             "status": ti_status,
+            "status_reason": status_reason,
+            "status_reason_text": TI_STATUS_REASON_TEXT[status_reason],
             # Backward-compatible field name retained, but its semantics are
             # now explicitly hash-only rather than all eligible observables.
             "eligible_file_sha256_count": eligible_counts.get("hash", 0),
@@ -1155,6 +1315,21 @@ def build_session_ti_projection(
             "records_found": len(records),
             "evidence_returned": len(evidence),
             "source_ip_cache_records_found": len(source_ip_cache_context),
+            "source_ip_cache_policy_bindings": sorted(
+                {
+                    str(item.get("policy_binding") or "UNKNOWN")
+                    for item in source_ip_cache_context
+                }
+            ),
+            "source_ip_cache_freshness": "FRESH" if source_ip_cache_context else "NONE",
+            "source_ip_cache_latest_lookup_at": max(
+                (
+                    str(item.get("lookup_at") or "")
+                    for item in source_ip_cache_context
+                    if str(item.get("lookup_at") or "")
+                ),
+                default=None,
+            ),
             "shared_entity_count": len(shared_entities),
             "authority": EXTERNAL_TI_AUTHORITY,
             "uncertainty": "context only; no provider finding is a project classification",

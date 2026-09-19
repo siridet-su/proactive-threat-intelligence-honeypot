@@ -14,6 +14,7 @@ import hashlib
 import ipaddress
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional
 
 from production.utils.serialization import stable_id, utc_now
@@ -424,3 +425,139 @@ class ExternalTIProofGuard:
             completed_at=completed_at or utc_now(),
         )
         return bool(result)
+
+
+def _utc_day(value: Any) -> str:
+    """Return a compact UTC day without accepting a local-time ambiguity."""
+
+    try:
+        parsed = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            raise ValueError
+        return parsed.astimezone(timezone.utc).strftime("%Y%m%d")
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc).strftime("%Y%m%d")
+
+
+def production_guard_campaigns(
+    campaign_base: str,
+    normalized_source_ip: str,
+    *,
+    observed_at: Any,
+    max_daily_targets: int,
+) -> tuple[str, str]:
+    """Build secret-free daily quota and per-target request identities.
+
+    The quota identity exposes neither the source IP nor its digest and has a
+    fixed number of deterministic slots.  The request identity carries only a
+    one-way digest, so duplicate worker instances converge on one durable
+    provider claim for the same source and UTC day.
+    """
+
+    base = _campaign(campaign_base)
+    normalized = normalize_public_source_ip(normalized_source_ip)
+    digest = source_ip_digest(normalized)
+    try:
+        target_limit = int(max_daily_targets)
+    except (TypeError, ValueError) as exc:
+        raise ProofGuardError("production proof daily target limit is invalid") from exc
+    if target_limit < 1 or target_limit > 100:
+        raise ProofGuardError("production proof daily target limit is invalid")
+    day = _utc_day(observed_at)
+    base_digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+    slot = int(digest[:16], 16) % target_limit
+    quota_campaign = f"eti-prod-quota:{base_digest}:{day}:{slot:03d}"
+    request_campaign = f"eti-prod-request:{base_digest}:{day}:{digest}"
+    return _campaign(quota_campaign), _campaign(request_campaign)
+
+
+class ExternalTIProductionGuard:
+    """Bounded continuous source-IP guard with a durable daily target cap."""
+
+    def __init__(
+        self,
+        storage: Any,
+        campaign_base: str,
+        mode: str,
+        *,
+        max_daily_targets: int,
+    ) -> None:
+        self.storage = storage
+        self.campaign_base = _campaign(campaign_base)
+        self.mode = _mode(mode)
+        if self.mode != PROOF_GUARD_MODE_REAL:
+            raise ProofGuardError("production source-IP guard requires REAL_PROOF mode")
+        self.max_daily_targets = int(max_daily_targets)
+        if self.max_daily_targets < 1 or self.max_daily_targets > 100:
+            raise ProofGuardError("production proof daily target limit is invalid")
+        self._claimed_provider_guards: Dict[str, ExternalTIProofGuard] = {}
+
+    def claim_for_provider(
+        self,
+        provider: str,
+        normalized_source_ip: str,
+        *,
+        cutoff_utc: str,
+        first_observed_at: str,
+    ) -> ProofGuardDecision:
+        name = _provider(provider)
+        try:
+            quota_campaign, request_campaign = production_guard_campaigns(
+                self.campaign_base,
+                normalized_source_ip,
+                observed_at=first_observed_at,
+                max_daily_targets=self.max_daily_targets,
+            )
+            quota_guard = ExternalTIProofGuard(
+                self.storage,
+                quota_campaign,
+                self.mode,
+            )
+            quota = quota_guard.claim_target(
+                normalized_source_ip,
+                cutoff_utc=cutoff_utc,
+                first_observed_at=first_observed_at,
+            )
+            if not quota.allowed:
+                return ProofGuardDecision(
+                    False,
+                    f"DAILY_QUOTA_{quota.code}",
+                    provider=name,
+                    target_claim_id=quota.target_claim_id,
+                    source_ip_digest=quota.source_ip_digest,
+                )
+            request_guard = ExternalTIProofGuard(
+                self.storage,
+                request_campaign,
+                self.mode,
+            )
+            decision = request_guard.claim_for_provider(
+                name,
+                normalized_source_ip,
+                cutoff_utc=cutoff_utc,
+                first_observed_at=first_observed_at,
+            )
+            if decision.allowed:
+                self._claimed_provider_guards[name] = request_guard
+            return decision
+        except Exception:
+            return ProofGuardDecision(False, "GUARD_STORAGE_UNAVAILABLE", provider=name)
+
+    def complete_provider(
+        self,
+        provider: str,
+        result_class: str,
+        *,
+        http_status: Optional[int] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool:
+        name = _provider(provider)
+        guard = self._claimed_provider_guards.pop(name, None)
+        if guard is None:
+            raise ProofGuardError("production provider claim is not active")
+        return guard.complete_provider(
+            name,
+            result_class,
+            http_status=http_status,
+            completed_at=completed_at,
+        )

@@ -778,6 +778,53 @@ class StorageBackend(Protocol):
         expires_at: Optional[str] = None,
     ) -> None: ...
 
+    def get_external_ti_source_ip_cache(
+        self,
+        provider: str,
+        normalized_observable_identity: str,
+        provider_config_identity: str = "",
+        *,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]: ...
+
+    def upsert_external_ti_source_ip_cache(
+        self,
+        entry: Dict[str, Any],
+    ) -> None: ...
+
+    def prune_external_ti_source_ip_cache(
+        self,
+        *,
+        now: Any = None,
+        max_records: int = 1_000,
+    ) -> int: ...
+
+    def claim_external_ti_proof_target(
+        self,
+        entry: Dict[str, Any],
+    ) -> Dict[str, Any]: ...
+
+    def claim_external_ti_proof_provider(
+        self,
+        entry: Dict[str, Any],
+    ) -> Dict[str, Any]: ...
+
+    def complete_external_ti_proof_provider(
+        self,
+        *,
+        proof_campaign_id: str,
+        provider: str,
+        result_class: str,
+        http_status: Optional[int] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool: ...
+
+    def list_external_ti_proof_guard(
+        self,
+        proof_campaign_id: str = "",
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
     def enqueue_enrichment_job(
         self,
         observable_type: str,
@@ -833,6 +880,19 @@ class StorageBackend(Protocol):
 
     def record_observable_sighting(self, sighting: Dict[str, Any]) -> str: ...
 
+    def list_session_observable_sightings(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def list_observable_sightings(
+        self,
+        observable_type: str,
+        observable_value: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
     def enqueue_threat_hunt_job(
         self,
         session_id: str,
@@ -882,6 +942,20 @@ class StorageBackend(Protocol):
         observable_value: str,
         exclude_session_id: str = "",
         limit: int = 100,
+    ) -> List[Dict[str, Any]]: ...
+
+    def find_sessions_by_source_ip(
+        self,
+        normalized_source_ip: str,
+        exclude_session_id: str = "",
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]: ...
+
+    def find_sessions_by_observables(
+        self,
+        observables: Any,
+        exclude_session_id: str = "",
+        limit_per_observable: int = 20,
     ) -> List[Dict[str, Any]]: ...
 
     def save_session_link(self, link_payload: Dict[str, Any]) -> str: ...

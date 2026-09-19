@@ -60,6 +60,38 @@ class StorageError(RuntimeError):
 
 
 SQLITE_SCHEMA_VERSION = 3
+
+
+def _merge_enrichment_job_payload_json(
+    existing_payload_json: Any,
+    incoming_body: Mapping[str, Any],
+) -> str:
+    """Keep the strongest provenance when an observable job is re-enqueued.
+
+    A source-IP enrichment job can be enqueued once for a Cowrie event and
+    again when the session closes. Both operations intentionally share the
+    deterministic observable identity, but the session-close payload does not
+    carry the event/sensor/timestamp binding required by the outbound proof
+    gate. Never let that weaker payload replace an existing event payload.
+    A later Cowrie event is allowed to replace a close payload because it
+    restores the required event-level binding.
+    """
+
+    try:
+        existing = json.loads(str(existing_payload_json or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+
+    incoming = dict(incoming_body)
+    existing_source = str(existing.get("source") or "").strip().lower()
+    incoming_source = str(incoming.get("source") or "").strip().lower()
+    if existing_source == "cowrie_event" and incoming_source != "cowrie_event":
+        selected = existing
+    else:
+        selected = incoming
+    return stable_json(selected)
 AI_ADVISORY_SCHEMA_EXTENSION_ID = "non_authoritative_ai_advisory.v1"
 AI_ADVISORY_RECONCILIATION_CURSOR_SCHEMA = (
     "ai_advisory_reconciliation_cursor.v1"
@@ -606,6 +638,53 @@ class SQLiteStorage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_enrichment_records_expires
                     ON enrichment_records(expires_at);
+
+                CREATE TABLE IF NOT EXISTS external_ti_source_ip_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    observable_type TEXT NOT NULL,
+                    normalized_observable_identity TEXT NOT NULL,
+                    lookup_status TEXT NOT NULL,
+                    normalized_context_json TEXT NOT NULL,
+                    provider_observed_at TEXT,
+                    lookup_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    negative_cache_until TEXT,
+                    provenance_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(provider, observable_type, normalized_observable_identity)
+                );
+                CREATE INDEX IF NOT EXISTS idx_external_ti_source_ip_cache_expiry
+                    ON external_ti_source_ip_cache(provider, expires_at);
+
+                -- Auxiliary operational safety state.  This table is
+                -- intentionally outside the canonical schema/manifest and
+                -- has no expiry or cleanup path: a proof claim is consumed
+                -- permanently for its campaign.
+                CREATE TABLE IF NOT EXISTS external_ti_provider_proof_guard (
+                    guard_id TEXT PRIMARY KEY,
+                    schema_version TEXT NOT NULL,
+                    authority TEXT NOT NULL,
+                    claim_type TEXT NOT NULL,
+                    proof_campaign_id TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    normalized_observable_type TEXT NOT NULL,
+                    normalized_source_ip_digest TEXT NOT NULL,
+                    cutoff_utc TEXT NOT NULL,
+                    target_guard_id TEXT NOT NULL,
+                    first_observed_at TEXT NOT NULL,
+                    claimed_at TEXT NOT NULL,
+                    completed_at TEXT NOT NULL DEFAULT '',
+                    result_class TEXT NOT NULL DEFAULT '',
+                    http_status INTEGER,
+                    provenance_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS enrichment_jobs (
                     job_id TEXT PRIMARY KEY,
@@ -3942,6 +4021,343 @@ class SQLiteStorage:
                 ),
             )
 
+    @staticmethod
+    def _external_ti_source_ip_cache_key(
+        provider: str,
+        normalized_observable_identity: str,
+    ) -> str:
+        from production.enrichment.enrichment_cache import source_ip_cache_key
+
+        return source_ip_cache_key(provider, normalized_observable_identity)
+
+    def get_external_ti_source_ip_cache(
+        self,
+        provider: str,
+        normalized_observable_identity: str,
+        provider_config_identity: str = "",
+        *,
+        now: Any = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read one non-authoritative source-IP cache row without revalidation.
+
+        Freshness, provider identity, and bounded projection checks belong to
+        ``SourceIPCacheService`` so SQLite and Mongo share one policy.
+        """
+
+        del provider_config_identity, now
+        cache_key = self._external_ti_source_ip_cache_key(
+            provider, normalized_observable_identity
+        )
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM external_ti_source_ip_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        try:
+            item["normalized_context"] = json.loads(
+                item.pop("normalized_context_json") or "{}"
+            )
+            item["provenance"] = json.loads(item.pop("provenance_json") or "{}")
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise StorageError("external TI source-IP cache row is malformed") from exc
+        if not isinstance(item["normalized_context"], dict) or not isinstance(
+            item["provenance"], dict
+        ):
+            raise StorageError("external TI source-IP cache row has invalid JSON")
+        return item
+
+    def upsert_external_ti_source_ip_cache(self, entry: Dict[str, Any]) -> None:
+        """Atomically upsert one deterministic provider/IP cache row."""
+
+        provider = str(entry.get("provider") or "").strip().lower()
+        identity = str(entry.get("normalized_observable_identity") or "").strip()
+        cache_key = str(entry.get("cache_key") or "")
+        expected_key = self._external_ti_source_ip_cache_key(provider, identity)
+        if not cache_key or cache_key != expected_key:
+            raise StorageError("external TI source-IP cache key is invalid")
+        required = (
+            "schema_version",
+            "observable_type",
+            "lookup_status",
+            "lookup_at",
+            "expires_at",
+            "created_at",
+            "updated_at",
+        )
+        if any(not str(entry.get(field) or "").strip() for field in required):
+            raise StorageError("external TI source-IP cache entry is incomplete")
+        context_json = stable_json(entry.get("normalized_context") or {})
+        provenance_json = stable_json(entry.get("provenance") or {})
+        with self.connection() as conn:
+            previous = conn.execute(
+                "SELECT created_at FROM external_ti_source_ip_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+            created_at = str(previous["created_at"]) if previous else str(entry["created_at"])
+            conn.execute(
+                """
+                INSERT INTO external_ti_source_ip_cache
+                (cache_key, schema_version, provider, observable_type,
+                 normalized_observable_identity, lookup_status,
+                 normalized_context_json, provider_observed_at, lookup_at,
+                 expires_at, negative_cache_until, provenance_json,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    schema_version=excluded.schema_version,
+                    provider=excluded.provider,
+                    observable_type=excluded.observable_type,
+                    normalized_observable_identity=excluded.normalized_observable_identity,
+                    lookup_status=excluded.lookup_status,
+                    normalized_context_json=excluded.normalized_context_json,
+                    provider_observed_at=excluded.provider_observed_at,
+                    lookup_at=excluded.lookup_at,
+                    expires_at=excluded.expires_at,
+                    negative_cache_until=excluded.negative_cache_until,
+                    provenance_json=excluded.provenance_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    cache_key,
+                    str(entry["schema_version"]),
+                    provider,
+                    str(entry["observable_type"]),
+                    identity,
+                    str(entry["lookup_status"]),
+                    context_json,
+                    entry.get("provider_observed_at"),
+                    str(entry["lookup_at"]),
+                    str(entry["expires_at"]),
+                    entry.get("negative_cache_until"),
+                    provenance_json,
+                    created_at,
+                    str(entry["updated_at"]),
+                ),
+            )
+
+    @staticmethod
+    def _external_ti_proof_guard_row(row: sqlite3.Row) -> Dict[str, Any]:
+        from production.enrichment.external_ti_proof_guard import (
+            ProofGuardError,
+            validate_guard_record,
+        )
+
+        item = dict(row)
+        try:
+            item["provenance"] = json.loads(item.pop("provenance_json") or "{}")
+            return validate_guard_record(item)
+        except (TypeError, json.JSONDecodeError, ProofGuardError) as exc:
+            raise StorageError("external TI proof guard row is malformed") from exc
+
+    @staticmethod
+    def _external_ti_proof_guard_db_values(entry: Dict[str, Any]) -> tuple[Any, ...]:
+        from production.enrichment.external_ti_proof_guard import validate_guard_record
+
+        item = validate_guard_record(entry)
+        return (
+            item["guard_id"],
+            item["schema_version"],
+            item["authority"],
+            item["claim_type"],
+            item["proof_campaign_id"],
+            item["provider"],
+            item["state"],
+            item["mode"],
+            item["normalized_observable_type"],
+            item["normalized_source_ip_digest"],
+            item["cutoff_utc"],
+            item["target_guard_id"],
+            item["first_observed_at"],
+            item["claimed_at"],
+            item["completed_at"],
+            item["result_class"],
+            item["http_status"],
+            stable_json(item["provenance"]),
+            item["created_at"],
+            item["updated_at"],
+        )
+
+    def _claim_external_ti_proof_guard(
+        self,
+        entry: Dict[str, Any],
+        *,
+        expected_claim_type: str,
+    ) -> Dict[str, Any]:
+        from production.enrichment.external_ti_proof_guard import validate_guard_record
+
+        clean = validate_guard_record(entry)
+        if clean["claim_type"] != expected_claim_type:
+            raise StorageError("external TI proof guard claim type is invalid")
+        values = self._external_ti_proof_guard_db_values(clean)
+        columns = (
+            "guard_id, schema_version, authority, claim_type, proof_campaign_id, provider, "
+            "state, mode, normalized_observable_type, normalized_source_ip_digest, "
+            "cutoff_utc, target_guard_id, first_observed_at, claimed_at, completed_at, "
+            "result_class, http_status, provenance_json, created_at, updated_at"
+        )
+        with self.connection() as conn:
+            if expected_claim_type == "provider":
+                target_row = conn.execute(
+                    "SELECT * FROM external_ti_provider_proof_guard WHERE guard_id = ?",
+                    (clean["target_guard_id"],),
+                ).fetchone()
+                if target_row is None:
+                    raise StorageError("external TI proof target claim is missing")
+                target = self._external_ti_proof_guard_row(target_row)
+                if (
+                    target["claim_type"] != "target"
+                    or target["proof_campaign_id"] != clean["proof_campaign_id"]
+                    or target["mode"] != clean["mode"]
+                    or target["cutoff_utc"] != clean["cutoff_utc"]
+                    or target["normalized_source_ip_digest"]
+                    != clean["normalized_source_ip_digest"]
+                ):
+                    raise StorageError("external TI proof provider target binding is invalid")
+            cursor = conn.execute(
+                f"INSERT OR IGNORE INTO external_ti_provider_proof_guard ({columns}) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                values,
+            )
+            inserted = int(cursor.rowcount or 0) == 1
+            row = conn.execute(
+                "SELECT * FROM external_ti_provider_proof_guard WHERE guard_id = ?",
+                (clean["guard_id"],),
+            ).fetchone()
+            if row is None:
+                raise StorageError("external TI proof guard claim was not durable")
+            stored = self._external_ti_proof_guard_row(row)
+        binding_fields = (
+            "schema_version",
+            "authority",
+            "claim_type",
+            "proof_campaign_id",
+            "provider",
+            "mode",
+            "normalized_observable_type",
+            "normalized_source_ip_digest",
+            "cutoff_utc",
+            "target_guard_id",
+        )
+        if any(stored.get(field) != clean.get(field) for field in binding_fields):
+            if (
+                expected_claim_type == "target"
+                and stored.get("proof_campaign_id") == clean.get("proof_campaign_id")
+                and stored.get("claim_type") == "target"
+                and stored.get("normalized_source_ip_digest")
+                != clean.get("normalized_source_ip_digest")
+            ):
+                return {"decision": "TARGET_MISMATCH", "record": stored}
+            raise StorageError("conflicting duplicate external TI proof guard identity")
+        if expected_claim_type == "target":
+            decision = "CLAIMED" if inserted else "EXISTING"
+        elif inserted:
+            decision = "CLAIMED"
+        elif stored["state"] == "CLAIMED":
+            decision = "REQUEST_CLAIMED_OUTCOME_UNKNOWN"
+        elif stored["state"] == "REQUEST_COMPLETED":
+            decision = "ALREADY_COMPLETED"
+        else:
+            raise StorageError("external TI proof provider claim state is invalid")
+        return {"decision": decision, "record": stored}
+
+    def claim_external_ti_proof_target(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self._claim_external_ti_proof_guard(entry, expected_claim_type="target")
+
+    def claim_external_ti_proof_provider(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        return self._claim_external_ti_proof_guard(entry, expected_claim_type="provider")
+
+    def complete_external_ti_proof_provider(
+        self,
+        *,
+        proof_campaign_id: str,
+        provider: str,
+        result_class: str,
+        http_status: Optional[int] = None,
+        completed_at: Optional[str] = None,
+    ) -> bool:
+        from production.enrichment.external_ti_proof_guard import (
+            PROOF_GUARD_RESULT_CLASSES,
+            provider_guard_id,
+        )
+
+        outcome = str(result_class or "").strip().upper()
+        if outcome not in PROOF_GUARD_RESULT_CLASSES:
+            raise StorageError("external TI proof result class is invalid")
+        if http_status is not None and not 100 <= int(http_status) <= 599:
+            raise StorageError("external TI proof HTTP status is invalid")
+        identity = provider_guard_id(proof_campaign_id, provider)
+        completed = str(completed_at or utc_now()).strip()
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM external_ti_provider_proof_guard WHERE guard_id = ?",
+                (identity,),
+            ).fetchone()
+            if row is None:
+                raise StorageError("external TI proof provider claim is missing")
+            stored = self._external_ti_proof_guard_row(row)
+            if stored["state"] == "REQUEST_COMPLETED":
+                return False
+            if stored["state"] != "CLAIMED":
+                raise StorageError("external TI proof provider claim is not claimable")
+            updated = conn.execute(
+                """
+                UPDATE external_ti_provider_proof_guard
+                SET state = 'REQUEST_COMPLETED', completed_at = ?, result_class = ?,
+                    http_status = ?, updated_at = ?
+                WHERE guard_id = ? AND state = 'CLAIMED'
+                """,
+                (completed, outcome, http_status, completed, identity),
+            )
+            if int(updated.rowcount or 0) != 1:
+                raise StorageError("external TI proof completion was not durable")
+        return True
+
+    def list_external_ti_proof_guard(
+        self,
+        proof_campaign_id: str = "",
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        bounded_limit = max(0, min(int(limit), 1_000))
+        query = "SELECT * FROM external_ti_provider_proof_guard"
+        parameters: tuple[Any, ...] = ()
+        if str(proof_campaign_id or "").strip():
+            query += " WHERE proof_campaign_id = ?"
+            parameters = (str(proof_campaign_id).strip(),)
+        query += " ORDER BY claimed_at ASC, guard_id ASC LIMIT ?"
+        parameters += (bounded_limit,)
+        with self.connection() as conn:
+            rows = conn.execute(query, parameters).fetchall()
+        return [self._external_ti_proof_guard_row(row) for row in rows]
+
+    def prune_external_ti_source_ip_cache(
+        self,
+        *,
+        now: Any = None,
+        max_records: int = 1_000,
+    ) -> int:
+        """Delete only expired cache rows in one bounded maintenance batch."""
+
+        limit = max(1, min(int(max_records), 1_000))
+        current = _utc_timestamp(now)
+        with self.connection() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM external_ti_source_ip_cache
+                WHERE cache_key IN (
+                    SELECT cache_key
+                    FROM external_ti_source_ip_cache
+                    WHERE expires_at <= ?
+                    ORDER BY expires_at, cache_key
+                    LIMIT ?
+                )
+                """,
+                (current, limit),
+            )
+            return max(0, int(cursor.rowcount))
+
     def enqueue_enrichment_job(
         self,
         observable_type: str,
@@ -3971,6 +4387,18 @@ class SQLiteStorage:
         if priority_reason:
             body.setdefault("priority_reason", priority_reason)
         with self.connection() as conn:
+            existing_job = conn.execute(
+                """
+                SELECT payload_json
+                FROM enrichment_jobs
+                WHERE observable_type = ? AND observable_value = ?
+                """,
+                (observable_type, observable_value),
+            ).fetchone()
+            merged_payload_json = _merge_enrichment_job_payload_json(
+                existing_job["payload_json"] if existing_job else "{}",
+                body,
+            )
             cur = conn.execute(
                 """
                 INSERT INTO enrichment_jobs
@@ -3982,6 +4410,10 @@ class SQLiteStorage:
                     status=CASE
                         WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.status
                         ELSE 'queued'
+                    END,
+                    attempts=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.attempts
+                        ELSE 0
                     END,
                     priority=CASE
                         WHEN
@@ -4000,7 +4432,36 @@ class SQLiteStorage:
                     payload_json=excluded.payload_json,
                     next_retry_at=NULL,
                     error=NULL,
+                    claim_owner=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.claim_owner
+                        ELSE NULL
+                    END,
+                    claim_token=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.claim_token
+                        ELSE NULL
+                    END,
+                    claim_expires_at=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.claim_expires_at
+                        ELSE NULL
+                    END,
+                    last_error_code=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.last_error_code
+                        ELSE NULL
+                    END,
+                    last_error_type=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.last_error_type
+                        ELSE NULL
+                    END,
+                    last_error_at=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.last_error_at
+                        ELSE NULL
+                    END,
+                    completed_at=CASE
+                        WHEN enrichment_jobs.status IN ('queued', 'running', 'retry') THEN enrichment_jobs.completed_at
+                        ELSE NULL
+                    END,
                     updated_at=excluded.updated_at
+                WHERE enrichment_jobs.status IN ('queued', 'running', 'retry') OR ?
                 """,
                 (
                     job_id,
@@ -4009,9 +4470,10 @@ class SQLiteStorage:
                     session_id or None,
                     priority,
                     priority_reason or None,
-                    stable_json(body),
+                    merged_payload_json,
                     now,
                     now,
+                    int(bool(force)),
                 ),
             )
         return job_id, cur.rowcount > 0
@@ -4219,6 +4681,62 @@ class SQLiteStorage:
                 )
         return sighting_id
 
+    @staticmethod
+    def _decode_observable_sighting_row(row: Any) -> Dict[str, Any]:
+        item = dict(row)
+        raw_payload = item.pop("payload_json", "")
+        try:
+            payload = json.loads(raw_payload or "{}")
+        except (TypeError, json.JSONDecodeError):
+            payload = {}
+        item["payload"] = payload if isinstance(payload, dict) else {}
+        return item
+
+    def list_session_observable_sightings(
+        self,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        selected_limit = min(max(int(limit), 0), 100)
+        if not selected_limit:
+            return []
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM observable_sightings
+                WHERE session_id = ?
+                ORDER BY timestamp DESC, created_at DESC, sighting_id ASC
+                LIMIT ?
+                """,
+                (str(session_id), selected_limit),
+            ).fetchall()
+        return [self._decode_observable_sighting_row(row) for row in rows]
+
+    def list_observable_sightings(
+        self,
+        observable_type: str,
+        observable_value: str,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        selected_limit = min(max(int(limit), 0), 100)
+        if not selected_limit:
+            return []
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM observable_sightings
+                WHERE observable_type = ? AND observable_value = ?
+                ORDER BY timestamp DESC, created_at DESC, sighting_id ASC
+                LIMIT ?
+                """,
+                (
+                    str(observable_type).strip().lower(),
+                    str(observable_value).strip(),
+                    selected_limit,
+                ),
+            ).fetchall()
+        return [self._decode_observable_sighting_row(row) for row in rows]
+
     def enqueue_threat_hunt_job(
         self,
         session_id: str,
@@ -4395,6 +4913,150 @@ class SQLiteStorage:
             item["roles"] = [value for value in str(item.get("roles") or "").split(",") if value]
             item["sources"] = [value for value in str(item.get("sources") or "").split(",") if value]
             output.append(item)
+        return output
+
+    def find_sessions_by_source_ip(
+        self,
+        normalized_source_ip: str,
+        exclude_session_id: str = "",
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """Return bounded, safe summaries for exact source-IP sightings.
+
+        This is a read-side projection only.  The query is deliberately
+        restricted to the source-IP roles emitted by the canonical sighting
+        extractor; destination/IP or arbitrary observable joins cannot satisfy
+        this relation.  No session payload or source-IP field is copied into
+        the result beyond the explicitly requested lookup identity handled by
+        the caller.
+        """
+
+        selected_limit = min(max(int(limit), 0), 20)
+        if not selected_limit:
+            return []
+        candidate_limit = min(selected_limit * 100, 500)
+        with self.connection() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    os.session_id,
+                    os.sighting_id,
+                    os.role,
+                    os.source,
+                    os.sensor_id,
+                    os.timestamp,
+                    os.created_at
+                FROM observable_sightings os
+                WHERE os.observable_type = 'ip'
+                  AND os.observable_value = ?
+                  AND os.role IN ('source_ip', 'session_source_ip')
+                  AND os.session_id <> ?
+                ORDER BY COALESCE(os.timestamp, os.created_at) DESC,
+                         os.session_id ASC,
+                         os.sighting_id ASC
+                LIMIT ?
+                """,
+                (
+                    str(normalized_source_ip).strip(),
+                    str(exclude_session_id or ""),
+                    candidate_limit,
+                ),
+            ).fetchall()
+        groups: Dict[str, Dict[str, Any]] = {}
+        seen_ids: Dict[str, set[str]] = {}
+        for row in rows:
+            item = dict(row)
+            session_id = str(item.get("session_id") or "").strip()
+            if not session_id:
+                continue
+            sighting_id = str(item.get("sighting_id") or "").strip()
+            dedupe_key = sighting_id or stable_id(
+                "source-ip-sighting",
+                {
+                    "session_id": session_id,
+                    "role": item.get("role"),
+                    "source": item.get("source"),
+                    "sensor_id": item.get("sensor_id"),
+                    "timestamp": item.get("timestamp") or item.get("created_at"),
+                },
+            )
+            seen = seen_ids.setdefault(session_id, set())
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            timestamp = str(item.get("timestamp") or item.get("created_at") or "")
+            group = groups.setdefault(
+                session_id,
+                {
+                    "session_id": session_id,
+                    "sighting_count": 0,
+                    "first_seen": timestamp,
+                    "last_seen": timestamp,
+                    "roles": set(),
+                    "sources": set(),
+                    "sensor_ids": set(),
+                    "sighting_ids": [],
+                },
+            )
+            group["sighting_count"] += 1
+            if timestamp:
+                group["first_seen"] = min(str(group["first_seen"] or timestamp), timestamp)
+                group["last_seen"] = max(str(group["last_seen"] or timestamp), timestamp)
+            role = str(item.get("role") or "").strip()
+            source = str(item.get("source") or "").strip()
+            sensor_id = str(item.get("sensor_id") or "").strip()
+            if role:
+                group["roles"].add(role)
+            if source:
+                group["sources"].add(source)
+            if sensor_id:
+                group["sensor_ids"].add(sensor_id)
+            if sighting_id and len(group["sighting_ids"]) < 100:
+                group["sighting_ids"].append(sighting_id)
+        output: List[Dict[str, Any]] = [
+            {
+                "session_id": group["session_id"],
+                "sighting_count": int(group["sighting_count"]),
+                "first_seen": str(group["first_seen"] or ""),
+                "last_seen": str(group["last_seen"] or ""),
+                "roles": sorted(group["roles"]),
+                "sources": sorted(group["sources"]),
+                "sensor_ids": sorted(group["sensor_ids"]),
+                "sighting_ids": sorted(group["sighting_ids"]),
+            }
+            for group in groups.values()
+        ]
+        return sorted(
+            output,
+            key=lambda item: (str(item.get("last_seen") or ""), str(item.get("session_id") or "")),
+            reverse=True,
+        )[:selected_limit]
+
+    def find_sessions_by_observables(
+        self,
+        observables: Any,
+        exclude_session_id: str = "",
+        limit_per_observable: int = 20,
+    ) -> List[Dict[str, Any]]:
+        output: List[Dict[str, Any]] = []
+        selected_limit = min(max(int(limit_per_observable), 0), 20)
+        for observable_type, observable_value in list(observables or [])[:50]:
+            kind = str(observable_type or "").strip().lower()
+            value = str(observable_value or "").strip()
+            if not kind or not value or not selected_limit:
+                continue
+            output.append(
+                {
+                    "observable_type": kind,
+                    "observable_value": value,
+                    "sessions": self.find_sessions_by_observable(
+                        kind,
+                        value,
+                        exclude_session_id=exclude_session_id,
+                        limit=selected_limit,
+                    ),
+                }
+            )
         return output
 
     def save_session_link(self, link_payload: Dict[str, Any]) -> str:
@@ -5466,7 +6128,7 @@ class SQLiteStorage:
         return output
 
     def list_rows(self, table: str, limit: int = 100) -> List[Dict[str, Any]]:
-        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "ai_advisory_outbox", "ai_advisories", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "prediction_snapshots", "prediction_outbox", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
+        allowed = {"events", "sessions", "alerts", "analysis_jobs", "reports", "ai_advisory_outbox", "ai_advisories", "feed_status", "webhook_deliveries", "enrichment_records", "enrichment_jobs", "external_ti_source_ip_cache", "external_ti_provider_proof_guard", "prediction_snapshots", "prediction_outbox", "prediction_backtest_runs", "prediction_calibration_runs", "analyst_feedback", "classification_review_labels", "observables", "observable_sightings", "threat_hunt_jobs", "session_links", "campaigns", "campaign_sessions"}
         if table not in allowed:
             raise ValueError(f"unsupported table: {table}")
         with self.connection() as conn:
