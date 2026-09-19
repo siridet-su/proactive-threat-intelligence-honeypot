@@ -1768,6 +1768,7 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 	for _, id := range []string{"orphan-after-head-a", "orphan-after-head-b", "recreated-source"} {
 		projectionDocs = append(projectionDocs, bson.M{"_id": id, "sessionId": id, "expires_at": watermark})
 	}
+	projectionDocs = append(projectionDocs, bson.M{"_id": "malformed-cleanup-watermark", "sessionId": "malformed-cleanup-watermark", "expires_at": "not-a-date"})
 	if _, err := states.InsertMany(ctx, stateDocs); err != nil {
 		t.Fatal(err)
 	}

@@ -772,10 +772,10 @@ type cwdCleanupCursor struct {
 }
 
 func cwdAuditProjectionCleanupKeysetQuery(now time.Time, cursor *cwdCleanupCursor) bson.M {
-	match := bson.M{"expires_at": bson.M{"$lte": now}}
+	match := bson.M{"expires_at": bson.M{"$type": "date", "$lte": now}}
 	if cursor != nil {
 		match["$or"] = bson.A{
-			bson.M{"expires_at": bson.M{"$gt": cursor.ExpiresAt, "$lte": now}},
+			bson.M{"expires_at": bson.M{"$type": "date", "$gt": cursor.ExpiresAt, "$lte": now}},
 			bson.M{"expires_at": cursor.ExpiresAt, "_id": bson.M{"$gt": cursor.ID}},
 		}
 	}
