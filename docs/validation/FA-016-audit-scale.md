@@ -5,8 +5,8 @@ FS-007 remains `PARTIAL`.
 
 ## Scope and architecture
 
-This remediation starts at `b94b69af2e853a4e43560a7756b932ddba9eb821` on
-`feat/cwd-filesystem-telemetry`. The processor owns the durable
+This remediation starts at `b94b69af2e853a4e43560a7756b932ddba9eb821` and is
+implemented in `54c872b` on `feat/cwd-filesystem-telemetry`. The processor owns the durable
 `cwd_audit_projection` read model; `cwd_session_state` and `cwd_events` remain
 authoritative source records. `cwd_audit_projection_meta` is only a readiness
 hint, never the sole read-safety condition.
