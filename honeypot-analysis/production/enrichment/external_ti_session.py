@@ -15,7 +15,7 @@ from production.enrichment.external_ti_contract import (
     SOURCE_IP_ENRICHMENT_MODE,
     SOURCE_IP_POLICY_ID,
     SOURCE_IP_POLICY_VERSION,
-    SOURCE_IP_PRODUCTION_POLICY_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_VERSIONS,
     build_external_ti_evidence,
     default_external_ti_provider_configs,
     evaluate_outbound_sighting,
@@ -396,12 +396,13 @@ def _lookup_governed_source_ip_cache(
         or governance is None
         or str(getattr(governance, "policy_id", "") or "") != SOURCE_IP_POLICY_ID
         or str(getattr(governance, "version", "") or "")
-        not in {SOURCE_IP_POLICY_VERSION, SOURCE_IP_PRODUCTION_POLICY_VERSION}
+        not in {SOURCE_IP_POLICY_VERSION, *SOURCE_IP_PRODUCTION_POLICY_VERSIONS}
         or not bool(getattr(governance, "authorizes_provider", lambda _name: False)(name))
     ):
         return None
     expected_modes = {
         "abuseipdb": "lookup",
+        "otx": "lookup",
         "shodan_official": "official_lookup",
     }
     try:

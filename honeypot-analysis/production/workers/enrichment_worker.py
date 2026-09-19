@@ -74,6 +74,16 @@ class EnrichmentWorker:
         source_configs = getattr(config, "external_ti_provider_configs", {}) or {}
         source_ip_requested = self.source_ip_mode == SOURCE_IP_ENRICHMENT_MODE or any(
             str(name).strip().lower() in SOURCE_IP_PROVIDER_NAMES
+            and "ip"
+            in {
+                str(item).strip().lower()
+                for item in value.get("observable_types", []) or []
+            }
+            and "source_ip"
+            in {
+                str(item).strip().lower()
+                for item in value.get("observable_roles", []) or []
+            }
             and (
                 str(name).strip().lower() in {
                     str(item).strip().lower()

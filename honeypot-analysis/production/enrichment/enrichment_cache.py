@@ -31,7 +31,7 @@ SUPPORTED_OBSERVABLES = {"ip", "url", "domain", "hash", "hassh", "ja3"}
 SOURCE_IP_CACHE_COLLECTION = "external_ti_source_ip_cache"
 SOURCE_IP_CACHE_SCHEMA = "external_ti_source_ip_cache.v1"
 SOURCE_IP_CACHE_AUTHORITY = "NON_AUTHORITATIVE_CACHE"
-SOURCE_IP_CACHE_PROVIDERS = frozenset({"abuseipdb", "shodan_official"})
+SOURCE_IP_CACHE_PROVIDERS = frozenset({"abuseipdb", "otx", "shodan_official"})
 SOURCE_IP_CACHE_STATUSES = frozenset(
     {
         "DATA",
@@ -134,6 +134,11 @@ def _cache_context(provider: str, extension: Mapping[str, Any]) -> Dict[str, Any
             "country_code",
             "last_reported_at",
         )
+    elif name == "otx":
+        allowed = (
+            "pulses",
+            "truncated",
+        )
     else:
         allowed = (
             "asn",
@@ -169,6 +174,7 @@ def _fit_cache_context(context: Mapping[str, Any]) -> Dict[str, Any]:
     for key in (
         "vulnerabilities",
         "cpe",
+        "pulses",
         "tags",
         "hostnames",
         "service_product_summary",
@@ -181,7 +187,7 @@ def _fit_cache_context(context: Mapping[str, Any]) -> Dict[str, Any]:
             values.pop()
 
     if len(stable_json(candidate).encode("utf-8")) > MAX_NORMALIZED_CACHE_CONTEXT_BYTES:
-        for key in ("vulnerabilities", "cpe", "tags", "hostnames", "service_product_summary"):
+        for key in ("vulnerabilities", "cpe", "pulses", "tags", "hostnames", "service_product_summary"):
             candidate.pop(key, None)
             if len(stable_json(candidate).encode("utf-8")) <= MAX_NORMALIZED_CACHE_CONTEXT_BYTES:
                 break
@@ -315,6 +321,7 @@ def build_source_ip_cache_entry(
         endpoint_id = ""
     provider_mode = {
         "abuseipdb": "lookup",
+        "otx": "lookup",
         "shodan_official": "official_lookup",
     }.get(name, "lookup")
     provenance = {
