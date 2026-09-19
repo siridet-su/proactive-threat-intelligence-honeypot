@@ -36,6 +36,12 @@ runtime:
 - `GET /api/hardware`: latest 30 `hardware_live` slots, falling back to
   `hardware_metrics_1m` and then legacy `hardware_metrics`.
 
+`hardware_live` is a bounded real-time projection, not an audit collection.
+Its current samples contain the values needed by System Health: total and
+per-core CPU utilization, memory and root-disk capacity values, temperature,
+and `wlan0` RX/TX throughput. Raw counters and audit-only collector fields are
+kept outside this browser-facing live ring.
+
 ## Error contract
 
 The BFF returns `401` for a missing/invalid dashboard session, `404` for an unknown allowlist key, `503` for an unsafe origin or unavailable upstream, and `502` for a non-JSON or oversized upstream response. An upstream `401`/`403` is normalized to `dashboard backend authorization failed`; an upstream `404` is normalized to `dashboard data was not found`; other upstream status codes are preserved with `dashboard backend request failed`. Backend route-specific errors below are therefore visible only after the BFF has admitted the request.

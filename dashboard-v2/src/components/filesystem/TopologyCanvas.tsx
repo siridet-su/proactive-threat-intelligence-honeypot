@@ -2,18 +2,24 @@
 
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "framer-motion";
 import {
+  AlertTriangle,
+  Check,
+  ChevronDown,
   ChevronRight,
   Folder,
   FolderOpen,
-  Grip,
   HardDrive,
+  Layers,
+  LayoutGrid,
   LocateFixed,
   Maximize2,
   Minimize2,
   MousePointer2,
+  Move,
   RotateCcw,
   Route,
   ScanLine,
+  Settings2,
   ShieldAlert,
   Undo2,
   ZoomIn,
@@ -26,43 +32,43 @@ import {
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { TopologyMinimap } from "./TopologyMinimap";
+import { HopEnergy } from "./HopEnergy";
 import {
+  analyzeTopologyDensity,
   calloutsForGraph,
+  compactDirectoryPath,
+  DEFAULT_DENSITY_THRESHOLDS,
   directorySegment,
   formatTimestamp,
+  formatUpdateAge,
+  GRAPH_CALLOUT_LIMIT,
+  GRAPH_NODE_LIMIT,
   isSensitiveDirectory,
   leaderEndpoints,
-  MAP_MAX_ZOOM,
-  MAP_MIN_ZOOM,
   pointForGraph,
+  resolveCalloutPositions,
   sourceRailPositions,
   type ActiveHopRoute,
+  type FreshnessState,
   type GraphCallout,
   type GraphElementBounds,
-  type LabelDrag,
   type LabelPosition,
-  type MapMetrics,
-  type NodeDrag,
   type Pan,
   type StreamState,
+  type TopologyDensityMode,
+  type TopologyDensityPreference,
 } from "./filesystemUtils";
+import { useTopologyViewport } from "./useTopologyViewport";
+import { useTopologyArrange } from "./useTopologyArrange";
+import { getLayoutStorageKeys } from "./layoutPersistence";
+import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 
-const NODE_WORKSPACE_LIMIT = 400;
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
-
-
-interface WorkspaceLayoutSnapshot {
-  labelPositions: Record<string, LabelPosition>;
-  nodePositions: Record<string, LabelPosition>;
-  pan: Pan;
-  zoom: number;
-}
 
 function sameElementBounds(
   left: Record<string, GraphElementBounds>,
@@ -81,67 +87,24 @@ function sameElementBounds(
   });
 }
 
-function unrestrictedNodeCoordinate(value: number) {
-  return Math.min(NODE_WORKSPACE_LIMIT, Math.max(-NODE_WORKSPACE_LIMIT, value));
-}
-
-function readStoredLabelLayout(storageKey: string): Record<string, LabelPosition> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.fromEntries(
-        Object.entries(parsed).flatMap(([sourceIp, position]) => {
-          if (!position || typeof position !== "object" || Array.isArray(position)) return [];
-          const candidate = position as Partial<LabelPosition>;
-          return typeof candidate.x === "number" && typeof candidate.y === "number"
-            ? [[sourceIp, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
-            : [];
-        }),
-      );
-    }
-  } catch {
-    // Ignore corrupt or blocked localStorage
-  }
-  return {};
-}
-
-function readStoredNodeLayout(storageKey: string): Record<string, LabelPosition> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return Object.fromEntries(
-        Object.entries(parsed).flatMap(([path, position]) => {
-          if (!position || typeof position !== "object" || Array.isArray(position)) return [];
-          const candidate = position as Partial<LabelPosition>;
-          return typeof candidate.x === "number" && typeof candidate.y === "number"
-            ? [[path, { x: unrestrictedNodeCoordinate(candidate.x), y: unrestrictedNodeCoordinate(candidate.y) }]]
-            : [];
-        }),
-      );
-    }
-  } catch {
-    // Ignore corrupt or blocked localStorage
-  }
-  return {};
-}
-
 interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
   streamState: StreamState;
+  freshnessState: FreshnessState;
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
+  hopDurationMs?: number;
   title?: string;
   subtitle?: string;
   onSelectSession: (sessionId: string) => void;
   onSelectPath: (path: string | null) => void;
   isExpanded?: boolean;
   onToggleExpand?: () => void;
+  onRefresh?: () => void;
+  onReconnect?: () => void;
+  staleThresholdMs: number;
   isAuditMode?: boolean;
   isResizingContainer?: boolean;
   className?: string;
@@ -151,31 +114,31 @@ export function TopologyCanvas({
   snapshot,
   regionStatus,
   streamState,
+  freshnessState,
   selectedSessionId,
   selectedPath,
   activeHop,
+  hopDurationMs = 1400,
   title,
   subtitle,
   onSelectSession,
   onSelectPath,
   isExpanded: controlledIsExpanded,
   onToggleExpand,
+  onRefresh,
+  onReconnect,
+  staleThresholdMs,
   isAuditMode = false,
   isResizingContainer = false,
   className,
 }: TopologyCanvasProps) {
   const reducedMotion = useReducedMotion();
-  const hasUserManuallyAdjustedView = useRef(false);
-  const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
-  const [isDraggingSurface, setIsDraggingSurface] = useState(false);
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
   const isControlledExpansion = onToggleExpand !== undefined;
   const isStandaloneExpanded = isTopologyExpanded && !isControlledExpansion;
 
   const handleToggleExpand = useCallback(() => {
-    hasUserManuallyAdjustedView.current = false;
     if (onToggleExpand) {
       onToggleExpand();
     } else {
@@ -184,77 +147,201 @@ export function TopologyCanvas({
   }, [onToggleExpand]);
 
   // Scope layout persistence so audit session inspection never overrides live global topology
-  const labelStorageKey = useMemo(
-    () => (isAuditMode ? `pti-label-layout-audit-${selectedSessionId ?? "default"}` : "pti-label-layout-live"),
-    [isAuditMode, selectedSessionId],
-  );
-  const nodeStorageKey = useMemo(
-    () => (isAuditMode ? `pti-node-layout-audit-${selectedSessionId ?? "default"}` : "pti-node-layout-live"),
+  const { labelStorageKey, nodeStorageKey } = useMemo(
+    () => getLayoutStorageKeys(isAuditMode, selectedSessionId),
     [isAuditMode, selectedSessionId],
   );
 
-  const [labelPositions, setLabelPositions] = useState<Record<string, LabelPosition>>(() =>
-    readStoredLabelLayout(labelStorageKey),
-  );
-  const [nodePositions, setNodePositions] = useState<Record<string, LabelPosition>>(() =>
-    readStoredNodeLayout(nodeStorageKey),
-  );
-
-  // Sync state if storage key changes (e.g. switching between live and audit mode or changing session)
-  const [prevLabelStorageKey, setPrevLabelStorageKey] = useState(labelStorageKey);
-  if (prevLabelStorageKey !== labelStorageKey) {
-    setPrevLabelStorageKey(labelStorageKey);
-    setLabelPositions(readStoredLabelLayout(labelStorageKey));
-  }
-
-  const [prevNodeStorageKey, setPrevNodeStorageKey] = useState(nodeStorageKey);
-  if (prevNodeStorageKey !== nodeStorageKey) {
-    setPrevNodeStorageKey(nodeStorageKey);
-    setNodePositions(readStoredNodeLayout(nodeStorageKey));
-  }
-
-  const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
-  const [draggedCalloutIp, setDraggedCalloutIp] = useState<string | null>(null);
-  const [draggedNodePath, setDraggedNodePath] = useState<string | null>(null);
   const [nodeElementBounds, setNodeElementBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutElementBounds, setCalloutElementBounds] = useState<Record<string, GraphElementBounds>>({});
 
-  const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
-  const panRef = useRef<Pan>({ x: 0, y: 0 });
-  const zoomRef = useRef(1);
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const graphPlaneRef = useRef<HTMLDivElement>(null);
   const nodeElementRefs = useRef(new Map<string, HTMLButtonElement>());
-  const calloutElementRefs = useRef(new Map<string, HTMLButtonElement>());
-  const labelDrag = useRef<LabelDrag | null>(null);
-  const nodeDrag = useRef<NodeDrag | null>(null);
-  const suppressCalloutClick = useRef(false);
-  const suppressNodeClick = useRef(false);
-  const autoArrangeUndo = useRef<WorkspaceLayoutSnapshot | null>(null);
-  const [canUndoAutoArrange, setCanUndoAutoArrange] = useState(false);
+  const calloutElementRefs = useRef(new Map<string, HTMLElement>());
+  const clusterSessionRefs = useRef(new Map<string, HTMLButtonElement>());
+  const [userCollapsedIps, setUserCollapsedIps] = useState<Set<string>>(new Set());
+  const [userExpandedIps, setUserExpandedIps] = useState<Set<string>>(new Set());
 
-  // Save label layout to localStorage
-  useEffect(() => {
-    if (Object.keys(labelPositions).length === 0) {
-      window.localStorage.removeItem(labelStorageKey);
-    } else {
-      window.localStorage.setItem(labelStorageKey, JSON.stringify(labelPositions));
-    }
-  }, [labelPositions, labelStorageKey]);
+  const isClusterExpanded = useCallback(
+    (callout: GraphCallout) => {
+      if (callout.sessions.length <= 1) return false;
+      if (userCollapsedIps.has(callout.sourceIp)) return false;
+      if (userExpandedIps.has(callout.sourceIp)) return true;
+      return callout.sessionIds.includes(selectedSessionId ?? "");
+    },
+    [selectedSessionId, userCollapsedIps, userExpandedIps],
+  );
 
-  // Directory layout is a workspace preference, independent from source-IP labels.
-  useEffect(() => {
-    if (Object.keys(nodePositions).length === 0) {
-      window.localStorage.removeItem(nodeStorageKey);
+  const toggleClusterExpand = useCallback((sourceIp: string, isCurrentlyExpanded: boolean) => {
+    if (isCurrentlyExpanded) {
+      setUserCollapsedIps((prev) => new Set(prev).add(sourceIp));
+      setUserExpandedIps((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceIp);
+        return next;
+      });
     } else {
-      window.localStorage.setItem(nodeStorageKey, JSON.stringify(nodePositions));
+      setUserExpandedIps((prev) => new Set(prev).add(sourceIp));
+      setUserCollapsedIps((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceIp);
+        return next;
+      });
     }
-  }, [nodePositions, nodeStorageKey]);
+  }, []);
+
+  const getViewportSnapshotRef = useRef<(() => { pan: Pan; zoom: number }) | null>(null);
+  const restoreViewportRef = useRef<((snapshot: { pan: Pan; zoom: number }) => void) | null>(null);
+  const resetViewportRef = useRef<((overrideLabels?: Record<string, LabelPosition>, overrideNodes?: Record<string, LabelPosition>) => void) | null>(null);
+
+  // TopologyCanvas is the sole mounted owner of arrangement state for this
+  // topology instance. Presentational header/scene/overlay children receive
+  // focused values and callbacks; they never call viewport or arrangement hooks.
+  const {
+    isArrangeMode,
+    setIsArrangeMode,
+    labelPositions,
+    nodePositions,
+    draggedCalloutIp,
+    draggedNodePath,
+    canUndoLayout,
+    undoLayoutChange,
+    autoArrangeTopology,
+    resetMapWorkspace,
+    onCalloutPointerDown,
+    onCalloutPointerMove,
+    onCalloutPointerEnd,
+    consumeCalloutClickSuppression,
+    onNodePointerDown,
+    onNodePointerMove,
+    onNodePointerEnd,
+    consumeNodeClickSuppression,
+  } = useTopologyArrange({
+    labelStorageKey,
+    nodeStorageKey,
+    graphPlaneRef,
+    onCaptureViewport: () => getViewportSnapshotRef.current?.() ?? { pan: { x: 0, y: 0 }, zoom: 1 },
+    onRestoreViewport: (snapshot) => restoreViewportRef.current?.(snapshot),
+    onResetViewport: (labels, nodes) => resetViewportRef.current?.(labels, nodes),
+    onClearElementBounds: () => {
+      setNodeElementBounds({});
+      setCalloutElementBounds({});
+    },
+  });
+
+  const layoutMenuRef = useRef<HTMLDivElement>(null);
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!layoutMenuOpen) return;
+    const closeLayoutMenu = (event: PointerEvent) => {
+      if (!layoutMenuRef.current?.contains(event.target as Node)) setLayoutMenuOpen(false);
+    };
+    const closeLayoutMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setLayoutMenuOpen(false);
+        layoutMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeLayoutMenu);
+    document.addEventListener("keydown", closeLayoutMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeLayoutMenu);
+      document.removeEventListener("keydown", closeLayoutMenuOnEscape);
+    };
+  }, [layoutMenuOpen]);
+
+  const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
+  const [densityMenuOpen, setDensityMenuOpen] = useState(false);
+  const densityMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!densityMenuOpen) return;
+    const closeDensityMenu = (event: PointerEvent) => {
+      if (!densityMenuRef.current?.contains(event.target as Node)) setDensityMenuOpen(false);
+    };
+    const closeDensityMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setDensityMenuOpen(false);
+        densityMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeDensityMenu);
+    document.addEventListener("keydown", closeDensityMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeDensityMenu);
+      document.removeEventListener("keydown", closeDensityMenuOnEscape);
+    };
+  }, [densityMenuOpen]);
+
+  useEffect(() => {
+    if (!isArrangeMode) return;
+    const exitArrangeMode = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || layoutMenuOpen) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setIsArrangeMode(false);
+    };
+    document.addEventListener("keydown", exitArrangeMode);
+    return () => document.removeEventListener("keydown", exitArrangeMode);
+  }, [isArrangeMode, layoutMenuOpen, setIsArrangeMode]);
+
+  // Render limits state
+  const [isPathsExpanded, setIsPathsExpanded] = useState(false);
+  const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
 
   // Derived graph layout
+  const effectiveDensityMode: TopologyDensityMode = useMemo(() => {
+    if (densityPreference !== "auto") return densityPreference;
+    const totalNodes = snapshot?.nodes.length ?? 0;
+    const uniqueSources = new Set((snapshot?.sessions ?? []).map((s) => s.sourceIp)).size;
+    if (
+      totalNodes <= DEFAULT_DENSITY_THRESHOLDS.detailedMaxNodes &&
+      uniqueSources <= DEFAULT_DENSITY_THRESHOLDS.detailedMaxSources
+    ) {
+      return "detailed";
+    }
+    if (
+      totalNodes <= DEFAULT_DENSITY_THRESHOLDS.clusteredMaxNodes &&
+      uniqueSources <= DEFAULT_DENSITY_THRESHOLDS.clusteredMaxSources
+    ) {
+      return "clustered";
+    }
+    return "aggregated";
+  }, [densityPreference, snapshot?.nodes.length, snapshot?.sessions]);
+
+  const focusedGraphPath = selectedPath ?? activeHop?.toPath ?? null;
+
   const automaticGraphNodes = useMemo(
-    () => pointForGraph(snapshot?.nodes ?? [], snapshot?.sessions ?? [], selectedPath),
-    [selectedPath, snapshot?.nodes, snapshot?.sessions],
+    () =>
+      pointForGraph(
+        snapshot?.nodes ?? [],
+        snapshot?.sessions ?? [],
+        selectedPath,
+        isAuditMode,
+        {
+          nodeLimit: isPathsExpanded || densityPreference === "detailed" || isAuditMode ? null : GRAPH_NODE_LIMIT,
+          selectedSessionId,
+          densityMode: effectiveDensityMode,
+          focusedPath: focusedGraphPath,
+        },
+      ),
+    [
+      effectiveDensityMode,
+      focusedGraphPath,
+      isAuditMode,
+      isPathsExpanded,
+      densityPreference,
+      selectedPath,
+      selectedSessionId,
+      snapshot?.nodes,
+      snapshot?.sessions,
+    ],
   );
   const graphNodes = useMemo(
     () => automaticGraphNodes.map((node) => ({ ...node, ...(nodePositions[node.path] ?? {}) })),
@@ -287,19 +374,57 @@ export function TopologyCanvas({
   );
 
   const graphCallouts = useMemo(
-    () => calloutsForGraph(effectiveSessions, automaticGraphNodeByPath),
-    [effectiveSessions, automaticGraphNodeByPath],
+    () =>
+      calloutsForGraph(effectiveSessions, automaticGraphNodeByPath, {
+        calloutLimit: isSourcesExpanded || densityPreference === "detailed" || isAuditMode ? null : GRAPH_CALLOUT_LIMIT,
+        selectedSessionId,
+        densityMode: effectiveDensityMode,
+      }),
+    [
+      effectiveSessions,
+      automaticGraphNodeByPath,
+      isSourcesExpanded,
+      densityPreference,
+      isAuditMode,
+      selectedSessionId,
+      effectiveDensityMode,
+    ],
+  );
+  const allSourceClusters = useMemo(
+    () =>
+      calloutsForGraph(effectiveSessions, automaticGraphNodeByPath, {
+        calloutLimit: null,
+        selectedSessionId,
+      }),
+    [effectiveSessions, automaticGraphNodeByPath, selectedSessionId],
+  );
+
+  const densityAnalysis = useMemo(
+    () =>
+      analyzeTopologyDensity(
+        snapshot?.nodes ?? [],
+        snapshot?.sessions ?? [],
+        densityPreference,
+        focusedGraphPath,
+        graphNodes,
+        graphCallouts,
+      ),
+    [snapshot?.nodes, snapshot?.sessions, densityPreference, focusedGraphPath, graphNodes, graphCallouts],
   );
   const automaticCalloutPositions = useMemo(
-    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath),
-    [graphCallouts, automaticGraphNodeByPath],
+    () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath, isAuditMode),
+    [graphCallouts, automaticGraphNodeByPath, isAuditMode],
+  );
+  const effectiveCalloutPositions = useMemo(
+    () => resolveCalloutPositions(graphCallouts, automaticCalloutPositions, labelPositions),
+    [graphCallouts, automaticCalloutPositions, labelPositions],
   );
   const positionForCallout = useCallback(
     (callout: GraphCallout, _index: number): LabelPosition =>
-      labelPositions[callout.sourceIp] ??
+      effectiveCalloutPositions.get(callout.sourceIp) ??
       automaticCalloutPositions.get(callout.sourceIp) ??
       { x: _index % 2 === 0 ? 10 : 90, y: 50 },
-    [automaticCalloutPositions, labelPositions],
+    [automaticCalloutPositions, effectiveCalloutPositions],
   );
   const liveSessionById = useMemo(
     () => new Map(effectiveSessions.map((session) => [session.sessionId, session])),
@@ -313,23 +438,21 @@ export function TopologyCanvas({
     () => new Set(effectiveSessions.map((session) => session.sourceIp)).size,
     [effectiveSessions],
   );
-
-  // When a source's verified path changes, clear any manual drag override so it smoothly moves to the new directory
-  const lastSourcePathByIp = useRef<Map<string, string>>(new Map());
-  useEffect(() => {
-    for (const callout of graphCallouts) {
-      const previousPath = lastSourcePathByIp.current.get(callout.sourceIp);
-      if (previousPath && previousPath !== callout.path) {
-        setLabelPositions((current) => {
-          if (!current[callout.sourceIp]) return current;
-          const next = { ...current };
-          delete next[callout.sourceIp];
-          return next;
-        });
+  const exactSessionCountByPath = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const session of effectiveSessions) {
+      const p = session.cwdState.path;
+      if (p) {
+        counts.set(p, (counts.get(p) ?? 0) + 1);
       }
-      lastSourcePathByIp.current.set(callout.sourceIp, callout.path);
     }
-  }, [graphCallouts]);
+    return counts;
+  }, [effectiveSessions]);
+
+  const totalLiveSources = liveSourceCount;
+  const renderedSourcesCount = graphCallouts.length;
+  const isSourcesTruncated = totalLiveSources > renderedSourcesCount;
+
 
 
   const measureElementBounds = useCallback(() => {
@@ -337,7 +460,7 @@ export function TopologyCanvas({
     if (!plane?.offsetWidth || !plane.offsetHeight) return;
     const planeBounds = plane.getBoundingClientRect();
     if (!planeBounds.width || !planeBounds.height) return;
-    const toRelativeBounds = (element: HTMLButtonElement): GraphElementBounds => {
+    const toRelativeBounds = (element: HTMLElement): GraphElementBounds => {
       const bounds = element.getBoundingClientRect();
       return {
         x: ((bounds.left + bounds.width / 2 - planeBounds.left) / planeBounds.width) * 100,
@@ -367,221 +490,109 @@ export function TopologyCanvas({
     return () => observer.disconnect();
   }, [graphCallouts, graphNodes, isTopologyExpanded, labelPositions, measureElementBounds, nodePositions]);
 
-  const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
-    const nextZoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, Number(value.toFixed(3))));
-    const currentZoom = zoomRef.current;
-    const currentPan = panRef.current;
-    const nextPan = focalPoint
-      ? {
-          x: focalPoint.x - ((focalPoint.x - currentPan.x) / currentZoom) * nextZoom,
-          y: focalPoint.y - ((focalPoint.y - currentPan.y) / currentZoom) * nextZoom,
-        }
-      : currentPan;
-    zoomRef.current = nextZoom;
-    panRef.current = nextPan;
-    setZoom(nextZoom);
-    setPan(nextPan);
-  }, []);
+  // Overlap detection: Identify any directory nodes or IP callouts that overlap each other
+  const { overlappingNodePaths, overlappingCalloutIps } = useMemo(() => {
+    const overlappingNodes = new Set<string>();
+    const overlappingCallouts = new Set<string>();
 
-  const calculateFitViewport = useCallback(
-    (
-      surface: HTMLDivElement,
-      plane: HTMLDivElement,
-      overrideLabels?: Record<string, LabelPosition>,
-      overrideNodes?: Record<string, LabelPosition>,
-    ) => {
-      const surfaceWidth = surface.clientWidth;
-      if (!surfaceWidth) return null;
+    type BoundingBox = { id: string; type: "node" | "callout"; x: number; y: number; hw: number; hh: number };
+    const boxes: BoundingBox[] = [];
 
-      const baseWidth = plane.offsetWidth || 860;
-      const effectiveNodes = overrideNodes ?? nodePositions;
-      const effectiveLabels = overrideLabels ?? labelPositions;
+    // Collect directory nodes
+    for (const node of graphNodes) {
+      const bounds = nodeElementBounds[node.path];
+      const hw = bounds?.width ? bounds.width / 2 : 7.5;
+      const hh = bounds?.height ? bounds.height / 2 : 4.0;
+      boxes.push({ id: node.path, type: "node", x: node.x, y: node.y, hw, hh });
+    }
 
-      // 1. Calculate actual content horizontal bounding box in plane percentage (0 - 100)
-      let minContentX = 100;
-      let maxContentX = 0;
+    // Collect callouts
+    for (const [index, callout] of graphCallouts.entries()) {
+      const pos = positionForCallout(callout, index);
+      const bounds = calloutElementBounds[callout.sourceIp];
+      const hw = bounds?.width ? bounds.width / 2 : 8.35;
+      const hh = bounds?.height ? bounds.height / 2 : 5.2;
+      boxes.push({ id: callout.sourceIp, type: "callout", x: pos.x, y: pos.y, hw, hh });
+    }
 
-      // Folders
-      for (const node of automaticGraphNodes) {
-        const bounds = nodeElementBounds[node.path];
-        // If rendered element bounds are measured, use actual rendered width in %
-        // Otherwise fallback to safe default folder width (~16% of plane, half = 8%)
-        const halfWidth = bounds?.width ? bounds.width / 2 : 8;
-        const posX = effectiveNodes[node.path]?.x ?? node.x;
-        const left = posX - halfWidth;
-        const right = posX + halfWidth;
-        if (left < minContentX) minContentX = left;
-        if (right > maxContentX) maxContentX = right;
-      }
+    // Compare all pairs for AABB intersection
+    for (let i = 0; i < boxes.length; i++) {
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i];
+        const b = boxes[j];
 
-      // IP Callouts
-      for (const callout of graphCallouts) {
-        const bounds = calloutElementBounds[callout.sourceIp];
-        const pos =
-          effectiveLabels[callout.sourceIp] ??
-          automaticCalloutPositions.get(callout.sourceIp) ??
-          { x: 90, y: 50 };
-        // Callout is w-44 (176px). On an 860px plane, 176px is ~20.4%, half = 10.2%
-        const halfWidth = bounds?.width ? bounds.width / 2 : 10.5;
-        const posX = pos.x;
-        const left = posX - halfWidth;
-        const right = posX + halfWidth;
-        if (left < minContentX) minContentX = left;
-        if (right > maxContentX) maxContentX = right;
-      }
+        // An overlap occurs when both X and Y center distances are smaller than the sum of their half-sizes (with small tolerance)
+        const overlapX = Math.abs(a.x - b.x) < a.hw + b.hw - 0.4;
+        const overlapY = Math.abs(a.y - b.y) < a.hh + b.hh - 0.4;
 
-      // If no nodes found or bounds invalid, fallback to balanced 20%-80%
-      if (minContentX >= maxContentX) {
-        minContentX = 20;
-        maxContentX = 80;
-      }
+        if (overlapX && overlapY) {
+          if (a.type === "node") overlappingNodes.add(a.id);
+          else overlappingCallouts.add(a.id);
 
-      // Add a small 2% padding around content bounds for visual breathing room
-      const safeMinX = Math.max(0, minContentX - 2);
-      const safeMaxX = Math.min(100, maxContentX + 2);
-
-      const contentWidthPercent = safeMaxX - safeMinX;
-      const contentCenterPercent = (safeMinX + safeMaxX) / 2;
-
-      // Actual unscaled content width in pixels
-      const unscaledContentWidthPx = (contentWidthPercent / 100) * baseWidth;
-      const horizontalPadding = 48; // 24px clearance on each side of the screen
-      const availableWidth = surfaceWidth - horizontalPadding;
-
-      let fitZoom = 1;
-      if (availableWidth < unscaledContentWidthPx) {
-        fitZoom = Math.min(1, Math.max(MAP_MIN_ZOOM, Number((availableWidth / unscaledContentWidthPx).toFixed(2))));
-      } else {
-        fitZoom = 1;
-      }
-
-      // Calculate panX to place contentCenterPercent exactly at the center of surfaceWidth
-      const contentCenterPx = (contentCenterPercent / 100) * baseWidth * fitZoom;
-      let panX = Math.round(surfaceWidth / 2 - plane.offsetLeft - contentCenterPx);
-
-      // Defensive safety clamp: Ensure the bounds never cross screen edges (minimum 24px clearance)
-      const minPadding = 24;
-      const screenLeft = plane.offsetLeft + panX + (safeMinX / 100) * baseWidth * fitZoom;
-      const screenRight = plane.offsetLeft + panX + (safeMaxX / 100) * baseWidth * fitZoom;
-      if (screenLeft < minPadding) {
-        panX += Math.round(minPadding - screenLeft);
-      } else if (screenRight > surfaceWidth - minPadding) {
-        panX -= Math.round(screenRight - (surfaceWidth - minPadding));
-      }
-
-      return {
-        zoom: fitZoom,
-        pan: { x: panX, y: 0 },
-      };
-    },
-    [automaticCalloutPositions, automaticGraphNodes, calloutElementBounds, graphCallouts, labelPositions, nodeElementBounds, nodePositions],
-  );
-
-  const resetViewport = useCallback(
-    (overrideLabels?: Record<string, LabelPosition>, overrideNodes?: Record<string, LabelPosition>) => {
-      hasUserManuallyAdjustedView.current = false;
-      const surface = mapSurfaceRef.current;
-      const plane = graphPlaneRef.current;
-      if (surface && plane) {
-        const fit = calculateFitViewport(surface, plane, overrideLabels, overrideNodes);
-        if (fit) {
-          panRef.current = fit.pan;
-          zoomRef.current = fit.zoom;
-          setPan(fit.pan);
-          setZoom(fit.zoom);
-          return;
+          if (b.type === "node") overlappingNodes.add(b.id);
+          else overlappingCallouts.add(b.id);
         }
       }
-      panRef.current = { x: 0, y: 0 };
-      zoomRef.current = 1;
-      setPan(panRef.current);
-      setZoom(zoomRef.current);
-    },
-    [calculateFitViewport],
-  );
+    }
 
-  const resetLabelLayout = () => {
-    labelDrag.current = null;
-    setDraggedCalloutIp(null);
-    setLabelPositions({});
-    setCalloutElementBounds({});
-    window.localStorage.removeItem(labelStorageKey);
-  };
+    return { overlappingNodePaths: overlappingNodes, overlappingCalloutIps: overlappingCallouts };
+  }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
-  const resetNodeLayout = () => {
-    nodeDrag.current = null;
-    setDraggedNodePath(null);
-    setNodePositions({});
-    setNodeElementBounds({});
-    window.localStorage.removeItem(nodeStorageKey);
-  };
+  const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
+  const showMinimap = isTopologyExpanded || graphNodes.length > 8 || graphCallouts.length > 2;
 
-  const resetMapWorkspace = () => {
-    hasUserManuallyAdjustedView.current = false;
-    resetLabelLayout();
-    resetNodeLayout();
-    resetViewport({}, {});
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
-  };
+  const {
+    pan,
+    setPan,
+    zoom,
+    setZoom,
+    panRef,
+    zoomRef,
+    isDraggingSurface,
+    mapMetrics,
+    zoomIn,
+    zoomOut,
+    markUserAdjusted,
+    centerMapOn,
+    resetViewport,
+    fitTopology,
+    onPointerDown,
+    onPointerMove,
+    onPointerEnd,
+    onSurfaceKeyDown,
+  } = useTopologyViewport({
+    mapSurfaceRef,
+    graphPlaneRef,
+    isTopologyExpanded,
+    showMinimap,
+    automaticGraphNodes,
+    graphCallouts,
+    nodePositions,
+    labelPositions,
+    automaticCalloutPositions,
+    nodeElementBounds,
+    calloutElementBounds,
+    nodesCount: snapshot?.nodes.length ?? 0,
+  });
 
-  const fitTopology = () => {
-    hasUserManuallyAdjustedView.current = false;
-    resetViewport();
-  };
-
-  const autoArrangeTopology = () => {
-    hasUserManuallyAdjustedView.current = false;
-    autoArrangeUndo.current = {
-      labelPositions: { ...labelPositions },
-      nodePositions: { ...nodePositions },
-      pan: { ...panRef.current },
-      zoom: zoomRef.current,
+  useEffect(() => {
+    getViewportSnapshotRef.current = () => ({ pan: panRef.current, zoom: zoomRef.current });
+    restoreViewportRef.current = (snapshot) => {
+      markUserAdjusted();
+      panRef.current = snapshot.pan;
+      zoomRef.current = snapshot.zoom;
+      setPan(snapshot.pan);
+      setZoom(snapshot.zoom);
     };
-    setCanUndoAutoArrange(true);
-    resetLabelLayout();
-    resetNodeLayout();
-    resetViewport({}, {});
-  };
+    resetViewportRef.current = resetViewport;
+  }, [markUserAdjusted, panRef, resetViewport, setPan, setZoom, zoomRef]);
 
-  const undoAutoArrangeTopology = () => {
-    const previous = autoArrangeUndo.current;
-    if (!previous) return;
-    hasUserManuallyAdjustedView.current = true;
-    setLabelPositions(previous.labelPositions);
-    setNodePositions(previous.nodePositions);
-    panRef.current = previous.pan;
-    zoomRef.current = previous.zoom;
-    setPan(previous.pan);
-    setZoom(previous.zoom);
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
-  };
-
-  const clearAutoArrangeUndo = () => {
-    if (!autoArrangeUndo.current) return;
-    autoArrangeUndo.current = null;
-    setCanUndoAutoArrange(false);
-  };
-
-  const centerMapOn = useCallback((position: LabelPosition) => {
-    const surface = mapSurfaceRef.current;
-    const plane = graphPlaneRef.current;
-    if (!surface || !plane) return;
-    const nextPan = {
-      x: surface.clientWidth / 2 - plane.offsetLeft - ((plane.offsetWidth * position.x) / 100) * zoomRef.current,
-      y: surface.clientHeight / 2 - plane.offsetTop - ((plane.offsetHeight * position.y) / 100) * zoomRef.current,
-    };
-    panRef.current = nextPan;
-    setPan(nextPan);
-  }, []);
-
-  const centerSelectedSource = () => {
+  const centerSelectedSource = useCallback(() => {
     if (!selectedGraphCallout) return;
     const index = graphCallouts.findIndex((callout) => callout.sourceIp === selectedGraphCallout.sourceIp);
     if (index < 0) return;
     centerMapOn(positionForCallout(selectedGraphCallout, index));
-  };
+  }, [centerMapOn, graphCallouts, positionForCallout, selectedGraphCallout]);
 
   // Keep camera steady; only bring target node into view when hop changes AND it is outside the viewport
   const lastCenteredHopEventId = useRef<string | null>(null);
@@ -591,7 +602,7 @@ export function TopologyCanvas({
     lastCenteredHopEventId.current = activeHop.eventId;
 
     // Never auto-center while user is actively dragging or interacting with the canvas
-    if (nodeDrag.current || labelDrag.current || isDraggingSurface) return;
+    if (draggedNodePath || draggedCalloutIp || isDraggingSurface) return;
 
     const targetNode = graphNodeByPath.get(activeHop.toPath);
     if (!targetNode) return;
@@ -600,8 +611,8 @@ export function TopologyCanvas({
     const plane = graphPlaneRef.current;
     if (!surface || !plane) return;
 
-    const screenX = (plane.offsetWidth * targetNode.x / 100) * zoomRef.current + panRef.current.x;
-    const screenY = (plane.offsetHeight * targetNode.y / 100) * zoomRef.current + panRef.current.y;
+    const screenX = plane.offsetLeft + panRef.current.x + ((plane.offsetWidth * targetNode.x) / 100) * zoomRef.current;
+    const screenY = plane.offsetTop + panRef.current.y + ((plane.offsetHeight * targetNode.y) / 100) * zoomRef.current;
 
     const margin = 60;
     const isVisible =
@@ -613,241 +624,17 @@ export function TopologyCanvas({
     if (!isVisible) {
       centerMapOn(targetNode);
     }
-  }, [activeHop?.eventId, activeHop?.toPath, centerMapOn, graphNodeByPath, isDraggingSurface]);
-
-  // Label dragging handlers
-  const onCalloutPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, sourceIp: string, origin: LabelPosition) => {
-    event.stopPropagation();
-    event.currentTarget.focus();
-    suppressCalloutClick.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    labelDrag.current = { sourceIp, startX: event.clientX, startY: event.clientY, origin };
-    setDraggedCalloutIp(sourceIp);
-  };
-
-  const onCalloutPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const dragging = labelDrag.current;
-    const plane = graphPlaneRef.current;
-    if (!dragging || !plane) return;
-    const rect = plane.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
-    const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
-    if (Math.abs(deltaX) > 0.25 || Math.abs(deltaY) > 0.25) {
-      suppressCalloutClick.current = true;
-      clearAutoArrangeUndo();
-    }
-    setLabelPositions((current) => ({
-      ...current,
-      [dragging.sourceIp]: {
-        x: unrestrictedNodeCoordinate(dragging.origin.x + deltaX),
-        y: unrestrictedNodeCoordinate(dragging.origin.y + deltaY),
-      },
-    }));
-  };
-
-  const onCalloutPointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const dragging = labelDrag.current;
-    if (dragging) {
-      setLabelPositions((current) => ({
-        ...current,
-        [dragging.sourceIp]: current[dragging.sourceIp] ?? dragging.origin,
-      }));
-    }
-    labelDrag.current = null;
-    setDraggedCalloutIp(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  // Manual node placement is unconstrained by the automatic tree layout.
-  const onNodePointerDown = (event: ReactPointerEvent<HTMLButtonElement>, path: string, origin: LabelPosition) => {
-    event.stopPropagation();
-    event.currentTarget.focus();
-    suppressNodeClick.current = false;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    nodeDrag.current = { path, startX: event.clientX, startY: event.clientY, origin };
-    setDraggedNodePath(path);
-  };
-
-  const onNodePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const dragging = nodeDrag.current;
-    const plane = graphPlaneRef.current;
-    if (!dragging || !plane) return;
-    const rect = plane.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const deltaX = ((event.clientX - dragging.startX) / rect.width) * 100;
-    const deltaY = ((event.clientY - dragging.startY) / rect.height) * 100;
-    if (Math.abs(deltaX) > 0.2 || Math.abs(deltaY) > 0.2) {
-      suppressNodeClick.current = true;
-      clearAutoArrangeUndo();
-    }
-    setNodePositions((current) => ({
-      ...current,
-      [dragging.path]: {
-        x: unrestrictedNodeCoordinate(dragging.origin.x + deltaX),
-        y: unrestrictedNodeCoordinate(dragging.origin.y + deltaY),
-      },
-    }));
-  };
-
-  const onNodePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    nodeDrag.current = null;
-    setDraggedNodePath(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  // Surface pan handlers
-  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button")) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragStart.current = { x: event.clientX, y: event.clientY, pan: panRef.current };
-    setIsDraggingSurface(true);
-  };
-
-  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragStart.current) return;
-    const deltaX = event.clientX - dragStart.current.x;
-    const deltaY = event.clientY - dragStart.current.y;
-    if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
-      hasUserManuallyAdjustedView.current = true;
-    }
-    const nextPan = {
-      x: dragStart.current.pan.x + deltaX,
-      y: dragStart.current.pan.y + deltaY,
-    };
-    panRef.current = nextPan;
-    setPan(nextPan);
-  };
-
-  const onPointerEnd = (event: ReactPointerEvent<HTMLDivElement>) => {
-    dragStart.current = null;
-    setIsDraggingSurface(false);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  };
-
-  // Keyboard navigation
-  const onSurfaceKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) {
-      event.preventDefault();
-      hasUserManuallyAdjustedView.current = true;
-      const step = 40;
-      setPan((current) => {
-        const next = {
-          x: event.key === "ArrowLeft" ? current.x + step : event.key === "ArrowRight" ? current.x - step : current.x,
-          y: event.key === "ArrowUp" ? current.y + step : event.key === "ArrowDown" ? current.y - step : current.y,
-        };
-        panRef.current = next;
-        return next;
-      });
-    }
-  };
-
-  // Wheel zoom
-  useEffect(() => {
-    const surface = mapSurfaceRef.current;
-    if (!surface) return;
-    const onWheel = (event: WheelEvent) => {
-      const plane = graphPlaneRef.current;
-      if (!plane) return;
-      event.preventDefault();
-      hasUserManuallyAdjustedView.current = true;
-      const bounds = surface.getBoundingClientRect();
-      setMapZoom(zoomRef.current * Math.exp(-event.deltaY * 0.0015), {
-        x: event.clientX - bounds.left - plane.offsetLeft,
-        y: event.clientY - bounds.top - plane.offsetTop,
-      });
-    };
-    surface.addEventListener("wheel", onWheel, { passive: false });
-    return () => surface.removeEventListener("wheel", onWheel);
-  }, [isTopologyExpanded, setMapZoom, snapshot?.nodes.length]);
-
-  // Touch pinch zoom
-  useEffect(() => {
-    const surface = mapSurfaceRef.current;
-    if (!surface) return;
-    let initialDistance: number | null = null;
-    let initialZoom = 1;
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length === 2) {
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        initialDistance = Math.hypot(dx, dy);
-        initialZoom = zoomRef.current;
-      }
-    };
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length === 2 && initialDistance) {
-        e.preventDefault();
-        hasUserManuallyAdjustedView.current = true;
-        const dx = e.touches[0].clientX - e.touches[1].clientX;
-        const dy = e.touches[0].clientY - e.touches[1].clientY;
-        const currentDistance = Math.hypot(dx, dy);
-        const factor = currentDistance / initialDistance;
-        setMapZoom(initialZoom * factor);
-      }
-    };
-
-    const onTouchEnd = (e: TouchEvent) => {
-      if (e.touches.length < 2) initialDistance = null;
-    };
-
-    surface.addEventListener("touchstart", onTouchStart, { passive: true });
-    surface.addEventListener("touchmove", onTouchMove, { passive: false });
-    surface.addEventListener("touchend", onTouchEnd, { passive: true });
-
-    return () => {
-      surface.removeEventListener("touchstart", onTouchStart);
-      surface.removeEventListener("touchmove", onTouchMove);
-      surface.removeEventListener("touchend", onTouchEnd);
-    };
-  }, [setMapZoom]);
-
-  // ResizeObserver for metrics and responsive auto-fit viewport
-  useEffect(() => {
-    const surface = mapSurfaceRef.current;
-    const plane = graphPlaneRef.current;
-    if (!surface || !plane) return;
-    const handleResize = () => {
-      setMapMetrics({
-        surfaceWidth: surface.clientWidth,
-        surfaceHeight: surface.clientHeight,
-        planeWidth: plane.offsetWidth,
-        planeHeight: plane.offsetHeight,
-        planeLeft: plane.offsetLeft,
-        planeTop: plane.offsetTop,
-      });
-
-      // Automatically fit camera if the user hasn't manually panned or zoomed
-      if (!hasUserManuallyAdjustedView.current) {
-        const fit = calculateFitViewport(surface, plane);
-        if (fit) {
-          if (
-            Math.abs(panRef.current.x - fit.pan.x) > 1 ||
-            Math.abs(panRef.current.y - fit.pan.y) > 1 ||
-            Math.abs(zoomRef.current - fit.zoom) > 0.005
-          ) {
-            panRef.current = fit.pan;
-            zoomRef.current = fit.zoom;
-            setPan(fit.pan);
-            setZoom(fit.zoom);
-          }
-        }
-      }
-    };
-    handleResize();
-    const observer = new ResizeObserver(handleResize);
-    observer.observe(surface);
-    observer.observe(plane);
-    return () => observer.disconnect();
-  }, [calculateFitViewport, isTopologyExpanded, snapshot?.nodes.length]);
+  }, [
+    activeHop?.eventId,
+    activeHop?.toPath,
+    centerMapOn,
+    graphNodeByPath,
+    isDraggingSurface,
+    draggedNodePath,
+    draggedCalloutIp,
+    panRef,
+    zoomRef,
+  ]);
 
   // Minimap viewport box calculation
   const minimapViewport = useMemo(() => {
@@ -886,137 +673,278 @@ export function TopologyCanvas({
       } ${className ?? ""}`}
       aria-busy={regionStatus === "loading"}
     >
-      <div className="flex shrink-0 flex-col gap-2.5 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0 flex-1 pr-3">
-          <div className="flex items-center gap-2">
-            <Route className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
-            <h2 className="truncate font-semibold text-text text-sm sm:text-base">{title ?? "Live filesystem topology"}</h2>
-          </div>
-          <p className="mt-0.5 truncate text-xs text-text-subtle">
-            {subtitle ?? "Observed paths form the topology; compact source-IP clusters point to their most recently verified location."}
-          </p>
-        </div>
-
-        {/* Toolbar Buttons: ALWAYS single row with flex-nowrap */}
-        <div className="flex shrink-0 items-center gap-1 flex-nowrap">
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Zoom out"
-            aria-label="Zoom out"
-            onClick={() => {
-              hasUserManuallyAdjustedView.current = true;
-              setMapZoom(zoomRef.current - 0.1);
-            }}
+      <TopologyCanvasHeader title={title} subtitle={subtitle}>
+        {/* Unified toolbar: Canvas navigation, Layout editing, and Canvas expansion are grouped distinctly to prevent ambiguous wrapping */}
+        <div
+          className="flex shrink-0 flex-wrap items-center justify-start sm:justify-end gap-2"
+          role="toolbar"
+          aria-label="Topology canvas controls"
+        >
+          {/* Group 1: Canvas navigation (Zoom In/Out/%, Fit view, Center selected IP) */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
+            role="group"
+            aria-label="Canvas navigation"
           >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </button>
-          <span
-            className="ui-badge h-8 min-w-11 justify-center px-1 font-mono text-xs tabular-nums"
-            aria-live="polite"
-            aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
-          >
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Zoom in"
-            aria-label="Zoom in"
-            onClick={() => {
-              hasUserManuallyAdjustedView.current = true;
-              setMapZoom(zoomRef.current + 0.1);
-            }}
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </button>
-
-          <div className="mx-0.5 h-4 w-px bg-border" />
-
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Reset view"
-            aria-label="Reset map view"
-            onClick={fitTopology}
-          >
-            <ScanLine className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Center selected IP"
-            aria-label="Center selected IP"
-            disabled={!selectedGraphCallout}
-            onClick={() => {
-              hasUserManuallyAdjustedView.current = true;
-              centerSelectedSource();
-            }}
-          >
-            <LocateFixed className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Auto arrange topology"
-            aria-label="Auto arrange directory and IP labels"
-            onClick={autoArrangeTopology}
-          >
-            <MousePointer2 className="h-3.5 w-3.5" />
-          </button>
-          {canUndoAutoArrange && (
             <button
               type="button"
               className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Undo auto arrange"
-              aria-label="Undo auto arrange"
-              onClick={undoAutoArrangeTopology}
+              title="Zoom out"
+              aria-label="Zoom out"
+              onClick={() => zoomOut()}
             >
-              <Undo2 className="h-3.5 w-3.5" />
+              <ZoomOut className="h-3.5 w-3.5" />
             </button>
-          )}
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title="Restore default workspace"
-            aria-label="Restore default map view and layout"
-            onClick={resetMapWorkspace}
-          >
-            <RotateCcw className="h-3.5 w-3.5" />
-          </button>
+            <span
+              className="ui-badge h-8 min-w-11 justify-center border-none bg-surface/80 px-1 font-mono text-xs tabular-nums"
+              aria-live="polite"
+              aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
+            >
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              type="button"
+              className="ui-button h-8 min-h-8 w-8 p-0"
+              title="Zoom in"
+              aria-label="Zoom in"
+              onClick={() => zoomIn()}
+            >
+              <ZoomIn className="h-3.5 w-3.5" />
+            </button>
 
-          <div className="mx-0.5 h-4 w-px bg-border" />
+            <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
 
-          <button
-            type="button"
-            className="ui-button h-8 min-h-8 w-8 p-0"
-            title={
-              isTopologyExpanded
-                ? isAuditMode
-                  ? "Exit fullscreen audit studio"
-                  : "Exit expanded map"
-                : isAuditMode
-                  ? "Open fullscreen audit studio"
-                  : "Expand map workspace"
-            }
-            aria-label={
-              isTopologyExpanded
-                ? isAuditMode
-                  ? "Exit fullscreen audit studio"
-                  : "Exit expanded map"
-                : isAuditMode
-                  ? "Open fullscreen audit studio"
-                  : "Expand map workspace"
-            }
-            aria-pressed={isTopologyExpanded}
-            onClick={handleToggleExpand}
+            <button
+              type="button"
+              className="ui-button h-8 min-h-8 w-8 p-0"
+              title="Fit topology in view"
+              aria-label="Fit topology in view"
+              onClick={fitTopology}
+            >
+              <ScanLine className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              className="ui-button h-8 min-h-8 w-8 p-0"
+              title="Center selected IP"
+              aria-label="Center selected IP"
+              disabled={!selectedGraphCallout}
+              onClick={() => {
+                markUserAdjusted();
+                centerSelectedSource();
+              }}
+            >
+              <LocateFixed className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Group 2: Layout editing (Explore/Arrange mode toggle, Undo, Layout options menu) */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
+            role="group"
+            aria-label="Layout editing"
           >
-            {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-          </button>
+            <div
+              className="flex items-center"
+              role="group"
+              aria-label="Interaction mode"
+            >
+              <button
+                type="button"
+                aria-pressed={!isArrangeMode}
+                onClick={() => setIsArrangeMode(false)}
+                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                  !isArrangeMode
+                    ? "border border-border bg-surface font-semibold text-text shadow-2xs"
+                    : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+                }`}
+              >
+                <MousePointer2 className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Explore</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={isArrangeMode}
+                onClick={() => setIsArrangeMode(true)}
+                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                  isArrangeMode
+                    ? "border border-primary-border bg-primary-subtle font-semibold text-primary shadow-2xs"
+                    : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+                }`}
+              >
+                <Move className="h-3.5 w-3.5" aria-hidden="true" />
+                <span className="hidden sm:inline">Arrange</span>
+              </button>
+            </div>
+
+            {canUndoLayout && (
+              <>
+                <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
+                <button
+                  type="button"
+                  className="ui-button h-8 min-h-8 px-2 text-xs"
+                  title="Undo last layout change"
+                  aria-label="Undo last layout change"
+                  onClick={undoLayoutChange}
+                >
+                  <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Undo</span>
+                </button>
+              </>
+            )}
+
+            <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
+
+            <div ref={layoutMenuRef} className="relative">
+              <button
+                type="button"
+                className={`ui-button relative h-8 min-h-8 w-8 p-0 ${
+                  totalOverlaps > 0 ? "border-warning/70 text-warning" : ""
+                }`}
+                title="Layout options"
+                aria-label="Open topology layout options"
+                aria-expanded={layoutMenuOpen}
+                aria-controls="topology-layout-options"
+                onClick={() => setLayoutMenuOpen((current) => !current)}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                {totalOverlaps > 0 && (
+                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
+                )}
+              </button>
+              {layoutMenuOpen && (
+                <div
+                  id="topology-layout-options"
+                  aria-label="Topology layout options"
+                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      autoArrangeTopology();
+                      setLayoutMenuOpen(false);
+                    }}
+                    className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    <LayoutGrid className="h-4 w-4 text-primary" aria-hidden="true" />
+                    <span className="flex-1">Auto arrange</span>
+                    {totalOverlaps > 0 && <span className="text-warning">{totalOverlaps} overlapping</span>}
+                  </button>
+                  <div className="my-1 h-px bg-border" aria-hidden="true" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      resetMapWorkspace();
+                      setIsArrangeMode(false);
+                      setLayoutMenuOpen(false);
+                    }}
+                    className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    Restore default layout
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Group 3: Density mode (Auto / Detailed / Clustered / Aggregated) */}
+          <div
+            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
+            role="group"
+            aria-label="Density mode"
+          >
+            <div ref={densityMenuRef} className="relative">
+              <button
+                type="button"
+                className="ui-button h-8 min-h-8 px-2 text-xs flex items-center gap-1.5"
+                title="Adjust map density mode"
+                aria-label={`Density mode: ${densityPreference === "auto" ? `Auto (${effectiveDensityMode})` : densityPreference}`}
+                aria-expanded={densityMenuOpen}
+                aria-controls="topology-density-options"
+                onClick={() => setDensityMenuOpen((current) => !current)}
+              >
+                <Layers className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
+                <span className="font-medium capitalize hidden sm:inline">
+                  {densityPreference === "auto" ? `Auto (${effectiveDensityMode})` : densityPreference}
+                </span>
+                <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
+              </button>
+              {densityMenuOpen && (
+                <div
+                  id="topology-density-options"
+                  aria-label="Density options"
+                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
+                >
+                  <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+                    Density mode
+                  </div>
+                  {(["auto", "detailed", "clustered", "aggregated"] as const).map((pref) => {
+                    const isSelected = densityPreference === pref;
+                    return (
+                      <button
+                        key={pref}
+                        type="button"
+                        onClick={() => {
+                          setDensityPreference(pref);
+                          setDensityMenuOpen(false);
+                        }}
+                        className={`flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                          isSelected
+                            ? "bg-primary-subtle text-primary font-medium"
+                            : "text-text hover:bg-surface-hover"
+                        }`}
+                      >
+                        <span className="capitalize">
+                          {pref === "auto" ? `Auto (${effectiveDensityMode})` : pref}
+                        </span>
+                        {isSelected && <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
+                      </button>
+                    );
+                  })}
+                  {densityAnalysis.hiddenNodes > 0 && (
+                    <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-[11px] text-text-subtle">
+                      {densityAnalysis.hiddenNodes} {densityAnalysis.hiddenNodes === 1 ? "path" : "paths"} aggregated in branches
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Group 4: Workspace expansion action */}
+          <div className="flex items-center shrink-0">
+            <button
+              type="button"
+              className="ui-button h-9 min-h-9 w-9 p-0"
+              title={
+                isTopologyExpanded
+                  ? isAuditMode
+                    ? "Exit fullscreen audit studio"
+                    : "Exit expanded map"
+                  : isAuditMode
+                    ? "Open fullscreen audit studio"
+                    : "Expand map workspace"
+              }
+              aria-label={
+                isTopologyExpanded
+                  ? isAuditMode
+                    ? "Exit fullscreen audit studio"
+                    : "Exit expanded map"
+                  : isAuditMode
+                    ? "Open fullscreen audit studio"
+                    : "Expand map workspace"
+              }
+              aria-pressed={isTopologyExpanded}
+              onClick={handleToggleExpand}
+            >
+              {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+            </button>
+          </div>
         </div>
-      </div>
+      </TopologyCanvasHeader>
 
-      {regionStatus === "error" ? (
+      {regionStatus === "error" && !snapshot ? (
         <div className="p-5">
           <RegionState
             kind="error"
@@ -1030,10 +958,20 @@ export function TopologyCanvas({
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className="p-5">
+          {!isAuditMode && freshnessState.isDegraded && (
+            <div role="status" className="mb-4 rounded-lg border border-warning-border bg-surface-raised px-3 py-2 text-xs text-text">
+              <strong className="font-semibold text-warning">Degraded connection:</strong>{" "}
+              Showing retained snapshot.
+            </div>
+          )}
           <RegionState
             kind="empty"
-            title="No observed working directories yet"
-            description="The live view will populate after verified CWD telemetry is recorded."
+            title={isAuditMode ? "No session selected for audit" : "No observed working directories yet"}
+            description={
+              isAuditMode
+                ? "Choose a session from the dropdown above or reset active filters."
+                : "The live view will populate after verified CWD telemetry is recorded."
+            }
           />
         </div>
       ) : (
@@ -1062,10 +1000,65 @@ export function TopologyCanvas({
                   className="pointer-events-none absolute inset-0 opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
                   aria-hidden="true"
                 />
-                <div className="pointer-events-none absolute left-5 top-5 flex items-center gap-2 text-xs text-text-subtle">
-                  <Grip className="h-3.5 w-3.5" aria-hidden="true" />
-                  Drag surface to pan · Scroll or pinch to zoom · Drag directory or IP nodes beyond the tree frame · Use reset to recover
-                </div>
+
+                <AnimatePresence initial={false}>
+                  {!isAuditMode && freshnessState.isDegraded && (
+                    <motion.div
+                      key="degraded-banner"
+                      role="status"
+                      initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+                      className="absolute left-1/2 top-4 z-50 flex -translate-x-1/2 items-center gap-2.5 rounded-lg border border-warning-border bg-surface-raised/95 px-3 py-1.5 text-xs text-text shadow-md backdrop-blur-xs"
+                    >
+                      <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                      <span>
+                        <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot (received{" "}
+                        {formatUpdateAge(freshnessState.snapshotReceiptAgeMs)}).
+                      </span>
+                      <span className="hidden sm:inline text-text-subtle text-[11px]">
+                        (Threshold: {Math.round(staleThresholdMs / 1000)}s)
+                      </span>
+                      {onRefresh && (
+                        <button
+                          type="button"
+                          onClick={onRefresh}
+                          className="ml-1 rounded border border-border bg-surface px-2 py-0.5 text-xs font-semibold text-text hover:bg-surface-hover transition-colors"
+                        >
+                          Refresh snapshot
+                        </button>
+                      )}
+                      {onReconnect && (
+                        <button
+                          type="button"
+                          onClick={onReconnect}
+                          className="ml-1 rounded border border-warning-border bg-warning-subtle px-2 py-0.5 text-xs font-semibold text-warning hover:bg-warning/20 transition-colors"
+                        >
+                          Reconnect now
+                        </button>
+                      )}
+                    </motion.div>
+                  )}
+                  {isArrangeMode && (
+                    <motion.div
+                      role="status"
+                      initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+                      className="pointer-events-none absolute left-4 top-4 z-50 flex min-h-9 items-center gap-2 rounded-lg border border-primary-border bg-surface-raised px-3 text-xs text-text shadow-sm sm:left-5 sm:top-5"
+                    >
+                      <Move className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                      <strong className="font-semibold text-primary">Arrange mode</strong>
+                      <span className="text-text-muted">Drag nodes</span>
+                      <span className="text-border" aria-hidden="true">·</span>
+                      <kbd className="rounded border border-border bg-surface-subtle px-1.5 py-0.5 font-mono text-xs">Esc</kbd>
+                      <span className="text-text-muted">to finish</span>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 <motion.div
                   ref={graphPlaneRef}
                   className="relative min-h-[500px] min-w-[860px] origin-top-left overflow-visible"
@@ -1109,6 +1102,8 @@ export function TopologyCanvas({
                           activeHop.visitedPaths.includes(parent.path)
                         );
 
+                        const hopColor = activeHop?.isFailedAttempt ? "var(--warning)" : "var(--primary)";
+
                         return (
                           <motion.g
                             key={`${parent.path}-${node.path}`}
@@ -1117,6 +1112,7 @@ export function TopologyCanvas({
                             exit={reducedMotion ? undefined : { opacity: 0 }}
                             transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
                           >
+                            {/* The active connector is drawn with its packet in HopEnergy. */}
                             <motion.path
                               initial={false}
                               animate={{ d: filesystemRoute }}
@@ -1128,23 +1124,23 @@ export function TopologyCanvas({
                               fill="none"
                               stroke={
                                 isActiveHopEdge
-                                  ? "var(--primary)"
+                                  ? hopColor
                                   : isTrailEdge
                                     ? "var(--primary)"
                                     : "var(--border-strong)"
                               }
                               strokeWidth={
                                 isActiveHopEdge
-                                  ? "0.65"
+                                  ? "0.55"
                                   : isTrailEdge
-                                    ? "0.45"
+                                    ? "0.24"
                                     : "0.35"
                               }
                               strokeOpacity={
                                 isActiveHopEdge
-                                  ? 1
+                                  ? 0
                                   : isTrailEdge
-                                    ? 0.75
+                                    ? 0.42
                                     : 0.4
                               }
                               strokeDasharray={
@@ -1155,22 +1151,6 @@ export function TopologyCanvas({
                                     : "none"
                               }
                             />
-                            {isActiveHopEdge && (
-                              <motion.path
-                                initial={false}
-                                animate={{ d: filesystemRoute }}
-                                transition={
-                                  reducedMotion || Boolean(draggedNodePath)
-                                    ? { duration: 0 }
-                                    : TOPOLOGY_TRANSITION
-                                }
-                                fill="none"
-                                stroke="var(--primary)"
-                                strokeWidth="1.2"
-                                strokeOpacity={0.3}
-                                className="animate-pulse"
-                              />
-                            )}
                           </motion.g>
                         );
                       })}
@@ -1181,8 +1161,11 @@ export function TopologyCanvas({
                       {graphCallouts.map((callout, index) => {
                         const position = positionForCallout(callout, index);
                         const selectedSource = callout.sessionIds.includes(selectedSessionId ?? "");
-                        const targetPaths = selectedSource
-                          ? [...new Set(callout.sessionIds.map((sessionId) => liveSessionById.get(sessionId)?.cwdState.path).filter((path): path is string => Boolean(path)))]
+                        const selectedSessionPath = selectedSessionId
+                          ? callout.sessions?.find((s) => s.sessionId === selectedSessionId)?.path ?? liveSessionById.get(selectedSessionId)?.cwdState.path
+                          : null;
+                        const targetPaths = callout.targetPaths?.length
+                          ? callout.targetPaths
                           : [callout.path];
                         return (
                           <motion.g
@@ -1195,7 +1178,8 @@ export function TopologyCanvas({
                             {targetPaths.map((path, routeIndex) => {
                               const node = graphNodeByPath.get(path);
                               if (!node) return null;
-                              const focused = selectedSource;
+                              const isPrimarySelected = selectedSource && (path === selectedSessionPath || (!selectedSessionPath && path === callout.path));
+                              const isClusterSelected = selectedSource;
                               const endpoint = leaderEndpoints(
                                 node,
                                 position,
@@ -1205,7 +1189,7 @@ export function TopologyCanvas({
                               const controlX = (endpoint.startX + endpoint.endX) / 2;
                               const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;
                               return (
-                                <g key={`${callout.sourceIp}-route-${routeIndex}`}>
+                                <g key={`${callout.sourceIp}-route-${path}-${routeIndex}`}>
                                   <motion.path
                                     initial={false}
                                     animate={{ d: routePath }}
@@ -1215,10 +1199,10 @@ export function TopologyCanvas({
                                         : TOPOLOGY_TRANSITION
                                     }
                                     fill="none"
-                                    stroke={focused ? "var(--primary)" : "var(--border-strong)"}
-                                    strokeOpacity={focused ? 1 : 0.52}
-                                    strokeWidth={focused ? "0.42" : "0.24"}
-                                    strokeDasharray={focused ? "none" : "0.75 1.6"}
+                                    stroke={isPrimarySelected ? "var(--primary)" : isClusterSelected ? "var(--primary)" : "var(--border-strong)"}
+                                    strokeOpacity={isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
+                                    strokeWidth={isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
+                                    strokeDasharray={isPrimarySelected ? "none" : isClusterSelected ? "1.5 1.5" : "0.75 1.6"}
                                   />
                                   <motion.circle
                                     initial={false}
@@ -1228,12 +1212,9 @@ export function TopologyCanvas({
                                         ? { duration: 0 }
                                         : TOPOLOGY_TRANSITION
                                     }
-                                    r={focused ? "1.05" : "0.5"}
-                                    fill={focused ? "var(--surface)" : "var(--border-strong)"}
-                                    fillOpacity={focused ? 1 : 0.68}
-                                    stroke={focused ? "var(--primary)" : "var(--border-strong)"}
-                                    strokeOpacity={focused ? 1 : 0.55}
-                                    strokeWidth={focused ? "0.48" : "0.18"}
+                                    r={isPrimarySelected ? "0.8" : isClusterSelected ? "0.6" : "0.45"}
+                                    fill={isPrimarySelected ? "var(--primary)" : isClusterSelected ? "var(--primary)" : "var(--border-strong)"}
+                                    fillOpacity={isPrimarySelected ? 1 : isClusterSelected ? 0.7 : 0.45}
                                   />
                                 </g>
                               );
@@ -1243,230 +1224,579 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
+                  {activeHop?.toPath && !activeHop.isFailedAttempt && graphNodeByPath.has(activeHop.toPath) && (
+                    <HopEnergy
+                      key={`${selectedSessionId}:${activeHop.eventId}`}
+                      from={activeHop.fromPath ? graphNodeByPath.get(activeHop.fromPath) : undefined}
+                      to={graphNodeByPath.get(activeHop.toPath)!}
+                      fromBounds={activeHop.fromPath ? nodeElementBounds[activeHop.fromPath] : undefined}
+                      toBounds={nodeElementBounds[activeHop.toPath]}
+                      durationMs={hopDurationMs}
+                      reducedMotion={Boolean(reducedMotion)}
+                      transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
+                    />
+                  )}
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {
-                    const isSelected = node.path === selectedPath;
-                    const isRoot = node.path === "/";
-                    const isSensitive = isSensitiveDirectory(node.path);
-                    const isHopTarget = activeHop?.toPath === node.path;
-                    const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
-                    const visitedStep = activeHop?.visitedStepMap[node.path];
+                      const isSelected = node.path === selectedPath;
+                      const isRoot = node.path === "/";
+                      const isSensitive = isSensitiveDirectory(node.path);
+                      const isHopTarget = activeHop?.toPath === node.path;
+                      const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
+                      const visitedStep = activeHop?.visitedStepMap[node.path];
+                      const isOverlapping = overlappingNodePaths.has(node.path);
+                      const exactCount = exactSessionCountByPath.get(node.path) ?? 0;
+                      const branchCount = node.sessionIds.length;
+                      const descendantCount = Math.max(0, branchCount - exactCount);
 
-                    return (
-                      <motion.button
-                        key={node.path}
-                        ref={(element) => {
-                          if (element) nodeElementRefs.current.set(node.path, element);
-                          else nodeElementRefs.current.delete(node.path);
-                        }}
-                        initial={reducedMotion ? false : { opacity: 0, scale: 0.92 }}
-                        animate={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 1, scale: 1 }}
-                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
-                        transition={
-                          reducedMotion || draggedNodePath === node.path
-                            ? { duration: 0 }
-                            : {
-                                left: TOPOLOGY_TRANSITION,
-                                top: TOPOLOGY_TRANSITION,
-                                opacity: { duration: 0.3, ease: "easeOut" },
-                                scale: { duration: 0.3, ease: "easeOut" },
-                              }
-                        }
-                        type="button"
-                        aria-pressed={isSelected}
-                        aria-label={`Inspect directory ${node.path}${isSensitive ? " (sensitive target)" : ""}${
-                          isHopTarget && activeHop ? ` (active hop target ${activeHop.stepIndex + 1} of ${activeHop.totalSteps})` : ""
-                        }`}
-                        title={node.path}
-                        onPointerDown={(event) => onNodePointerDown(event, node.path, node)}
-                        onPointerMove={onNodePointerMove}
-                        onPointerUp={onNodePointerEnd}
-                        onPointerCancel={onNodePointerEnd}
-                        onClick={() => {
-                          if (suppressNodeClick.current) {
-                            suppressNodeClick.current = false;
-                            return;
+                      return (
+                        <motion.button
+                          key={node.path}
+                          ref={(element) => {
+                            if (element) nodeElementRefs.current.set(node.path, element);
+                            else nodeElementRefs.current.delete(node.path);
+                          }}
+                          initial={reducedMotion ? false : { opacity: 0, scale: 0.92 }}
+                          animate={{ left: `${node.x}%`, top: `${node.y}%`, opacity: 1, scale: 1 }}
+                          exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
+                          transition={
+                            reducedMotion || draggedNodePath === node.path
+                              ? { duration: 0 }
+                              : {
+                                  left: TOPOLOGY_TRANSITION,
+                                  top: TOPOLOGY_TRANSITION,
+                                  opacity: { duration: 0.3, ease: "easeOut" },
+                                  scale: { duration: 0.3, ease: "easeOut" },
+                                }
                           }
-                          onSelectPath(node.path);
-                        }}
-                        className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left shadow-sm transition-colors duration-200 ${
-                          isHopTarget && activeHop?.isFailedAttempt
-                            ? "z-20 border-warning bg-warning-subtle text-text ring-2 ring-warning ring-offset-2 ring-offset-surface shadow-md shadow-warning/20"
-                            : isHopTarget
-                              ? "z-20 border-primary bg-primary-subtle text-text ring-2 ring-primary ring-offset-2 ring-offset-surface shadow-md shadow-primary/20"
-                              : isSelected
-                                ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
-                                : isHopVisited
-                                  ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
-                                  : isSensitive
-                                    ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
-                                    : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
-                        }`}
-                      >
-                        {isHopTarget && !reducedMotion && (
-                          <span
-                            className={`pointer-events-none absolute -inset-1 animate-ping rounded-lg border-2 opacity-40 ${
-                              activeHop?.isFailedAttempt ? "border-warning/70" : "border-primary/50"
-                            }`}
-                            aria-hidden="true"
-                          />
-                        )}
-                        {isRoot ? (
-                          <HardDrive
-                            className={`h-3.5 w-3.5 shrink-0 ${isSelected || isHopTarget ? "text-primary" : "text-text-subtle"}`}
-                            aria-hidden="true"
-                          />
-                        ) : isSelected || isHopTarget ? (
-                          <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
-                        ) : (
-                          <Folder
-                            className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
-                            aria-hidden="true"
-                          />
-                        )}
-                        <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
-                        {isSensitive && (
-                          <span
-                            className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                            title="Sensitive target / Drop directory"
-                            aria-hidden="true"
-                          />
-                        )}
-                        {isHopTarget && activeHop ? (
-                          <span
-                            className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-[10px] font-bold shadow-xs ${
-                              activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
-                            }`}
-                            title={
-                              activeHop.isFailedAttempt
-                                ? `Attempted move failed (stayed at ${node.path})`
-                                : `Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
-                            }
-                          >
-                            <Route className="h-2.5 w-2.5" aria-hidden="true" />
-                            {activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}
-                          </span>
-                        ) : isHopVisited && visitedStep !== undefined ? (
-                          <span
-                            className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-[10px] font-semibold text-primary"
-                            title={`Route step ${visitedStep}`}
-                          >
-                            #{visitedStep}
-                          </span>
-                        ) : null}
-                        <span className="rounded-full border border-border bg-surface-subtle px-1.5 text-[11px] font-semibold text-text-subtle">
-                          {node.sessionIds.length}
-                        </span>
-                      </motion.button>
-                    );
+                          type="button"
+                          aria-pressed={isSelected}
+                          aria-label={`Inspect directory ${node.path}${
+                            exactCount > 0 && descendantCount > 0
+                              ? ` (${exactCount} at exact path, ${descendantCount} in child directories)`
+                              : exactCount > 0
+                                ? ` (${exactCount} active ${exactCount === 1 ? "session" : "sessions"})`
+                                : descendantCount > 0
+                                  ? ` (${descendantCount} active ${descendantCount === 1 ? "session" : "sessions"} in child directories)`
+                                  : ""
+                          }${
+                            (node.hiddenChildCount ?? 0) > 0
+                              ? ` (${node.hiddenChildCount} child directories aggregated, click to expand)`
+                              : ""
+                          }${isSensitive ? " (sensitive target)" : ""}${
+                            isHopTarget && activeHop ? ` (active hop target ${activeHop.stepIndex + 1} of ${activeHop.totalSteps})` : ""
+                          }`}
+                          title={
+                            (node.hiddenChildCount ?? 0) > 0
+                              ? `${node.path} (${node.hiddenChildCount} child directories aggregated, click to expand branch)`
+                              : exactCount > 0 && descendantCount > 0
+                                ? `${node.path} (${exactCount} at exact path, ${descendantCount} in child directories)`
+                                : exactCount > 0
+                                  ? `${node.path} (${exactCount} active)`
+                                  : descendantCount > 0
+                                    ? `${node.path} (${descendantCount} in child directories)`
+                                    : node.path
+                          }
+                          onPointerDown={(event) => onNodePointerDown(event, node.path, node)}
+                          onPointerMove={onNodePointerMove}
+                          onPointerUp={onNodePointerEnd}
+                          onPointerCancel={onNodePointerEnd}
+                          onClick={() => {
+                            if (consumeNodeClickSuppression()) return;
+                            onSelectPath(node.path);
+                          }}
+                          className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
+                            isOverlapping
+                              ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
+                              : isHopTarget && activeHop?.isFailedAttempt
+                                ? "z-20 border-warning bg-warning-subtle text-text"
+                                : isHopTarget
+                                  ? "z-20 border-primary bg-primary-subtle text-text"
+                                  : isSelected
+                                    ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
+                                    : isHopVisited
+                                      ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
+                                      : isSensitive
+                                        ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
+                                        : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
+                          }`}
+                        >
+                          {isOverlapping && (
+                            <span
+                              className="pointer-events-none absolute -top-1.5 -right-1.5 z-40 flex h-4 w-4 items-center justify-center rounded-full bg-warning text-surface shadow ring-1 ring-surface"
+                              title="Overlapping position with another node"
+                              aria-label="Overlapping position with another node"
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5 stroke-[2.5]" aria-hidden="true" />
+                            </span>
+                          )}
+                          {isRoot ? (
+                            <HardDrive
+                              className={`h-3.5 w-3.5 shrink-0 ${isSelected || isHopTarget ? "text-primary" : "text-text-subtle"}`}
+                              aria-hidden="true"
+                            />
+                          ) : isSelected || isHopTarget ? (
+                            <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                          ) : (
+                            <Folder
+                              className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
+                              aria-hidden="true"
+                            />
+                          )}
+                          <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
+                          {isSensitive && (
+                            <span
+                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
+                              title="Sensitive target / Drop directory"
+                              aria-hidden="true"
+                            />
+                          )}
+                          {isHopTarget && activeHop ? (
+                            <span
+                              className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-xs font-bold shadow-xs ${
+                                activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
+                              }`}
+                              title={
+                                activeHop.isFailedAttempt
+                                  ? `Failed attempt target (attempt ${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
+                                  : `Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
+                              }
+                            >
+                              <Route className="h-2.5 w-2.5" aria-hidden="true" />
+                              <span>{activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}</span>
+                            </span>
+                          ) : isHopVisited && visitedStep !== undefined ? (
+                            <span
+                              className="shrink-0 rounded border border-primary/30 bg-primary/10 px-1 py-0.5 font-mono text-xs font-semibold text-primary"
+                              title={`Route step ${visitedStep}`}
+                            >
+                              #{visitedStep}
+                            </span>
+                          ) : null}
+                          {(node.hiddenChildCount ?? 0) > 0 && (
+                            <span
+                              className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary"
+                              title={`${node.hiddenChildCount} child ${node.hiddenChildCount === 1 ? "directory" : "directories"} aggregated under this path. Click to expand.`}
+                            >
+                              +{node.hiddenChildCount}
+                            </span>
+                          )}
+                          {!isAuditMode && (
+                            <span
+                              className="rounded-full border border-border bg-surface-subtle px-1.5 text-xs font-semibold text-text-subtle"
+                              title={`${exactCount} at exact path, ${descendantCount} in child directories (${branchCount} across branch)`}
+                            >
+                              {exactCount > 0 && descendantCount > 0
+                                ? `${exactCount} (${branchCount})`
+                                : exactCount > 0
+                                  ? exactCount
+                                  : descendantCount > 0
+                                    ? `↳${branchCount}`
+                                    : 0}
+                            </span>
+                          )}
+                        </motion.button>
+                      );
                     })}
                   </AnimatePresence>
                   <AnimatePresence initial={false}>
                     {graphCallouts.map((callout, index) => {
-                    const position = positionForCallout(callout, index);
-                    const selected = callout.sessionIds.includes(selectedSessionId ?? "");
-                    return (
-                      <motion.button
-                        key={`callout-${callout.sourceIp}`}
-                        ref={(element) => {
-                          if (element) calloutElementRefs.current.set(callout.sourceIp, element);
-                          else calloutElementRefs.current.delete(callout.sourceIp);
-                        }}
-                        initial={reducedMotion ? false : { opacity: 0, scale: 0.94 }}
-                        animate={{ left: `${position.x}%`, top: `${position.y}%`, opacity: 1, scale: 1 }}
-                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
-                        transition={
-                          reducedMotion || draggedCalloutIp === callout.sourceIp
-                            ? { duration: 0 }
-                            : {
-                                left: TOPOLOGY_TRANSITION,
-                                top: TOPOLOGY_TRANSITION,
-                                opacity: { duration: 0.3, ease: "easeOut" },
-                                scale: { duration: 0.3, ease: "easeOut" },
-                              }
-                        }
-                        type="button"
-                        aria-pressed={selected}
-                        aria-label={`Inspect source ${callout.sourceIp}; ${callout.sessionIds.length} ${
-                          callout.sessionIds.length === 1 ? "session" : "sessions"
-                        }`}
-                        onPointerDown={(event) => onCalloutPointerDown(event, callout.sourceIp, position)}
-                        onPointerMove={onCalloutPointerMove}
-                        onPointerUp={onCalloutPointerEnd}
-                        onPointerCancel={onCalloutPointerEnd}
-                        onClick={() => {
-                          if (suppressCalloutClick.current) {
-                            suppressCalloutClick.current = false;
-                            return;
+                      const position = positionForCallout(callout, index);
+                      const isClusterSelected = callout.sessionIds.includes(selectedSessionId ?? "");
+                      const isOverlapping = overlappingCalloutIps.has(callout.sourceIp);
+                      const isMulti = callout.sessions?.length > 1;
+                      const expanded = isClusterExpanded(callout);
+
+                      return (
+                        <motion.div
+                          key={`callout-${callout.sourceIp}`}
+                          ref={(element) => {
+                            if (element) calloutElementRefs.current.set(callout.sourceIp, element);
+                            else calloutElementRefs.current.delete(callout.sourceIp);
+                          }}
+                          initial={reducedMotion ? false : { opacity: 0, scale: 0.94 }}
+                          animate={{ left: `${position.x}%`, top: `${position.y}%`, opacity: 1, scale: 1 }}
+                          exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
+                          transition={
+                            reducedMotion || draggedCalloutIp === callout.sourceIp
+                              ? { duration: 0 }
+                              : {
+                                  left: TOPOLOGY_TRANSITION,
+                                  top: TOPOLOGY_TRANSITION,
+                                  opacity: { duration: 0.3, ease: "easeOut" },
+                                  scale: { duration: 0.3, ease: "easeOut" },
+                                }
                           }
-                          onSelectSession(callout.sessionIds[0]);
-                        }}
-                        className={`absolute z-40 flex w-44 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-2 rounded-lg border px-2.5 py-2 text-left shadow-sm transition-colors duration-200 ${
-                          selected
-                            ? "border-primary-border bg-primary-subtle"
-                            : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
-                        }`}
-                      >
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            streamState === "live" ? "bg-success" : "bg-warning"
+                          onPointerDown={(event) => onCalloutPointerDown(event, callout.sourceIp, position)}
+                          onPointerMove={onCalloutPointerMove}
+                          onPointerUp={onCalloutPointerEnd}
+                          onPointerCancel={onCalloutPointerEnd}
+                          className={`absolute z-40 flex flex-col -translate-x-1/2 -translate-y-1/2 touch-none rounded-xl border text-left shadow-sm transition-all duration-200 ${
+                            isMulti ? "w-44 sm:w-52" : "w-36"
+                          } ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : ""} ${
+                            isOverlapping
+                              ? "border-warning bg-warning-subtle/60 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
+                              : isClusterSelected
+                                ? "border-primary-border bg-surface ring-1 ring-primary/40 shadow-md"
+                                : "border-border bg-surface hover:border-border-strong hover:bg-surface-hover"
                           }`}
-                          aria-hidden="true"
-                        />
-                        <span className="min-w-0">
-                          <span className="block truncate font-mono text-xs text-text">{callout.sourceIp}</span>
-                          <span className="mt-0.5 flex items-center gap-1 text-[11px] text-text-subtle">
-                            <span>
-                              {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
+                        >
+                          {isOverlapping && (
+                            <span
+                              className="pointer-events-none absolute -top-1.5 -right-1.5 z-50 flex h-4 w-4 items-center justify-center rounded-full bg-warning text-surface shadow ring-1 ring-surface"
+                              title="Overlapping position with another node"
+                              aria-label="Overlapping position with another node"
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5 stroke-[2.5]" aria-hidden="true" />
                             </span>
-                          </span>
-                        </span>
-                      </motion.button>
-                    );
+                          )}
+
+                          {/* Main Callout Trigger */}
+                          <button
+                            type="button"
+                            aria-pressed={isClusterSelected}
+                            aria-expanded={isMulti ? expanded : undefined}
+                            aria-haspopup={isMulti ? "listbox" : undefined}
+                            aria-label={`Source ${callout.sourceIp}; ${callout.sessionIds.length} ${
+                              callout.sessionIds.length === 1 ? "session" : "sessions"
+                            }${isMulti ? (expanded ? "; cluster expanded" : "; click to expand sessions") : ""}`}
+                            onClick={() => {
+                              if (consumeCalloutClickSuppression()) return;
+                              if (!isMulti) {
+                                onSelectSession(callout.sessionIds[0]);
+                              } else {
+                                if (!isClusterSelected) {
+                                  onSelectSession(callout.sessions[0].sessionId);
+                                  setUserCollapsedIps((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(callout.sourceIp);
+                                    return next;
+                                  });
+                                  setUserExpandedIps((prev) => new Set(prev).add(callout.sourceIp));
+                                } else {
+                                  toggleClusterExpand(callout.sourceIp, expanded);
+                                }
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (isMulti && event.key === "ArrowDown") {
+                                event.preventDefault();
+                                if (!expanded) {
+                                  toggleClusterExpand(callout.sourceIp, false);
+                                }
+                                const firstId = callout.sessions[0]?.sessionId;
+                                if (firstId) {
+                                  window.requestAnimationFrame(() => {
+                                    clusterSessionRefs.current.get(`${callout.sourceIp}:${firstId}`)?.focus();
+                                  });
+                                }
+                              }
+                            }}
+                            className={`flex w-full items-center justify-between gap-1.5 p-2 rounded-xl text-left cursor-pointer transition-colors ${
+                              isClusterSelected && !isMulti ? "bg-primary-subtle" : ""
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span
+                                className={`h-2 w-2 shrink-0 rounded-full ${
+                                  streamState === "live" ? "bg-success" : "bg-warning"
+                                }`}
+                                aria-hidden="true"
+                              />
+                              <div className="min-w-0">
+                                <span className="block truncate font-mono text-xs font-semibold text-text" title={callout.sourceIp}>
+                                  {callout.sourceIp}
+                                </span>
+                                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-text-subtle">
+                                  <span>
+                                    {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
+                                  </span>
+                                  {isMulti && (
+                                    <>
+                                      <span>·</span>
+                                      <span className="font-semibold text-text-muted">
+                                        {callout.targetPaths.length} {callout.targetPaths.length === 1 ? "path" : "paths"}
+                                      </span>
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                            {isMulti && (
+                              <ChevronDown
+                                className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform duration-200 ${
+                                  expanded ? "rotate-180 text-primary" : ""
+                                }`}
+                                aria-hidden="true"
+                              />
+                            )}
+                          </button>
+
+                          {/* Multi-Session Cluster Disclosure Panel */}
+                          {isMulti && expanded && (
+                            <div
+                              role="listbox"
+                              aria-label={`Active sessions for ${callout.sourceIp}`}
+                              className="border-t border-border/70 p-1.5 space-y-1 bg-surface-subtle/60 rounded-b-xl max-h-48 overflow-y-auto overscroll-contain"
+                            >
+                              {callout.sessions.map((sess, sIdx) => {
+                                const isSessSelected = sess.sessionId === selectedSessionId;
+                                return (
+                                  <button
+                                    key={sess.sessionId}
+                                    ref={(el) => {
+                                      if (el) clusterSessionRefs.current.set(`${callout.sourceIp}:${sess.sessionId}`, el);
+                                      else clusterSessionRefs.current.delete(`${callout.sourceIp}:${sess.sessionId}`);
+                                    }}
+                                    type="button"
+                                    role="option"
+                                    aria-selected={isSessSelected}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onSelectSession(sess.sessionId);
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "ArrowDown") {
+                                        e.preventDefault();
+                                        const nextIdx = (sIdx + 1) % callout.sessions.length;
+                                        const nextId = callout.sessions[nextIdx].sessionId;
+                                        clusterSessionRefs.current.get(`${callout.sourceIp}:${nextId}`)?.focus();
+                                      } else if (e.key === "ArrowUp") {
+                                        e.preventDefault();
+                                        if (sIdx === 0) {
+                                          calloutElementRefs.current.get(callout.sourceIp)?.querySelector("button")?.focus();
+                                        } else {
+                                          const prevId = callout.sessions[sIdx - 1].sessionId;
+                                          clusterSessionRefs.current.get(`${callout.sourceIp}:${prevId}`)?.focus();
+                                        }
+                                      } else if (e.key === "Escape") {
+                                        e.preventDefault();
+                                        toggleClusterExpand(callout.sourceIp, true);
+                                        calloutElementRefs.current.get(callout.sourceIp)?.querySelector("button")?.focus();
+                                      }
+                                    }}
+                                    className={`flex w-full items-center justify-between gap-1.5 rounded-lg px-2 py-1 text-left text-xs font-mono transition-colors cursor-pointer ${
+                                      isSessSelected
+                                        ? "bg-primary-subtle text-primary font-semibold border border-primary-border/60 shadow-2xs"
+                                        : "text-text hover:bg-surface-hover hover:text-text border border-transparent"
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-1.5 truncate min-w-0">
+                                      <span
+                                        className={`h-1.5 w-1.5 rounded-full shrink-0 ${
+                                          isSessSelected ? "bg-primary animate-pulse" : "bg-text-subtle/50"
+                                        }`}
+                                      />
+                                      <span className="truncate text-text-muted">{sess.sessionId.slice(0, 8)}…</span>
+                                      <span
+                                        className={`truncate px-1 py-0.2 rounded text-[10px] border ${
+                                          isSessSelected
+                                            ? "bg-surface text-primary border-primary-border"
+                                            : "bg-surface text-text-subtle border-border/50"
+                                        }`}
+                                        title={sess.path}
+                                      >
+                                        {compactDirectoryPath(sess.path)}
+                                      </span>
+                                    </div>
+                                    {isSessSelected && (
+                                      <Check className="h-3 w-3 text-primary shrink-0" aria-hidden="true" />
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </motion.div>
+                      );
                     })}
                   </AnimatePresence>
                 </motion.div>
 
-                <TopologyMinimap
-                  graphNodes={graphNodes}
-                  graphNodeByPath={graphNodeByPath}
-                  graphCallouts={graphCallouts}
-                  selectedPath={selectedPath}
-                  selectedSessionId={selectedSessionId}
-                  minimapViewport={minimapViewport}
-                  positionForCallout={positionForCallout}
-                  onFit={fitTopology}
-                />
+                {showMinimap && (
+                  <TopologyMinimap
+                    graphNodes={graphNodes}
+                    graphNodeByPath={graphNodeByPath}
+                    graphCallouts={graphCallouts}
+                    selectedPath={selectedPath}
+                    selectedSessionId={selectedSessionId}
+                    minimapViewport={minimapViewport}
+                    positionForCallout={positionForCallout}
+                    onFit={fitTopology}
+                  />
+                )}
               </div>
 
-              <div className="flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 border-t border-border px-5 py-3 text-xs text-text-muted">
-                <span>
-                  <strong className="text-text">{snapshot.nodes.length}</strong> observed paths
-                </span>
-                <span>
-                  <strong className="text-text">{snapshot.sessions.length}</strong> sessions with a known CWD
-                </span>
-                <span>
-                  <strong className="text-text">{liveSourceCount}</strong> live {liveSourceCount === 1 ? "source" : "sources"}
-                </span>
-                <span>Snapshot {formatTimestamp(snapshot.generatedAt)}</span>
-                <span className="flex items-center gap-3 sm:ml-auto" aria-label="Topology map legend">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
-                    Filesystem route
+              <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:flex-nowrap sm:gap-3">
+                  {densityAnalysis.hiddenNodes > 0 ? (
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      <span>
+                        <strong className="font-medium text-text">{densityAnalysis.renderedNodes}</strong> of{" "}
+                        <strong className="font-medium text-text">{densityAnalysis.totalNodes}</strong> paths{" "}
+                        <span className="text-text-subtle font-normal">
+                          ({densityAnalysis.hiddenNodes} aggregated in branches)
+                        </span>
+                      </span>
+                      {densityPreference !== "detailed" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDensityPreference("detailed");
+                            setIsPathsExpanded(true);
+                          }}
+                          className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                          title="Switch to detailed density mode to render all paths"
+                        >
+                          Expand all
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDensityPreference("auto");
+                            setIsPathsExpanded(false);
+                          }}
+                          className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
+                          title="Reset density mode to Auto"
+                        >
+                          Reset to auto
+                        </button>
+                      )}
+                    </span>
+                  ) : densityPreference !== "auto" ? (
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      <span>
+                        All <strong className="font-medium text-text">{densityAnalysis.renderedNodes}</strong> paths rendered
+                        <span className="text-text-subtle font-normal"> ({densityPreference} mode)</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDensityPreference("auto");
+                          setIsPathsExpanded(false);
+                        }}
+                        className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
+                        title="Reset density mode to Auto"
+                      >
+                        Reset to auto
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="shrink-0">
+                      <strong className="font-medium text-text">{densityAnalysis.totalNodes}</strong> observed paths
+                    </span>
+                  )}
+                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
+                  <span className="shrink-0">
+                    <strong className="font-medium text-text">{effectiveSessions.length}</strong> active {effectiveSessions.length === 1 ? "session" : "sessions"}
+                    <span className="hidden xl:inline"> with a known CWD</span>
                   </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-                    Selected source route
+                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
+                  {isSourcesTruncated ? (
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      <span>
+                        <strong className="font-medium text-text">{renderedSourcesCount}</strong> of{" "}
+                        <strong className="font-medium text-text">{totalLiveSources}</strong> unique {totalLiveSources === 1 ? "source" : "sources"} on map
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsSourcesExpanded(true)}
+                        className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+                        title="Show all live source callouts on the map"
+                      >
+                        Show all
+                      </button>
+                    </span>
+                  ) : isSourcesExpanded && totalLiveSources > GRAPH_CALLOUT_LIMIT ? (
+                    <span className="shrink-0 flex items-center gap-1.5">
+                      <span>
+                        All <strong className="font-medium text-text">{renderedSourcesCount}</strong> unique {renderedSourcesCount === 1 ? "source" : "sources"} on map
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setIsSourcesExpanded(false)}
+                        className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
+                        title={`Limit to ${GRAPH_CALLOUT_LIMIT} source callouts`}
+                      >
+                        Compact ({GRAPH_CALLOUT_LIMIT})
+                      </button>
+                    </span>
+                  ) : (
+                    <span className="shrink-0">
+                      <strong className="font-medium text-text">{totalLiveSources}</strong> unique {totalLiveSources === 1 ? "source" : "sources"}
+                    </span>
+                  )}
+                  <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
+                  <span
+                    className="hidden 2xl:inline truncate text-text-subtle"
+                    title={`Snapshot generated at ${formatTimestamp(snapshot.generatedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
+                  >
+                    {freshnessState.isStale ? (
+                      <span className="font-medium text-warning">
+                        {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
+                          <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        ) : freshnessState.telemetryStatus === "future_skew" ? (
+                          <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        ) : (
+                          <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
+                        )}
+                      </span>
+                    ) : freshnessState.label === "Live · No activity" ? (
+                      <span>
+                        Live (no activity) · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                      </span>
+                    ) : (
+                      <span>
+                        Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
+                      </span>
+                    )}
                   </span>
-                </span>
+                </div>
+
+                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3.5">
+                  <AnimatePresence>
+                    {totalOverlaps > 0 && (
+                      <motion.div
+                        key="overlap-badge-group"
+                        initial={reducedMotion ? false : { opacity: 0, scale: 0.92, x: 8 }}
+                        animate={{ opacity: 1, scale: 1, x: 0 }}
+                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.92, x: 8 }}
+                        transition={{ duration: 0.18, ease: "easeOut" }}
+                        className="flex items-center gap-3"
+                      >
+                        <button
+                          type="button"
+                          onClick={autoArrangeTopology}
+                          className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning transition-all hover:border-warning/60 hover:bg-warning/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
+                          title="Click to automatically arrange overlapping elements"
+                          aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
+                        >
+                          <AlertTriangle className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
+                          <span>{totalOverlaps} overlapping · Auto arrange</span>
+                        </button>
+                        <div className="hidden h-3.5 w-px bg-border sm:block" aria-hidden="true" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Topology map legend">
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
+                      <span>Filesystem route</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
+                      <span>Selected source route</span>
+                    </span>
+                  </div>
+                </div>
               </div>
               {snapshot.truncated && (
                 <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
                   <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
                   <p>
-                    Showing the latest {snapshot.sessions.length} observed sessions. Older sessions are not included in
-                    this live topology.
+                    Showing the latest {snapshot.sessions.length} observed sessions. Live stream reached server limit (500). Older sessions are retained in Audit history.
                   </p>
                 </div>
               )}
@@ -1480,7 +1810,9 @@ export function TopologyCanvas({
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-[0.12em] text-primary">Map controls</p>
-                    <h3 className="mt-1 font-semibold text-text">Live source clusters</h3>
+                    <h3 className="mt-1 font-semibold text-text">
+                      Live source clusters ({graphCallouts.length}/{allSourceClusters.length} on map)
+                    </h3>
                   </div>
                   <span
                     className={`ui-badge ${
@@ -1493,26 +1825,43 @@ export function TopologyCanvas({
                   </span>
                 </div>
                 <p className="mt-3 text-xs text-text-subtle">
-                  Choose an IP to fan its leader line out to every current verified path. Drag directories and IP labels
-                  on the map to arrange them. Auto arrange rebuilds the subtree layout, returns sources to their rails,
+                  Choose an IP to fan its leader line out to every current verified path. Switch to Arrange to drag
+                  directories and IP labels. Auto arrange rebuilds the subtree layout, returns sources to their rails,
                   and recenters the camera; undo restores this workspace. Press Escape to exit this workspace.
                 </p>
                 <button type="button" className="ui-button mt-4 w-full" onClick={autoArrangeTopology}>
                   <ScanLine className="h-4 w-4" />
                   Auto arrange topology
                 </button>
-                {canUndoAutoArrange && (
-                  <button type="button" className="ui-button mt-2 w-full" onClick={undoAutoArrangeTopology}>
+                {canUndoLayout && (
+                  <button type="button" className="ui-button mt-2 w-full" onClick={undoLayoutChange}>
                     <Undo2 className="h-4 w-4" />
-                    Undo auto arrange
+                    Undo layout change
                   </button>
                 )}
                 <button type="button" className="ui-button mt-2 w-full" onClick={resetMapWorkspace}>
                   <RotateCcw className="h-4 w-4" />
                   Restore default workspace
                 </button>
-                <div className="mt-5 space-y-2">
-                  {graphCallouts.map((callout) => {
+                {allSourceClusters.length > GRAPH_CALLOUT_LIMIT && (
+                  <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-surface-subtle p-2.5 text-xs">
+                    <span className="text-text-muted">
+                      {isSourcesExpanded
+                        ? `All ${allSourceClusters.length} sources rendered on map`
+                        : `Showing top ${graphCallouts.length} of ${allSourceClusters.length} sources`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSourcesExpanded((prev) => !prev)}
+                      className="rounded border border-primary-border bg-primary-subtle px-2 py-1 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+                    >
+                      {isSourcesExpanded ? `Limit to ${GRAPH_CALLOUT_LIMIT}` : "Show all on map"}
+                    </button>
+                  </div>
+                )}
+                <div className="mt-4 space-y-2">
+                  {allSourceClusters.map((callout) => {
+                    const isRendered = graphCallouts.some((c) => c.sourceIp === callout.sourceIp);
                     const selected = callout === selectedGraphCallout;
                     return (
                       <button
@@ -1528,9 +1877,16 @@ export function TopologyCanvas({
                       >
                         <div className="flex items-center justify-between gap-3">
                           <span className="font-mono text-xs text-text">{callout.sourceIp}</span>
-                          <span className="ui-badge border-info-border bg-info-subtle text-info">
-                            {callout.sessionIds.length}
-                          </span>
+                          <div className="flex items-center gap-1.5">
+                            {!isRendered && (
+                              <span className="ui-badge border-warning-border bg-warning-subtle text-[10px] text-warning">
+                                Omitted (limit)
+                              </span>
+                            )}
+                            <span className="ui-badge border-info-border bg-info-subtle text-info">
+                              {callout.sessionIds.length}
+                            </span>
+                          </div>
                         </div>
                         <p className="mt-1 truncate font-mono text-xs text-text-muted">Latest: {callout.path}</p>
                       </button>
@@ -1558,7 +1914,7 @@ export function TopologyCanvas({
                               <span className="block truncate font-mono text-xs text-text">
                                 {session?.cwdState.path ?? "Unknown"}
                               </span>
-                              <span className="mt-0.5 block truncate font-mono text-[11px] text-text-subtle">
+                              <span className="mt-0.5 block truncate font-mono text-xs text-text-subtle">
                                 {sessionId}
                               </span>
                             </span>

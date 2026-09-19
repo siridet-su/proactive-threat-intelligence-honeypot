@@ -1,0 +1,40 @@
+[Unit]
+Description=Honeypot allow-listed response agent
+After=network-online.target tailscaled.service cowrie.service
+Wants=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cowrie-response
+Group=cowrie
+LoadCredential=response-agent-token:/etc/honeypot/response-agent.token
+EnvironmentFile=/etc/honeypot/response-agent.env
+Environment=RESPONSE_AGENT_TOKEN_FILE=%d/response-agent-token
+Environment=COWRIE_CONTROL_SOCKET=/run/cowrie-control/control.sock
+ExecStart=/usr/local/libexec/honeypot-response-agent
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+IPAddressDeny=any
+IPAddressAllow=100.64.0.0/10
+
+[Install]
+WantedBy=multi-user.target

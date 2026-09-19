@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	psnet "github.com/shirou/gopsutil/v3/net"
 )
@@ -60,6 +61,29 @@ func TestAddMemoryMetricsPreservesLegacyAndDefinesPressureSemantics(t *testing.T
 	}
 	if values["mem_pressure_semantics"] != "total_minus_available" {
 		t.Fatalf("pressure semantics missing: %#v", values)
+	}
+}
+
+func TestAddCPUMetricsIncludesCurrentPerCoreBreakdown(t *testing.T) {
+	values := map[string]interface{}{}
+
+	addCPUMetrics(values, []float64{12.5}, []float64{10, 15})
+
+	if values["cpu_percent"] != "12.50" {
+		t.Fatalf("cpu percent = %#v", values["cpu_percent"])
+	}
+	if values["cpu_core_percent"] != "[10,15]" {
+		t.Fatalf("per-core CPU payload = %#v", values["cpu_core_percent"])
+	}
+}
+
+func TestAddDiskMetricsIncludesCapacityAndFreeSpace(t *testing.T) {
+	values := map[string]interface{}{}
+
+	addDiskMetrics(values, &disk.UsageStat{Total: 1_000, Free: 600, Used: 400, UsedPercent: 40})
+
+	if values["disk_total_bytes"] != uint64(1_000) || values["disk_free_bytes"] != uint64(600) || values["disk_used_bytes"] != uint64(400) || values["disk_percent"] != "40.00" {
+		t.Fatalf("disk metrics = %#v", values)
 	}
 }
 

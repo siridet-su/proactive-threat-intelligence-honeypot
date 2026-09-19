@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func cwdEventForTest(eventID string) map[string]any {
@@ -171,16 +173,18 @@ func TestCwdStateDocumentStoresDateAndOrderMetadata(t *testing.T) {
 func TestCwdSessionCloseUpdateCreatesRetentionBoundedTombstone(t *testing.T) {
 	closedAt := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 	update := cwdSessionCloseUpdate("session-1", closedAt, 24*time.Hour)
-	set, ok := update["$set"].(bson.M)
+	if len(update) != 1 {
+		t.Fatalf("close update must be a single generation-owning pipeline: %#v", update)
+	}
+	set, ok := update[0][0].Value.(bson.M)
 	if !ok || set["lifecycle.status"] != "closed" || set["lifecycle.closedAt"] != closedAt {
 		t.Fatalf("closed lifecycle state missing: %#v", update)
 	}
 	if set["expires_at"] != closedAt.Add(24*time.Hour) {
 		t.Fatalf("close tombstone must retain only for the configured duration: %#v", update)
 	}
-	insert, ok := update["$setOnInsert"].(bson.M)
-	if !ok || insert["sessionId"] != "session-1" || insert["schemaVersion"] != cwdStateSchemaVersion {
-		t.Fatalf("close tombstone insert metadata missing: %#v", update)
+	if set["auditProjectionPendingGeneration"] == nil || set["auditProjectionGeneration"] == nil {
+		t.Fatalf("close tombstone generation metadata missing: %#v", update)
 	}
 }
 
@@ -201,5 +205,204 @@ func TestCowrieCwdContractFixtures(t *testing.T) {
 		if _, ok := cwdObservationFromEvent(cwdEventForTest("fixture-"+strconv.Itoa(index)), payload); !ok {
 			t.Fatalf("fixture %d does not satisfy the processor contract: %#v", index, payload)
 		}
+	}
+}
+
+func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
+	indexes := cwdEventIndexModels()
+	hasCanonical := false
+	hasLegacy := false
+	hasPendingMarker := false
+
+	for _, idx := range indexes {
+		keys, ok := idx.Keys.(bson.D)
+		if !ok {
+			continue
+		}
+		if sameIndexKeys(keys, bson.D{{Key: "sessionId", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}) {
+			hasCanonical = true
+		}
+		if sameIndexKeys(keys, bson.D{{Key: "session_id", Value: 1}, {Key: "at", Value: -1}, {Key: "eventId", Value: -1}}) {
+			hasLegacy = true
+		}
+		if sameIndexKeys(keys, bson.D{{Key: "auditProjectionPending", Value: 1}, {Key: "_id", Value: 1}}) {
+			hasPendingMarker = true
+		}
+	}
+
+	if !hasCanonical {
+		t.Fatal("expected canonical sessionId compound index in cwd_events index models")
+	}
+	if !hasLegacy {
+		t.Fatal("expected legacy session_id compound index in cwd_events index models to support mixed-schema rank aggregation")
+	}
+	if !hasPendingMarker {
+		t.Fatal("expected indexed auditProjectionPending outbox marker")
+	}
+}
+
+func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndSourceOwnedCleanup(t *testing.T) {
+	indexes := cwdAuditProjectionIndexModels()
+	want := []bson.D{
+		{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "auditHomeOnly", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "auditVisitedPaths", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "auditPathsOverflow", Value: 1}},
+		{{Key: "expires_at", Value: 1}},
+		{{Key: "expires_at", Value: 1}, {Key: "_id", Value: 1}},
+	}
+	for _, expected := range want {
+		found := false
+		for _, index := range indexes {
+			keys, ok := index.Keys.(bson.D)
+			if ok && sameIndexKeys(keys, expected) {
+				found = true
+				if sameIndexKeys(expected, bson.D{{Key: "expires_at", Value: 1}}) {
+					if index.Options != nil && index.Options.ExpireAfterSeconds != nil {
+						t.Fatal("projection expires_at index must not be a TTL index")
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing projection index %#v", expected)
+		}
+	}
+
+	legacyStateIndex := bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "session_id", Value: -1}}
+	foundLegacy := false
+	for _, index := range cwdStateIndexModels() {
+		if keys, ok := index.Keys.(bson.D); ok && sameIndexKeys(keys, legacyStateIndex) {
+			foundLegacy = true
+		}
+	}
+	if !foundLegacy {
+		t.Fatal("missing legacy session_id closed-time state index")
+	}
+	for _, expected := range []bson.D{
+		{{Key: "lifecycle.status", Value: 1}, {Key: "sessionId", Value: 1}, {Key: "_id", Value: 1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "session_id", Value: 1}, {Key: "_id", Value: 1}},
+	} {
+		found := false
+		for _, index := range cwdStateIndexModels() {
+			if keys, ok := index.Keys.(bson.D); ok && sameIndexKeys(keys, expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing raw repair keyset index %#v", expected)
+		}
+	}
+}
+
+func TestFA016CursorCASUsesDottedFields(t *testing.T) {
+	repair := cwdRepairCursor{Value: "raw", ID: "source"}
+	repairFilter := cwdRepairCursorCASFilter("repairCursor", &repair)
+	if _, ok := repairFilter["repairCursor"]; ok {
+		t.Fatalf("repair CAS must not compare an embedded document: %#v", repairFilter)
+	}
+	if repairFilter["repairCursor.value"] != repair.Value || repairFilter["repairCursor.id"] != repair.ID {
+		t.Fatalf("repair CAS does not use dotted fields: %#v", repairFilter)
+	}
+	cleanup := cwdCleanupCursor{ExpiresAt: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), ID: "projection"}
+	cleanupFilter := cwdCleanupCursorCASFilter("cleanupCursor", &cleanup)
+	if _, ok := cleanupFilter["cleanupCursor"]; ok {
+		t.Fatalf("cleanup CAS must not compare an embedded document: %#v", cleanupFilter)
+	}
+	if cleanupFilter["cleanupCursor.expiresAt"] != cleanup.ExpiresAt || cleanupFilter["cleanupCursor.id"] != cleanup.ID {
+		t.Fatalf("cleanup CAS does not use dotted fields: %#v", cleanupFilter)
+	}
+}
+
+func TestFA016RepairReadinessProjectionContract(t *testing.T) {
+	projection := cwdAuditRepairSourceProjection()
+	for _, field := range cwdAuditRepairSourceProjectionFields {
+		if projection[field] != 1 {
+			t.Fatalf("repair readiness projection omitted %q: %#v", field, projection)
+		}
+	}
+	base := bson.M{
+		"auditProjectionVersion":         cwdAuditProjectionVersion,
+		"auditProjectionGeneration":      int64(2),
+		"auditProjectionReadyGeneration": int64(2),
+	}
+	ready := func(overrides bson.M) bson.M {
+		state := bson.M{}
+		for key, value := range base {
+			state[key] = value
+		}
+		for key, value := range overrides {
+			if value == nil {
+				delete(state, key)
+				continue
+			}
+			state[key] = value
+		}
+		return state
+	}
+	cases := []struct {
+		name  string
+		state bson.M
+		want  bool
+	}{
+		{name: "exact ready", state: ready(nil), want: true},
+		{name: "pending owns generation", state: ready(bson.M{"auditProjectionPendingGeneration": int64(2)}), want: false},
+		{name: "ready generation is stale", state: ready(bson.M{"auditProjectionReadyGeneration": int64(1)}), want: false},
+		{name: "generation is missing", state: ready(bson.M{"auditProjectionGeneration": nil}), want: false},
+		{name: "version is legacy", state: ready(bson.M{"auditProjectionVersion": "cwd_audit_projection.v1"}), want: false},
+		{name: "dirty marker", state: ready(bson.M{"auditProjectionDirty": true}), want: false},
+		{name: "pending event marker", state: ready(bson.M{"auditProjectionPendingEventCount": int64(1)}), want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := cwdAuditSourceReadyForRepair(tc.state); got != tc.want {
+				t.Fatalf("readiness=%v want=%v state=%#v", got, tc.want, tc.state)
+			}
+		})
+	}
+}
+
+func TestFA016MongoTargetRejectsUnsafeConfigurationsBeforeCallback(t *testing.T) {
+	cases := []struct{ name, uri, database, runID string }{
+		{"missing uri", "", "pti_fa016_test_abc", "abc"},
+		{"missing db", "mongodb://127.0.0.1:27017/pti_fa016_test_abc", "", "abc"},
+		{"missing run id", "mongodb://127.0.0.1:27017/pti_fa016_test_abc", "pti_fa016_test_abc", ""},
+		{"uppercase run id", "mongodb://127.0.0.1:27017/pti_fa016_test_ABC", "pti_fa016_test_ABC", "ABC"},
+		{"wrong prefix", "mongodb://127.0.0.1:27017/honeypot_db", "honeypot_db", "abc"},
+		{"uri database mismatch", "mongodb://127.0.0.1:27017/pti_fa016_test_other", "pti_fa016_test_abc", "abc"},
+		{"remote host", "mongodb://db.example/pti_fa016_test_abc", "pti_fa016_test_abc", "abc"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			if err := runWithValidatedFA016Target(tc.uri, tc.database, tc.runID, func(fa016MongoTarget) error { called = true; return nil }); err == nil {
+				t.Fatal("unsafe target was accepted")
+			}
+			if called {
+				t.Fatal("rejected target executed connection/destructive callback")
+			}
+		})
+	}
+}
+
+func TestFA016MongoTargetAcceptsExactLoopbackTarget(t *testing.T) {
+	target, err := validateFA016MongoTarget("mongodb://127.0.0.1:27017/pti_fa016_test_abc", "pti_fa016_test_abc", "abc")
+	if err != nil || target.Database != "pti_fa016_test_abc" {
+		t.Fatalf("valid target rejected: %#v %v", target, err)
+	}
+}
+
+func TestTTLIndexCompatibilityRejectsNonTTLIndex(t *testing.T) {
+	ttl := int32(0)
+	wanted := mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}
+	if indexOptionsCompatible(&existingIndex{Name: "expires_at_1"}, wanted) {
+		t.Fatal("non-TTL index was accepted as the TTL contract")
+	}
+	if !indexOptionsCompatible(&existingIndex{Name: "expires_at_1", ExpireAfterSeconds: &ttl}, wanted) {
+		t.Fatal("valid TTL index was rejected")
+	}
+	if indexOptionsCompatible(&existingIndex{Name: "expires_at_1", ExpireAfterSeconds: &ttl}, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}}) {
+		t.Fatal("retired TTL index was accepted for a source-owned cleanup watermark")
 	}
 }

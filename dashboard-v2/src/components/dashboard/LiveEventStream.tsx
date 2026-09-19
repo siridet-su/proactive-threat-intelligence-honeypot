@@ -4,7 +4,7 @@ import { Pause, Play, Terminal } from "lucide-react";
 
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { SeverityBadge } from "./SeverityBadge";
-import { RegionState } from "@/components/ui/RegionState";
+import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 export function LiveEventStream() {
@@ -14,6 +14,12 @@ export function LiveEventStream() {
   const loading = status === "loading";
   const fetchFailed = status === "error";
   const events = (paused ? pausedEvents : threats).slice(0, 50);
+  const feedState = liveFeedPresentation(status);
+  const detail = paused
+    ? `Snapshot paused · ${events.length} event${events.length === 1 ? "" : "s"}`
+    : lastUpdated
+      ? `${events.length} event${events.length === 1 ? "" : "s"} · updated ${new Date(lastUpdated).toLocaleTimeString([], { hour12: false })}`
+      : "Waiting for the first event";
 
   const togglePause = () => {
     if (paused) {
@@ -27,7 +33,16 @@ export function LiveEventStream() {
 
   return <div className="ui-panel flex h-full flex-col overflow-hidden">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface-subtle px-5 py-4">
-      <div className="flex items-center gap-2"><Terminal className="h-4 w-4 text-primary" aria-hidden="true" /><div><h2 className="text-base font-semibold">Live event stream</h2><p className="mt-0.5 text-xs text-text-subtle">{paused ? "Snapshot paused for review" : lastUpdated ? "Updates from the live threat feed" : "Waiting for the first event"}</p></div></div>
+      <div className="flex min-w-0 items-center gap-2">
+        <Terminal className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold">Live event stream</h2>
+            <span className={`ui-badge ${feedState.className}`}>{paused ? "Paused" : feedState.label}</span>
+          </div>
+          <p className="mt-0.5 truncate text-xs text-text-subtle" title={detail}>{detail}</p>
+        </div>
+      </div>
       <button type="button" onClick={togglePause} disabled={loading || fetchFailed} className="ui-button min-h-8 px-2.5 text-xs" aria-pressed={paused}>{paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}{paused ? "Resume" : "Pause"}</button>
     </div>
     <div className="flex-1 space-y-2 overflow-y-auto p-3" aria-busy={loading} aria-live={paused ? "off" : "polite"}>
@@ -37,4 +52,12 @@ export function LiveEventStream() {
       {!loading && !fetchFailed && events.length === 0 && <RegionState kind="empty" title={paused ? "No events in this snapshot" : "No recent events"} description={paused ? "Resume the stream to view incoming events." : "No events were returned in the last successful response."} />}
     </div>
   </div>;
+}
+
+function liveFeedPresentation(status: RegionStatus) {
+  if (status === "error") return { label: "Unavailable", className: "border-danger-border bg-danger-subtle text-danger" };
+  if (status === "stale") return { label: "Stale", className: "border-warning-border bg-warning-subtle text-warning" };
+  if (status === "refreshing") return { label: "Updating", className: "border-info-border bg-info-subtle text-info" };
+  if (status === "loading") return { label: "Connecting", className: "border-info-border bg-info-subtle text-info" };
+  return { label: "Live", className: "border-success-border bg-success-subtle text-success" };
 }
