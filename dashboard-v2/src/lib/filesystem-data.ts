@@ -332,10 +332,12 @@ export interface AuditScopingPipelineOptions {
   targetPath?: string | null;
   hideHome?: boolean;
   historyCollectionName?: string;
+  sessionIds?: string[];
+  projectionOverflow?: "exclude" | "only";
 }
 
 /** Version written by processor-agent into cwd_audit_projection. */
-export const AUDIT_PROJECTION_VERSION = "cwd_audit_projection.v1";
+export const AUDIT_PROJECTION_VERSION = "cwd_audit_projection.v2";
 
 export interface AuditSessionsPipelineOptions extends AuditScopingPipelineOptions {
   cursor?: string | null;
@@ -359,6 +361,7 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
         effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
       },
     },
+    ...(options.sessionIds?.length ? [{ $match: { effectiveSessionId: { $in: options.sessionIds } } }] : []),
     {
       $lookup: {
         from: historyCollection,
@@ -588,13 +591,16 @@ export function buildAuditSummaryPipeline(options: AuditScopingPipelineOptions):
   return stages;
 }
 
-function buildAuditProjectionBaseMatch(): Document {
-  return {
+function buildAuditProjectionBaseMatch(options: AuditScopingPipelineOptions = {}): Document {
+  const match: Document = {
     "lifecycle.status": "closed",
     "cwdState.path": { $type: "string", $ne: "" },
     auditProjectionVersion: AUDIT_PROJECTION_VERSION,
     sessionId: { $type: "string", $ne: "" },
   };
+  if (options.projectionOverflow === "exclude") match.auditPathsOverflow = { $ne: true };
+  if (options.projectionOverflow === "only") match.auditPathsOverflow = true;
+  return match;
 }
 
 function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): Document {
@@ -665,7 +671,7 @@ function buildAuditProjectionCursorMatch(options: AuditSessionsPipelineOptions):
 }
 
 function buildAuditProjectionBaseStages(options: AuditScopingPipelineOptions): Document[] {
-  const stages: Document[] = [{ $match: buildAuditProjectionBaseMatch() }];
+  const stages: Document[] = [{ $match: buildAuditProjectionBaseMatch(options) }];
   const filterMatch = buildAuditProjectionFilterMatch(options);
   if (Object.keys(filterMatch).length) stages.push({ $match: filterMatch });
   return stages;
@@ -695,7 +701,7 @@ export const buildAuditProjectionSessionsPipeline = buildAuditProjectionItemPipe
 
 export function buildAuditProjectionSummaryPipeline(options: AuditScopingPipelineOptions): Document[] {
   return [
-    { $match: buildAuditProjectionBaseMatch() },
+    { $match: buildAuditProjectionBaseMatch(options) },
     { $set: { matchesFilter: buildAuditProjectionFilterExpression(options) } },
     {
       $set: {

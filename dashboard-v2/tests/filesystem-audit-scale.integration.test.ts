@@ -206,6 +206,11 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
       { _id: "migration-canonical-event", eventId: "migration-canonical-event", sessionId: "migration-canonical", action: "entered", fromPath: "/home/cowrie", toPath: "/home/cowrie", at: new Date("2026-09-18T00:00:00Z") },
       { _id: "migration-legacy-event", eventId: "migration-legacy-event", session_id: "migration-legacy", action: "changed", fromPath: "/etc", toPath: "/opt", at: new Date("2026-09-17T00:00:00Z") },
     ]);
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: "cwd_audit_projection.v1" });
+    const oldMarkerPage = await getAuditSessions({ limit: 25 });
+    expect(oldMarkerPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy"]);
+    expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
+    await database.collection("cwd_audit_projection_meta").deleteMany({});
     const page = await getAuditSessions({ limit: 25 });
     expect(page.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy"]);
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
@@ -218,5 +223,55 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     const rollingPage = await getAuditSessions({ limit: 25 });
     expect(rollingPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer"]);
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
+  });
+
+  it("keeps overflow exact and scoped to its session while normal pages stay projection-backed", async () => {
+    await Promise.all([
+      database.collection("cwd_session_state").deleteMany({}),
+      database.collection("cwd_events").deleteMany({}),
+      projection.deleteMany({}),
+      database.collection("cwd_audit_projection_meta").deleteMany({}),
+    ]);
+    const closedAt = new Date("2026-09-19T23:00:00.000Z");
+    await projection.insertMany([
+      {
+        _id: "normal-session", sessionId: "normal-session", sourceIp: "198.51.100.40",
+        cwdState: { path: "/var/normal", status: "confirmed" }, lifecycle: { status: "closed", closedAt },
+        auditVisitedPaths: ["/var/normal"], auditHomeOnly: false, auditEventCount: 1,
+        auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z"),
+      },
+      {
+        _id: "overflow-session", sessionId: "overflow-session", sourceIp: "198.51.100.41",
+        cwdState: { path: "/overflow/619", status: "confirmed" }, lifecycle: { status: "closed", closedAt: new Date(closedAt.getTime() - 1_000) },
+        auditVisitedPaths: Array.from({ length: 512 }, (_, index) => `/overflow/${index}`),
+        auditTransitionPaths: Array.from({ length: 512 }, (_, index) => `/overflow/${index}`),
+        auditPathsOverflow: true, auditHomeOnly: false, auditEventCount: 620,
+        auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z"),
+      },
+    ]);
+    await database.collection("cwd_session_state").insertOne({
+      _id: "overflow-session", sessionId: "overflow-session", sourceIp: "198.51.100.41",
+      cwdState: { path: "/overflow/619", status: "confirmed" }, lifecycle: { status: "closed", closedAt: new Date(closedAt.getTime() - 1_000) },
+      auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z"),
+    });
+    await database.collection("cwd_events").insertMany(Array.from({ length: 620 }, (_, index) => ({
+      _id: `overflow-event-${index}`, eventId: `overflow-event-${index}`, sessionId: "overflow-session", action: "changed",
+      fromPath: `/overflow/${index}`, toPath: `/overflow/${index + 1}`, at: closedAt,
+    })));
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION, backfillCompletedAt: new Date() });
+
+    const page = await getAuditSessions({ limit: 25 });
+    expect(page.totalItems).toBe(2);
+    const overflowItem = page.items.find((item) => item.sessionId === "overflow-session");
+    expect(overflowItem?.auditSummary.visitedPaths).toContain("/overflow/619");
+    expect(overflowItem?.auditSummary.visitedPaths.length).toBeGreaterThan(512);
+    expect(aggregateCommands.some((command) => !JSON.stringify(command.pipeline).includes("$lookup"))).toBe(true);
+
+    const exact = await getAuditSessions({ targetPath: "/overflow/619", limit: 25 });
+    expect(exact.totalItems).toBe(1);
+    expect(exact.items.map((item) => item.sessionId)).toEqual(["overflow-session"]);
+    const summary = await getAuditDirectorySummary({ targetPath: "/overflow/619" });
+    expect(summary.matchingCount).toBe(1);
+    expect((await projection.findOne({ _id: "overflow-session" }))?.auditVisitedPaths).toHaveLength(512);
   });
 });

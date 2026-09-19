@@ -262,17 +262,28 @@ func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, cl
 	if !mw.enabled {
 		return fmt.Errorf("MongoDB is disabled; refusing to close CWD session")
 	}
-	_, err := mw.db.Collection("cwd_session_state").UpdateOne(
+	states := mw.db.Collection("cwd_session_state")
+	result, err := states.UpdateOne(
 		ctx,
-		// Do not filter out an already closed document here: the raw Redis
-		// stream is at-least-once, so a retried close must be a harmless update
-		// rather than an upsert attempt that collides with the existing _id.
-		bson.M{"_id": sessionID},
+		// The first close establishes the retention boundary. A retried close
+		// must be a harmless no-op rather than changing an already closed row.
+		bson.M{"_id": sessionID, "lifecycle.status": bson.M{"$ne": "closed"}},
 		cwdSessionCloseUpdate(sessionID, closedAt, retention),
-		options.Update().SetUpsert(true),
 	)
 	if err != nil {
 		return err
+	}
+	if result.MatchedCount == 0 {
+		var existing bson.M
+		findErr := states.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&existing)
+		if findErr == mongo.ErrNoDocuments {
+			_, err = states.UpdateOne(ctx, bson.M{"_id": sessionID, "lifecycle.status": bson.M{"$ne": "closed"}}, cwdSessionCloseUpdate(sessionID, closedAt, retention), options.Update().SetUpsert(true))
+			if err != nil && !mongo.IsDuplicateKeyError(err) {
+				return err
+			}
+		} else if findErr != nil {
+			return findErr
+		}
 	}
 	return mw.closeCwdAuditProjection(ctx, sessionID, closedAt, retention)
 }

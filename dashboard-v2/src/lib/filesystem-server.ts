@@ -542,23 +542,60 @@ async function auditProjectionIsReady(): Promise<boolean> {
     .findOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION }, { projection: { _id: 1 } });
   if (!marker) return false;
 
-  // A high-cardinality session is intentionally bounded in the projection.
-  // Exact path filters and summaries use the source fallback until that
-  // session is reconciled, so truncation is never exposed as authoritative.
-  const overflow = await db.collection<Document>(AUDIT_PROJECTION_COLLECTION).findOne(
-    { auditPathsOverflow: true },
-    { projection: { _id: 1 } },
-  );
-  if (overflow) return false;
-
-  // The marker is only a readiness hint. A rolling old writer can create a
-  // closed source state after it was published, so reads must fall back until
-  // every source row has a valid projection version again.
-  const missing = await db.collection<Document>(SESSIONS_COLLECTION).findOne({
+  // Eligibility is explicit: malformed historical rows are not retained Audit
+  // sessions and therefore cannot hold migration readiness false forever.
+  const eligible = await db.collection<Document>(SESSIONS_COLLECTION).find({
     "lifecycle.status": "closed",
-    auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION },
-  }, { projection: { _id: 1 } });
-  return missing === null;
+    "cwdState.path": { $type: "string", $regex: "^/" },
+    $or: [
+      { sessionId: { $type: "string", $ne: "" } },
+      { session_id: { $type: "string", $ne: "" } },
+    ],
+  }, { projection: { _id: 1, sessionId: 1, session_id: 1, auditProjectionVersion: 1 } }).toArray();
+  const sessionIds = [...new Set(eligible.map((row) => asString(row.sessionId) ?? asString(row.session_id)).filter((id): id is string => Boolean(id)))];
+  if (eligible.some((row) => row.auditProjectionVersion !== AUDIT_PROJECTION_VERSION)) return false;
+  if (!sessionIds.length) return true;
+  const projected = await db.collection<Document & { _id: string }>(AUDIT_PROJECTION_COLLECTION).find({
+    _id: { $in: sessionIds },
+    auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+  }, { projection: { _id: 1 } }).toArray();
+  return new Set(projected.map((row) => asString(row._id))).size === sessionIds.length;
+}
+
+async function getOverflowSessionIds(client: Awaited<ReturnType<typeof getMongoClient>>): Promise<string[]> {
+  const rows = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).find({
+    lifecycle: { $exists: true },
+    "lifecycle.status": "closed",
+    auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+    auditPathsOverflow: true,
+  }, { projection: { sessionId: 1 } }).toArray();
+  return [...new Set(rows.map((row) => asString(row.sessionId)).filter((id): id is string => Boolean(id)))];
+}
+
+function sortAuditDocuments(documents: Document[]): Document[] {
+  return [...documents].sort((left, right) => {
+    const leftAt = asDateString(left.lifecycle?.closedAt) ?? "";
+    const rightAt = asDateString(right.lifecycle?.closedAt) ?? "";
+    if (leftAt !== rightAt) return rightAt.localeCompare(leftAt);
+    const leftID = asString(left.effectiveSessionId) ?? asString(left.sessionId) ?? asString(left.session_id) ?? "";
+    const rightID = asString(right.effectiveSessionId) ?? asString(right.sessionId) ?? asString(right.session_id) ?? "";
+    return rightID.localeCompare(leftID);
+  });
+}
+
+async function getAuditDirectorySummaryFromSource(client: Awaited<ReturnType<typeof getMongoClient>>, options: { search?: string | null; targetPath?: string | null; hideHome?: boolean } = {}): Promise<AuditDirectorySummary> {
+  const result = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{
+    overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
+    distinctPaths: Array<{ path: string; sessionCount: number }>;
+  }>(buildAuditSummaryPipeline({ ...options, historyCollectionName: HISTORY_COLLECTION }), { allowDiskUse: true }).toArray();
+  const overview = result[0]?.overview?.[0];
+  const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
+  return {
+    totalSessions: overview?.totalSessions ?? 0,
+    homeOnlyCount: overview?.homeOnlyCount ?? 0,
+    distinctPaths: result[0]?.distinctPaths ?? [],
+    matchingCount: hasFilter ? (overview?.matchingCount ?? 0) : undefined,
+  };
 }
 
 export async function getAuditDirectorySummary(options: {
@@ -568,30 +605,46 @@ export async function getAuditDirectorySummary(options: {
 } = {}): Promise<AuditDirectorySummary> {
   const client = await getMongoClient();
   const useProjection = await auditProjectionIsReady();
-  const states = client.db(DATABASE_NAME).collection<Document>(useProjection ? AUDIT_PROJECTION_COLLECTION : SESSIONS_COLLECTION);
-  const pipeline = (useProjection ? buildAuditProjectionSummaryPipeline : buildAuditSummaryPipeline)({
+  if (!useProjection) return getAuditDirectorySummaryFromSource(client, options);
+
+  const overflowIds = await getOverflowSessionIds(client);
+  const projectionOptions = {
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
-    historyCollectionName: HISTORY_COLLECTION,
-  });
-
-  const result = await states.aggregate<{
+    projectionOverflow: overflowIds.length ? "exclude" as const : undefined,
+  };
+  const projectionResult = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).aggregate<{
     overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
     distinctPaths: Array<{ path: string; sessionCount: number }>;
-  }>(pipeline, { allowDiskUse: true }).toArray();
-
-  const overview = result[0]?.overview?.[0];
-  const totalSessions = overview?.totalSessions ?? 0;
-  const homeOnlyCount = overview?.homeOnlyCount ?? 0;
+  }>(buildAuditProjectionSummaryPipeline(projectionOptions), { allowDiskUse: true }).toArray();
+  const projectionOverview = projectionResult[0]?.overview?.[0];
+  let totalSessions = projectionOverview?.totalSessions ?? 0;
+  let homeOnlyCount = projectionOverview?.homeOnlyCount ?? 0;
   const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
-  const matchingCount = hasFilter ? (overview?.matchingCount ?? 0) : undefined;
-  const distinctPaths = result[0]?.distinctPaths ?? [];
+  let matchingCount = hasFilter ? (projectionOverview?.matchingCount ?? 0) : undefined;
+  const pathCounts = new Map<string, number>((projectionResult[0]?.distinctPaths ?? []).map((item) => [item.path, item.sessionCount]));
 
+  if (overflowIds.length) {
+    const sourceResult = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{
+      overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
+      distinctPaths: Array<{ path: string; sessionCount: number }>;
+    }>(buildAuditSummaryPipeline({ ...options, historyCollectionName: HISTORY_COLLECTION, sessionIds: overflowIds }), { allowDiskUse: true }).toArray();
+    const sourceOverview = sourceResult[0]?.overview?.[0];
+    totalSessions += sourceOverview?.totalSessions ?? 0;
+    homeOnlyCount += sourceOverview?.homeOnlyCount ?? 0;
+    if (hasFilter) matchingCount = (matchingCount ?? 0) + (sourceOverview?.matchingCount ?? 0);
+    for (const item of sourceResult[0]?.distinctPaths ?? []) pathCounts.set(item.path, (pathCounts.get(item.path) ?? 0) + item.sessionCount);
+  }
+
+  // Re-evaluate the source set after the read. If an old writer inserted a
+  // retained row during the projection query, restart from the source
+  // contract so the request cannot omit that row.
+  if (!(await auditProjectionIsReady())) return getAuditDirectorySummaryFromSource(client, options);
   return {
     totalSessions,
     homeOnlyCount,
-    distinctPaths,
+    distinctPaths: [...pathCounts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 100).map(([path, sessionCount]) => ({ path, sessionCount })),
     matchingCount,
   };
 }
@@ -608,61 +661,62 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
     limit,
     historyCollectionName: HISTORY_COLLECTION,
   };
+  if (!useProjection) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
 
-  const states = client.db(DATABASE_NAME).collection<Document>(useProjection ? AUDIT_PROJECTION_COLLECTION : SESSIONS_COLLECTION);
-  if (!useProjection) {
-    const pipeline = buildAuditSessionsPipeline({ ...queryOptions });
-    const [aggregationResult, summary] = await Promise.all([
-      states.aggregate<{ total: Array<{ count: number }>; items: Document[] }>(pipeline, { allowDiskUse: true }).toArray(),
-      options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome }) : Promise.resolve(undefined),
-    ]);
-    const facet = aggregationResult[0];
-    const rawItems = facet?.items ?? [];
-    const pageDocs = rawItems.slice(0, limit);
-    const lastDoc = pageDocs.at(-1);
-    return {
-      items: pageDocs.map(mapDocumentToClosedSession).filter((item): item is FilesystemClosedSession => item !== null),
-      totalItems: facet?.total?.[0]?.count ?? 0,
-      nextCursor: rawItems.length > limit && lastDoc
-        ? encodeAuditSessionCursor(asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(), asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "")
-        : null,
-      summary,
-    };
-  }
-
-  const [rawItems, countResult, summary] = await Promise.all([
-    states.aggregate<Document>(buildAuditProjectionItemPipeline(queryOptions), { allowDiskUse: true }).toArray(),
-    states.aggregate<{ count: number }>(buildAuditProjectionCountPipeline(queryOptions), { allowDiskUse: true }).toArray(),
-    options.includeSummary
-      ? getAuditDirectorySummary({
-          search: options.search,
-          targetPath: options.targetPath,
-          hideHome: options.hideHome,
-        })
-      : Promise.resolve(undefined),
+  const overflowIds = await getOverflowSessionIds(client);
+  const projectionOptions = { ...queryOptions, projectionOverflow: overflowIds.length ? "exclude" as const : undefined };
+  const projectionCollection = client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION);
+  const [projectionItems, projectionCount, summary] = await Promise.all([
+    projectionCollection.aggregate<Document>(buildAuditProjectionItemPipeline(projectionOptions), { allowDiskUse: true }).toArray(),
+    projectionCollection.aggregate<{ count: number }>(buildAuditProjectionCountPipeline(projectionOptions), { allowDiskUse: true }).toArray(),
+    options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome }) : Promise.resolve(undefined),
   ]);
 
-  const totalItems = countResult[0]?.count ?? 0;
-  const hasMore = rawItems.length > limit;
+  let rawItems = projectionItems;
+  let totalItems = projectionCount[0]?.count ?? 0;
+  if (overflowIds.length) {
+    const sourceResult = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{ total: Array<{ count: number }>; items: Document[] }>(
+      buildAuditSessionsPipeline({ ...queryOptions, sessionIds: overflowIds }),
+      { allowDiskUse: true },
+    ).toArray();
+    rawItems = sortAuditDocuments([...projectionItems, ...(sourceResult[0]?.items ?? [])]);
+    totalItems += sourceResult[0]?.total?.[0]?.count ?? 0;
+  }
+
+  // The readiness check and the page read form one mixed-source contract. A
+  // row created by an old writer during the read invalidates the projection
+  // result and is retried against the authoritative source pipeline.
+  if (!(await auditProjectionIsReady())) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
   const pageDocs = rawItems.slice(0, limit);
-
-  const items: FilesystemClosedSession[] = pageDocs
-    .map(mapDocumentToClosedSession)
-    .filter((item): item is FilesystemClosedSession => item !== null);
-
   const lastDoc = pageDocs.at(-1);
-  const nextCursor = hasMore && lastDoc
-    ? encodeAuditSessionCursor(
-        asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(),
-        asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "",
-      )
-    : null;
-
   return {
-    items,
+    items: pageDocs.map(mapDocumentToClosedSession).filter((item): item is FilesystemClosedSession => item !== null),
     totalItems,
-    nextCursor,
+    nextCursor: rawItems.length > limit && lastDoc
+      ? encodeAuditSessionCursor(asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(), asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "")
+      : null,
     summary,
+  };
+}
+
+async function getAuditSessionsFromSource(
+  client: Awaited<ReturnType<typeof getMongoClient>>,
+  queryOptions: AuditSessionsQueryOptions & { limit: number; historyCollectionName: string },
+  includeSummary?: boolean,
+): Promise<AuditSessionsPage> {
+  const result = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{ total: Array<{ count: number }>; items: Document[] }>(
+    buildAuditSessionsPipeline(queryOptions), { allowDiskUse: true },
+  ).toArray();
+  const rawItems = result[0]?.items ?? [];
+  const pageDocs = rawItems.slice(0, queryOptions.limit);
+  const lastDoc = pageDocs.at(-1);
+  return {
+    items: pageDocs.map(mapDocumentToClosedSession).filter((item): item is FilesystemClosedSession => item !== null),
+    totalItems: result[0]?.total?.[0]?.count ?? 0,
+    nextCursor: rawItems.length > queryOptions.limit && lastDoc
+      ? encodeAuditSessionCursor(asDateString(lastDoc.lifecycle?.closedAt) ?? new Date(0).toISOString(), asString(lastDoc.effectiveSessionId) ?? asString(lastDoc.sessionId) ?? asString(lastDoc.session_id) ?? "")
+      : null,
+    summary: includeSummary ? await getAuditDirectorySummaryFromSource(client, queryOptions) : undefined,
   };
 }
 

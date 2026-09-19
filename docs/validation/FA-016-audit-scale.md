@@ -6,10 +6,16 @@ FS-007 remains `PARTIAL`.
 ## Scope and architecture
 
 This remediation starts at `b94b69af2e853a4e43560a7756b932ddba9eb821` and is
-implemented in `54c872b` on `feat/cwd-filesystem-telemetry`. The processor owns the durable
+implemented in `54c872b` plus the current follow-up on `feat/cwd-filesystem-telemetry`. The processor owns the durable
 `cwd_audit_projection` read model; `cwd_session_state` and `cwd_events` remain
 authoritative source records. `cwd_audit_projection_meta` is only a readiness
 hint, never the sole read-safety condition.
+
+The follow-up migrates the projection contract to `cwd_audit_projection.v2`.
+Eligible retained rows are rebuilt from persisted v1 state/projection/event
+shapes, the v1 metadata marker is replaced only after every eligible row has a
+v2 projection, and obsolete `auditEventIds` data is removed. The dashboard
+rejects the v1 marker and verifies the source/projection set before using v2.
 
 The projection separates `cwdState.path` from `auditTransitionPaths`. Public
 `auditVisitedPaths` is deterministically recomputed as their union. Only
@@ -20,8 +26,10 @@ persisted `entered`/`changed` transition history contributes transition paths;
 Event delivery is at-least-once: `cwd_events._id` is the idempotency key, and
 duplicate retries reconcile from source history. The projection no longer
 stores an unbounded `auditEventIds` array. Distinct transition paths are capped
-at 512 per projection document; `auditPathsOverflow=true` causes exact reads
-to use the source fallback, so truncation is never presented as authoritative.
+at 512 per projection document; `auditPathsOverflow=true` causes only that
+session's exact reads and summaries to use the source fallback, so truncation
+is never presented as authoritative and normal sessions retain projection-backed
+pages.
 The resulting projection path storage is at most 512 transition paths plus the
 current path; source events remain TTL-retained for crash recovery and
 reconciliation.
@@ -34,14 +42,17 @@ closed lifecycle time plus retention. The processor repairs an existing
 `{expires_at:1}` index when it lacks `expireAfterSeconds: 0`.
 
 Backfill checks every history cursor error before accepting a result, updates
-source readiness only after the projection write, verifies that no closed source
-state lacks a projection version before publishing the marker, and is safe to
-retry. Guarded state ordering and merge-based transition paths prevent an older
-backfill from overwriting a newer accepted state. A 15-second reconciliation
-loop converges rows created by rolling/old writers without requiring a restart.
-Dashboard readiness also checks for missing source versions and overflow rows;
-either condition selects the exact legacy fallback, preventing missing or
-duplicate dashboard sessions during migration.
+source readiness only after the projection write, verifies that no eligible
+closed source state lacks a v2 projection before publishing the marker, and is
+safe to retry. Current-state and backfill writes carry `stateSequence` plus
+`stateSourceEventId` and use atomic MongoDB guards; closed lifecycle and expiry
+boundaries cannot be downgraded by delayed active writes. Duplicate retries
+reconcile persisted event history and do not merge untrusted retry payload
+paths. A 15-second reconciliation loop converges rows created by rolling/old
+writers without requiring a restart. Dashboard readiness rejects v1, ignores
+malformed rows under the explicit valid-row contract, scopes overflow fallback
+to affected session IDs, and rechecks source completeness after each projection
+read.
 
 ## Query and cursor contract
 
@@ -116,3 +127,29 @@ and item/count/summary/filtered execution plans.
 No live/production database or manual response-agent validation was used. The
 outstanding manual response-agent gate remains unrelated and recorded
 truthfully in the trackers.
+
+## Follow-up re-audit evidence (2026-09-19)
+
+Preflight on `feat/cwd-filesystem-telemetry` found a clean worktree at
+`a6f9aba`; `git fetch origin --prune` succeeded and `git merge origin/main`
+reported `Already up to date.` No fetch or merge failure occurred. The
+pre-edit dashboard baseline passed: 22 Vitest files, 463 passing tests, and 8
+skipped tests.
+
+The isolated FA-016 integration now seeds real v1 state, projection, and
+metadata documents, proves the old marker is not ready, migrates them to v2,
+removes `auditEventIds`, and verifies the v2 marker. It also covers equal-time
+source-event ordering, delayed current-state writes, close-versus-active and
+backfill interleavings, retry payload idempotency, TTL repair, missing expiry,
+and a 620-event overflow session. The dashboard overflow fixture proves exact
+target-path and summary results for the overflow session, bounded 512-entry
+projection storage, projection-backed ordinary pages, and no global fallback
+for normal sessions.
+
+Observed isolated command output: `npm run test:filesystem-audit-integration`
+passed 7 dashboard tests and both processor FA-016 integration tests. Dashboard
+explain evidence remained `26/26` documents for item pages, `1,900/1,900`
+for exact count and summary, and no `$skip`, `$lookup`, or `COLLSCAN` in the
+projection plans. Full repository validation and final clean-tree checks remain
+required before FA-016 can be accepted; FA-016 therefore remains `IN PROGRESS`
+and FS-007 remains `PARTIAL`.

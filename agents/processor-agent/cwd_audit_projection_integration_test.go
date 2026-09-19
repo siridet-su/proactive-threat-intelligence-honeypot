@@ -46,20 +46,33 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	closedAt := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	// Keep the retained fixtures ahead of the wall clock so Mongo's TTL monitor
+	// cannot remove them while the integration assertions are running.
+	closedAt := time.Date(2026, 9, 19, 23, 0, 0, 0, time.UTC)
+	const v1ProjectionVersion = "cwd_audit_projection.v1"
 	_, err = db.Collection("cwd_session_state").InsertMany(ctx, []any{
 		bson.M{
 			"_id": "canonical-session", "sessionId": "canonical-session", "sourceIp": "198.51.100.10",
 			"cwdState":  bson.M{"path": "/home/cowrie", "status": "confirmed"},
-			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour),
+			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour), "auditProjectionVersion": v1ProjectionVersion,
 		},
 		bson.M{
 			"_id": "legacy-state-id", "session_id": "legacy-session", "sourceIp": "198.51.100.11",
 			"cwdState":  bson.M{"path": "/var/tmp", "status": "observed"},
-			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour),
+			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": closedAt.Add(time.Hour), "auditProjectionVersion": v1ProjectionVersion,
 		},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Collection(cwdAuditProjectionCollection).InsertMany(ctx, []any{
+		bson.M{"_id": "canonical-session", "sessionId": "canonical-session", "cwdState": bson.M{"path": "/home/cowrie"}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditVisitedPaths": bson.A{"/home/cowrie", "/etc"}, "auditEventIds": bson.A{"canonical-event"}, "auditEventCount": 1, "auditHomeOnly": false, "auditProjectionVersion": v1ProjectionVersion, "expires_at": closedAt.Add(time.Hour)},
+		bson.M{"_id": "legacy-session", "sessionId": "legacy-session", "cwdState": bson.M{"path": "/var/tmp"}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditVisitedPaths": bson.A{"/var/tmp"}, "auditEventIds": bson.A{"legacy-event"}, "auditEventCount": 1, "auditHomeOnly": false, "auditProjectionVersion": v1ProjectionVersion, "expires_at": closedAt.Add(time.Hour)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": v1ProjectionVersion, "backfillCompletedAt": closedAt}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = db.Collection("cwd_events").InsertMany(ctx, []any{
@@ -82,6 +95,13 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 		if doc["sessionId"] != sessionID || doc["auditProjectionVersion"] != cwdAuditProjectionVersion {
 			t.Fatalf("projection %s is not canonical/read-ready: %#v", sessionID, doc)
 		}
+		if _, exists := doc["auditEventIds"]; exists {
+			t.Fatalf("projection %s retained obsolete unbounded v1 auditEventIds: %#v", sessionID, doc)
+		}
+	}
+	meta := bson.M{}
+	if err := db.Collection("cwd_audit_projection_meta").FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}).Decode(&meta); err != nil || meta["projectionVersion"] != cwdAuditProjectionVersion {
+		t.Fatalf("v1 readiness marker was not replaced only after v2 migration: %#v err=%v", meta, err)
 	}
 
 	lateSession := "late-session"
@@ -96,7 +116,12 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	if err := mw.recordCwdObservation(ctx, lateObservation, time.Hour); err != nil {
 		t.Fatal(err)
 	}
-	if err := mw.recordCwdObservation(ctx, lateObservation, time.Hour); err != nil {
+	// Same source event ID, deliberately different retry payload: persisted
+	// cwd_events truth must win over the untrusted duplicate payload.
+	lateRetry := lateObservation
+	lateRetry.FromPath = "/untrusted-from"
+	lateRetry.Path = "/untrusted-target"
+	if err := mw.recordCwdObservation(ctx, lateRetry, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	late := bson.M{}
@@ -128,6 +153,9 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	}
 	if !containsString(visited, "/etc/shadow") || !containsString(visited, "/home/cowrie") {
 		t.Fatalf("late history did not converge into visited paths: %#v", visited)
+	}
+	if containsString(visited, "/untrusted-target") || containsString(visited, "/untrusted-from") {
+		t.Fatalf("duplicate retry payload overrode persisted event truth: %#v", visited)
 	}
 
 	indexCursor, err := projection.Indexes().List(ctx)
@@ -270,6 +298,121 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	}
 	if len(stringSlice(boundedDoc["auditTransitionPaths"])) > cwdAuditProjectionMaxPaths || boundedDoc["auditPathsOverflow"] != true {
 		t.Fatalf("projection history storage was not bounded: %#v", boundedDoc)
+	}
+}
+
+func TestFA016ProjectionOrderingInterleavings(t *testing.T) {
+	uri := os.Getenv("FA016_MONGO_URI")
+	databaseName := os.Getenv("FA016_MONGO_DB")
+	runID := os.Getenv("FA016_MONGO_RUN_ID")
+	if uri == "" && databaseName == "" && runID == "" {
+		t.Skip("FA016_MONGO_URI is not set")
+	}
+	target, err := validateFA016MongoTarget(uri, databaseName, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 19, 23, 30, 0, 0, time.UTC)
+	newer := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.2", SourceEventID: "event-z", At: base.Add(2 * time.Minute), FromPath: "/old", Path: "/new", Action: "changed", Status: "confirmed"}
+	older := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.1", SourceEventID: "event-a", At: base, FromPath: "/old", Path: "/oldest", Action: "changed", Status: "confirmed"}
+	newerCommitted := make(chan struct{})
+	oldFinished := make(chan error, 1)
+	go func() {
+		<-newerCommitted
+		oldFinished <- mw.recordCwdObservation(ctx, older, retention)
+	}()
+	if err := mw.recordCwdObservation(ctx, newer, retention); err != nil {
+		t.Fatal(err)
+	}
+	close(newerCommitted)
+	if err := <-oldFinished; err != nil {
+		t.Fatal(err)
+	}
+	projection := db.Collection(cwdAuditProjectionCollection)
+	doc := bson.M{}
+	if err := projection.FindOne(ctx, bson.M{"_id": "interleaved"}).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	cwdState, _ := doc["cwdState"].(bson.M)
+	if cwdState["path"] != "/new" || doc["stateSourceEventId"] != "event-z" {
+		t.Fatalf("delayed older projection downgraded current state: %#v", doc)
+	}
+
+	tieHigh := newer
+	tieHigh.SourceEventID = "tie-z"
+	tieHigh.At = base.Add(4 * time.Minute)
+	tieHigh.Path = "/tie-new"
+	tieLow := tieHigh
+	tieLow.SourceEventID = "tie-a"
+	tieLow.Path = "/tie-old"
+	if err := mw.recordCwdObservation(ctx, tieHigh, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.recordCwdObservation(ctx, tieLow, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "interleaved"}).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	cwdState, _ = doc["cwdState"].(bson.M)
+	if cwdState["path"] != "/tie-new" || doc["stateSourceEventId"] != "tie-z" {
+		t.Fatalf("equal timestamp source-event ordering was not monotonic: %#v", doc)
+	}
+
+	closedAt := base.Add(10 * time.Minute)
+	if err := mw.closeCwdSession(ctx, "interleaved", closedAt, retention); err != nil {
+		t.Fatal(err)
+	}
+	closedExpiry := testBSONTime((func() any {
+		var value bson.M
+		_ = projection.FindOne(ctx, bson.M{"_id": "interleaved"}).Decode(&value)
+		return value["expires_at"]
+	})())
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.0", SourceEventID: "late-active", At: closedAt.Add(-time.Minute), Path: "/late", FromPath: "/tie-new", Action: "changed", Status: "confirmed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "interleaved"}).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	cwdState, _ = doc["cwdState"].(bson.M)
+	lifecycle, _ := doc["lifecycle"].(bson.M)
+	if cwdState["path"] != "/tie-new" || lifecycle["status"] != "closed" || !testBSONTime(doc["expires_at"]).Equal(closedExpiry) || doc["sourceIp"] != "198.51.100.2" {
+		t.Fatalf("close did not win against delayed active projection: %#v", doc)
+	}
+
+	// A backfill snapshot captured before close is deliberately applied after
+	// close. Its ordering and lifecycle guards must make it a no-op.
+	staleState := bson.M{
+		"_id": "interleaved", "sessionId": "interleaved", "sourceIp": "198.51.100.99",
+		"stateSequence": older.At.UnixNano(), "stateSourceEventId": older.SourceEventID,
+		"cwdState": bson.M{"path": "/stale-backfill"}, "lifecycle": bson.M{"status": "active", "startedAt": older.At},
+	}
+	if err := mw.backfillCwdAuditProjectionState(ctx, staleState, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "interleaved"}).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	cwdState, _ = doc["cwdState"].(bson.M)
+	lifecycle, _ = doc["lifecycle"].(bson.M)
+	if cwdState["path"] != "/tie-new" || lifecycle["status"] != "closed" || doc["sourceIp"] != "198.51.100.2" || !testBSONTime(doc["expires_at"]).Equal(closedExpiry) {
+		t.Fatalf("stale active backfill crossed the close boundary: %#v", doc)
 	}
 }
 
