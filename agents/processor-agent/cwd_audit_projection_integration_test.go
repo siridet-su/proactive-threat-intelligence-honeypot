@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,11 +50,20 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	}
 	// Simulate a rolling deployment that left the right key pattern with the
 	// retired TTL option. The authoritative owner must remove it.
-	if _, err := db.Collection(cwdAuditProjectionCollection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}}); err != nil {
+	if _, err := db.Collection(cwdAuditProjectionCollection).Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection(cwdAuditProjectionCollection).InsertOne(ctx, bson.M{"_id": "ttl-migration-survivor", "sessionId": "ttl-migration-survivor", "expires_at": time.Now().UTC().Add(24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
 	mw := &MongoWriter{enabled: true, db: db}
 	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "ttl-migration-survivor"}).Err(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -287,6 +297,45 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	}
 	if !testBSONTime(legacyDoc["expires_at"]).Equal(closedAt.Add(time.Hour)) {
 		t.Fatalf("missing expiry was not bounded from close time: %#v", legacyDoc)
+	}
+	legacySource := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": legacyExpiry}).Decode(&legacySource); err != nil {
+		t.Fatal(err)
+	}
+	if !testBSONTime(legacySource["expires_at"]).Equal(closedAt.Add(time.Hour)) {
+		t.Fatalf("source TTL authority was not normalized from close time: %#v", legacySource)
+	}
+
+	readyExpiry := "ready-invalid-expiry"
+	if _, err := db.Collection("cwd_session_state").InsertOne(ctx, bson.M{
+		"_id": "ready-invalid-source", "sessionId": " " + readyExpiry + " ", "cwdState": bson.M{"path": "/etc/ready"},
+		"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": "not-a-date",
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(4), "auditProjectionReadyGeneration": int64(4),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projection.InsertOne(ctx, bson.M{
+		"_id": readyExpiry, "sessionId": readyExpiry, "cwdState": bson.M{"path": "/etc/ready"},
+		"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditProjectionVersion": cwdAuditProjectionVersion,
+		"auditProjectionGeneration": int64(4), "expires_at": "not-a-date",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for pass := 0; pass < 16; pass++ {
+		if err := mw.backfillCwdAuditProjection(ctx, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+	}
+	readySource := bson.M{}
+	if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": "ready-invalid-source"}).Decode(&readySource); err != nil {
+		t.Fatal(err)
+	}
+	readyProjection := bson.M{}
+	if err := projection.FindOne(ctx, bson.M{"_id": readyExpiry}).Decode(&readyProjection); err != nil {
+		t.Fatal(err)
+	}
+	if !testBSONTime(readySource["expires_at"]).Equal(closedAt.Add(time.Hour)) || !testBSONTime(readyProjection["expires_at"]).Equal(closedAt.Add(time.Hour)) {
+		t.Fatalf("v2-ready source/projection expiry normalization was not exact: source=%#v projection=%#v", readySource, readyProjection)
 	}
 
 	boundedSession := "bounded-history-session"
@@ -1499,8 +1548,8 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		filter     bson.M
 		sort       bson.D
 	}{
-		"repair":           {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
-		"cleanup":          {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
+		"repair":           {"cwd_session_state", missingCwdAuditProjectionKeysetQuery("sessionId", nil), bson.D{{Key: "sessionId", Value: 1}, {Key: "_id", Value: 1}}},
+		"cleanup":          {cwdAuditProjectionCollection, cwdAuditProjectionCleanupKeysetQuery(time.Now().UTC(), nil), bson.D{{Key: "expires_at", Value: 1}, {Key: "_id", Value: 1}}},
 		"source-canonical": {"cwd_session_state", indexedCwdStateCanonicalQuery(sessionID), nil},
 		"source-id":        {"cwd_session_state", bson.M{"_id": sessionID}, nil},
 		"source-session":   {"cwd_session_state", bson.M{"sessionId": sessionID}, nil},
@@ -1521,7 +1570,14 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		if examined := maxExplainMetric(explained, "totalDocsExamined"); examined > int64(cwdAuditProjectionRepairBatchSize) {
 			t.Fatalf("explain %s exceeded the %d-document repair/cleanup bound: %d", name, cwdAuditProjectionRepairBatchSize, examined)
 		}
-		fmt.Fprintf(os.Stderr, "FA016_RETENTION %s docsExamined=%d keysExamined=%d\n", name, maxExplainMetric(explained, "totalDocsExamined"), maxExplainMetric(explained, "totalKeysExamined"))
+		indexNames := explainIndexNames(explained)
+		if name == "repair" && !containsStringFragment(indexNames, "sessionId_1__id_1") {
+			t.Fatalf("explain repair did not use the raw sessionId/_id keyset index: %#v", indexNames)
+		}
+		if name == "cleanup" && !containsStringFragment(indexNames, "expires_at_1__id_1") {
+			t.Fatalf("explain cleanup did not use the expires_at/_id keyset index: %#v", indexNames)
+		}
+		fmt.Fprintf(os.Stderr, "FA016_RETENTION %s indexes=%v docsExamined=%d keysExamined=%d\n", name, indexNames, maxExplainMetric(explained, "totalDocsExamined"), maxExplainMetric(explained, "totalKeysExamined"))
 	}
 
 	// Source-owned cleanup removes an expired orphan only after its source is
@@ -1536,6 +1592,249 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 	}
 	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": sessionID}).Err(); err != nil {
 		t.Fatalf("retained source projection was cleaned up: %v", err)
+	}
+}
+
+func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection(cwdAuditProjectionMetaID).InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
+		t.Fatal(err)
+	}
+	closedAt := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	retention := time.Hour
+	expiresAt := closedAt.Add(retention)
+	sources := make([]any, 0, 512+600)
+	expected := map[string]string{}
+	addSource := func(id, field, rawSession, path string) {
+		doc := bson.M{
+			"_id": id, field: rawSession, "cwdState": bson.M{"path": path},
+			"lifecycle":              bson.M{"status": "closed", "closedAt": closedAt},
+			"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1), "auditProjectionReadyGeneration": int64(1),
+		}
+		sources = append(sources, doc)
+		canonical := strings.TrimSpace(rawSession)
+		if canonical != "" && strings.HasPrefix(path, "/") {
+			expected[canonical] = id
+		}
+	}
+	for index := 0; index < 256; index++ {
+		addSource(fmt.Sprintf("malformed-c-%03d", index), "sessionId", "   ", "relative")
+	}
+	addSource("padded-canonical-boundary", "sessionId", "a-canonical-boundary ", "/canonical/boundary")
+	for index := 0; index < 298; index++ {
+		addSource(fmt.Sprintf("canonical-%03d", index), "sessionId", fmt.Sprintf("b-canonical-%03d", index), fmt.Sprintf("/canonical/%03d", index))
+	}
+	addSource("canonical-repeat-a", "sessionId", "b-repeat", "/canonical/repeat-a")
+	addSource("canonical-repeat-b", "sessionId", "b-repeat", "/canonical/repeat-b")
+	for index := 0; index < 256; index++ {
+		addSource(fmt.Sprintf("malformed-l-%03d", index), "session_id", "   ", "relative")
+	}
+	addSource("padded-legacy-boundary", "session_id", "a-legacy-boundary ", "/legacy/boundary")
+	for index := 0; index < 298; index++ {
+		addSource(fmt.Sprintf("legacy-%03d", index), "session_id", fmt.Sprintf("b-legacy-%03d", index), fmt.Sprintf("/legacy/%03d", index))
+	}
+	if _, err := db.Collection("cwd_session_state").InsertMany(ctx, sources); err != nil {
+		t.Fatal(err)
+	}
+	validBoundaryID := "valid-boundary-source"
+	validBoundarySession := "b-valid-boundary"
+	validBoundaryExpiry := closedAt.Add(2 * retention)
+	if _, err := db.Collection("cwd_session_state").InsertOne(ctx, bson.M{
+		"_id": validBoundaryID, "sessionId": validBoundarySession, "cwdState": bson.M{"path": "/canonical/valid-boundary"},
+		"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "expires_at": validBoundaryExpiry,
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1), "auditProjectionReadyGeneration": int64(1),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Collection(cwdAuditProjectionCollection).InsertOne(ctx, bson.M{
+		"_id": validBoundarySession, "sessionId": validBoundarySession, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt},
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1), "expires_at": validBoundaryExpiry,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expected[validBoundarySession] = validBoundaryID
+
+	// Two reconcilers begin on the same raw keyset boundary. CAS marker updates
+	// may duplicate work, but cannot regress either cursor.
+	results := make(chan error, 2)
+	go func() { results <- mw.backfillCwdAuditProjection(ctx, retention) }()
+	go func() { results <- mw.backfillCwdAuditProjection(ctx, retention) }()
+	for index := 0; index < 2; index++ {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for pass := 0; pass < 20; pass++ {
+		if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	projection := db.Collection(cwdAuditProjectionCollection)
+	if got, err := projection.CountDocuments(ctx, bson.M{"auditProjectionVersion": cwdAuditProjectionVersion}); err != nil || got != int64(len(expected)) {
+		t.Fatalf("repair cursor did not converge every eligible logical projection: got=%d want=%d err=%v", got, len(expected), err)
+	}
+	for sessionID, sourceID := range expected {
+		wantExpiry := expiresAt
+		if sessionID == validBoundarySession {
+			wantExpiry = validBoundaryExpiry
+		}
+		var source bson.M
+		if err := db.Collection("cwd_session_state").FindOne(ctx, bson.M{"_id": sourceID}).Decode(&source); err != nil {
+			t.Fatal(err)
+		}
+		if !testBSONTime(source["expires_at"]).Equal(wantExpiry) {
+			t.Fatalf("source %s was not normalized to exact expiry: %#v", sourceID, source)
+		}
+		var reconstructed bson.M
+		if err := projection.FindOne(ctx, bson.M{"_id": sessionID}).Decode(&reconstructed); err != nil {
+			t.Fatalf("missing reconstructed projection %s: %v", sessionID, err)
+		}
+		if !testBSONTime(reconstructed["expires_at"]).Equal(wantExpiry) {
+			t.Fatalf("projection %s has wrong expiry: %#v", sessionID, reconstructed)
+		}
+	}
+	if count, err := projection.CountDocuments(ctx, bson.M{"_id": bson.M{"$in": bson.A{"malformed-c-000", "malformed-l-000"}}}); err != nil || count != 0 {
+		t.Fatalf("malformed rows blocked or created projections: count=%d err=%v", count, err)
+	}
+
+	for _, field := range []string{"sessionId", "session_id"} {
+		var explain bson.M
+		find := bson.D{{Key: "find", Value: "cwd_session_state"}, {Key: "filter", Value: missingCwdAuditProjectionKeysetQuery(field, nil)}, {Key: "sort", Value: bson.D{{Key: field, Value: 1}, {Key: "_id", Value: 1}}}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
+		if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: find}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explain); err != nil {
+			t.Fatal(err)
+		}
+		planText := fmt.Sprint(explain)
+		if strings.Contains(planText, "COLLSCAN") || !strings.Contains(planText, "IXSCAN") || maxExplainMetric(explain, "totalDocsExamined") > int64(cwdAuditProjectionRepairBatchSize) || maxExplainMetric(explain, "totalKeysExamined") > int64(cwdAuditProjectionRepairBatchSize) {
+			t.Fatalf("repair %s plan exceeded bounded IXSCAN contract: %#v", field, explain)
+		}
+		indexNames := explainIndexNames(explain)
+		if !containsStringFragment(indexNames, field+"_1__id_1") {
+			t.Fatalf("repair %s plan did not use the raw-field/_id keyset index: %#v", field, indexNames)
+		}
+		fmt.Fprintf(os.Stderr, "FA016_REPAIR %s indexes=%v docsExamined=%d keysExamined=%d\n", field, indexNames, maxExplainMetric(explain, "totalDocsExamined"), maxExplainMetric(explain, "totalKeysExamined"))
+	}
+}
+
+func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testing.T) {
+	target, skip := fa016IntegrationTarget(t)
+	if skip {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	watermark := now.Add(-time.Hour)
+	states := db.Collection("cwd_session_state")
+	projection := db.Collection(cwdAuditProjectionCollection)
+	stateDocs := make([]any, 0, cwdAuditProjectionRepairBatchSize)
+	projectionDocs := make([]any, 0, cwdAuditProjectionRepairBatchSize+3)
+	for index := 0; index < cwdAuditProjectionRepairBatchSize; index++ {
+		id := fmt.Sprintf("keep-%03d", index)
+		stateDocs = append(stateDocs, bson.M{"_id": id, "auditCanonicalSessionId": id, "expires_at": now.Add(time.Hour)})
+		projectionDocs = append(projectionDocs, bson.M{"_id": id, "sessionId": id, "expires_at": watermark})
+	}
+	for _, id := range []string{"orphan-after-head-a", "orphan-after-head-b", "recreated-source"} {
+		projectionDocs = append(projectionDocs, bson.M{"_id": id, "sessionId": id, "expires_at": watermark})
+	}
+	if _, err := states.InsertMany(ctx, stateDocs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := projection.InsertMany(ctx, projectionDocs); err != nil {
+		t.Fatal(err)
+	}
+	var explain bson.M
+	find := bson.D{{Key: "find", Value: cwdAuditProjectionCollection}, {Key: "filter", Value: cwdAuditProjectionCleanupKeysetQuery(now, nil)}, {Key: "sort", Value: bson.D{{Key: "expires_at", Value: 1}, {Key: "_id", Value: 1}}}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
+	if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: find}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explain); err != nil {
+		t.Fatal(err)
+	}
+	planText := fmt.Sprint(explain)
+	if strings.Contains(planText, "COLLSCAN") || !strings.Contains(planText, "IXSCAN") || maxExplainMetric(explain, "totalDocsExamined") > int64(cwdAuditProjectionRepairBatchSize) || maxExplainMetric(explain, "totalKeysExamined") > int64(cwdAuditProjectionRepairBatchSize) {
+		t.Fatalf("cleanup plan exceeded bounded IXSCAN contract: %#v", explain)
+	}
+	indexNames := explainIndexNames(explain)
+	if !containsStringFragment(indexNames, "expires_at_1__id_1") {
+		t.Fatalf("cleanup plan did not use the expires_at/_id keyset index: %#v", indexNames)
+	}
+	fmt.Fprintf(os.Stderr, "FA016_CLEANUP indexes=%v docsExamined=%d keysExamined=%d\n", indexNames, maxExplainMetric(explain, "totalDocsExamined"), maxExplainMetric(explain, "totalKeysExamined"))
+
+	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil || deleted != 0 {
+		t.Fatalf("first cleanup pass should retain the 256 source-backed head rows: deleted=%d err=%v", deleted, err)
+	}
+	var once sync.Once
+	mw.auditBeforeCwdProjectionDelete = func(id string) {
+		if id == "recreated-source" {
+			once.Do(func() {
+				_, _ = states.InsertOne(ctx, bson.M{"_id": id, "auditCanonicalSessionId": id, "expires_at": now.Add(time.Hour)})
+			})
+		}
+	}
+	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil || deleted != 2 {
+		t.Fatalf("second cleanup pass did not reach later orphans: deleted=%d err=%v", deleted, err)
+	}
+	for _, id := range []string{"orphan-after-head-a", "orphan-after-head-b"} {
+		if err := projection.FindOne(ctx, bson.M{"_id": id}).Err(); err != mongo.ErrNoDocuments {
+			t.Fatalf("later orphan %s was not deleted: %v", id, err)
+		}
+	}
+	if got, err := projection.CountDocuments(ctx, bson.M{"_id": bson.M{"$regex": "^keep-"}}); err != nil || got != int64(cwdAuditProjectionRepairBatchSize) {
+		t.Fatalf("source-backed head projections were not retained: %d err=%v", got, err)
+	}
+
+	results := make(chan error, 2)
+	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); results <- err }()
+	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); results <- err }()
+	if err := <-results; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-results; err != nil {
+		t.Fatal(err)
+	}
+	mw.auditBeforeCwdProjectionDelete = nil
+	if err := projection.FindOne(ctx, bson.M{"_id": "recreated-source"}).Err(); err != nil {
+		t.Fatalf("source recreation was not protected by the cleanup recheck: %v", err)
+	}
+	if _, err := states.DeleteOne(ctx, bson.M{"_id": "recreated-source"}); err != nil {
+		t.Fatal(err)
+	}
+	for pass := 0; pass < 3; pass++ {
+		if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "recreated-source"}).Err(); err != mongo.ErrNoDocuments {
+		t.Fatalf("source-less projection did not eventually clean up: %v", err)
 	}
 }
 
@@ -1614,6 +1913,50 @@ func maxExplainMetric(value any, key string) int64 {
 	}
 	visit(value)
 	return max
+}
+
+func explainIndexNames(value any) []string {
+	seen := map[string]struct{}{}
+	var visit func(any)
+	visit = func(current any) {
+		switch typed := current.(type) {
+		case bson.M:
+			if raw, ok := typed["indexName"].(string); ok {
+				seen[raw] = struct{}{}
+			}
+			for _, child := range typed {
+				visit(child)
+			}
+		case bson.D:
+			for _, child := range typed {
+				visit(child.Value)
+			}
+		case bson.A:
+			for _, child := range typed {
+				visit(child)
+			}
+		case []any:
+			for _, child := range typed {
+				visit(child)
+			}
+		}
+	}
+	visit(value)
+	result := make([]string, 0, len(seen))
+	for name := range seen {
+		result = append(result, name)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func containsStringFragment(values []string, fragment string) bool {
+	for _, value := range values {
+		if strings.Contains(value, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func stringSlice(value any) []string {

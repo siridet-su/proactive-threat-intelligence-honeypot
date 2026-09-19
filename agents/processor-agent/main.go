@@ -73,14 +73,15 @@ type LookupStore struct {
 }
 
 type MongoWriter struct {
-	enabled                       bool
-	db                            *mongo.Database
-	auditBackfillAfterHistoryRead func()
-	auditAfterCwdStateUpdate      func()
-	auditAfterCwdEventPending     func()
-	auditBeforeCwdEventUpsert     func() error
-	auditAfterCwdEventWrite       func()
-	auditAfterCwdCloseStateUpdate func()
+	enabled                        bool
+	db                             *mongo.Database
+	auditBackfillAfterHistoryRead  func()
+	auditAfterCwdStateUpdate       func()
+	auditAfterCwdEventPending      func()
+	auditBeforeCwdEventUpsert      func() error
+	auditAfterCwdEventWrite        func()
+	auditAfterCwdCloseStateUpdate  func()
+	auditBeforeCwdProjectionDelete func(string)
 }
 
 func main() {

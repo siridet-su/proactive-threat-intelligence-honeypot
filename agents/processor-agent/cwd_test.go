@@ -249,6 +249,7 @@ func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndSourceOwnedCleanup(
 		{{Key: "lifecycle.status", Value: 1}, {Key: "auditVisitedPaths", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
 		{{Key: "auditPathsOverflow", Value: 1}},
 		{{Key: "expires_at", Value: 1}},
+		{{Key: "expires_at", Value: 1}, {Key: "_id", Value: 1}},
 	}
 	for _, expected := range want {
 		found := false
