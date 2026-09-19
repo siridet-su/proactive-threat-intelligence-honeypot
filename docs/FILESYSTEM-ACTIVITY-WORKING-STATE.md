@@ -43,12 +43,13 @@ Reproducible test results belong in [`validation/`](validation/).
 
 ## Current focus
 
-**In progress:** `FA-016` — bound retained Audit directory queries and establish truthful MongoDB execution-plan limits.
+There is no active FA remediation item. `FA-001` through `FA-016` are all
+accepted `DONE`.
 
-**Why now:** FA-001 through FA-015 are accepted DONE. FA-016 is the sole active
-remediation focus. FS-007 remains PARTIAL until that large-collection work passes
-final audit. The outstanding manual response-agent validation remains recorded
-as an unrelated gate.
+`FS-007` is `DONE`: FA-001, FA-002, FA-011, and accepted FA-016 jointly
+complete the live-topology/Audit-directory separation and its bounded,
+truthful retained-session behavior. The outstanding manual/live response-agent
+validation remains recorded as an unrelated gate and was not performed.
 
 ## Historical baseline
 
@@ -88,7 +89,7 @@ avoid duplicating a large evidence block.
 
 | ID | Status | Work | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
-| `FS-007` | `PARTIAL` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | Original transport/search implementation is accepted by `FA-001`, `FA-002`, and `FA-011`. `FA-016` is IN PROGRESS for large-collection summary/cursor index optimization, so this row remains explicitly partial pending final audit. |
+| `FS-007` | `DONE` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | FA-001, FA-002, FA-011, and accepted FA-016 jointly complete this item. FA-016 acceptance covers exact projection semantics, bounded item plans, truthful count/summary bounds, source-owned retention, stable repair/cleanup cursors, event-outbox ownership, and isolated MongoDB evidence. |
 | `FS-008` | `DONE` | Define multi-session IP cluster interaction. | A cluster exposes every active session and path without implying that the latest path is the only route; selection behavior is deterministic and keyboard accessible. | Historical implementation evidence: cluster disclosure, multi-route rendering, and 57 tests; no FA corrective item mapped to FS-008. |
 | `FS-009` | `DONE` | Replace the fit algorithm with two-dimensional world bounds. | Fit considers X/Y, rendered element sizes, manual positions outside `0..100`, minimap clearance, and compact/fullscreen canvas sizes. | Historical implementation evidence: 2D bounds and 63 tests; no FA corrective item mapped to FS-009. |
 | `FS-010` | `DONE` | Correct count semantics. | Labels distinguish unique sources, sessions, exact-path sessions, and descendant-branch sessions; badges and their resulting lists always agree. | Historical implementation evidence: unified count semantics and 68 tests; no FA corrective item mapped to FS-010. |
@@ -130,8 +131,11 @@ These remain product backlog items and are not the active remediation focus.
 ## Current validation and evidence policy
 
 FA-015 was accepted `DONE` on `725102189587477bd9eafe13c8ac2d6e2e97e20c`.
-FA-016 is the sole `IN PROGRESS` item, and FS-007 remains `PARTIAL` pending
-its final re-audit. The manual response-agent validation remains unrelated.
+FA-016 was accepted `DONE` at terminal implementation commit
+`24586f20665564e8d4c58997d8c475791819db59` (`24586f2`). There is no active FA
+remediation item, and FS-007 is `DONE` through FA-001, FA-002, FA-011, and
+accepted FA-016. The manual/live response-agent validation remains unrelated,
+outstanding, and not performed.
 
 FA-016 implementation and follow-up re-audit evidence is recorded in
 [`validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). The
@@ -141,8 +145,8 @@ close races, rejected-observation ownership, old canonical/legacy writers, and
 scoped overflow coverage, with separate item/count/summary and retention-repair
 execution bounds recorded there. Retention coverage now also includes source
 expiry normalization, raw stable repair keysets, resumable orphan cleanup, and
-TTL-ordering/source-recreation races. FA-016
-remains IN PROGRESS pending final re-audit; FS-007 remains PARTIAL.
+TTL-ordering/source-recreation races. The independent final re-audit accepted
+FA-016 as DONE with no remaining blocking findings.
 
 The current repository validation is the independent final FA-013 audit dated
 2026-09-19 and is recorded in the canonical audit tracker. It ran these
@@ -179,3 +183,4 @@ claims about the 2026-09-15 historical baseline.
 | 2026-09-19 | Continued only FA-016: made source-state TTL authoritative for projection retention, added bounded resumable repair and source-checked orphan cleanup, and covered projection-first deletion with concurrent reconciliation and exact projection facts. | Clean preflight at `5036d03`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed before edits; isolated retention integration passed with no skipped FA-016 cases. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-20 | Continued only FA-016: normalized eligible source expiry, replaced trimmed repair cursors with raw `(session field, _id)` keysets, made orphan cleanup resumable with source-recreation rechecks, made cursor CAS independent of BSON field order, and added bounded malformed-expiry migration. | Preflight started clean at `a479cc0`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed; the isolated production Mongo run passed 15 FA-016 cases plus cursor/safety checks, with adversarial repair and cleanup plans bounded at 256 documents/keys. The first 20-repeat attempt lost its temporary MongoDB container mid-run; the replacement repeat result is recorded in the FA-016 validation evidence. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-20 | Continued only FA-016: corrected repair readiness ownership by projecting all readiness fields and requiring exact generation equality with no pending/dirty markers; added canonical/legacy ownership and paused-writer race coverage. | Preflight started clean at `3015b8b`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed; ownership, event-outbox, repair, cleanup, and dotted-CAS tests passed `-count=20` (`ok honeypot/processor-agent 86.808s`), and raw repair plans remained bounded at 256 documents/keys. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
+| 2026-09-20 | Accepted FA-016 `DONE` at terminal implementation commit `24586f2`; no FA remediation item remains active, and accepted FA-016 completes FS-007 with FA-001, FA-002, and FA-011. | Independent re-audit reported no remaining blocking findings: isolated FA-016 MongoDB coverage passed 12/12 dashboard tests and the processor FA-016 suite; dashboard Vitest passed 463 with 14 skipped; ESLint, Next.js production build, all five Go modules, and `git diff --check` passed; targeted ownership/cursor coverage passed `-count=20`; no temporary Mongo containers or browser-test artifacts remained. Manual/live response-agent validation remains unrelated and outstanding. |

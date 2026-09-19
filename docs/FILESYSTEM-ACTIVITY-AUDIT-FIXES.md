@@ -40,11 +40,17 @@ and the corrective work are not conflated.
 
 ## Current focus
 
-**In progress:** `FA-016` — bound retained Audit directory queries and establish truthful MongoDB execution-plan limits.
+There is no active FA remediation item. `FA-001` through `FA-016` are all
+accepted `DONE`.
 
 FA-015 was accepted `DONE` on `725102189587477bd9eafe13c8ac2d6e2e97e20c`.
-FA-016 is the sole `IN PROGRESS` item. FS-007 remains `PARTIAL` pending the
-FA-016 final re-audit; the manual response-agent validation remains unrelated.
+FA-016 was accepted `DONE` at terminal implementation commit
+`24586f20665564e8d4c58997d8c475791819db59` (`24586f2`). Its independent
+re-audit accepted exact projection semantics, bounded item plans, truthful
+count/summary bounds, source-owned retention, stable repair/cleanup cursors,
+event-outbox ownership, and isolated MongoDB evidence. FS-007 is complete
+through FA-001, FA-002, FA-011, and accepted FA-016. Manual/live response-agent
+validation remains an unrelated outstanding gate and was not performed.
 
 ## Remediation backlog
 
@@ -65,7 +71,7 @@ FA-016 final re-audit; the manual response-agent validation remains unrelated.
 | `FA-013` | `P1` | `DONE` | `FS-018` | Current tests predominantly exercise exported helper functions and do not verify the browser/component behaviors claimed by FS-006, FS-013, FS-014, FS-018, and FS-019. | Add component/browser coverage for remote filtered pagination, deep links beyond page one, Back/Forward, combobox focus and keys, polling cadence, empty valid topology, responsive toolbar behavior, reduced motion, and a time-positioned scrubber. | Accepted implementation chain `0f688ec85787707dc611891a7e80c1c904f713e7` → `bee351b6195d2c44b831a5faa5c0204d138af33d` → `439da30105868f2eccea5de480e9529e7616d591` → `da2822960fea66b060540bb4c44d3f76c78949a0` → `9286e6fa99f5403c3522d28923369e9b99380389`; integration merge `cc04dc03b2ec300d5259807b92ac10aff88b1e29`. Independent final audit: Chromium 6/6 under the normal configured timeout; Vitest 22 files, 460 passed, 2 skipped; ESLint 0 errors and 0 warnings; Next.js production build passed; all five `agents/*` Go modules passed `go test -count=1 ./...`; `git diff --check` passed; working tree was clean; no repository `test-results` or `playwright-report` artifacts. No manual/live validation was performed. FA-013 is accepted DONE; manual response-agent and large live-data gates remain outstanding.
 | `FA-014` | `P2` | `DONE` | `Tracker hygiene` | Working-state metadata/current focus disagree with the completion table, and recorded historical evidence does not match current repository validation. | Both trackers have one current focus, current date, truthful statuses, and evidence tied to reproducible commands or validation notes; affected original FS items have concise supersession references and FS-007 is qualified while FA-016 remains TODO. | Accepted DONE on commit `24d84fa4531460c2f2983ce1b47380c95ab3cdca`; both tracker contexts were reconciled, historical claims were qualified, and no production source or test files changed. |
 | `FA-015` | `P2` | `DONE` | `Change hygiene` | `git diff --check` reported blank-line-at-EOF errors and the full FS-001–FS-019 implementation exists as one large historical change. | `git diff --check`, tests, lint, and production build pass; changes are reviewed and committed in recoverable logical units without overwriting unrelated user work. | Accepted DONE on commit `725102189587477bd9eafe13c8ac2d6e2e97e20c`; final audit evidence is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md). The outstanding manual response-agent validation remains unrelated and open. |
-| `FA-016` | `P1` | `IN PROGRESS` | `FS-007` | Full-scan summary aggregation and cursor skip on 1,878+ documents, plus projection lifecycle/convergence gaps found during re-audit | Exact projection semantics, bounded item plans, truthful count/summary bounds, source-owned retention, and isolated MongoDB evidence | Follow-up preserves v2 migration, adds event-level durable reconciliation outbox work, generation-owned readiness/CAS, separate indexed old-writer cutover probes, exact `$unionWith` overflow pagination, canonical padded-ID convergence, and deterministic crash/race fixtures. This continuation removes the independent projection TTL, normalizes every eligible source TTL boundary, scans raw `(session field, _id)` batches while skipping non-ready rows in application code, uses dotted CAS for order-independent repair/cleanup cursors, and adds a bounded `_id` migration for malformed projection expiry. Evidence is recorded in [`docs/validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). FA-016 remains IN PROGRESS pending final validation/re-audit; FS-007 remains PARTIAL. |
+| `FA-016` | `P1` | `DONE` | `FS-007` | Full-scan summary aggregation and cursor skip on 1,878+ documents, plus projection lifecycle/convergence gaps found during re-audit | Exact projection semantics, bounded item plans, truthful count/summary bounds, source-owned retention, and isolated MongoDB evidence | Accepted at terminal implementation commit `24586f20665564e8d4c58997d8c475791819db59` (`24586f2`). Independent re-audit accepted exact projection semantics, bounded item plans, truthful count/summary bounds, source-owned retention, stable repair/cleanup cursors, event-outbox ownership, and isolated MongoDB evidence. Final evidence is recorded in [`docs/validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). |
 
 ### FA-014 acceptance record (2026-09-19)
 

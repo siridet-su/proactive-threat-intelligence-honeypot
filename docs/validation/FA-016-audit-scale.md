@@ -1,7 +1,7 @@
 # FA-016 retained Audit scale validation
 
-Status: remediation continues; FA-016 remains `IN PROGRESS` and
-FS-007 remains `PARTIAL`.
+Status: FA-016 accepted `DONE` at terminal implementation commit `24586f2`;
+FS-007 is `DONE`.
 
 ## Scope and architecture
 
@@ -446,3 +446,23 @@ documents/keys, respectively. All plans were index-backed and no `COLLSCAN`
 was accepted.
 
 FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
+
+## Final independent acceptance (2026-09-20)
+
+FA-016 was accepted `DONE` at terminal implementation commit
+`24586f20665564e8d4c58997d8c475791819db59` (`24586f2`) on
+`feat/cwd-filesystem-telemetry`. The independent re-audit reported no remaining
+blocking findings. It accepted exact projection semantics, bounded item plans,
+truthful count/summary bounds, source-owned retention, stable repair/cleanup
+cursors, event-outbox ownership, and isolated MongoDB evidence.
+
+The isolated FA-016 MongoDB suite passed 12/12 dashboard tests and the
+processor FA-016 suite. Dashboard Vitest passed 463 tests with 14 skipped;
+ESLint and the Next.js production build passed; all five Go modules passed
+`go test -count=1 ./...`; and `git diff --check` passed. The worktree was clean,
+no temporary `pti-fa016-mongo-*` containers or browser-test artifacts remained,
+and the targeted ownership/cursor suite passed with `-count=20`.
+
+FA-001 through FA-016 are `DONE`. FS-007 is `DONE` through FA-001, FA-002,
+FA-011, and accepted FA-016. Manual/live response-agent validation remains an
+unrelated outstanding gate and was not performed.
