@@ -436,6 +436,33 @@ test.describe("FA-013 real-browser evidence", () => {
       targetPath: "All paths",
       selectedContext: "/var",
     });
+    expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1);
+
+    // The original production Live entry is a real Back/Forward destination.
+    await page.goBack();
+    await expect(page.getByRole("tab", { name: "Live Topology" })).toBeVisible({ timeout: 15_000 });
+    await assertFilesystemState({
+      search: "",
+      live: true,
+      sessionIp: "",
+      hideHome: false,
+      targetPath: "",
+      selectedContext: "",
+    });
+    await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toHaveCount(0);
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(page.getByTitle("Previous hop", { exact: true })).toHaveCount(0);
+    expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1);
+
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=live-session",
+      live: false,
+      sessionIp: "192.0.2.10",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
     await page.goForward();
     await assertFilesystemState({
       search: "?view=audit&sessionId=closed-session",

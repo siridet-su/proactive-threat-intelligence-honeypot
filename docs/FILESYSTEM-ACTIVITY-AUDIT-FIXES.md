@@ -350,15 +350,14 @@ Real-browser evidence:
 - Scenario C starts from the production Live view, builds the Audit → session
   selection → hide-home → target-path → hop stack through production UI, and
   uses actual `page.goBack()`/`page.goForward()` and browser history traversal
-  across every traversable audit entry. Each step asserts the canonical URL,
-  selected audit state, filters, and visible hop context; it also checks that
-  traversal does not add feedback entries. Its delayed retained-session proof
+  from the hop tip all the way back to the original Live entry and forward
+  through every entry to the same hop tip. Each step asserts the canonical URL,
+  selected view/session state, filters, and visible hop context; it also checks
+  that traversal does not add feedback entries. Its delayed retained-session proof
   creates same-document A/B entries, goes Back to start A, goes Forward to B,
   and resolves A without any document navigation; the late A result cannot
   overwrite B's URL, session, hop, filters, or recovery state. The initial
-  Live baseline is asserted before the production Audit transition; the first
-  Playwright document entry itself is not treated as a traversable history
-  entry.
+  Live baseline and its final Back/Forward restoration are both asserted.
 - Scenario G uses a real Chromium layout engine at 375, 768, and 1440 CSS
   pixels. It checks bounding-box reachability, page and toolbar horizontal
   overflow, and actual timeline collapse to an inert/hidden panel followed by
