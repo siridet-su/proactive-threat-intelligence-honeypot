@@ -195,12 +195,13 @@ func cwdStateOrderFilter(observation cwdObservation) bson.M {
 
 func cwdStateDocument(observation cwdObservation, retention time.Duration) bson.M {
 	return bson.M{
-		"_id":                observation.SessionID,
-		"schemaVersion":      cwdStateSchemaVersion,
-		"sessionId":          observation.SessionID,
-		"sourceIp":           observation.SourceIP,
-		"stateSequence":      observation.At.UnixNano(),
-		"stateSourceEventId": observation.SourceEventID,
+		"_id":                     observation.SessionID,
+		"schemaVersion":           cwdStateSchemaVersion,
+		"sessionId":               observation.SessionID,
+		"auditCanonicalSessionId": observation.SessionID,
+		"sourceIp":                observation.SourceIP,
+		"stateSequence":           observation.At.UnixNano(),
+		"stateSourceEventId":      observation.SourceEventID,
 		"cwdState": bson.M{
 			"path":          observation.Path,
 			"status":        observation.Status,
@@ -228,12 +229,13 @@ func cwdStateUpdate(observation cwdObservation, retention time.Duration) mongo.P
 	nextGeneration := nextAuditProjectionGenerationExpression()
 	return mongo.Pipeline{
 		bson.D{{Key: "$set", Value: bson.M{
-			"schemaVersion":      document["schemaVersion"],
-			"sessionId":          document["sessionId"],
-			"sourceIp":           document["sourceIp"],
-			"stateSequence":      document["stateSequence"],
-			"stateSourceEventId": document["stateSourceEventId"],
-			"cwdState":           document["cwdState"],
+			"schemaVersion":           document["schemaVersion"],
+			"sessionId":               document["sessionId"],
+			"auditCanonicalSessionId": document["sessionId"],
+			"sourceIp":                document["sourceIp"],
+			"stateSequence":           document["stateSequence"],
+			"stateSourceEventId":      document["stateSourceEventId"],
+			"cwdState":                document["cwdState"],
 			// cwdStateOrderFilter rejects a closed state, so an authoritative CWD
 			// observation can safely activate a legacy projection that predates
 			// lifecycle metadata without reviving a closed session.
@@ -264,6 +266,7 @@ func cwdSessionCloseUpdate(sessionID string, closedAt time.Time, retention time.
 	return mongo.Pipeline{bson.D{{Key: "$set", Value: bson.M{
 		"schemaVersion":                    cwdStateSchemaVersion,
 		"sessionId":                        sessionID,
+		"auditCanonicalSessionId":          sessionID,
 		"lifecycle.status":                 "closed",
 		"lifecycle.closedAt":               closedAt,
 		"updatedAt":                        closedAt,

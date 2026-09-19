@@ -1499,11 +1499,16 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		filter     bson.M
 		sort       bson.D
 	}{
-		"repair":  {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
-		"cleanup": {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
+		"repair":          {"cwd_session_state", missingCwdAuditProjectionQuery("sessionId", ""), bson.D{{Key: "sessionId", Value: 1}}},
+		"cleanup":         {cwdAuditProjectionCollection, cwdAuditProjectionCleanupQuery(time.Now().UTC()), bson.D{{Key: "expires_at", Value: 1}}},
+		"source-presence": {"cwd_session_state", indexedCwdStateCanonicalQuery(sessionID), nil},
 	} {
 		var explained bson.M
-		if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: bson.D{{Key: "find", Value: spec.collection}, {Key: "filter", Value: spec.filter}, {Key: "sort", Value: spec.sort}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explained); err != nil {
+		find := bson.D{{Key: "find", Value: spec.collection}, {Key: "filter", Value: spec.filter}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
+		if spec.sort != nil {
+			find = append(find, bson.E{Key: "sort", Value: spec.sort})
+		}
+		if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: find}, {Key: "verbosity", Value: "executionStats"}}).Decode(&explained); err != nil {
 			t.Fatalf("explain %s: %v", name, err)
 		}
 		planText := fmt.Sprint(explained)
@@ -1513,6 +1518,7 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		if examined := maxExplainMetric(explained, "totalDocsExamined"); examined > int64(cwdAuditProjectionRepairBatchSize) {
 			t.Fatalf("explain %s exceeded the %d-document repair/cleanup bound: %d", name, cwdAuditProjectionRepairBatchSize, examined)
 		}
+		fmt.Printf("FA016_RETENTION %s docsExamined=%d keysExamined=%d\n", name, maxExplainMetric(explained, "totalDocsExamined"), maxExplainMetric(explained, "totalKeysExamined"))
 	}
 
 	// Source-owned cleanup removes an expired orphan only after its source is

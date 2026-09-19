@@ -52,6 +52,7 @@ func cwdStateIndexModels() []mongo.IndexModel {
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionPendingGeneration", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}})},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "sessionId", Value: 1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "session_id", Value: 1}}},
+		{Keys: bson.D{{Key: "auditCanonicalSessionId", Value: 1}}},
 		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
@@ -645,7 +646,7 @@ func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, n
 		if sessionID == "" {
 			continue
 		}
-		if _, err := mw.findCwdStateByCanonicalID(ctx, sessionID); err == nil {
+		if _, err := mw.findCwdStateByIndexedCanonicalID(ctx, sessionID); err == nil {
 			continue
 		} else if err != mongo.ErrNoDocuments {
 			return deleted, err
@@ -675,6 +676,7 @@ func (mw *MongoWriter) claimCwdAuditProjectionState(ctx context.Context, state b
 		mongo.Pipeline{bson.D{{Key: "$set", Value: bson.M{
 			"auditProjectionGeneration":        generation,
 			"auditProjectionPendingGeneration": generation,
+			"auditCanonicalSessionId":          auditProjectionSessionID(state),
 		}}}},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&claimed)
@@ -682,6 +684,21 @@ func (mw *MongoWriter) claimCwdAuditProjectionState(ctx context.Context, state b
 		return nil, nil
 	}
 	return claimed, err
+}
+
+func indexedCwdStateCanonicalQuery(sessionID string) bson.M {
+	return bson.M{"$or": bson.A{
+		bson.M{"_id": sessionID},
+		bson.M{"auditCanonicalSessionId": sessionID},
+		bson.M{"sessionId": sessionID},
+		bson.M{"session_id": sessionID},
+	}}
+}
+
+func (mw *MongoWriter) findCwdStateByIndexedCanonicalID(ctx context.Context, sessionID string) (bson.M, error) {
+	var state bson.M
+	err := mw.db.Collection("cwd_session_state").FindOne(ctx, indexedCwdStateCanonicalQuery(sessionID)).Decode(&state)
+	return state, err
 }
 
 func (mw *MongoWriter) backfillCwdAuditProjectionSession(ctx context.Context, sessionID string, retention time.Duration) error {
