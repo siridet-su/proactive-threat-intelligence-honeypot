@@ -236,5 +236,5 @@ Final validation passed `npm test`, `npm run test:filesystem-audit-integration`,
 modules. `git diff --check` passed; the isolated wrapper left no
 `pti-fa016-mongo-*` containers and no Playwright/test-result artifacts.
 Implementation commits are `53c9cc6` and `bd351b1`; tracker/evidence updates
-are in the subsequent documentation commit. FA-016 remains `IN PROGRESS` and
+are in `912784f` and `36fa589`. FA-016 remains `IN PROGRESS` and
 FS-007 remains `PARTIAL` pending re-audit.
