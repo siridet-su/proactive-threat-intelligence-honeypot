@@ -211,8 +211,9 @@ func cwdStateDocument(observation cwdObservation, retention time.Duration) bson.
 			"status":    "active",
 			"startedAt": observation.At,
 		},
-		"updatedAt":  observation.At,
-		"expires_at": expiryAt(observation.At, retention),
+		"updatedAt":            observation.At,
+		"expires_at":           expiryAt(observation.At, retention),
+		"auditProjectionDirty": true,
 	}
 }
 
@@ -230,9 +231,10 @@ func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M 
 			// cwdStateOrderFilter rejects a closed state, so an authoritative CWD
 			// observation can safely activate a legacy projection that predates
 			// lifecycle metadata without reviving a closed session.
-			"lifecycle.status": "active",
-			"updatedAt":        document["updatedAt"],
-			"expires_at":       document["expires_at"],
+			"lifecycle.status":     "active",
+			"updatedAt":            document["updatedAt"],
+			"expires_at":           document["expires_at"],
+			"auditProjectionDirty": true,
 		},
 		// Preserve the actual first CWD observation, while giving legacy
 		// documents lifecycle metadata the first time they receive v2 telemetry.
@@ -243,10 +245,11 @@ func cwdStateUpdate(observation cwdObservation, retention time.Duration) bson.M 
 func cwdSessionCloseUpdate(sessionID string, closedAt time.Time, retention time.Duration) bson.M {
 	return bson.M{
 		"$set": bson.M{
-			"lifecycle.status":   "closed",
-			"lifecycle.closedAt": closedAt,
-			"updatedAt":          closedAt,
-			"expires_at":         expiryAt(closedAt, retention),
+			"lifecycle.status":     "closed",
+			"lifecycle.closedAt":   closedAt,
+			"updatedAt":            closedAt,
+			"expires_at":           expiryAt(closedAt, retention),
+			"auditProjectionDirty": true,
 		},
 		// A close can be observed before an initial CWD event reaches this
 		// consumer. The tombstone makes that ordering safe: a later CWD insert
@@ -323,6 +326,9 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	stateChanged, err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention)
 	if err != nil {
 		return fmt.Errorf("update CWD state: %w", err)
+	}
+	if mw.auditAfterCwdStateUpdate != nil {
+		mw.auditAfterCwdStateUpdate()
 	}
 
 	// Command observations update only current state. History is reserved for

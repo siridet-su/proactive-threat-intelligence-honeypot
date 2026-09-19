@@ -339,6 +339,73 @@ export interface AuditScopingPipelineOptions {
 /** Version written by processor-agent into cwd_audit_projection. */
 export const AUDIT_PROJECTION_VERSION = "cwd_audit_projection.v2";
 
+// FA-016 source-row contract. Processor and dashboard both canonicalize the
+// first nonblank sessionId/session_id value with surrounding whitespace
+// removed, require a closed row with a parseable BSON date/string closedAt,
+// and accept only a trimmed absolute cwdState.path. The projection stores the
+// resulting canonical sessionId. Invalid rows are outside the retained Audit
+// directory and must never hold readiness false.
+function trimmedStringExpression(field: string): Document {
+  return {
+    $cond: [
+      { $eq: [{ $type: field }, "string"] },
+      { $trim: { input: field } },
+      null,
+    ],
+  };
+}
+
+function canonicalAuditSessionIdExpression(): Document {
+  return {
+    $let: {
+      vars: {
+        sessionId: trimmedStringExpression("$sessionId"),
+        legacySessionId: trimmedStringExpression("$session_id"),
+      },
+      in: {
+        $cond: [
+          { $and: [{ $ne: ["$$sessionId", null] }, { $ne: ["$$sessionId", ""] }] },
+          "$$sessionId",
+          { $cond: [{ $and: [{ $ne: ["$$legacySessionId", null] }, { $ne: ["$$legacySessionId", ""] }] }, "$$legacySessionId", null] },
+        ],
+      },
+    },
+  };
+}
+
+function auditClosedAtExpression(): Document {
+  return {
+    $convert: {
+      input: "$lifecycle.closedAt",
+      to: "date",
+      onError: null,
+      onNull: null,
+    },
+  };
+}
+
+function auditSourceEligibilityExpression(): Document {
+  return {
+    $and: [
+      { $ne: [canonicalAuditSessionIdExpression(), null] },
+      { $ne: [auditClosedAtExpression(), null] },
+      { $regexMatch: { input: { $ifNull: [trimmedStringExpression("$cwdState.path"), ""] }, regex: "^/" } },
+    ],
+  };
+}
+
+/** Bounded readiness probe shared by the dashboard and processor contract. */
+export function buildAuditProjectionReadinessQuery(): Document {
+  return {
+    "lifecycle.status": "closed",
+    $expr: auditSourceEligibilityExpression(),
+    $or: [
+      { auditProjectionVersion: { $ne: AUDIT_PROJECTION_VERSION } },
+      { auditProjectionDirty: true },
+    ],
+  };
+}
+
 export interface AuditSessionsPipelineOptions extends AuditScopingPipelineOptions {
   cursor?: string | null;
   limit?: number;
@@ -358,9 +425,12 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
     },
     {
       $addFields: {
-        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
+        effectiveSessionId: canonicalAuditSessionIdExpression(),
+        effectiveClosedAt: auditClosedAtExpression(),
+        effectiveCwdPath: trimmedStringExpression("$cwdState.path"),
       },
     },
+    { $match: { $expr: auditSourceEligibilityExpression() } },
     ...(options.sessionIds?.length ? [{ $match: { effectiveSessionId: { $in: options.sessionIds } } }] : []),
     {
       $lookup: {
@@ -372,7 +442,7 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
               $expr: {
                 $and: [
                   { $in: ["$action", ["entered", "changed", "failed_change"]] },
-                  { $or: [{ $eq: ["$sessionId", "$$sid"] }, { $eq: ["$session_id", "$$sid"] }] },
+                  { $or: [{ $eq: [trimmedStringExpression("$sessionId"), "$$sid"] }, { $eq: [trimmedStringExpression("$session_id"), "$$sid"] }] },
                 ],
               },
             },
@@ -391,12 +461,12 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
     },
     {
       $addFields: {
-        cwdPath: "$cwdState.path",
+        cwdPath: "$effectiveCwdPath",
         visitedPaths: {
           $filter: {
             input: {
               $setUnion: [
-                ["$cwdState.path"],
+                ["$effectiveCwdPath"],
                 "$historyEvents.fromPath",
                 "$historyEvents.successfulToPath",
               ],
@@ -516,9 +586,9 @@ export function buildAuditSessionsPipeline(options: AuditSessionsPipelineOptions
       if (!Number.isNaN(cursorDate.getTime()) && decoded.sessionId) {
         cursorMatch = {
           $or: [
-            { "lifecycle.closedAt": { $lt: cursorDate } },
+            { effectiveClosedAt: { $lt: cursorDate } },
             {
-              "lifecycle.closedAt": { $eq: cursorDate },
+              effectiveClosedAt: { $eq: cursorDate },
               effectiveSessionId: { $lt: decoded.sessionId },
             },
           ],
@@ -540,7 +610,7 @@ export function buildAuditSessionsPipeline(options: AuditSessionsPipelineOptions
         ...(cursorMatch ? [{ $match: cursorMatch }] : []),
         {
           $sort: {
-            "lifecycle.closedAt": -1,
+            effectiveClosedAt: -1,
             effectiveSessionId: -1,
           },
         },
@@ -594,9 +664,10 @@ export function buildAuditSummaryPipeline(options: AuditScopingPipelineOptions):
 function buildAuditProjectionBaseMatch(options: AuditScopingPipelineOptions = {}): Document {
   const match: Document = {
     "lifecycle.status": "closed",
-    "cwdState.path": { $type: "string", $ne: "" },
+    "cwdState.path": { $type: "string", $regex: "^/" },
     auditProjectionVersion: AUDIT_PROJECTION_VERSION,
     sessionId: { $type: "string", $ne: "" },
+    "lifecycle.closedAt": { $type: "date" },
   };
   if (options.projectionOverflow === "exclude") match.auditPathsOverflow = { $ne: true };
   if (options.projectionOverflow === "only") match.auditPathsOverflow = true;
@@ -701,7 +772,7 @@ export const buildAuditProjectionSessionsPipeline = buildAuditProjectionItemPipe
 
 export function buildAuditProjectionSummaryPipeline(options: AuditScopingPipelineOptions): Document[] {
   return [
-    { $match: buildAuditProjectionBaseMatch(options) },
+    ...buildAuditProjectionBaseStages({ projectionOverflow: options.projectionOverflow }),
     { $set: { matchesFilter: buildAuditProjectionFilterExpression(options) } },
     {
       $set: {

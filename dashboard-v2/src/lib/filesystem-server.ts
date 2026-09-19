@@ -20,6 +20,7 @@ import {
   buildAuditSessionsPipeline,
   buildAuditProjectionCountPipeline,
   buildAuditProjectionItemPipeline,
+  buildAuditProjectionReadinessQuery,
   buildAuditProjectionSummaryPipeline,
   buildAuditSummaryPipeline,
   buildSessionCwdHistoryPipeline,
@@ -51,6 +52,15 @@ const RECENT_CLOSED_BUFFER_LIMIT = 12;
 export const CLOSED_AUDIT_PATHS_CACHE_MAX_ENTRIES = RECENT_CLOSED_BUFFER_LIMIT * 2;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
+
+let auditProjectionReadinessTestHook: (() => Promise<void>) | null = null;
+
+// Deterministic integration hook for the rolling-old-writer cutover race. It
+// is inert in production and lets the isolated Mongo test insert a source row
+// between the marker read and the bounded pending-row probe.
+export function setAuditProjectionReadinessTestHook(hook: (() => Promise<void>) | null): void {
+  auditProjectionReadinessTestHook = hook;
+}
 
 // Closed session audit paths are immutable once closed; cached in-memory to
 // avoid querying and aggregating cwd_events on high-frequency live CWD ticks.
@@ -90,7 +100,7 @@ globalScope.__ptiFilesystemRuntime = runtime;
 function normalizeCwdState(value: unknown): SessionCwdState | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
-  const path = asString(record.path);
+  const path = asString(record.path)?.trim();
   if (!path) return null;
   return {
     path,
@@ -484,7 +494,7 @@ export interface AuditSessionsQueryOptions {
 }
 
 function mapDocumentToClosedSession(document: Document): FilesystemClosedSession | null {
-  const sessionId = asString(document.effectiveSessionId) ?? asString(document.sessionId) ?? asString(document.session_id);
+  const sessionId = (asString(document.effectiveSessionId) ?? asString(document.sessionId) ?? asString(document.session_id))?.trim();
   const cwdState = normalizeCwdState(document.cwdState);
   const lifecycle = document.lifecycle;
   if (!sessionId || !cwdState || !lifecycle || typeof lifecycle !== "object" || Array.isArray(lifecycle)) {
@@ -542,34 +552,34 @@ async function auditProjectionIsReady(): Promise<boolean> {
     .findOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION }, { projection: { _id: 1 } });
   if (!marker) return false;
 
-  // Eligibility is explicit: malformed historical rows are not retained Audit
-  // sessions and therefore cannot hold migration readiness false forever.
-  const eligible = await db.collection<Document>(SESSIONS_COLLECTION).find({
-    "lifecycle.status": "closed",
-    "cwdState.path": { $type: "string", $regex: "^/" },
-    $or: [
-      { sessionId: { $type: "string", $ne: "" } },
-      { session_id: { $type: "string", $ne: "" } },
-    ],
-  }, { projection: { _id: 1, sessionId: 1, session_id: 1, auditProjectionVersion: 1 } }).toArray();
-  const sessionIds = [...new Set(eligible.map((row) => asString(row.sessionId) ?? asString(row.session_id)).filter((id): id is string => Boolean(id)))];
-  if (eligible.some((row) => row.auditProjectionVersion !== AUDIT_PROJECTION_VERSION)) return false;
-  if (!sessionIds.length) return true;
-  const projected = await db.collection<Document & { _id: string }>(AUDIT_PROJECTION_COLLECTION).find({
-    _id: { $in: sessionIds },
-    auditProjectionVersion: AUDIT_PROJECTION_VERSION,
-  }, { projection: { _id: 1 } }).toArray();
-  return new Set(projected.map((row) => asString(row._id))).size === sessionIds.length;
+  if (auditProjectionReadinessTestHook) await auditProjectionReadinessTestHook();
+
+  // The processor writes this source marker only after the corresponding
+  // projection is durable. One indexed, bounded existence probe therefore
+  // replaces the old all-source/$in readiness scan. Invalid historical rows
+  // are deliberately outside the contract and cannot hold readiness false.
+  const pending = await db.collection<Document>(SESSIONS_COLLECTION).findOne(
+    buildAuditProjectionReadinessQuery(),
+    { projection: { _id: 1 } },
+  );
+  return pending === null;
 }
 
-async function getOverflowSessionIds(client: Awaited<ReturnType<typeof getMongoClient>>): Promise<string[]> {
+async function getOverflowSessionIds(client: Awaited<ReturnType<typeof getMongoClient>>, limit: number): Promise<string[]> {
   const rows = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).find({
     lifecycle: { $exists: true },
     "lifecycle.status": "closed",
     auditProjectionVersion: AUDIT_PROJECTION_VERSION,
     auditPathsOverflow: true,
-  }, { projection: { sessionId: 1 } }).toArray();
+  }, { projection: { sessionId: 1 } }).sort({ "lifecycle.closedAt": -1, sessionId: -1 }).limit(limit).toArray();
   return [...new Set(rows.map((row) => asString(row.sessionId)).filter((id): id is string => Boolean(id)))];
+}
+
+async function hasOverflowProjection(client: Awaited<ReturnType<typeof getMongoClient>>): Promise<boolean> {
+  return (await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).findOne(
+    { "lifecycle.status": "closed", auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditPathsOverflow: true },
+    { projection: { _id: 1 } },
+  )) !== null;
 }
 
 function sortAuditDocuments(documents: Document[]): Document[] {
@@ -607,35 +617,27 @@ export async function getAuditDirectorySummary(options: {
   const useProjection = await auditProjectionIsReady();
   if (!useProjection) return getAuditDirectorySummaryFromSource(client, options);
 
-  const overflowIds = await getOverflowSessionIds(client);
+  // A projection document intentionally caps paths at 512. Once any overflow
+  // exists, the summary is an explicitly scoped authoritative source query so
+  // MongoDB computes the global top 100 after combining every path population.
+  // Item pagination remains projection-backed below.
+  if (await hasOverflowProjection(client)) return getAuditDirectorySummaryFromSource(client, options);
+
   const projectionOptions = {
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
-    projectionOverflow: overflowIds.length ? "exclude" as const : undefined,
   };
   const projectionResult = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).aggregate<{
     overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
     distinctPaths: Array<{ path: string; sessionCount: number }>;
   }>(buildAuditProjectionSummaryPipeline(projectionOptions), { allowDiskUse: true }).toArray();
   const projectionOverview = projectionResult[0]?.overview?.[0];
-  let totalSessions = projectionOverview?.totalSessions ?? 0;
-  let homeOnlyCount = projectionOverview?.homeOnlyCount ?? 0;
+  const totalSessions = projectionOverview?.totalSessions ?? 0;
+  const homeOnlyCount = projectionOverview?.homeOnlyCount ?? 0;
   const hasFilter = Boolean(options.hideHome || options.targetPath || options.search);
-  let matchingCount = hasFilter ? (projectionOverview?.matchingCount ?? 0) : undefined;
+  const matchingCount = hasFilter ? (projectionOverview?.matchingCount ?? 0) : undefined;
   const pathCounts = new Map<string, number>((projectionResult[0]?.distinctPaths ?? []).map((item) => [item.path, item.sessionCount]));
-
-  if (overflowIds.length) {
-    const sourceResult = await client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION).aggregate<{
-      overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
-      distinctPaths: Array<{ path: string; sessionCount: number }>;
-    }>(buildAuditSummaryPipeline({ ...options, historyCollectionName: HISTORY_COLLECTION, sessionIds: overflowIds }), { allowDiskUse: true }).toArray();
-    const sourceOverview = sourceResult[0]?.overview?.[0];
-    totalSessions += sourceOverview?.totalSessions ?? 0;
-    homeOnlyCount += sourceOverview?.homeOnlyCount ?? 0;
-    if (hasFilter) matchingCount = (matchingCount ?? 0) + (sourceOverview?.matchingCount ?? 0);
-    for (const item of sourceResult[0]?.distinctPaths ?? []) pathCounts.set(item.path, (pathCounts.get(item.path) ?? 0) + item.sessionCount);
-  }
 
   // Re-evaluate the source set after the read. If an old writer inserted a
   // retained row during the projection query, restart from the source
@@ -663,7 +665,7 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
   };
   if (!useProjection) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
 
-  const overflowIds = await getOverflowSessionIds(client);
+  const overflowIds = await getOverflowSessionIds(client, limit + 1);
   const projectionOptions = { ...queryOptions, projectionOverflow: overflowIds.length ? "exclude" as const : undefined };
   const projectionCollection = client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION);
   const [projectionItems, projectionCount, summary] = await Promise.all([

@@ -235,11 +235,8 @@ describe("MongoDB Aggregation Pipeline Builders (FA-002)", () => {
         "cwdState.path": { $type: "string", $ne: "" },
       },
     });
-    expect(stages[1]).toEqual({
-      $addFields: {
-        effectiveSessionId: { $ifNull: ["$sessionId", "$session_id"] },
-      },
-    });
+    expect(stages[1].$addFields).toMatchObject({ effectiveSessionId: expect.any(Object) });
+    expect(JSON.stringify(stages[1])).toContain("$trim");
     // History lookup stage
     const lookupStage = stages.find((s) => "$lookup" in s) as { $lookup: Record<string, unknown> };
     expect(lookupStage).toBeDefined();
@@ -264,12 +261,12 @@ describe("MongoDB Aggregation Pipeline Builders (FA-002)", () => {
     expect(orClauses).toHaveLength(2);
 
     // First clause: closedAt < cursorDate
-    const ltClause = orClauses[0]["lifecycle.closedAt"] as { $lt: unknown };
+    const ltClause = orClauses[0].effectiveClosedAt as { $lt: unknown };
     expect(ltClause.$lt).toBeInstanceOf(Date);
     expect((ltClause.$lt as Date).toISOString()).toBe(sampleClosedAt);
 
     // Second clause: closedAt == cursorDate AND effectiveSessionId < cursorSessionId
-    const eqClause = orClauses[1]["lifecycle.closedAt"] as { $eq: unknown };
+    const eqClause = orClauses[1].effectiveClosedAt as { $eq: unknown };
     expect(eqClause.$eq).toBeInstanceOf(Date);
     expect((eqClause.$eq as Date).toISOString()).toBe(sampleClosedAt);
     expect(orClauses[1].effectiveSessionId).toEqual({ $lt: sampleSessionId });
@@ -666,12 +663,12 @@ describe("Execution-Level Fixture Tests: Filter-Then-Page Semantics (FA-002)", (
     const facet = pipeline.find((s) => "$facet" in s) as { $facet: { items: Document[] } };
     const match = facet.$facet.items.find((s) => "$match" in s) as { $match: { $or: Document[] } };
 
-    const ltCondition = match.$match.$or[0]["lifecycle.closedAt"];
+    const ltCondition = match.$match.$or[0].effectiveClosedAt;
     expect(ltCondition.$lt).toBeInstanceOf(Date);
     expect(typeof ltCondition.$lt).not.toBe("string");
     expect((ltCondition.$lt as Date).getTime()).toBe(new Date(isoDate).getTime());
 
-    const eqCondition = match.$match.$or[1]["lifecycle.closedAt"];
+    const eqCondition = match.$match.$or[1].effectiveClosedAt;
     expect(eqCondition.$eq).toBeInstanceOf(Date);
     expect(typeof eqCondition.$eq).not.toBe("string");
     expect((eqCondition.$eq as Date).getTime()).toBe(new Date(isoDate).getTime());

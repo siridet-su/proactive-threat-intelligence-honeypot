@@ -9,7 +9,7 @@ import {
   buildAuditProjectionSummaryPipeline,
   encodeAuditSessionCursor,
 } from "@/lib/filesystem-data";
-import { getAuditDirectorySummary, getAuditSessions } from "@/lib/filesystem-server";
+import { getAuditDirectorySummary, getAuditSessions, setAuditProjectionReadinessTestHook } from "@/lib/filesystem-server";
 import * as mongo from "@/lib/mongodb";
 import { AUDIT_PROJECTION_VERSION } from "@/lib/filesystem-data";
 import { validateFilesystemAuditTestTarget } from "../scripts/filesystem-audit-test-target.mjs";
@@ -44,11 +44,13 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
   let database: ReturnType<MongoClient["db"]>;
   let projection: Collection<Document>;
   const aggregateCommands: Document[] = [];
+  const commandEvents: Array<{ commandName: string; command: Document }> = [];
   const sessionCount = 1900;
 
   beforeAll(async () => {
     client = new MongoClient(target!.uri, { monitorCommands: true });
     client.on("commandStarted", (event) => {
+      commandEvents.push({ commandName: event.commandName, command: event.command });
       if (event.commandName === "aggregate") aggregateCommands.push(event.command);
     });
     await client.connect();
@@ -80,6 +82,15 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
       };
     });
     await projection.insertMany(docs, { ordered: true });
+    await database.collection("cwd_session_state").insertMany(docs.map((doc) => ({
+      _id: doc._id,
+      sessionId: doc.sessionId,
+      cwdState: doc.cwdState,
+      lifecycle: doc.lifecycle,
+      auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+      auditProjectionDirty: false,
+      expires_at: doc.expires_at,
+    })), { ordered: true });
     await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION, backfillCompletedAt: new Date() });
 
     const productionPathClient = {
@@ -89,9 +100,13 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     vi.spyOn(mongo, "getMongoClient").mockResolvedValue(productionPathClient as unknown as ReturnType<typeof mongo.getMongoClient>);
   });
 
-  beforeEach(() => aggregateCommands.length = 0);
+  beforeEach(() => {
+    aggregateCommands.length = 0;
+    commandEvents.length = 0;
+  });
 
   afterAll(async () => {
+    setAuditProjectionReadinessTestHook(null);
     await database.dropDatabase();
     await client.close();
     vi.restoreAllMocks();
@@ -130,6 +145,22 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     const invalid = await getAuditSessions({ limit: 25, cursor: Buffer.from("{}").toString("base64url") });
     expect(invalid.items).toHaveLength(0);
     expect(invalid.totalItems).toBe(sessionCount);
+  });
+
+  it("keeps the complete ordinary page request bounded, including readiness", async () => {
+    const page = await getAuditSessions({ limit: 25 });
+    expect(page.items).toHaveLength(25);
+    const readinessFinds = commandEvents.filter(({ commandName, command }) =>
+      commandName === "find" && String(command.find).includes("cwd_session_state"));
+    expect(readinessFinds.length).toBeGreaterThanOrEqual(2);
+    for (const { command } of readinessFinds) {
+      const serialized = JSON.stringify(command);
+      expect(serialized).not.toContain("$in");
+      expect(serialized.length).toBeLessThan(1_000_000);
+    }
+    // The request has two bounded readiness probes and two bounded projection
+    // aggregates; no command contains the retained 1,900-session identifier set.
+    expect(JSON.stringify(commandEvents).length).toBeLessThan(2_000_000);
   });
 
   it("returns authoritative totals, filters, and distinct paths from projection facts", async () => {
@@ -197,7 +228,12 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
   }, 15_000);
 
   it("uses the explicit migration fallback for canonical and legacy source documents", async () => {
-    await database.collection("cwd_audit_projection_meta").deleteMany({});
+    await Promise.all([
+      database.collection("cwd_session_state").deleteMany({}),
+      database.collection("cwd_events").deleteMany({}),
+      projection.deleteMany({}),
+      database.collection("cwd_audit_projection_meta").deleteMany({}),
+    ]);
     await database.collection("cwd_session_state").insertMany([
       { _id: "migration-canonical", sessionId: "migration-canonical", sourceIp: "203.0.113.1", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-18T00:00:00Z") } },
       { _id: "migration-legacy-state", session_id: "migration-legacy", sourceIp: "203.0.113.2", cwdState: { path: "/etc" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-17T00:00:00Z") } },
@@ -216,11 +252,18 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
 
     // An old rolling writer can publish a closed source row after the marker.
-    // Readiness must detect it and use the exact mixed-schema fallback rather
-    // than silently dropping the new session from the directory.
+    // The hook places that write between the marker read and the bounded
+    // readiness probe, so the request must use the exact mixed-schema fallback
+    // rather than silently dropping the new session from the directory.
     await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION });
-    await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") } });
+    let insertedByOldWriter = false;
+    setAuditProjectionReadinessTestHook(async () => {
+      if (insertedByOldWriter) return;
+      insertedByOldWriter = true;
+      await database.collection("cwd_session_state").insertOne({ _id: "migration-old-writer", sessionId: "migration-old-writer", sourceIp: "203.0.113.9", cwdState: { path: "/home/cowrie" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-16T00:00:00Z") } });
+    });
     const rollingPage = await getAuditSessions({ limit: 25 });
+    setAuditProjectionReadinessTestHook(null);
     expect(rollingPage.items.map((item) => item.sessionId)).toEqual(["migration-canonical", "migration-legacy", "migration-old-writer"]);
     expect(JSON.stringify(aggregateCommands.at(-1)?.pipeline)).toContain("$lookup");
   });
@@ -273,5 +316,66 @@ run("FA-016 isolated MongoDB retained Audit scale", () => {
     const summary = await getAuditDirectorySummary({ targetPath: "/overflow/619" });
     expect(summary.matchingCount).toBe(1);
     expect((await projection.findOne({ _id: "overflow-session" }))?.auditVisitedPaths).toHaveLength(512);
+  });
+
+  it("computes the global top 100 after combining overflow populations", async () => {
+    await Promise.all([
+      database.collection("cwd_session_state").deleteMany({}),
+      database.collection("cwd_events").deleteMany({}),
+      projection.deleteMany({}),
+      database.collection("cwd_audit_projection_meta").deleteMany({}),
+    ]);
+    const closedAt = new Date("2026-09-19T23:00:00.000Z");
+    const competitors = Array.from({ length: 101 }, (_, index) => `/competing/${String(index).padStart(3, "0")}`);
+    const sourceStates: Document[] = [];
+    const history: Document[] = [];
+    const projectionDocs: Document[] = [];
+    for (const population of ["projection", "overflow"]) {
+      for (const path of competitors.map((value) => `/${population}-${value.slice(1)}`)) {
+        for (let index = 0; index < 5; index += 1) {
+          const sessionId = `${population}-${path.slice(path.lastIndexOf("/") + 1)}-${index}`;
+          sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionDirty: false, expires_at: new Date("2099-01-01T00:00:00Z") });
+          history.push({ _id: `${sessionId}-event`, eventId: `${sessionId}-event`, sessionId, action: "entered", fromPath: path, toPath: path, at: closedAt });
+          projectionDocs.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditVisitedPaths: [path], auditTransitionPaths: [path], auditPathsOverflow: population === "overflow", auditHomeOnly: false, auditEventCount: 1, auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z") });
+        }
+      }
+    }
+    for (const population of ["projection", "overflow"]) {
+      for (let index = 0; index < 4; index += 1) {
+        const sessionId = `${population}-target-${index}`;
+        const path = "/globally-top";
+        sourceStates.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditProjectionVersion: AUDIT_PROJECTION_VERSION, auditProjectionDirty: false, expires_at: new Date("2099-01-01T00:00:00Z") });
+        history.push({ _id: `${sessionId}-event`, eventId: `${sessionId}-event`, sessionId, action: "entered", fromPath: path, toPath: path, at: closedAt });
+        projectionDocs.push({ _id: sessionId, sessionId, cwdState: { path }, lifecycle: { status: "closed", closedAt }, auditVisitedPaths: [path], auditTransitionPaths: [path], auditPathsOverflow: population === "overflow", auditHomeOnly: false, auditEventCount: 1, auditProjectionVersion: AUDIT_PROJECTION_VERSION, expires_at: new Date("2099-01-01T00:00:00Z") });
+      }
+    }
+    await database.collection("cwd_session_state").insertMany(sourceStates);
+    await database.collection("cwd_events").insertMany(history);
+    await projection.insertMany(projectionDocs);
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION, backfillCompletedAt: new Date() });
+
+    const summary = await getAuditDirectorySummary();
+    expect(summary.distinctPaths[0]).toEqual({ path: "/globally-top", sessionCount: 8 });
+    expect(summary.distinctPaths).not.toContainEqual({ path: "/projection-competing/000", sessionCount: 5 });
+  });
+
+  it("applies the same valid-row and canonical identifier contract to source fallback", async () => {
+    await Promise.all([
+      database.collection("cwd_session_state").deleteMany({}),
+      database.collection("cwd_events").deleteMany({}),
+      projection.deleteMany({}),
+      database.collection("cwd_audit_projection_meta").deleteMany({}),
+    ]);
+    await database.collection("cwd_session_state").insertMany([
+      { _id: "padded", sessionId: "  padded-id  ", cwdState: { path: " /home/cowrie " }, lifecycle: { status: "closed", closedAt: "2026-09-19T23:00:00.000Z" } },
+      { _id: "legacy", session_id: " legacy-id ", cwdState: { path: "/etc" }, lifecycle: { status: "closed", closedAt: new Date("2026-09-19T22:00:00.000Z") } },
+      { _id: "bad-id", sessionId: "   ", cwdState: { path: "/etc" }, lifecycle: { status: "closed", closedAt: new Date() } },
+      { _id: "bad-date", sessionId: "bad-date", cwdState: { path: "/etc" }, lifecycle: { status: "closed", closedAt: "not-a-date" } },
+      { _id: "bad-path", sessionId: "bad-path", cwdState: { path: "relative" }, lifecycle: { status: "closed", closedAt: new Date() } },
+      { _id: "active", sessionId: "active", cwdState: { path: "/etc" }, lifecycle: { status: "active", closedAt: new Date() } },
+    ]);
+    await database.collection("cwd_audit_projection_meta").insertOne({ _id: "audit-directory", projectionVersion: "cwd_audit_projection.v1" });
+    const page = await getAuditSessions({ limit: 25 });
+    expect(page.items.map((item) => item.sessionId)).toEqual(["padded-id", "legacy-id"]);
   });
 });

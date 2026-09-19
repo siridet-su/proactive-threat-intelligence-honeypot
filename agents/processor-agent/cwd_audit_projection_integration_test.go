@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/event"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -27,7 +30,13 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	var cwdEventFinds int
+	monitor := &event.CommandMonitor{Started: func(_ context.Context, started *event.CommandStartedEvent) {
+		if started.CommandName == "find" && started.Command.Lookup("find").StringValue() == "cwd_events" {
+			cwdEventFinds++
+		}
+	}}
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI).SetMonitor(monitor))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,6 +308,13 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 	if len(stringSlice(boundedDoc["auditTransitionPaths"])) > cwdAuditProjectionMaxPaths || boundedDoc["auditPathsOverflow"] != true {
 		t.Fatalf("projection history storage was not bounded: %#v", boundedDoc)
 	}
+	cwdEventFinds = 0
+	if err := mw.backfillCwdAuditProjection(ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if cwdEventFinds != 0 {
+		t.Fatalf("steady-state reconciliation read cwd_events for already-converged rows: %d", cwdEventFinds)
+	}
 }
 
 func TestFA016ProjectionOrderingInterleavings(t *testing.T) {
@@ -331,17 +347,27 @@ func TestFA016ProjectionOrderingInterleavings(t *testing.T) {
 	base := time.Date(2026, 9, 19, 23, 30, 0, 0, time.UTC)
 	newer := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.2", SourceEventID: "event-z", At: base.Add(2 * time.Minute), FromPath: "/old", Path: "/new", Action: "changed", Status: "confirmed"}
 	older := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.1", SourceEventID: "event-a", At: base, FromPath: "/old", Path: "/oldest", Action: "changed", Status: "confirmed"}
-	newerCommitted := make(chan struct{})
+	newerStateWritten := make(chan struct{})
+	releaseNewerProjection := make(chan struct{})
+	var stateBarrierStarted atomic.Bool
+	mw.auditAfterCwdStateUpdate = func() {
+		if stateBarrierStarted.CompareAndSwap(false, true) {
+			close(newerStateWritten)
+			<-releaseNewerProjection
+		}
+	}
+	newerFinished := make(chan error, 1)
 	oldFinished := make(chan error, 1)
+	go func() { newerFinished <- mw.recordCwdObservation(ctx, newer, retention) }()
+	<-newerStateWritten
 	go func() {
-		<-newerCommitted
 		oldFinished <- mw.recordCwdObservation(ctx, older, retention)
 	}()
-	if err := mw.recordCwdObservation(ctx, newer, retention); err != nil {
+	if err := <-oldFinished; err != nil {
 		t.Fatal(err)
 	}
-	close(newerCommitted)
-	if err := <-oldFinished; err != nil {
+	close(releaseNewerProjection)
+	if err := <-newerFinished; err != nil {
 		t.Fatal(err)
 	}
 	projection := db.Collection(cwdAuditProjectionCollection)
@@ -413,6 +439,77 @@ func TestFA016ProjectionOrderingInterleavings(t *testing.T) {
 	lifecycle, _ = doc["lifecycle"].(bson.M)
 	if cwdState["path"] != "/tie-new" || lifecycle["status"] != "closed" || doc["sourceIp"] != "198.51.100.2" || !testBSONTime(doc["expires_at"]).Equal(closedExpiry) {
 		t.Fatalf("stale active backfill crossed the close boundary: %#v", doc)
+	}
+}
+
+func TestFA016BackfillHistoryRevisionBarrier(t *testing.T) {
+	uri := os.Getenv("FA016_MONGO_URI")
+	databaseName := os.Getenv("FA016_MONGO_DB")
+	runID := os.Getenv("FA016_MONGO_RUN_ID")
+	if uri == "" && databaseName == "" && runID == "" {
+		t.Skip("FA016_MONGO_URI is not set")
+	}
+	target, err := validateFA016MongoTarget(uri, databaseName, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(target.URI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(target.Database)
+	if err := db.Drop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	mw := &MongoWriter{enabled: true, db: db}
+	if err := mw.ensureIndexes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	retention := time.Hour
+	base := time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)
+	// The current state is newer than both retained history events. The first
+	// backfill snapshot is held after its cwd_events read, then the late event
+	// is durably inserted and projected before the snapshot resumes.
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "history-race", SourceEventID: "state-current", At: base.Add(2 * time.Minute), Path: "/current", Action: "observed", Status: "observed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "history-race", SourceEventID: "history-initial", At: base, FromPath: "/home/cowrie", Path: "/initial", Action: "changed", Status: "confirmed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	readComplete := make(chan struct{})
+	resume := make(chan struct{})
+	var barrierOnce sync.Once
+	mw.auditBackfillAfterHistoryRead = func() {
+		barrierOnce.Do(func() {
+			close(readComplete)
+			<-resume
+		})
+	}
+	backfillDone := make(chan error, 1)
+	go func() {
+		backfillDone <- mw.backfillCwdAuditProjectionState(ctx, bson.M{"_id": "history-race", "sessionId": "history-race", "stateSequence": base.Add(2 * time.Minute).UnixNano(), "stateSourceEventId": "state-current", "cwdState": bson.M{"path": "/current"}, "lifecycle": bson.M{"status": "active", "startedAt": base}}, retention)
+	}()
+	<-readComplete
+	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "history-race", SourceEventID: "history-late", At: base.Add(time.Minute), FromPath: "/initial", Path: "/late", Action: "changed", Status: "confirmed"}, retention); err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	if err := <-backfillDone; err != nil {
+		t.Fatal(err)
+	}
+	projection := bson.M{}
+	if err := db.Collection(cwdAuditProjectionCollection).FindOne(ctx, bson.M{"_id": "history-race"}).Decode(&projection); err != nil {
+		t.Fatal(err)
+	}
+	if count := bsonInt64(projection["auditEventCount"]); count != 2 {
+		t.Fatalf("delayed backfill overwrote newer exact history count: %#v", projection)
+	}
+	paths := stringSlice(projection["auditTransitionPaths"])
+	if !containsString(paths, "/late") || !containsString(paths, "/initial") {
+		t.Fatalf("delayed backfill lost the late event path: %#v", projection)
 	}
 }
 
