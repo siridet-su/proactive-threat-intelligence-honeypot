@@ -311,9 +311,11 @@ is absent, without a close retry. The same pass normalizes missing/invalid
 source expiry to the deterministic closedAt-plus-retention boundary, including
 rows whose ready projection already exists. Orphan cleanup uses a resumable
 `(expires_at, _id)` cursor, advances past retained sources, wraps safely, and
-deletes only after an indexed source lookup and immediate delete CAS prove the
-source is gone. Existing event outbox ownership, generation CAS, history CAS,
-and bounded projection-backed dashboard item/count/summary paths are unchanged.
+deletes only BSON-Date watermarks, so malformed expiry values cannot stall the
+cursor; it then requires an indexed source lookup and immediate delete CAS to
+prove the source is gone. Existing event outbox ownership, generation CAS,
+history CAS, and bounded projection-backed dashboard item/count/summary paths
+are unchanged.
 
 The production Mongo integration tests directly cover projection-first removal
 with a ready source and no pending markers, invalid source expiry with an
