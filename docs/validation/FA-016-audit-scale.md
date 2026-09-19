@@ -365,7 +365,7 @@ cleanup, source recreation, eventual cleanup after source removal, and the
 retired-TTL-to-ordinary-index migration. Explain-statistics assertions verify
 the intended raw-field/`_id` and `expires_at`/`_id` indexes, no `COLLSCAN`, and
 at most 256 documents and keys examined per bounded batch. The isolated
-harness passed 12/12 dashboard integration tests and all 11 `TestFA016*`
+harness passed 12/12 dashboard integration tests and all 14 `TestFA016*`
 processor tests plus 2 target-safety tests, with none skipped.
 
 FA-016 remains `IN PROGRESS` and FS-007 remains `PARTIAL` pending re-audit.
