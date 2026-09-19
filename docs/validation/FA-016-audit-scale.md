@@ -202,3 +202,39 @@ Implementation commit `8d67ae6` and evidence/tracker commit `05018e1` were
 created without modifying prior commits. Final clean-tree status is recorded
 after those commits. FA-016 remains
 `IN PROGRESS` and FS-007 remains `PARTIAL` pending final re-audit.
+
+## Current event-outbox remediation evidence (2026-09-19)
+
+The required preflight was clean at `7ef06f1`; `git fetch origin --prune`
+succeeded, and `origin/main` (`4390d88`) was already an ancestor, so no merge
+was required. Baseline processor tests passed and the dashboard baseline was
+`22` Vitest files, `463` passing tests, and `14` skipped tests.
+
+The lifecycle protocol now treats `cwd_events.auditProjectionPending=true` as
+the authoritative indexed outbox bit. The source event counter is no longer
+written, queried, or used for readiness; old copies are removed when a source
+row passes the generation CAS. A pre-upsert failure leaves only retryable
+generation work. A durable event remains discoverable after a writer crash,
+and marker clear is an exclusive `MatchedCount` ownership CAS. Reconciliation
+uses an incremental batch cursor, not an unbounded pending-event slice. The
+dashboard readiness probe checks the same pending-event marker directly, so a
+pending event with no source counter forces truthful source fallback.
+
+The final isolated harness passed `12/12` dashboard integration tests and
+executed `11` production FA-016 Mongo tests plus `2` loopback-target safety
+tests, with no FA-016 test skipped. Its execution evidence remained
+`26/26` for item pages, `1,900/1,900` for exact count and summary, and
+`0/0`, `1/1`, `1/1`, and `2/2` for converged, pending, stale-version, and
+malformed source readiness branches. Pending-event zero/one/multiple probes
+were index-backed and limit-one bounded. The processor race fixtures verified
+failed upsert/retry/close, crash after durable insert, concurrent reconcilers,
+two pending events for one session, exact marker ownership, exact projection
+facts, absent source counter, and no subsequent authoritative history reads.
+
+Final validation passed `npm test`, `npm run test:filesystem-audit-integration`,
+`npm run lint`, `npm run build`, and `go test -count=1 ./...` in all five Go
+modules. `git diff --check` passed; the isolated wrapper left no
+`pti-fa016-mongo-*` containers and no Playwright/test-result artifacts.
+Implementation commits are `53c9cc6` and `bd351b1`; tracker/evidence updates
+are in the subsequent documentation commit. FA-016 remains `IN PROGRESS` and
+FS-007 remains `PARTIAL` pending re-audit.
