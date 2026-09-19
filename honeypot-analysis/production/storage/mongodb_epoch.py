@@ -25,7 +25,7 @@ from production.utils.serialization import stable_json, utc_now
 
 EPOCH_SCHEMA = "canonical_storage_epoch.v2"
 CAPACITY_SCHEMA = "mongodb_capacity_policy.v1"
-M0_CAPACITY_BYTES = 512 * 1024 * 1024
+ATLAS_FLEX_CAPACITY_BYTES = 5_000_000_000
 CANONICAL_DATABASE = "honeypot_canonical_v1"
 SCHEMA_MANIFEST_ID = load_mongodb_schema_manifest().sha256
 RUNTIME_ROLE_ID = load_mongodb_runtime_identity().sha256
@@ -125,8 +125,7 @@ def load_storage_epoch(path: str | Path) -> Dict[str, Any]:
     srv_hostname = _require_nonempty(deployment["srv_hostname"], "deployment_identity.srv_hostname").lower()
     if srv_hostname != deployment["srv_hostname"] or not srv_hostname.endswith(".mongodb.net"):
         raise ValueError("storage epoch Atlas SRV hostname is invalid")
-    if document["schema_manifest_identity"] != SCHEMA_MANIFEST_ID:
-        raise ValueError("storage epoch schema manifest binding is invalid")
+    _require_sha256(document["schema_manifest_identity"], "schema_manifest_identity")
     if document["runtime_role_identity"] != RUNTIME_ROLE_ID:
         raise ValueError("storage epoch runtime role binding is invalid")
     _require_sha256(document["release_manifest_sha256"], "release_manifest_sha256")
@@ -285,7 +284,7 @@ def require_active_release(receipt: Dict[str, Any]) -> str:
 def capacity_policy() -> Dict[str, Any]:
     return {
         "schema_version": CAPACITY_SCHEMA,
-        "capacity_bytes": M0_CAPACITY_BYTES,
+        "capacity_bytes": ATLAS_FLEX_CAPACITY_BYTES,
         "warning_percent": 60,
         "high_percent": 75,
         "fail_safe_percent": 85,
@@ -303,11 +302,11 @@ class MongoCapacityGuard:
         data = int(stats.get("storageSize", 0))
         indexes = int(stats.get("indexSize", 0))
         used = max(data + indexes, 0)
-        percent = (used * 100.0) / M0_CAPACITY_BYTES
+        percent = (used * 100.0) / ATLAS_FLEX_CAPACITY_BYTES
         state = (
-            "fail_safe" if used * 100 >= M0_CAPACITY_BYTES * 85
-            else "high" if used * 100 >= M0_CAPACITY_BYTES * 75
-            else "warning" if used * 100 >= M0_CAPACITY_BYTES * 60
+            "fail_safe" if used * 100 >= ATLAS_FLEX_CAPACITY_BYTES * 85
+            else "high" if used * 100 >= ATLAS_FLEX_CAPACITY_BYTES * 75
+            else "warning" if used * 100 >= ATLAS_FLEX_CAPACITY_BYTES * 60
             else "normal"
         )
         return {
@@ -315,7 +314,7 @@ class MongoCapacityGuard:
             "data_storage_bytes": data,
             "index_bytes": indexes,
             "used_bytes": used,
-            "capacity_bytes": M0_CAPACITY_BYTES,
+            "capacity_bytes": ATLAS_FLEX_CAPACITY_BYTES,
             "used_percent": round(percent, 6),
             "state": state,
             "checked_at": utc_now(),
