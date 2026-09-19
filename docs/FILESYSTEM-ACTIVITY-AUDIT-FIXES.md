@@ -296,50 +296,109 @@ further implementation work under this item.
 
 ### FA-013 component/browser evidence (2026-09-19)
 
-FA-013 adds `dashboard-v2/tests/fa013-component-evidence.test.tsx` with five
-production-path happy-dom scenarios: the real selector/filter composition
-applies hide-home and target-path scope through remote page-one/page-two
-search, deduplicates and completes pagination; `useSessionCwdHistory` plus
-`CwdRouteHistory` resolves a retained deep hop, preserves the URL anchor, and
-reconciles the anchor when an earlier page loads; the controlled Response tab
-uses fake timers to verify 100 ms then 150 ms cadence, terminal stop, and
-disable abort; `TopologyCanvas` renders a valid empty live snapshot as
-`Live · No activity` with zero freshness timers; and the real range input maps
-uneven elapsed positions plus Home/End hop navigation.
+The accepted FA-012 ownership boundaries are preserved: `FilesystemActivity`
+remains the page composition owner, `useAuditReplay` owns replay state and
+autoplay, `useResponseActionController` owns response requests/polling,
+`useFilesystemStreaming` owns freshness/ticking, and presentation components
+remain request-free and timer-free.
 
-Existing production-path happy-dom coverage remains authoritative for the
-remaining interaction breadth: `filesystem-navigation-history.test.ts` uses
-real `window.history` traversal and popstate for view/session/filter/hop state,
-stale retained-session lookup results, and history-entry ownership;
-`combobox-popover.test.ts` renders `AuditSessionSelect` and
-`AuditFilterControls` and asserts document focus, Arrow/Home/End/Enter/Space/
-Escape/typeahead behavior, ARIA ownership, loading/empty/error/retry/reset/load
-more controls, identity-preserving focus recovery, parent-controlled pagination,
-and stale page-two cancellation; `response-action-poller.test.ts` and
-`filesystem-ownership-boundaries.test.tsx` cover monotonic backoff, bounded
-timeout, session/enable/unmount cancellation, and controlled composition; and
-`filesystem-replay-scrubber.test.ts` covers equal, invalid, missing, and
-non-monotonic timestamp fallback, tie resolution, pause behavior, and partial
-versus complete labels.
+Happy-dom component evidence:
 
-Real-browser-only evidence is in `tests/browser/filesystem-fa013.spec.mjs` and
-runs with the pinned `@playwright/test@1.55.0` dependency, system Chromium, and
-the dedicated `npm run test:browser` command. Scenario G exercises the real
-`FilesystemActivity` toolbar at 375, 768, and 1440 CSS pixels, checking visible
-bounding boxes and collapsed/expanded timeline reachability. Scenario H uses a
-real `prefers-reduced-motion: reduce` media setting, switches the production
-Forensic Studio tabs, and asserts zero-duration transitions with functional
-state changes. These two scenarios are not claimed as happy-dom coverage.
+- `fa013-component-evidence.test.tsx` renders production `ResponseActionPanel`
+  with `useResponseActionController` and fake timers for monotonic 100 ms then
+  150 ms polling, terminal stop, and disable cancellation (E).
+- The same file renders `TopologyCanvas` with a valid empty live snapshot and
+  with a retained valid empty snapshot under degraded transport. It asserts
+  `Live · No activity`, truthful degraded/retained-snapshot messaging, and zero
+  freshness timers in both cases (F).
+- The same file renders the production `CwdRouteHistory` with the real
+  `useAuditReplay` presentation. It verifies elapsed-millisecond range
+  positions, nearest-event selection with earliest-event ties, pause/input and
+  Home/End behavior, and the explicit index fallback for malformed timing (I).
+- `combobox-popover.test.ts` remains the real-DOM component evidence for
+  `AuditSessionSelect` and `AuditFilterControls`: keyboard/focus movement,
+  Escape and selection restoration, search and option ownership, ARIA state,
+  loading/empty/error/retry/reset/load-more controls, identity-preserving focus,
+  parent-controlled pagination, and stale page-two cancellation (D).
+- `response-action-poller.test.ts` and
+  `filesystem-ownership-boundaries.test.tsx` provide the accepted controller
+  and production-composition polling/ownership evidence (E). Existing
+  `filesystem-replay-scrubber.test.ts` supplements the scrubber timing fallback
+  and partial/complete labels (I).
+- `filesystem-navigation-history.test.ts` is happy-dom/helper-orchestration
+  evidence for coordinator transactions, popstate delivery, stale retained
+  lookup cancellation, and history-entry ownership. It is not claimed as
+  Chromium browser Back/Forward coverage.
+- The former local pagination and deep-link replicas were removed. Their A/B
+  evidence now runs through the production page in Chromium below.
 
-Validation evidence: `npm test` in `dashboard-v2` passed 22 files with 459
-passing and 2 skipped tests; `npm run test:browser` passed 2 browser tests;
-`npm run lint` passed with 0 errors and 0 warnings; `npm run build` passed
-TypeScript, static generation, and route optimization; `git diff --check`
-passed; and `go test -count=1 ./...` passed in all five Go modules
+Real-browser evidence:
+
+- `tests/browser/filesystem-fa013.spec.mjs` runs the production
+  `/filesystem-activity` page with deterministic intercepted APIs. Scenario A
+  applies hide-home and `/var/log` filters, performs cursor page-one/page-two
+  search with unique append and exhaustion UI, leaves stale page two pending,
+  changes query scope, and proves the obsolete response cannot mutate the new
+  results or completion state. The production parent-controlled selector path
+  is used; no standalone fallback request is installed by the test.
+- Scenario B starts at a deep audit URL, retains the requested hop while its
+  direct lookup is pending, displays an authoritative anchored target without
+  splicing it into page one, loads earlier history for identity reconciliation,
+  and preserves the absolute hop/URL. It also exercises explicit unknown-hop
+  and lookup-error recovery plus Show latest and Clear hop without silently
+  clearing the URL.
+- Scenario C uses intentional production UI navigation and actual browser
+  `window.history` traversal (`page.goBack()`/`page.goForward()` for the main
+  path, and browser `history.back()`/`history.forward()` for rapid traversal).
+  It verifies view, session, hide-home, target path, and hop restoration,
+  history length, no feedback entries, and a delayed retained-session lookup
+  from A → B → A → B whose late A response cannot overwrite B.
+- Scenario G uses a real Chromium layout engine at 375, 768, and 1440 CSS
+  pixels. It checks bounding-box reachability, page and toolbar horizontal
+  overflow, and actual timeline collapse to an inert/hidden panel followed by
+  expansion with replay controls reachable.
+- Scenario H uses Chromium `prefers-reduced-motion: reduce` and the production
+  replay/Response/Command tabs, asserting immediate zero-duration transitions,
+  no running animations, and functional controls. Scenarios G/H are not
+  described as happy-dom coverage. D, E, F, and I are component-tier evidence;
+  the browser file intentionally does not duplicate those claims.
+
+Hydration and browser failure policy: URL-owned state and persisted timeline
+preferences use deterministic server/client initial values, then the mounted
+production page applies the original search transaction after hydration. This
+preserves deep-link URLs without push/replace feedback entries and retains
+session/hop lookup and navigation transaction behavior. The browser harness
+fails on every `pageerror` and every unexpected `console.error`; the only
+narrow allowlist is the intentionally intercepted HTTP 500 for the
+`error-hop` recovery scenario. Direct audit, filter, session, and hop URLs are
+opened under this policy and passed without hydration/runtime errors.
+
+Browser portability and isolation: `playwright.config.mjs` defaults to the
+pinned Playwright-managed Chromium. Machines that require a system browser may
+set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`; the reproducible managed install is
+`npx playwright install chromium`. The suite uses isolated `127.0.0.1:3100`,
+intercepts every API used by the scenarios, contacts no production services,
+MongoDB, or response agents, and writes Playwright output to
+`/tmp/proactive-threat-intelligence-fa013-playwright` so browser reports do not
+dirty the repository.
+
+Validation recorded for this follow-up: from `dashboard-v2`, `npm test` passed
+22 files with 457 passing and 2 skipped tests (459 total), and
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`
+passed 5 Chromium tests in 26.2 seconds. `npm run lint` passed with 0 errors
+and 0 warnings; `npm run build` passed TypeScript, static generation, and route
+optimization; `git diff --check` passed; and
+`go test -count=1 ./...` passed in each of the five Go modules
 (`collector-agent`, `hardware-agent`, `processor-agent`, `response-agent`, and
-`ti-worker`). Deterministic intercepted fixtures were used; no production
-services, MongoDB, response agent, or live smoke test was contacted. FA-013
-remains `IN PROGRESS` pending audit. FA-014 and later items were not started.
+`ti-worker`). The browser command is the repository's `npm run test:browser`
+script; this environment used the documented explicit system-browser override
+because its Playwright-managed binary is not installed. Preflight began at
+`0f688ec85787707dc611891a7e80c1c904f713e7` on
+`feat/cwd-filesystem-telemetry` with a clean tree; fetch authentication was
+unavailable over the configured SSH remote, and the existing
+`origin/main` (`4e90071c788ec7f1d61b4756ed527a445d993973`) equaled the merge
+base, so no merge was required. FA-013 remains `IN PROGRESS` pending audit.
+FA-014 and later items remain `TODO` and were not started.
 
 ## Required validation gate
 

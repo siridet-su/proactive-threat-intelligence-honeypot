@@ -958,6 +958,12 @@ export function TopologyCanvas({
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className="p-5">
+          {!isAuditMode && freshnessState.isDegraded && (
+            <div role="status" className="mb-4 rounded-lg border border-warning-border bg-surface-raised px-3 py-2 text-xs text-text">
+              <strong className="font-semibold text-warning">Degraded connection:</strong>{" "}
+              Showing retained snapshot.
+            </div>
+          )}
           <RegionState
             kind="empty"
             title={isAuditMode ? "No session selected for audit" : "No observed working directories yet"}

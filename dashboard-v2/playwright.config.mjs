@@ -1,4 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 
 export default defineConfig({
   testDir: "./tests/browser",
@@ -7,13 +11,14 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   reporter: "line",
+  outputDir: join(tmpdir(), "proactive-threat-intelligence-fa013-playwright"),
   use: {
     ...devices["Desktop Chrome"],
     baseURL: "http://127.0.0.1:3100",
     browserName: "chromium",
     headless: true,
     ignoreHTTPSErrors: true,
-    launchOptions: { executablePath: "/usr/bin/chromium" },
+    ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
   },
   webServer: {
     command: "npm run dev -- --hostname 127.0.0.1 --port 3100",

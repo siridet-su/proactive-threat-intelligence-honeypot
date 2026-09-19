@@ -16,7 +16,7 @@ import {
   Route,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import type {
   FilesystemClosedSession,
@@ -38,7 +38,6 @@ import {
   buildAuditUrlSearch,
   clampTimelineSidebarWidth,
   formatPageBadgeText,
-  parseAuditUrlParams,
   type AuditUrlParams,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
@@ -65,6 +64,18 @@ interface NavigationApplicationErrorState {
   message: string;
 }
 
+function readStoredTimelineWidth(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
+    if (!saved) return null;
+    const parsed = parseInt(saved, 10);
+    return Number.isFinite(parsed) ? clampTimelineSidebarWidth(parsed) : null;
+  } catch {
+    return null;
+  }
+}
+
 type ForensicTab = "replay" | "commands" | "actions";
 
 export function FilesystemActivity() {
@@ -79,21 +90,19 @@ export function FilesystemActivity() {
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
-  const [timelineWidth, setTimelineWidth] = useState<number>(() => {
-    if (typeof window === "undefined") return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-    try {
-      const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
-      if (saved) {
-        const parsedWidth = parseInt(saved, 10);
-        if (Number.isFinite(parsedWidth)) {
-          return clampTimelineSidebarWidth(parsedWidth);
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-  });
+  const persistedTimelineWidth = useSyncExternalStore(
+    useCallback(() => () => {}, []),
+    readStoredTimelineWidth,
+    () => null,
+  );
+  const [timelineWidthOverride, setTimelineWidthOverride] = useState<number | null>(null);
+  const timelineWidth = timelineWidthOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
+  const setTimelineWidth = useCallback((next: number | ((current: number) => number)) => {
+    setTimelineWidthOverride((currentOverride) => {
+      const current = currentOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
+      return typeof next === "function" ? next(current) : next;
+    });
+  }, [persistedTimelineWidth]);
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
   const [activeForensicTab, setActiveForensicTab] = useState<ForensicTab>("replay");
 
@@ -104,15 +113,10 @@ export function FilesystemActivity() {
   const auditDialogRef = useRef<HTMLDivElement | null>(null);
   const focusBeforeFullscreenRef = useRef<HTMLElement | null>(null);
   const [remoteAuditLookupManager] = useState(() => {
-    const initialView =
-      typeof window !== "undefined" && parseAuditUrlParams(window.location.search).view === "audit"
-        ? "audit"
-        : "live";
-    const initialParsed = typeof window !== "undefined" ? parseAuditUrlParams(window.location.search) : null;
     return new RemoteAuditLookupCoordinator({
-      initialViewMode: initialView,
-      initialSessionId: initialParsed?.sessionId ?? null,
-      initialTargetHopId: initialParsed?.hop ?? null,
+      initialViewMode: "live",
+      initialSessionId: null,
+      initialTargetHopId: null,
     });
   });
   const lookupRemoteAuditSessionRef = useRef<((intentOrId: RemoteAuditLookupIntent | string, explicitHop?: string | null) => Promise<void> | void) | null>(null);
@@ -135,14 +139,14 @@ export function FilesystemActivity() {
 
   // Persist timeline width preference
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== "undefined" && (persistedTimelineWidth !== null || timelineWidthOverride !== null)) {
       try {
         localStorage.setItem(TIMELINE_SIDEBAR_STORAGE_KEY, String(timelineWidth));
       } catch {
         // ignore
       }
     }
-  }, [timelineWidth]);
+  }, [persistedTimelineWidth, timelineWidth, timelineWidthOverride]);
 
   // Prevent text selection and preserve resize cursor during drag
   useEffect(() => {
@@ -179,11 +183,11 @@ export function FilesystemActivity() {
 
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
-  }, [timelineWidth]);
+  }, [setTimelineWidth, timelineWidth]);
 
   const handleResetTimelineWidth = useCallback(() => {
     setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
-  }, []);
+  }, [setTimelineWidth]);
 
   const handleSplitterKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "ArrowLeft") {
@@ -196,7 +200,7 @@ export function FilesystemActivity() {
       e.preventDefault();
       setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
     }
-  }, []);
+  }, [setTimelineWidth]);
 
   // Streaming & snapshot management hook
   const {
@@ -232,6 +236,7 @@ export function FilesystemActivity() {
     setExpiredSessionId,
     requestedHopRef,
     requestedSessionIdRef,
+    applyInitialUrlState,
     navigationCoordinator,
   } = useFilesystemUrlState({
     isHydrated,
@@ -356,7 +361,7 @@ export function FilesystemActivity() {
       requestedSessionIdRef,
       selectedSessionIdRef,
       requestedHopRef,
-      viewMode,
+      viewMode: viewModeRef.current,
       lookupRemoteAuditSession: (intent) => lookupRemoteAuditSessionRef.current?.(intent),
       setExpiredSessionId,
       setSelectedSessionId,
@@ -381,7 +386,7 @@ export function FilesystemActivity() {
       if (valid) return current;
       return selectedLiveSession?.cwdState.path ?? data.sessions[0]?.cwdState.path ?? data.nodes[0]?.path ?? null;
     });
-  }, [extraAuditSessions, viewMode, setExpiredSessionId, requestedSessionIdRef, requestedHopRef, remoteAuditLookupManager]);
+  }, [extraAuditSessions, viewModeRef, setExpiredSessionId, requestedSessionIdRef, requestedHopRef, remoteAuditLookupManager]);
 
   useEffect(() => {
     handleSnapshotAppliedRef.current = handleSnapshotApplied;
@@ -659,6 +664,10 @@ export function FilesystemActivity() {
     setIsPlaying,
   ]);
 
+  useEffect(() => {
+    applyInitialUrlState();
+  }, [applyInitialUrlState]);
+
   const handleUserSelectSession = useCallback(
     (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => {
       navigationCoordinator.userSelectSession(sessionId, sessionObj);
@@ -797,7 +806,7 @@ export function FilesystemActivity() {
   }, [isAuditFullscreen]);
 
   return (
-    <div className="space-y-5 pb-10 sm:pb-14">
+    <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
       {navigationApplicationError ? (
         <div
           role="alert"

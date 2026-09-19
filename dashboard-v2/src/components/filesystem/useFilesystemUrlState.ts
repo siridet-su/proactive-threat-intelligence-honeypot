@@ -79,6 +79,7 @@ export interface UseFilesystemUrlStateReturn {
   requestedSessionIdRef: React.MutableRefObject<string | null>;
   commitUserNavigation: (updates: NavigationStateCommitOptions) => void;
   commitPlaybackNavigation: (hopId: string | null) => void;
+  applyInitialUrlState: () => void;
   navigationCoordinator: FilesystemNavigationCoordinator;
 }
 
@@ -93,36 +94,18 @@ export function useFilesystemUrlState(
     setSelectedSessionId,
   } = options;
 
-  const [viewMode, setViewMode] = useState<"live" | "audit">(() => {
-    if (typeof window === "undefined") return "live";
-    const parsed = parseAuditUrlParams(window.location.search);
-    return parsed.view ?? "live";
-  });
-  const [hideHomeOnly, setHideHomeOnly] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    const parsed = parseAuditUrlParams(window.location.search);
-    return Boolean(parsed.hideHome);
-  });
-  const [targetPathFilter, setTargetPathFilter] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const parsed = parseAuditUrlParams(window.location.search);
-    return parsed.targetPath ?? null;
-  });
-  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const parsed = parseAuditUrlParams(window.location.search);
-    return parsed.hop ?? null;
-  });
-  const [expiredSessionId, setExpiredSessionId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    const parsed = parseAuditUrlParams(window.location.search);
-    return parsed.sessionId ?? null;
-  });
+  // URL-owned state is deliberately initialized to the same values on the
+  // server and browser. The address bar is applied after hydration below;
+  // reading window.location in a state initializer would make the first
+  // client render differ from the server render for deep links.
+  const [viewMode, setViewMode] = useState<"live" | "audit">("live");
+  const [hideHomeOnly, setHideHomeOnly] = useState(false);
+  const [targetPathFilter, setTargetPathFilter] = useState<string | null>(null);
+  const [selectedHistoryEventId, setSelectedHistoryEventId] = useState<string | null>(null);
+  const [expiredSessionId, setExpiredSessionId] = useState<string | null>(null);
 
-  const requestedHopRef = useRef<string | null>(selectedHistoryEventId);
-  const requestedSessionIdRef = useRef<string | null>(
-    typeof window !== "undefined" ? parseAuditUrlParams(window.location.search).sessionId ?? null : null,
-  );
+  const requestedHopRef = useRef<string | null>(null);
+  const requestedSessionIdRef = useRef<string | null>(null);
 
   const fallbackSelectedSessionIdRef = useRef<string | null>(selectedSessionId);
   const activeSessionIdRef = options.selectedSessionIdRef ?? fallbackSelectedSessionIdRef;
@@ -160,6 +143,9 @@ export function useFilesystemUrlState(
   }, [expiredSessionId]);
 
   const [navigationCoordinator] = useState(() => new FilesystemNavigationCoordinator());
+  const initialUrlAppliedRef = useRef(false);
+  const initialUrlApplicationScheduledRef = useRef(false);
+  const initialUrlSearchRef = useRef<string | null>(null);
 
   // Synchronize dynamic URL state bindings owned exclusively by useFilesystemUrlState
   useEffect(() => {
@@ -175,11 +161,26 @@ export function useFilesystemUrlState(
       getExtraAuditSessions: () => extraAuditSessions,
       setExtraAuditSessions: options.setExtraAuditSessions,
 
-      setViewMode,
-      setHideHomeOnly,
-      setTargetPathFilter,
-      setSelectedHistoryEventId,
-      setExpiredSessionId,
+      setViewMode: (next) => {
+        viewModeRef.current = next;
+        setViewMode(next);
+      },
+      setHideHomeOnly: (next) => {
+        hideHomeOnlyRef.current = next;
+        setHideHomeOnly(next);
+      },
+      setTargetPathFilter: (next) => {
+        targetPathFilterRef.current = next;
+        setTargetPathFilter(next);
+      },
+      setSelectedHistoryEventId: (next) => {
+        selectedHistoryEventIdRef.current = next;
+        setSelectedHistoryEventId(next);
+      },
+      setExpiredSessionId: (next) => {
+        expiredSessionIdRef.current = next;
+        setExpiredSessionId(next);
+      },
       setSelectedSessionId: (id) => {
         activeSessionIdRef.current = id;
         setSelectedSessionId?.(id);
@@ -237,10 +238,22 @@ export function useFilesystemUrlState(
     return () => window.removeEventListener("popstate", handlePopState);
   }, [navigationCoordinator]);
 
+  // Called by FilesystemActivity after its domain adapter is bound. This is a
+  // state adoption transaction, not a URL write, so the original deep-link
+  // entry remains authoritative and no push/replace feedback entry is made.
+  const applyInitialUrlState = useCallback(() => {
+    if (typeof window === "undefined" || initialUrlApplicationScheduledRef.current) return;
+    initialUrlApplicationScheduledRef.current = true;
+    initialUrlSearchRef.current = window.location.search;
+    navigationCoordinator.handlePopState(window.location.search);
+    initialUrlAppliedRef.current = true;
+  }, [navigationCoordinator]);
+
   // Synchronize React navigation & filter state with the URL for initial hydration and system-driven fallbacks
   // Guarded against overwriting pending popstate targets with stale pre-navigation React state
   useEffect(() => {
-    if (!isHydrated || typeof window === "undefined") return;
+    if (!isHydrated || !initialUrlAppliedRef.current || typeof window === "undefined") return;
+    if (initialUrlSearchRef.current === window.location.search) return;
     navigationCoordinator.synchronizeUrlState();
   }, [
     isHydrated,
@@ -270,6 +283,7 @@ export function useFilesystemUrlState(
     requestedSessionIdRef,
     commitUserNavigation,
     commitPlaybackNavigation,
+    applyInitialUrlState,
     navigationCoordinator,
   };
 }
