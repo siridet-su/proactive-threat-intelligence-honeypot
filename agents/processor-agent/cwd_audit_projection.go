@@ -51,8 +51,8 @@ func cwdStateIndexModels() []mongo.IndexModel {
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "session_id", Value: -1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}}},
 		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionPendingGeneration", Value: 1}}, Options: options.Index().SetPartialFilterExpression(bson.M{"auditProjectionPendingGeneration": bson.M{"$exists": true}})},
-		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "sessionId", Value: 1}, {Key: "_id", Value: 1}}},
-		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "auditProjectionVersion", Value: 1}, {Key: "session_id", Value: 1}, {Key: "_id", Value: 1}}},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "sessionId", Value: 1}, {Key: "_id", Value: 1}}},
+		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "session_id", Value: 1}, {Key: "_id", Value: 1}}},
 		{Keys: bson.D{{Key: "auditCanonicalSessionId", Value: 1}}},
 		{Keys: bson.D{{Key: "sessionId", Value: 1}}},
 		{Keys: bson.D{{Key: "session_id", Value: 1}}},
@@ -579,7 +579,7 @@ func (mw *MongoWriter) backfillCwdAuditProjection(ctx context.Context, retention
 	if err := mw.repairMissingCwdAuditProjections(ctx, retention); err != nil {
 		return err
 	}
-	if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC()); err != nil {
+	if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC(), retention); err != nil {
 		return err
 	}
 	_, err = mw.db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": time.Now().UTC()}}, options.Update().SetUpsert(true))
@@ -615,11 +615,8 @@ type cwdRepairCursor struct {
 
 func missingCwdAuditProjectionKeysetQuery(field string, cursor *cwdRepairCursor) bson.M {
 	match := bson.M{
-		"lifecycle.status":                 "closed",
-		"auditProjectionVersion":           cwdAuditProjectionVersion,
-		"auditProjectionReadyGeneration":   bson.M{"$exists": true},
-		"auditProjectionPendingGeneration": bson.M{"$exists": false},
-		field:                              bson.M{"$type": "string"},
+		"lifecycle.status": "closed",
+		field:              bson.M{"$type": "string"},
 	}
 	if cursor != nil {
 		match["$or"] = bson.A{
@@ -652,7 +649,8 @@ func cwdRepairCursorCASFilter(cursorKey string, cursor *cwdRepairCursor) bson.M 
 	if cursor == nil {
 		filter[cursorKey] = bson.M{"$exists": false}
 	} else {
-		filter[cursorKey] = cwdRepairCursorDocument(cursor)
+		filter[cursorKey+".value"] = cursor.Value
+		filter[cursorKey+".id"] = cursor.ID
 	}
 	return filter
 }
@@ -680,6 +678,9 @@ func (mw *MongoWriter) repairMissingCwdAuditProjectionField(ctx context.Context,
 			last = &cwdRepairCursor{Value: rawValue, ID: state["_id"]}
 		}
 		if !rawOK {
+			continue
+		}
+		if !cwdAuditSourceReadyForRepair(state) {
 			continue
 		}
 		sessionID := strings.TrimSpace(rawValue)
@@ -741,8 +742,24 @@ func (mw *MongoWriter) repairMissingCwdAuditProjectionField(ctx context.Context,
 	if last == nil {
 		return nil
 	}
-	_, err = meta.UpdateOne(ctx, cwdRepairCursorCASFilter(cursorKey, start), bson.M{"$set": bson.M{cursorKey: cwdRepairCursorDocument(last)}})
+	result, err := meta.UpdateOne(ctx, cwdRepairCursorCASFilter(cursorKey, start), bson.M{"$set": bson.M{cursorKey: cwdRepairCursorDocument(last)}})
+	if err == nil && result.MatchedCount != 1 {
+		// Another reconciler owns a newer cursor. Its CAS is authoritative; do
+		// not overwrite it or treat a lost duplicate claim as progress.
+		return nil
+	}
 	return err
+}
+
+func cwdAuditSourceReadyForRepair(state bson.M) bool {
+	if state["auditProjectionVersion"] != cwdAuditProjectionVersion {
+		return false
+	}
+	if _, ready := state["auditProjectionReadyGeneration"]; !ready {
+		return false
+	}
+	_, pending := state["auditProjectionPendingGeneration"]
+	return !pending
 }
 
 func validCwdAuditRepairState(state bson.M, sessionID string) bool {
@@ -799,7 +816,22 @@ func cwdCleanupCursorDocument(cursor *cwdCleanupCursor) bson.M {
 	return bson.M{"expiresAt": cursor.ExpiresAt, "id": cursor.ID}
 }
 
-func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, now time.Time) (int64, error) {
+func cwdCleanupCursorCASFilter(cursorKey string, cursor *cwdCleanupCursor) bson.M {
+	filter := bson.M{"_id": cwdAuditProjectionMetaID}
+	if cursor == nil {
+		filter[cursorKey] = bson.M{"$exists": false}
+	} else {
+		filter[cursorKey+".expiresAt"] = cursor.ExpiresAt
+		filter[cursorKey+".id"] = cursor.ID
+	}
+	return filter
+}
+
+func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, now time.Time, retention time.Duration) (int64, error) {
+	malformedDeleted, err := mw.cleanupMalformedCwdAuditProjections(ctx, retention)
+	if err != nil {
+		return 0, err
+	}
 	projections := mw.db.Collection(cwdAuditProjectionCollection)
 	meta := mw.db.Collection("cwd_audit_projection_meta")
 	marker := bson.M{}
@@ -814,7 +846,7 @@ func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, n
 		return 0, err
 	}
 	defer rows.Close(ctx)
-	var deleted int64
+	var deleted int64 = malformedDeleted
 	batchCount := 0
 	for rows.Next(ctx) {
 		batchCount++
@@ -843,7 +875,7 @@ func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, n
 		} else if err != mongo.ErrNoDocuments {
 			return deleted, err
 		}
-		result, err := projections.DeleteOne(ctx, bson.M{"_id": projection["_id"], "expires_at": bson.M{"$lte": now}})
+		result, err := projections.DeleteOne(ctx, bson.M{"_id": projection["_id"], "expires_at": expiresAt})
 		if err != nil {
 			return deleted, err
 		}
@@ -862,20 +894,147 @@ func (mw *MongoWriter) cleanupOrphanedCwdAuditProjections(ctx context.Context, n
 		if original == nil {
 			return deleted, nil
 		}
-		cursorFilter := bson.M{"_id": cwdAuditProjectionMetaID, "cleanupProjectionCursor": cwdCleanupCursorDocument(original)}
-		_, err := meta.UpdateOne(ctx, cursorFilter, bson.M{"$unset": bson.M{"cleanupProjectionCursor": ""}})
-		return deleted, err
+		result, err := meta.UpdateOne(ctx, cwdCleanupCursorCASFilter("cleanupProjectionCursor", original), bson.M{"$unset": bson.M{"cleanupProjectionCursor": ""}})
+		if err != nil || result.MatchedCount != 1 {
+			// A concurrent cleanup pass owns a newer cursor or has already
+			// wrapped it. Its CAS result is authoritative; retrying the bounded
+			// work on the next pass is safe and cannot regress that cursor.
+			return deleted, err
+		}
+		return deleted, nil
 	}
 	if start == nil {
 		return deleted, nil
 	}
-	cursorFilter := bson.M{"_id": cwdAuditProjectionMetaID}
-	if original == nil {
-		cursorFilter["cleanupProjectionCursor"] = bson.M{"$exists": false}
-	} else {
-		cursorFilter["cleanupProjectionCursor"] = cwdCleanupCursorDocument(original)
+	result, err := meta.UpdateOne(ctx, cwdCleanupCursorCASFilter("cleanupProjectionCursor", original), bson.M{"$set": bson.M{"cleanupProjectionCursor": cwdCleanupCursorDocument(start)}})
+	if err != nil {
+		return deleted, err
 	}
-	if _, err := meta.UpdateOne(ctx, cursorFilter, bson.M{"$set": bson.M{"cleanupProjectionCursor": cwdCleanupCursorDocument(start)}}); err != nil {
+	if result.MatchedCount != 1 {
+		return deleted, nil
+	}
+	return deleted, nil
+}
+
+type cwdMalformedProjectionCursor struct {
+	ID any
+}
+
+func decodeCwdMalformedProjectionCursor(value any) *cwdMalformedProjectionCursor {
+	document, ok := value.(bson.M)
+	if !ok || document["id"] == nil {
+		return nil
+	}
+	return &cwdMalformedProjectionCursor{ID: document["id"]}
+}
+
+func cwdMalformedProjectionCursorDocument(cursor *cwdMalformedProjectionCursor) bson.M {
+	return bson.M{"id": cursor.ID}
+}
+
+func cwdMalformedProjectionCursorCASFilter(cursor *cwdMalformedProjectionCursor) bson.M {
+	filter := bson.M{"_id": cwdAuditProjectionMetaID}
+	if cursor == nil {
+		filter["malformedProjectionCursor"] = bson.M{"$exists": false}
+	} else {
+		filter["malformedProjectionCursor.id"] = cursor.ID
+	}
+	return filter
+}
+
+func malformedProjectionExpiryDeleteFilter(projection bson.M) bson.M {
+	filter := bson.M{"_id": projection["_id"]}
+	if value, exists := projection["expires_at"]; exists {
+		filter["expires_at"] = value
+	} else {
+		filter["expires_at"] = bson.M{"$exists": false}
+	}
+	return filter
+}
+
+func (mw *MongoWriter) cleanupMalformedCwdAuditProjections(ctx context.Context, retention time.Duration) (int64, error) {
+	projections := mw.db.Collection(cwdAuditProjectionCollection)
+	meta := mw.db.Collection("cwd_audit_projection_meta")
+	marker := bson.M{}
+	if err := meta.FindOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, options.FindOne().SetProjection(bson.M{"malformedProjectionCursor": 1})).Decode(&marker); err != nil && err != mongo.ErrNoDocuments {
+		return 0, err
+	}
+	original := decodeCwdMalformedProjectionCursor(marker["malformedProjectionCursor"])
+	start := original
+	filter := bson.M{}
+	if start != nil {
+		filter["_id"] = bson.M{"$gt": start.ID}
+	}
+	rows, err := projections.Find(ctx, filter, options.Find().SetProjection(bson.M{"_id": 1, "sessionId": 1, "session_id": 1, "expires_at": 1}).SetSort(bson.D{{Key: "_id", Value: 1}}).SetLimit(cwdAuditProjectionRepairBatchSize))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close(ctx)
+	var deleted int64
+	batchCount := 0
+	for rows.Next(ctx) {
+		batchCount++
+		var projection bson.M
+		if err := rows.Decode(&projection); err != nil {
+			return deleted, err
+		}
+		start = &cwdMalformedProjectionCursor{ID: projection["_id"]}
+		if _, valid := sourceBSONExpiry(projection["expires_at"]); valid {
+			continue
+		}
+		sessionID := auditProjectionSessionID(projection)
+		if sessionID != "" {
+			state, lookupErr := mw.findCwdStateByIndexedCanonicalID(ctx, sessionID)
+			if lookupErr == nil {
+				if err := mw.backfillCwdAuditProjectionState(ctx, state, retention); err != nil {
+					return deleted, err
+				}
+				continue
+			}
+			if lookupErr != mongo.ErrNoDocuments {
+				return deleted, lookupErr
+			}
+		}
+		if mw.auditBeforeCwdProjectionDelete != nil {
+			mw.auditBeforeCwdProjectionDelete(sessionID)
+		}
+		if sessionID != "" {
+			if _, lookupErr := mw.findCwdStateByIndexedCanonicalID(ctx, sessionID); lookupErr == nil {
+				continue
+			} else if lookupErr != mongo.ErrNoDocuments {
+				return deleted, lookupErr
+			}
+		}
+		result, err := projections.DeleteOne(ctx, malformedProjectionExpiryDeleteFilter(projection))
+		if err != nil {
+			return deleted, err
+		}
+		deleted += result.DeletedCount
+	}
+	if err := rows.Err(); err != nil {
+		return deleted, err
+	}
+	if err := rows.Close(ctx); err != nil {
+		return deleted, err
+	}
+	if _, err := meta.UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$setOnInsert": bson.M{"_id": cwdAuditProjectionMetaID}}, options.Update().SetUpsert(true)); err != nil {
+		return deleted, err
+	}
+	if batchCount == 0 {
+		if original == nil {
+			return deleted, nil
+		}
+		result, err := meta.UpdateOne(ctx, cwdMalformedProjectionCursorCASFilter(original), bson.M{"$unset": bson.M{"malformedProjectionCursor": ""}})
+		if err != nil || result.MatchedCount != 1 {
+			return deleted, err
+		}
+		return deleted, nil
+	}
+	if start == nil {
+		return deleted, nil
+	}
+	result, err := meta.UpdateOne(ctx, cwdMalformedProjectionCursorCASFilter(original), bson.M{"$set": bson.M{"malformedProjectionCursor": cwdMalformedProjectionCursorDocument(start)}})
+	if err != nil || result.MatchedCount != 1 {
 		return deleted, err
 	}
 	return deleted, nil

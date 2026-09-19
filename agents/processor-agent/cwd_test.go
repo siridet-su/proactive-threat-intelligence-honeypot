@@ -279,6 +279,40 @@ func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndSourceOwnedCleanup(
 	if !foundLegacy {
 		t.Fatal("missing legacy session_id closed-time state index")
 	}
+	for _, expected := range []bson.D{
+		{{Key: "lifecycle.status", Value: 1}, {Key: "sessionId", Value: 1}, {Key: "_id", Value: 1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "session_id", Value: 1}, {Key: "_id", Value: 1}},
+	} {
+		found := false
+		for _, index := range cwdStateIndexModels() {
+			if keys, ok := index.Keys.(bson.D); ok && sameIndexKeys(keys, expected) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing raw repair keyset index %#v", expected)
+		}
+	}
+}
+
+func TestFA016CursorCASUsesDottedFields(t *testing.T) {
+	repair := cwdRepairCursor{Value: "raw", ID: "source"}
+	repairFilter := cwdRepairCursorCASFilter("repairCursor", &repair)
+	if _, ok := repairFilter["repairCursor"]; ok {
+		t.Fatalf("repair CAS must not compare an embedded document: %#v", repairFilter)
+	}
+	if repairFilter["repairCursor.value"] != repair.Value || repairFilter["repairCursor.id"] != repair.ID {
+		t.Fatalf("repair CAS does not use dotted fields: %#v", repairFilter)
+	}
+	cleanup := cwdCleanupCursor{ExpiresAt: time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC), ID: "projection"}
+	cleanupFilter := cwdCleanupCursorCASFilter("cleanupCursor", &cleanup)
+	if _, ok := cleanupFilter["cleanupCursor"]; ok {
+		t.Fatalf("cleanup CAS must not compare an embedded document: %#v", cleanupFilter)
+	}
+	if cleanupFilter["cleanupCursor.expiresAt"] != cleanup.ExpiresAt || cleanupFilter["cleanupCursor.id"] != cleanup.ID {
+		t.Fatalf("cleanup CAS does not use dotted fields: %#v", cleanupFilter)
+	}
 }
 
 func TestFA016MongoTargetRejectsUnsafeConfigurationsBeforeCallback(t *testing.T) {

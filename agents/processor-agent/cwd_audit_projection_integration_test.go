@@ -1564,8 +1564,8 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 			t.Fatalf("explain %s: %v", name, err)
 		}
 		planText := fmt.Sprint(explained)
-		if strings.Contains(planText, "COLLSCAN") || !strings.Contains(planText, "IXSCAN") {
-			t.Fatalf("explain %s used COLLSCAN: %#v", name, explained)
+		if strings.Contains(planText, "COLLSCAN") || (!strings.Contains(planText, "IXSCAN") && !strings.Contains(planText, "IDHACK")) {
+			t.Fatalf("explain %s was not index-backed: %#v", name, explained)
 		}
 		if examined := maxExplainMetric(explained, "totalDocsExamined"); examined > int64(cwdAuditProjectionRepairBatchSize) {
 			t.Fatalf("explain %s exceeded the %d-document repair/cleanup bound: %d", name, cwdAuditProjectionRepairBatchSize, examined)
@@ -1586,7 +1586,7 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 	if _, err := db.Collection(cwdAuditProjectionCollection).InsertOne(ctx, bson.M{"_id": orphanID, "sessionId": orphanID, "expires_at": time.Now().UTC().Add(-time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC())
+	deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, time.Now().UTC(), time.Hour)
 	if err != nil || deleted != 1 {
 		t.Fatalf("orphan cleanup did not delete exactly one source-less projection: deleted=%d err=%v", deleted, err)
 	}
@@ -1618,6 +1618,22 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 	if _, err := db.Collection(cwdAuditProjectionMetaID).InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
 		t.Fatal(err)
 	}
+	repairCASCursor := &cwdRepairCursor{Value: "raw-cursor", ID: "repair-cursor-id"}
+	for _, stored := range []bson.D{
+		{{Key: "value", Value: repairCASCursor.Value}, {Key: "id", Value: repairCASCursor.ID}},
+		{{Key: "id", Value: repairCASCursor.ID}, {Key: "value", Value: repairCASCursor.Value}},
+	} {
+		if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"missingProjectionSessionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
+			t.Fatal(err)
+		}
+		result, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, cwdRepairCursorCASFilter("missingProjectionSessionCursor", repairCASCursor), bson.M{"$set": bson.M{"missingProjectionSessionCursor": cwdRepairCursorDocument(repairCASCursor)}})
+		if err != nil || result.MatchedCount != 1 {
+			t.Fatalf("repair cursor dotted CAS failed for field order %#v: matched=%d err=%v", stored, result.MatchedCount, err)
+		}
+	}
+	if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"missingProjectionSessionCursor": ""}}); err != nil {
+		t.Fatal(err)
+	}
 	closedAt := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
 	retention := time.Hour
 	expiresAt := closedAt.Add(retention)
@@ -1638,6 +1654,12 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 	for index := 0; index < 256; index++ {
 		addSource(fmt.Sprintf("malformed-c-%03d", index), "sessionId", "   ", "relative")
 	}
+	for index := 0; index < 1000; index++ {
+		sources = append(sources, bson.M{
+			"_id": fmt.Sprintf("nonready-c-%04d", index), "sessionId": fmt.Sprintf("a-nonready-c-%04d", index), "cwdState": bson.M{"path": "/nonready/canonical"},
+			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1),
+		})
+	}
 	addSource("padded-canonical-boundary", "sessionId", "a-canonical-boundary ", "/canonical/boundary")
 	for index := 0; index < 298; index++ {
 		addSource(fmt.Sprintf("canonical-%03d", index), "sessionId", fmt.Sprintf("b-canonical-%03d", index), fmt.Sprintf("/canonical/%03d", index))
@@ -1646,6 +1668,12 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 	addSource("canonical-repeat-b", "sessionId", "b-repeat", "/canonical/repeat-b")
 	for index := 0; index < 256; index++ {
 		addSource(fmt.Sprintf("malformed-l-%03d", index), "session_id", "   ", "relative")
+	}
+	for index := 0; index < 1000; index++ {
+		sources = append(sources, bson.M{
+			"_id": fmt.Sprintf("nonready-l-%04d", index), "session_id": fmt.Sprintf("a-nonready-l-%04d", index), "cwdState": bson.M{"path": "/nonready/legacy"},
+			"lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1),
+		})
 	}
 	addSource("padded-legacy-boundary", "session_id", "a-legacy-boundary ", "/legacy/boundary")
 	for index := 0; index < 298; index++ {
@@ -1754,6 +1782,22 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 	if err := mw.ensureIndexes(ctx); err != nil {
 		t.Fatal(err)
 	}
+	cleanupCASCursor := &cwdCleanupCursor{ExpiresAt: time.Now().UTC().Add(-time.Hour), ID: "cleanup-cursor-id"}
+	for _, stored := range []bson.D{
+		{{Key: "expiresAt", Value: cleanupCASCursor.ExpiresAt}, {Key: "id", Value: cleanupCASCursor.ID}},
+		{{Key: "id", Value: cleanupCASCursor.ID}, {Key: "expiresAt", Value: cleanupCASCursor.ExpiresAt}},
+	} {
+		if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$set": bson.M{"cleanupProjectionCursor": stored}}, options.Update().SetUpsert(true)); err != nil {
+			t.Fatal(err)
+		}
+		result, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, cwdCleanupCursorCASFilter("cleanupProjectionCursor", cleanupCASCursor), bson.M{"$set": bson.M{"cleanupProjectionCursor": cwdCleanupCursorDocument(cleanupCASCursor)}})
+		if err != nil || result.MatchedCount != 1 {
+			t.Fatalf("cleanup cursor dotted CAS failed for field order %#v: matched=%d err=%v", stored, result.MatchedCount, err)
+		}
+	}
+	if _, err := db.Collection(cwdAuditProjectionMetaID).UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"cleanupProjectionCursor": ""}}); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	watermark := now.Add(-time.Hour)
 	states := db.Collection("cwd_session_state")
@@ -1769,6 +1813,13 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 		projectionDocs = append(projectionDocs, bson.M{"_id": id, "sessionId": id, "expires_at": watermark})
 	}
 	projectionDocs = append(projectionDocs, bson.M{"_id": "malformed-cleanup-watermark", "sessionId": "malformed-cleanup-watermark", "expires_at": "not-a-date"})
+	projectionDocs = append(projectionDocs, bson.M{"_id": "malformed-missing-watermark", "sessionId": "malformed-missing-watermark"})
+	stateDocs = append(stateDocs, bson.M{
+		"_id": "malformed-retained-source", "sessionId": "malformed-retained", "cwdState": bson.M{"path": "/malformed/retained"},
+		"lifecycle": bson.M{"status": "closed", "closedAt": now.Add(-2 * time.Hour)}, "expires_at": now.Add(time.Hour),
+		"auditProjectionVersion": cwdAuditProjectionVersion, "auditProjectionGeneration": int64(1), "auditProjectionReadyGeneration": int64(1),
+	})
+	projectionDocs = append(projectionDocs, bson.M{"_id": "malformed-retained", "sessionId": "malformed-retained", "expires_at": "not-a-date"})
 	if _, err := states.InsertMany(ctx, stateDocs); err != nil {
 		t.Fatal(err)
 	}
@@ -1789,8 +1840,18 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 		t.Fatalf("cleanup plan did not use the expires_at/_id keyset index: %#v", indexNames)
 	}
 	fmt.Fprintf(os.Stderr, "FA016_CLEANUP indexes=%v docsExamined=%d keysExamined=%d\n", indexNames, maxExplainMetric(explain, "totalDocsExamined"), maxExplainMetric(explain, "totalKeysExamined"))
+	var malformedExplain bson.M
+	malformedFind := bson.D{{Key: "find", Value: cwdAuditProjectionCollection}, {Key: "filter", Value: bson.M{}}, {Key: "sort", Value: bson.D{{Key: "_id", Value: 1}}}, {Key: "limit", Value: int64(cwdAuditProjectionRepairBatchSize)}}
+	if err := db.RunCommand(ctx, bson.D{{Key: "explain", Value: malformedFind}, {Key: "verbosity", Value: "executionStats"}}).Decode(&malformedExplain); err != nil {
+		t.Fatal(err)
+	}
+	malformedPlanText := fmt.Sprint(malformedExplain)
+	if strings.Contains(malformedPlanText, "COLLSCAN") || !strings.Contains(malformedPlanText, "IXSCAN") || maxExplainMetric(malformedExplain, "totalDocsExamined") > int64(cwdAuditProjectionRepairBatchSize) || maxExplainMetric(malformedExplain, "totalKeysExamined") > int64(cwdAuditProjectionRepairBatchSize) || !containsStringFragment(explainIndexNames(malformedExplain), "_id_") {
+		t.Fatalf("malformed cleanup plan exceeded bounded _id keyset contract: %#v", malformedExplain)
+	}
+	fmt.Fprintf(os.Stderr, "FA016_MALFORMED_CLEANUP indexes=%v docsExamined=%d keysExamined=%d\n", explainIndexNames(malformedExplain), maxExplainMetric(malformedExplain, "totalDocsExamined"), maxExplainMetric(malformedExplain, "totalKeysExamined"))
 
-	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil || deleted != 0 {
+	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now, time.Hour); err != nil || deleted != 0 {
 		t.Fatalf("first cleanup pass should retain the 256 source-backed head rows: deleted=%d err=%v", deleted, err)
 	}
 	var once sync.Once
@@ -1801,8 +1862,8 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 			})
 		}
 	}
-	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil || deleted != 2 {
-		t.Fatalf("second cleanup pass did not reach later orphans: deleted=%d err=%v", deleted, err)
+	if deleted, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now, time.Hour); err != nil || deleted != 4 {
+		t.Fatalf("second cleanup pass did not reach later orphans and malformed cleanup: deleted=%d err=%v", deleted, err)
 	}
 	for _, id := range []string{"orphan-after-head-a", "orphan-after-head-b"} {
 		if err := projection.FindOne(ctx, bson.M{"_id": id}).Err(); err != mongo.ErrNoDocuments {
@@ -1812,10 +1873,24 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 	if got, err := projection.CountDocuments(ctx, bson.M{"_id": bson.M{"$regex": "^keep-"}}); err != nil || got != int64(cwdAuditProjectionRepairBatchSize) {
 		t.Fatalf("source-backed head projections were not retained: %d err=%v", got, err)
 	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "malformed-cleanup-watermark"}).Err(); err != mongo.ErrNoDocuments {
+		t.Fatalf("source-less malformed projection was not removed: %v", err)
+	}
+	if err := projection.FindOne(ctx, bson.M{"_id": "malformed-missing-watermark"}).Err(); err != mongo.ErrNoDocuments {
+		t.Fatalf("source-less missing-expiry projection was not removed: %v", err)
+	}
+	retainedMalformed := bson.M{}
+	if err := projection.FindOne(ctx, bson.M{"_id": "malformed-retained"}).Decode(&retainedMalformed); err != nil {
+		t.Fatalf("source-backed malformed projection was not rebuilt: %v", err)
+	}
+	retainedCwdState, _ := retainedMalformed["cwdState"].(bson.M)
+	if !testBSONTime(retainedMalformed["expires_at"]).Equal(now.Add(time.Hour).Truncate(time.Millisecond)) || retainedCwdState["path"] != "/malformed/retained" {
+		t.Fatalf("source-backed malformed projection was not rebuilt exactly: %#v", retainedMalformed)
+	}
 
 	results := make(chan error, 2)
-	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); results <- err }()
-	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); results <- err }()
+	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now, time.Hour); results <- err }()
+	go func() { _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now, time.Hour); results <- err }()
 	if err := <-results; err != nil {
 		t.Fatal(err)
 	}
@@ -1830,7 +1905,7 @@ func TestFA016CleanupCursorSkipsRetainedHeadAndRechecksRecreatedSource(t *testin
 		t.Fatal(err)
 	}
 	for pass := 0; pass < 3; pass++ {
-		if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now); err != nil {
+		if _, err := mw.cleanupOrphanedCwdAuditProjections(ctx, now, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
