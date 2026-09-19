@@ -18,12 +18,15 @@ import {
   asStatus,
   asString,
   buildAuditSessionsPipeline,
+  buildAuditProjectionSessionsPipeline,
+  buildAuditProjectionSummaryPipeline,
   buildAuditSummaryPipeline,
   buildSessionCwdHistoryPipeline,
   encodeAuditSessionCursor,
   encodeHistoryCursor,
   normalizeHistoryEvent,
   normalizeSessionAuditSummary,
+  AUDIT_PROJECTION_VERSION,
 } from "@/lib/filesystem-data";
 import { deriveLatestTelemetryAt } from "@/lib/filesystem-freshness";
 import { createBoundedLruCache } from "@/lib/bounded-lru-cache";
@@ -34,6 +37,8 @@ import { getMongoClient } from "@/lib/mongodb";
 const DATABASE_NAME = "honeypot_db";
 const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
+const AUDIT_PROJECTION_COLLECTION = "cwd_audit_projection";
+const AUDIT_PROJECTION_META_COLLECTION = "cwd_audit_projection_meta";
 const TOPOLOGY_LIMIT = 500;
 // Live topology SSE broadcast maintains only a small immediate transition buffer
 // of recently closed sessions; the complete searchable/paginated closed directory
@@ -486,7 +491,9 @@ function mapDocumentToClosedSession(document: Document): FilesystemClosedSession
   }
   const lifecycleRecord = lifecycle as Record<string, unknown>;
 
-  const rawVisited = Array.isArray(document.visitedPaths) ? document.visitedPaths : [cwdState.path];
+  const rawVisited = Array.isArray(document.auditVisitedPaths)
+    ? document.auditVisitedPaths
+    : (Array.isArray(document.visitedPaths) ? document.visitedPaths : [cwdState.path]);
   const visitedSet = new Set<string>();
   for (const p of rawVisited) {
     if (typeof p === "string" && p.startsWith("/")) {
@@ -501,10 +508,13 @@ function mapDocumentToClosedSession(document: Document): FilesystemClosedSession
   const nonRootPaths = visitedPaths.filter((p) => p !== "/");
   const hasHomePath = nonRootPaths.some((p) => p === "/home" || p.startsWith("/home/"));
   const hasOutsideHomePath = nonRootPaths.some((p) => p !== "/home" && !p.startsWith("/home/"));
-  const homeOnly = typeof document.homeOnly === "boolean" ? document.homeOnly : (hasHomePath && !hasOutsideHomePath);
+  const homeOnly = typeof document.auditHomeOnly === "boolean"
+    ? document.auditHomeOnly
+    : (typeof document.homeOnly === "boolean" ? document.homeOnly : (hasHomePath && !hasOutsideHomePath));
 
-  const eventCount = typeof document.eventCount === "number" && Number.isSafeInteger(document.eventCount) && document.eventCount >= 0
-    ? document.eventCount
+  const rawEventCount = document.auditEventCount ?? document.eventCount;
+  const eventCount = typeof rawEventCount === "number" && Number.isSafeInteger(rawEventCount) && rawEventCount >= 0
+    ? rawEventCount
     : 0;
 
   return {
@@ -523,14 +533,23 @@ function mapDocumentToClosedSession(document: Document): FilesystemClosedSession
   };
 }
 
+async function auditProjectionIsReady(): Promise<boolean> {
+  const client = await getMongoClient();
+  const marker = await client.db(DATABASE_NAME)
+    .collection<Document & { _id: string }>(AUDIT_PROJECTION_META_COLLECTION)
+    .findOne({ _id: "audit-directory", projectionVersion: AUDIT_PROJECTION_VERSION }, { projection: { _id: 1 } });
+  return marker !== null;
+}
+
 export async function getAuditDirectorySummary(options: {
   search?: string | null;
   targetPath?: string | null;
   hideHome?: boolean;
 } = {}): Promise<AuditDirectorySummary> {
   const client = await getMongoClient();
-  const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
-  const pipeline = buildAuditSummaryPipeline({
+  const useProjection = await auditProjectionIsReady();
+  const states = client.db(DATABASE_NAME).collection<Document>(useProjection ? AUDIT_PROJECTION_COLLECTION : SESSIONS_COLLECTION);
+  const pipeline = (useProjection ? buildAuditProjectionSummaryPipeline : buildAuditSummaryPipeline)({
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
@@ -559,7 +578,9 @@ export async function getAuditDirectorySummary(options: {
 
 export async function getAuditSessions(options: AuditSessionsQueryOptions = {}): Promise<AuditSessionsPage> {
   const limit = Math.max(1, Math.min(100, options.limit ?? 25));
-  const pipeline = buildAuditSessionsPipeline({
+  const client = await getMongoClient();
+  const useProjection = await auditProjectionIsReady();
+  const pipeline = (useProjection ? buildAuditProjectionSessionsPipeline : buildAuditSessionsPipeline)({
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
@@ -568,8 +589,7 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
     historyCollectionName: HISTORY_COLLECTION,
   });
 
-  const client = await getMongoClient();
-  const states = client.db(DATABASE_NAME).collection<Document>(SESSIONS_COLLECTION);
+  const states = client.db(DATABASE_NAME).collection<Document>(useProjection ? AUDIT_PROJECTION_COLLECTION : SESSIONS_COLLECTION);
   const [aggregationResult, summary] = await Promise.all([
     states.aggregate<{
       total: Array<{ count: number }>;

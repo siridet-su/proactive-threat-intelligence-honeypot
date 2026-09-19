@@ -334,6 +334,9 @@ export interface AuditScopingPipelineOptions {
   historyCollectionName?: string;
 }
 
+/** Version written by processor-agent into cwd_audit_projection. */
+export const AUDIT_PROJECTION_VERSION = "cwd_audit_projection.v1";
+
 export interface AuditSessionsPipelineOptions extends AuditScopingPipelineOptions {
   cursor?: string | null;
   limit?: number;
@@ -583,6 +586,142 @@ export function buildAuditSummaryPipeline(options: AuditScopingPipelineOptions):
   });
 
   return stages;
+}
+
+function buildAuditProjectionBaseMatch(): Document {
+  return {
+    "lifecycle.status": "closed",
+    "cwdState.path": { $type: "string", $ne: "" },
+    auditProjectionVersion: AUDIT_PROJECTION_VERSION,
+    sessionId: { $type: "string", $ne: "" },
+  };
+}
+
+function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): Document {
+  const match: Document = {};
+  const searchRegexStr = buildAuditSearchRegexString(options.search);
+  const targetRegexStr = buildAuditTargetPathRegexString(options.targetPath);
+  if (searchRegexStr) {
+    match.$or = [
+      { sessionId: { $regex: searchRegexStr, $options: "i" } },
+      { sourceIp: { $regex: searchRegexStr, $options: "i" } },
+      { "cwdState.path": { $regex: searchRegexStr, $options: "i" } },
+    ];
+  }
+  if (targetRegexStr) match.auditVisitedPaths = { $elemMatch: { $regex: targetRegexStr } };
+  if (options.hideHome) match.auditHomeOnly = { $ne: true };
+  return match;
+}
+
+function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptions): Document | boolean {
+  const searchRegexStr = buildAuditSearchRegexString(options.search);
+  const targetRegexStr = buildAuditTargetPathRegexString(options.targetPath);
+  const clauses: Document[] = [];
+  if (searchRegexStr) {
+    clauses.push({
+      $or: [
+        { $regexMatch: { input: "$sessionId", regex: searchRegexStr, options: "i" } },
+        { $regexMatch: { input: { $ifNull: ["$sourceIp", ""] }, regex: searchRegexStr, options: "i" } },
+        { $regexMatch: { input: "$cwdState.path", regex: searchRegexStr, options: "i" } },
+      ],
+    });
+  }
+  if (targetRegexStr) {
+    clauses.push({
+      $anyElementTrue: {
+        $map: {
+          input: { $ifNull: ["$auditVisitedPaths", []] },
+          as: "path",
+          in: { $regexMatch: { input: "$$path", regex: targetRegexStr } },
+        },
+      },
+    });
+  }
+  if (options.hideHome) clauses.push({ $ne: ["$auditHomeOnly", true] });
+  return clauses.length ? { $and: clauses } : true;
+}
+
+/**
+ * Builds the post-backfill Audit read model path. It deliberately contains no
+ * $lookup: every filterable history fact is already owned by the processor's
+ * durable projection. The source-state pipeline above remains the explicit
+ * migration fallback until the processor writes its completion marker.
+ */
+export function buildAuditProjectionSessionsPipeline(options: AuditSessionsPipelineOptions): Document[] {
+  const limit = Math.max(1, Math.min(100, options.limit ?? 25));
+  const stages: Document[] = [{ $match: buildAuditProjectionBaseMatch() }];
+  const filterMatch = buildAuditProjectionFilterMatch(options);
+  if (Object.keys(filterMatch).length) stages.push({ $match: filterMatch });
+
+  let cursorMatch: Document | null = null;
+  if (typeof options.cursor === "string" && options.cursor.trim()) {
+    const decoded = decodeAuditSessionCursor(options.cursor);
+    if (decoded) {
+      const cursorDate = new Date(decoded.closedAt);
+      cursorMatch = !Number.isNaN(cursorDate.getTime()) && decoded.sessionId
+        ? {
+            $or: [
+              { "lifecycle.closedAt": { $lt: cursorDate } },
+              { "lifecycle.closedAt": cursorDate, sessionId: { $lt: decoded.sessionId } },
+            ],
+          }
+        : { $expr: false };
+    } else {
+      cursorMatch = { $expr: false };
+    }
+  }
+
+  stages.push({
+    $facet: {
+      total: [{ $count: "count" }],
+      items: [
+        ...(cursorMatch ? [{ $match: cursorMatch }] : []),
+        { $sort: { "lifecycle.closedAt": -1, sessionId: -1 } },
+        { $limit: limit + 1 },
+      ],
+    },
+  });
+  return stages;
+}
+
+export function buildAuditProjectionSummaryPipeline(options: AuditScopingPipelineOptions): Document[] {
+  return [
+    { $match: buildAuditProjectionBaseMatch() },
+    { $set: { matchesFilter: buildAuditProjectionFilterExpression(options) } },
+    {
+      $set: {
+        nonRootPaths: {
+          $filter: {
+            input: { $ifNull: ["$auditVisitedPaths", []] },
+            as: "path",
+            cond: { $ne: ["$$path", "/"] },
+          },
+        },
+      },
+    },
+    {
+      $facet: {
+        overview: [
+          {
+            $group: {
+              _id: null,
+              totalSessions: { $sum: 1 },
+              homeOnlyCount: { $sum: { $cond: ["$auditHomeOnly", 1, 0] } },
+              matchingCount: { $sum: { $cond: ["$matchesFilter", 1, 0] } },
+            },
+          },
+        ],
+        distinctPaths: [
+          { $match: { matchesFilter: true } },
+          { $unwind: "$nonRootPaths" },
+          { $group: { _id: "$nonRootPaths", sessionCount: { $sum: 1 } } },
+          { $sort: { sessionCount: -1, _id: 1 } },
+          { $limit: 100 },
+          { $project: { _id: 0, path: "$_id", sessionCount: 1 } },
+        ],
+      },
+    },
+  ];
 }
 
 export function normalizeHistoryEvent(document: Document): SessionCwdHistoryEvent | null {

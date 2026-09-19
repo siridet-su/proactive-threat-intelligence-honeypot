@@ -229,3 +229,41 @@ func TestCwdEventIndexesIncludeLegacySessionIdCompoundIndex(t *testing.T) {
 		t.Fatal("expected legacy session_id compound index in cwd_events index models to support mixed-schema rank aggregation")
 	}
 }
+
+func TestCwdAuditProjectionIndexesBoundCanonicalAuditReadsAndTTL(t *testing.T) {
+	indexes := cwdAuditProjectionIndexModels()
+	want := []bson.D{
+		{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "auditHomeOnly", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "lifecycle.status", Value: 1}, {Key: "auditVisitedPaths", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}},
+		{{Key: "expires_at", Value: 1}},
+	}
+	for _, expected := range want {
+		found := false
+		for _, index := range indexes {
+			keys, ok := index.Keys.(bson.D)
+			if ok && sameIndexKeys(keys, expected) {
+				found = true
+				if sameIndexKeys(expected, bson.D{{Key: "expires_at", Value: 1}}) {
+					if index.Options == nil || index.Options.ExpireAfterSeconds == nil || *index.Options.ExpireAfterSeconds != 0 {
+						t.Fatal("projection expires_at index must use expireAfterSeconds=0")
+					}
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("missing projection index %#v", expected)
+		}
+	}
+
+	legacyStateIndex := bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "session_id", Value: -1}}
+	foundLegacy := false
+	for _, index := range cwdStateIndexModels() {
+		if keys, ok := index.Keys.(bson.D); ok && sameIndexKeys(keys, legacyStateIndex) {
+			foundLegacy = true
+		}
+	}
+	if !foundLegacy {
+		t.Fatal("missing legacy session_id closed-time state index")
+	}
+}

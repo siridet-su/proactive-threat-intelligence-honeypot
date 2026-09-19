@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:browser": "playwright test --config=playwright.config.mjs",
     "test:filesystem-history-integration": "node scripts/validate-filesystem-history-pipeline.mjs",
+    "test:filesystem-audit-integration": "node scripts/validate-filesystem-audit-scale.mjs",
     "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs"
   },
   "dependencies": {

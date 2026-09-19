@@ -3,6 +3,8 @@ import type { Document } from "mongodb";
 
 import {
   buildAuditScopingStages,
+  buildAuditProjectionSessionsPipeline,
+  buildAuditProjectionSummaryPipeline,
   buildAuditSearchRegexString,
   buildAuditSessionsPipeline,
   buildAuditSummaryPipeline,
@@ -322,6 +324,45 @@ describe("MongoDB Aggregation Pipeline Builders (FA-002)", () => {
     expect(facetStage).toBeDefined();
     expect(facetStage.$facet.overview).toBeDefined();
     expect(facetStage.$facet.distinctPaths).toBeDefined();
+  });
+});
+
+describe("Materialized Audit projection pipeline (FA-016)", () => {
+  it("pages directly over canonical projection fields without history fan-out or skip", () => {
+    const pipeline = buildAuditProjectionSessionsPipeline({
+      hideHome: true,
+      targetPath: "/etc",
+      search: "198.51.100",
+      limit: 25,
+    });
+    const serialized = JSON.stringify(pipeline);
+    expect(serialized).not.toContain("$lookup");
+    expect(serialized).not.toContain("$skip");
+    expect(serialized).toContain("auditProjectionVersion");
+    expect(serialized).toContain("auditVisitedPaths");
+    expect(pipeline.at(-1)?.$facet.items).toContainEqual({ $limit: 26 });
+  });
+
+  it("uses the materialized canonical session identity for equal-time cursor ties", () => {
+    const cursor = encodeAuditSessionCursor("2026-09-10T12:00:00.000Z", "session-010");
+    const pipeline = buildAuditProjectionSessionsPipeline({ cursor, limit: 10 });
+    const facet = pipeline.at(-1)?.$facet as { items: Document[] };
+    const cursorStage = facet.items.find((stage) => "$match" in stage) as { $match: { $or: Document[] } };
+    expect(cursorStage.$match.$or[0]?.["lifecycle.closedAt"]).toEqual({ $lt: new Date("2026-09-10T12:00:00.000Z") });
+    expect(cursorStage.$match.$or[1]).toEqual({
+      "lifecycle.closedAt": new Date("2026-09-10T12:00:00.000Z"),
+      sessionId: { $lt: "session-010" },
+    });
+  });
+
+  it("keeps exact summary counting on materialized fields while bounding work to projection rows", () => {
+    const pipeline = buildAuditProjectionSummaryPipeline({ hideHome: true, targetPath: "/etc" });
+    const serialized = JSON.stringify(pipeline);
+    expect(serialized).not.toContain("$lookup");
+    expect(serialized).not.toContain("$skip");
+    expect(pipeline.at(-1)?.$facet.overview).toBeDefined();
+    expect(pipeline.at(-1)?.$facet.distinctPaths).toBeDefined();
+    expect(serialized).toContain("auditVisitedPaths");
   });
 });
 

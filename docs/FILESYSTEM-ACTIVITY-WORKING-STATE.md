@@ -43,12 +43,12 @@ Reproducible test results belong in [`validation/`](validation/).
 
 ## Current focus
 
-**In progress:** `FA-015` — verify repository and change hygiene after the accepted remediation chain.
+**In progress:** `FA-016` — bound retained Audit directory queries and establish truthful MongoDB execution-plan limits.
 
-**Why now:** FA-001 through FA-014 are accepted DONE. FA-015 is the sole active
-remediation focus pending final re-audit. FA-016 remains TODO, and FS-007 remains
-PARTIAL until that large-collection work is completed. No production behavior is
-being changed by this change-hygiene validation.
+**Why now:** FA-001 through FA-015 are accepted DONE. FA-016 is the sole active
+remediation focus. FS-007 remains PARTIAL until that large-collection work passes
+final audit. The outstanding manual response-agent validation remains recorded
+as an unrelated gate.
 
 ## Historical baseline
 
@@ -88,7 +88,7 @@ avoid duplicating a large evidence block.
 
 | ID | Status | Work | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
-| `FS-007` | `PARTIAL` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | Original transport/search implementation is accepted by `FA-001`, `FA-002`, and `FA-011`. `FA-016` remains TODO for large-collection summary/cursor index optimization, so this row is explicitly partial; final scale work is not accepted indirectly. |
+| `FS-007` | `PARTIAL` | Split live topology transport from the closed-session Audit directory. | Live SSE no longer queries and rebroadcasts the full retained closed-session list on every CWD update; Audit sessions are searchable and paginated. | Original transport/search implementation is accepted by `FA-001`, `FA-002`, and `FA-011`. `FA-016` is IN PROGRESS for large-collection summary/cursor index optimization, so this row remains explicitly partial pending final audit. |
 | `FS-008` | `DONE` | Define multi-session IP cluster interaction. | A cluster exposes every active session and path without implying that the latest path is the only route; selection behavior is deterministic and keyboard accessible. | Historical implementation evidence: cluster disclosure, multi-route rendering, and 57 tests; no FA corrective item mapped to FS-008. |
 | `FS-009` | `DONE` | Replace the fit algorithm with two-dimensional world bounds. | Fit considers X/Y, rendered element sizes, manual positions outside `0..100`, minimap clearance, and compact/fullscreen canvas sizes. | Historical implementation evidence: 2D bounds and 63 tests; no FA corrective item mapped to FS-009. |
 | `FS-010` | `DONE` | Correct count semantics. | Labels distinguish unique sources, sessions, exact-path sessions, and descendant-branch sessions; badges and their resulting lists always agree. | Historical implementation evidence: unified count semantics and 68 tests; no FA corrective item mapped to FS-010. |
@@ -129,6 +129,12 @@ These remain product backlog items and are not the active remediation focus.
 
 ## Current validation and evidence policy
 
+FA-016 implementation evidence is recorded in
+[`validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). The
+isolated MongoDB command passed its 1,900-session dashboard and processor
+coverage, with the exact before/after execution bounds recorded there. FA-016
+remains IN PROGRESS pending final re-audit; FS-007 remains PARTIAL.
+
 The current repository validation is the independent final FA-013 audit dated
 2026-09-19 and is recorded in the canonical audit tracker. It ran these
 reproducible commands: `cd dashboard-v2 && npm test`,
@@ -147,13 +153,13 @@ claims about the 2026-09-15 historical baseline.
 | --- | --- | --- |
 | 2026-09-15 | Start with `FS-001`; defer visual additions until Audit filtering is authoritative. | Incorrect result sets would invalidate later selection, count, and topology UX. |
 | 2026-09-15 | Keep this tracker separate from design and validation evidence. | Work status changes frequently; architecture and evidence must remain durable and independently reviewable. |
-| 2026-09-19 | Move the sole remediation focus to FA-015 after accepting FA-014; preserve FA-016 as TODO and FS-007 as PARTIAL. | Repository/change hygiene must be verified before large-collection optimization work begins. |
+| 2026-09-19 | Accept FA-015 and move the sole remediation focus to FA-016; preserve FS-007 as PARTIAL. | Large-collection optimization is now the only remaining FA item; FS-007 cannot be accepted until FA-016 passes final audit. |
 
 ## Update log
 
 | Date | Change | Evidence |
 | --- | --- | --- |
-| 2026-09-19 | Accepted FA-014 and started FA-015 as the sole current focus; retained FA-016 as TODO and FS-007 as PARTIAL. | FA-014 accepted on `24d84fa4531460c2f2983ce1b47380c95ab3cdca`; FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md). |
+| 2026-09-19 | Accepted FA-015 on `725102189587477bd9eafe13c8ac2d6e2e97e20c` and started FA-016 as the sole current focus; retained FS-007 as PARTIAL. | FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md); FA-016 implementation and final audit remain pending. |
 | 2026-09-19 | Accepted FA-013 and reconciled this tracker to FA-014; qualified FS-007 as partial because FA-016 remains TODO and retained FS-020+ as backlog. | Accepted FA-013 chain and independent final audit evidence are recorded in `FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`; FA-014 remains the sole current focus pending re-audit. |
 | 2026-09-16 | Completed `FS-019`; started `FS-020`. | Historical implementation note: 164-test time-based scrubber result; superseded for corrective acceptance by FA-009 and FA-013. |
 | 2026-09-16 | Completed `FS-018`; started `FS-019`. | Historical implementation note: 158-test foundation result; the “100% complete” wording and FA-014/FA-015/FA-016 focus state describe that earlier checkpoint and are superseded by the current backlog above. |

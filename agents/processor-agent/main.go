@@ -864,6 +864,9 @@ func newMongoWriter(ctx context.Context, cfg Config) (*MongoWriter, error) {
 	if err := mw.ensureIndexes(ctx); err != nil {
 		return nil, fmt.Errorf("ensure mongo indexes: %w", err)
 	}
+	if err := mw.backfillCwdAuditProjection(ctx, cfg.EventRetention); err != nil {
+		return nil, fmt.Errorf("backfill CWD audit projection: %w", err)
+	}
 	return mw, nil
 }
 
@@ -921,13 +924,15 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		return err
 	}
 
-	cwdStateIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "updatedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
-		{Keys: bson.D{{Key: "lifecycle.status", Value: 1}, {Key: "lifecycle.closedAt", Value: -1}, {Key: "sessionId", Value: -1}}},
-		{Keys: bson.D{{Key: "cwdState.path", Value: 1}}},
-		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+	if err := ensureIndexModels(ctx, mw.db.Collection("cwd_session_state"), cwdStateIndexModels()); err != nil {
+		return err
 	}
-	return ensureIndexModels(ctx, mw.db.Collection("cwd_session_state"), cwdStateIndexes)
+	if err := ensureIndexModels(ctx, mw.db.Collection(cwdAuditProjectionCollection), cwdAuditProjectionIndexModels()); err != nil {
+		return err
+	}
+	return ensureIndexModels(ctx, mw.db.Collection("cwd_audit_projection_meta"), []mongo.IndexModel{
+		{Keys: bson.D{{Key: "projectionVersion", Value: 1}}},
+	})
 }
 
 func loadLookups(dir string) LookupStore {

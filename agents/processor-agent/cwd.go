@@ -271,34 +271,37 @@ func (mw *MongoWriter) closeCwdSession(ctx context.Context, sessionID string, cl
 		cwdSessionCloseUpdate(sessionID, closedAt, retention),
 		options.Update().SetUpsert(true),
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	return mw.closeCwdAuditProjection(ctx, sessionID, closedAt, retention)
 }
 
 // updateLatestCwdState performs a compare-and-set without a read/write race.
 // Update-first handles existing sessions; insert-then-retry handles concurrent
 // first observations without allowing a stale observation to win permanently.
-func updateLatestCwdState(ctx context.Context, states *mongo.Collection, observation cwdObservation, retention time.Duration) error {
+func updateLatestCwdState(ctx context.Context, states *mongo.Collection, observation cwdObservation, retention time.Duration) (bool, error) {
 	filter := cwdStateOrderFilter(observation)
 	update := cwdStateUpdate(observation, retention)
 	result, err := states.UpdateOne(ctx, filter, update)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if result.MatchedCount > 0 {
-		return nil
+		return true, nil
 	}
 
 	if _, err := states.InsertOne(ctx, cwdStateDocument(observation, retention)); err == nil {
-		return nil
+		return true, nil
 	} else if !mongo.IsDuplicateKeyError(err) {
-		return err
+		return false, err
 	}
 
 	// Another worker inserted the session between UpdateOne and InsertOne. A
 	// final ordered update makes the newer observation win; zero matches means
 	// this observation is stale and is intentionally ignored.
-	_, err = states.UpdateOne(ctx, filter, update)
-	return err
+	result, err = states.UpdateOne(ctx, filter, update)
+	return result.MatchedCount > 0, err
 }
 
 func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwdObservation, retention time.Duration) error {
@@ -306,7 +309,8 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		return fmt.Errorf("MongoDB is disabled; refusing to acknowledge CWD telemetry")
 	}
 
-	if err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention); err != nil {
+	stateChanged, err := updateLatestCwdState(ctx, mw.db.Collection("cwd_session_state"), observation, retention)
+	if err != nil {
 		return fmt.Errorf("update CWD state: %w", err)
 	}
 
@@ -314,6 +318,9 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	// Cowrie-emitted transitions so the audit trail never infers cd semantics
 	// from attacker-controlled command text or cross-event state changes.
 	if observation.Action == "observed" {
+		if err := mw.updateCwdAuditProjection(ctx, observation, "", stateChanged, retention); err != nil {
+			return fmt.Errorf("update CWD audit projection: %w", err)
+		}
 		return nil
 	}
 
@@ -342,6 +349,9 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 		ctx, bson.M{"_id": eventID}, bson.M{"$setOnInsert": event}, options.Update().SetUpsert(true),
 	); err != nil {
 		return fmt.Errorf("upsert CWD event: %w", err)
+	}
+	if err := mw.updateCwdAuditProjection(ctx, observation, eventID, stateChanged, retention); err != nil {
+		return fmt.Errorf("update CWD audit projection: %w", err)
 	}
 	return nil
 }
