@@ -25,13 +25,11 @@ import type {
 } from "@/lib/dashboardTypes";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
-import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
 import { ResponseActionPanel } from "./ResponseActionPanel";
 import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
-import { TimelineSplitter } from "./TimelineSplitter";
+import { AuditFilesystemWorkspace } from "./AuditFilesystemWorkspace";
 import { FilesystemPageHeader } from "./FilesystemPageHeader";
-import { AuditNoticeRegion } from "./AuditNoticeRegion";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
@@ -78,7 +76,7 @@ function readStoredTimelineWidth(): number | null {
   }
 }
 
-type ForensicTab = "replay" | "commands" | "actions";
+export type ForensicTab = "replay" | "commands" | "actions";
 
 export function FilesystemActivity() {
   const shouldReduceMotion = useReducedMotion();
@@ -1051,90 +1049,63 @@ export function FilesystemActivity() {
           </header>
 
           {/* Main Studio Workspace */}
-          <div className="min-h-0 flex-1 flex overflow-hidden">
-            {/* Left Canvas: Flex-1 fills available width smoothly */}
-            <div className="min-w-0 flex-1 h-full flex flex-col">
-              <AuditNoticeRegion
-                expiredSessionId={expiredSessionId}
-                allSessions={allSessions}
-                setExpiredSessionId={setExpiredSessionId}
-                handleUserSelectSession={handleUserSelectSession}
-                switchViewMode={switchViewMode}
-                hasActiveFilters={hasActiveFilters}
-                isSelectedFilteredOut={isSelectedFilteredOut}
-                filteredSessionsCount={filteredSessionsCount}
-                totalSessionsCount={totalSessionsCount}
-                targetPathFilter={targetPathFilter}
-                hideHomeOnly={hideHomeOnly}
-                selectedSession={selectedSession}
-                filteredActiveSessions={filteredActiveSessions}
-                filteredClosedSessions={filteredClosedSessions}
-                handleResetAuditFilters={handleResetAuditFilters}
-                handleClearSelection={handleClearSelection}
-              />
-              <TopologyCanvas
-                snapshot={auditSnapshot ?? snapshot}
-                regionStatus={regionStatus}
-                streamState={streamState}
-                freshnessState={freshnessState}
-                selectedSessionId={selectedSessionId}
-                selectedPath={selectedPath}
-                activeHop={activeHop}
-                hopDurationMs={playbackSpeed}
-                title={auditCanvasTitle}
-                subtitle={auditCanvasSubtitle}
-                onSelectSession={handleUserSelectSession}
-                onSelectPath={selectPath}
-                isExpanded={isAuditFullscreen}
-                onToggleExpand={() => setIsAuditFullscreen(false)}
-                onRefresh={refresh}
-                onReconnect={handleReconnect}
-                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-                isAuditMode={true}
-                isResizingContainer={isDraggingTimeline}
-                className="h-full flex-1 min-h-0"
-              />
-            </div>
-
-            {/* Draggable Splitter Handle */}
-            {!isTimelineCollapsed && (
-              <TimelineSplitter
-                isDragging={isDraggingTimeline}
-                width={timelineWidth}
-                onMouseDown={handleSplitterMouseDown}
-                onDoubleClick={handleResetTimelineWidth}
-                onKeyDown={handleSplitterKeyDown}
-                className="hidden sm:flex"
-              />
-            )}
-
-            <FilesystemTimelinePanel
-              collapsed={isTimelineCollapsed}
-              isDragging={isDraggingTimeline}
-              width={timelineWidth}
-              variant="fullscreen"
-                  selectedSession={selectedSession}
-                  history={history}
-                  anchoredHop={anchoredHop}
-                  historyStatus={historyStatus}
-                  historyCursor={historyCursor}
-                  historyTotalItems={historyTotalItems}
-                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-                  historyComplete={historyComplete}
-                  replay={replayPresentation}
-                  activeTab={activeForensicTab}
-                  onTabChange={setActiveForensicTab}
-                  responsePanel={responsePanel}
-                  hopResolutionStatus={hopResolutionStatus}
-                  requestedHop={requestedHop}
-                  onClearHop={clearRequestedHop}
-                  onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={handleSelectHistoryEventId}
-                  onLoadEarlier={() => {
-                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-                  }}
-            />
-          </div>
+          <AuditFilesystemWorkspace
+            isFullscreen={true}
+            expiredSessionId={expiredSessionId}
+            allSessions={allSessions}
+            setExpiredSessionId={setExpiredSessionId}
+            handleUserSelectSession={handleUserSelectSession}
+            switchViewMode={switchViewMode}
+            hasActiveFilters={hasActiveFilters}
+            isSelectedFilteredOut={isSelectedFilteredOut}
+            filteredSessionsCount={filteredSessionsCount}
+            totalSessionsCount={totalSessionsCount}
+            targetPathFilter={targetPathFilter}
+            hideHomeOnly={hideHomeOnly}
+            selectedSession={selectedSession}
+            filteredActiveSessions={filteredActiveSessions}
+            filteredClosedSessions={filteredClosedSessions}
+            handleResetAuditFilters={handleResetAuditFilters}
+            handleClearSelection={handleClearSelection}
+            auditSnapshot={auditSnapshot}
+            snapshot={snapshot}
+            regionStatus={regionStatus}
+            streamState={streamState}
+            freshnessState={freshnessState}
+            selectedSessionId={selectedSessionId}
+            selectedPath={selectedPath}
+            activeHop={activeHop}
+            playbackSpeed={playbackSpeed}
+            auditCanvasTitle={auditCanvasTitle}
+            auditCanvasSubtitle={auditCanvasSubtitle}
+            selectPath={selectPath}
+            onToggleFullscreen={() => setIsAuditFullscreen(false)}
+            refresh={refresh}
+            handleReconnect={handleReconnect}
+            isDraggingTimeline={isDraggingTimeline}
+            isTimelineCollapsed={isTimelineCollapsed}
+            timelineWidth={timelineWidth}
+            handleSplitterMouseDown={handleSplitterMouseDown}
+            handleResetTimelineWidth={handleResetTimelineWidth}
+            handleSplitterKeyDown={handleSplitterKeyDown}
+            history={history}
+            anchoredHop={anchoredHop}
+            historyStatus={historyStatus}
+            historyCursor={historyCursor}
+            historyTotalItems={historyTotalItems}
+            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+            historyComplete={historyComplete}
+            replayPresentation={replayPresentation}
+            activeForensicTab={activeForensicTab}
+            setActiveForensicTab={setActiveForensicTab}
+            responsePanel={responsePanel}
+            hopResolutionStatus={hopResolutionStatus}
+            requestedHop={requestedHop}
+            clearRequestedHop={clearRequestedHop}
+            selectLatestHop={selectLatestHop}
+            handleSelectHistoryEventId={handleSelectHistoryEventId}
+            loadHistory={loadHistory}
+          />
         </div>
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
@@ -1276,89 +1247,63 @@ export function FilesystemActivity() {
           </div>
 
           {/* Side-by-Side Audit Layout */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]">
-            <div className="min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0">
-              <AuditNoticeRegion
-                expiredSessionId={expiredSessionId}
-                allSessions={allSessions}
-                setExpiredSessionId={setExpiredSessionId}
-                handleUserSelectSession={handleUserSelectSession}
-                switchViewMode={switchViewMode}
-                hasActiveFilters={hasActiveFilters}
-                isSelectedFilteredOut={isSelectedFilteredOut}
-                filteredSessionsCount={filteredSessionsCount}
-                totalSessionsCount={totalSessionsCount}
-                targetPathFilter={targetPathFilter}
-                hideHomeOnly={hideHomeOnly}
-                selectedSession={selectedSession}
-                filteredActiveSessions={filteredActiveSessions}
-                filteredClosedSessions={filteredClosedSessions}
-                handleResetAuditFilters={handleResetAuditFilters}
-                handleClearSelection={handleClearSelection}
-              />
-              <TopologyCanvas
-                snapshot={auditSnapshot ?? snapshot}
-                regionStatus={regionStatus}
-                streamState={streamState}
-                freshnessState={freshnessState}
-                selectedSessionId={selectedSessionId}
-                selectedPath={selectedPath}
-                activeHop={activeHop}
-                hopDurationMs={playbackSpeed}
-                title={auditCanvasTitle}
-                subtitle={auditCanvasSubtitle}
-                onSelectSession={handleUserSelectSession}
-                onSelectPath={selectPath}
-                isExpanded={false}
-                onToggleExpand={enterAuditFullscreen}
-                onRefresh={refresh}
-                onReconnect={handleReconnect}
-                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-                isAuditMode={true}
-                isResizingContainer={isDraggingTimeline}
-                className="h-full flex-1 min-h-0"
-              />
-            </div>
-
-            {/* Draggable Splitter Handle (desktop only) */}
-            {!isTimelineCollapsed && (
-              <TimelineSplitter
-                isDragging={isDraggingTimeline}
-                width={timelineWidth}
-                onMouseDown={handleSplitterMouseDown}
-                onDoubleClick={handleResetTimelineWidth}
-                onKeyDown={handleSplitterKeyDown}
-                className="hidden lg:flex"
-              />
-            )}
-
-            <FilesystemTimelinePanel
-              collapsed={isTimelineCollapsed}
-              isDragging={isDraggingTimeline}
-              width={timelineWidth}
-              variant="page"
-                  selectedSession={selectedSession}
-                  history={history}
-                  anchoredHop={anchoredHop}
-                  historyStatus={historyStatus}
-                  historyCursor={historyCursor}
-                  historyTotalItems={historyTotalItems}
-                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-                  historyComplete={historyComplete}
-                  replay={replayPresentation}
-                  activeTab={activeForensicTab}
-                  onTabChange={setActiveForensicTab}
-                  responsePanel={responsePanel}
-                  hopResolutionStatus={hopResolutionStatus}
-                  requestedHop={requestedHop}
-                  onClearHop={clearRequestedHop}
-                  onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={handleSelectHistoryEventId}
-                  onLoadEarlier={() => {
-                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-                  }}
-            />
-          </div>
+          <AuditFilesystemWorkspace
+            isFullscreen={false}
+            expiredSessionId={expiredSessionId}
+            allSessions={allSessions}
+            setExpiredSessionId={setExpiredSessionId}
+            handleUserSelectSession={handleUserSelectSession}
+            switchViewMode={switchViewMode}
+            hasActiveFilters={hasActiveFilters}
+            isSelectedFilteredOut={isSelectedFilteredOut}
+            filteredSessionsCount={filteredSessionsCount}
+            totalSessionsCount={totalSessionsCount}
+            targetPathFilter={targetPathFilter}
+            hideHomeOnly={hideHomeOnly}
+            selectedSession={selectedSession}
+            filteredActiveSessions={filteredActiveSessions}
+            filteredClosedSessions={filteredClosedSessions}
+            handleResetAuditFilters={handleResetAuditFilters}
+            handleClearSelection={handleClearSelection}
+            auditSnapshot={auditSnapshot}
+            snapshot={snapshot}
+            regionStatus={regionStatus}
+            streamState={streamState}
+            freshnessState={freshnessState}
+            selectedSessionId={selectedSessionId}
+            selectedPath={selectedPath}
+            activeHop={activeHop}
+            playbackSpeed={playbackSpeed}
+            auditCanvasTitle={auditCanvasTitle}
+            auditCanvasSubtitle={auditCanvasSubtitle}
+            selectPath={selectPath}
+            onToggleFullscreen={enterAuditFullscreen}
+            refresh={refresh}
+            handleReconnect={handleReconnect}
+            isDraggingTimeline={isDraggingTimeline}
+            isTimelineCollapsed={isTimelineCollapsed}
+            timelineWidth={timelineWidth}
+            handleSplitterMouseDown={handleSplitterMouseDown}
+            handleResetTimelineWidth={handleResetTimelineWidth}
+            handleSplitterKeyDown={handleSplitterKeyDown}
+            history={history}
+            anchoredHop={anchoredHop}
+            historyStatus={historyStatus}
+            historyCursor={historyCursor}
+            historyTotalItems={historyTotalItems}
+            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+            historyComplete={historyComplete}
+            replayPresentation={replayPresentation}
+            activeForensicTab={activeForensicTab}
+            setActiveForensicTab={setActiveForensicTab}
+            responsePanel={responsePanel}
+            hopResolutionStatus={hopResolutionStatus}
+            requestedHop={requestedHop}
+            clearRequestedHop={clearRequestedHop}
+            selectLatestHop={selectLatestHop}
+            handleSelectHistoryEventId={handleSelectHistoryEventId}
+            loadHistory={loadHistory}
+          />
         </div>
       )}
     </div>
