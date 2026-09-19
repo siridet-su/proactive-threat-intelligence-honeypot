@@ -6,7 +6,8 @@ FS-007 remains `PARTIAL`.
 ## Scope and architecture
 
 This remediation starts at `b94b69af2e853a4e43560a7756b932ddba9eb821` and is
-implemented in `54c872b` plus the current follow-up on `feat/cwd-filesystem-telemetry`. The processor owns the durable
+implemented through audited HEAD `60a73c4` plus this follow-up on
+`feat/cwd-filesystem-telemetry`. The processor owns the durable
 `cwd_audit_projection` read model; `cwd_session_state` and `cwd_events` remain
 authoritative source records. `cwd_audit_projection_meta` is only a readiness
 hint, never the sole read-safety condition.
@@ -15,8 +16,9 @@ The follow-up migrates the projection contract to `cwd_audit_projection.v2`.
 Eligible retained rows are rebuilt from persisted v1 state/projection/event
 shapes, the v1 metadata marker is replaced only after eligible rows have durable
 v2 projections, and obsolete `auditEventIds` data is removed. The dashboard
-rejects the v1 marker and uses one bounded pending-source probe; the processor's
-per-source v2/clean marker is written only after the projection write.
+rejects the v1 marker and uses separate bounded generation-pending,
+event-ownership, and old-writer cutover probes; the processor's per-source
+v2/clean marker is written only after the projection write.
 
 The projection separates `cwdState.path` from `auditTransitionPaths`. Public
 `auditVisitedPaths` is deterministically recomputed as their union. Only
@@ -25,7 +27,11 @@ persisted `entered`/`changed` transition history contributes transition paths;
 `sessionId`/`session_id` records are canonicalized during backfill.
 
 Event delivery is at-least-once: `cwd_events._id` is the idempotency key, and
-duplicate retries reconcile from source history. The projection no longer
+each new event carries an event-level pending outbox bit written in the same
+upsert as the durable history record. Source state also owns a pending-event
+count, which keeps reconciliation discoverable through the close race without
+forcing steady-state history reads. Duplicate retries reconcile from source
+history. The projection no longer
 stores an unbounded `auditEventIds` array. Distinct transition paths are capped
 at 512 per projection document; `auditPathsOverflow=true` causes an exact
 cursor-aware `$unionWith` composition of every overflow source row with the
@@ -45,9 +51,10 @@ closed lifecycle time plus retention. The processor repairs an existing
 `{expires_at:1}` index when it lacks `expireAfterSeconds: 0`.
 
 Backfill checks every history cursor error before accepting a result, selects
-only eligible pending-generation/stale-version source rows, updates source
-readiness only after the projection write, and publishes the marker only after
-one bounded pending-source probe. Each source row owns monotonic
+separate bounded generation-pending and v1/unversioned cutover branches,
+updates source readiness only after the projection write, and publishes the
+marker only after bounded pending-source, pending-event, and cutover probes.
+Each source row owns monotonic
 `auditProjectionGeneration`, `auditProjectionPendingGeneration`, and
 `auditProjectionReadyGeneration` markers; readiness is an exact `_id` plus
 generation CAS, so an older writer cannot clear newer work. Current-state and backfill writes carry `stateSequence`
@@ -81,13 +88,14 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
+- `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingEventCount": 1 }` for event ownership probes;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditVisitedPaths": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "auditPathsOverflow": 1 }` for bounded-readiness checks;
 - `cwd_audit_projection`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
-- canonical and legacy `cwd_events` session compound indexes plus its TTL index.
+- canonical and legacy `cwd_events` session compound indexes, canonical/legacy pending-event indexes, plus its TTL index.
 
 Go unit tests assert exact key patterns/options. Integration setup first creates
 an incorrect non-TTL projection expiry index and verifies the authoritative
@@ -146,11 +154,11 @@ truthfully in the trackers.
 
 ## Follow-up remediation evidence (2026-09-19)
 
-Preflight on `feat/cwd-filesystem-telemetry` found a clean worktree at
-`5aeb4c0`. The first sandboxed `git fetch origin --prune` could not write
-`.git/FETCH_HEAD`; the approved retry succeeded. `origin/main` was already an
-ancestor, so no merge was required. The pre-edit dashboard baseline passed:
-22 Vitest files, 463 passing tests, and 12 skipped tests.
+Preflight on `feat/cwd-filesystem-telemetry` found a clean worktree at audited
+HEAD `60a73c4`. `git fetch origin --prune` succeeded and `origin/main` was
+already an ancestor, so no merge was required. The pre-edit dashboard baseline
+passed 22 Vitest files, 463 passing tests, and 14 skipped tests; all five Go
+module baselines passed `go test -count=1 ./...`.
 
 The isolated FA-016 integration now seeds real v1 state, projection, and
 metadata documents, proves the old marker is not ready, migrates them to v2,
@@ -166,9 +174,19 @@ and older overflow matches outside any bounded sample; it also provisions the
 production source indexes and records readiness `executionStats`.
 
 Observed isolated command output: `npm run test:filesystem-audit-integration`
-passed 12 dashboard tests and six processor FA-016 integration tests.
-Dashboard explain evidence remained `26/26` documents for item pages, `1,900/1,900`
-for exact count and summary, and no `$skip`, `$lookup`, or `COLLSCAN` in the
-projection plans. Full repository validation and final clean-tree checks remain
-required before FA-016 can be accepted; FA-016 therefore remains `IN PROGRESS`
-and FS-007 remains `PARTIAL`.
+passed 12 dashboard tests and executed 9 production FA-016 Mongo integration
+tests plus 2 loopback-target safety tests in the processor (`go test -run
+TestFA016 ./...`; 11 named tests executed, none skipped). New deterministic
+coverage includes first-write history inspection, pending-before-upsert
+close/reconcile/resume, rejected observed payloads against active and close
+owners, owner-crash reconciliation, and canonical/legacy old-writer cutover
+with zero subsequent `cwd_events` reads. Dashboard explain evidence remained
+`26/26` documents for item pages, `1,900/1,900` for exact count and summary,
+and no `$skip`, `$lookup`, or `COLLSCAN` in the projection plans; readiness
+branches reported `0/0`, `1/1`, `1/1`, and `2/2` examined docs/keys for
+converged, pending, stale-version, and malformed fixtures. Full repository
+validation passed `npm test`, lint, build, all five Go modules, and
+`git diff --check`; the isolated wrapper left no `pti-fa016-mongo-*` container
+and no Playwright/test-result artifacts. Final clean-tree status and commit
+hashes are recorded after the logical commits below. FA-016 remains
+`IN PROGRESS` and FS-007 remains `PARTIAL` pending final re-audit.

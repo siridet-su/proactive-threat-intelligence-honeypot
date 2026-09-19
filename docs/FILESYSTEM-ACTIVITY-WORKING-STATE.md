@@ -136,8 +136,9 @@ its final re-audit. The manual response-agent validation remains unrelated.
 FA-016 implementation and follow-up re-audit evidence is recorded in
 [`validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). The
 isolated MongoDB command passed its 1,900-session dashboard and processor
-coverage, including v1-to-v2 migration, monotonic interleavings, and scoped
-overflow coverage, with separate item/count/summary execution bounds recorded there. FA-016
+coverage, including v1-to-v2 migration, monotonic interleavings, event-outbox
+close races, rejected-observation ownership, old canonical/legacy writers, and
+scoped overflow coverage, with separate item/count/summary execution bounds recorded there. FA-016
 remains IN PROGRESS pending final re-audit; FS-007 remains PARTIAL.
 
 The current repository validation is the independent final FA-013 audit dated
@@ -164,6 +165,7 @@ claims about the 2026-09-15 historical baseline.
 
 | Date | Change | Evidence |
 | --- | --- | --- |
+| 2026-09-19 | Continued only FA-016: made history projection an event-level durable outbox, separated current-state/history ownership, blocked rejected observed payloads from seeding or clearing readiness, and covered old canonical/legacy writers after the v2 marker. | Clean preflight at audited `60a73c4`; `git fetch origin --prune` succeeded; `origin/main` was already an ancestor; isolated integration passed 12 dashboard tests and executed 9 production FA-016 Mongo tests plus 2 target-safety tests; dashboard execution plans remained bounded and steady-state reconciliation performed zero `cwd_events` reads. Full dashboard tests, lint, build, diff check, and all five Go modules passed. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-19 | Continued only FA-016: exact cursor-aware overflow composition, generation-owned readiness/CAS with bounded execution evidence, stale/late history crash recovery, padded canonical convergence, and deterministic race barriers. | Clean start at `5aeb4c0`; initial sandbox fetch failure and approved successful retry are recorded in validation evidence; `origin/main` was already an ancestor; dashboard baseline passed; isolated FA-016 integration passed 12 dashboard tests and six processor tests; full dashboard and five-module Go validation passed. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending final re-audit. |
 | 2026-09-19 | Accepted FA-015 on `725102189587477bd9eafe13c8ac2d6e2e97e20c` and continued FA-016 as the sole current focus; remediation commit `54c872b` was created without rewriting prior history; retained FS-007 as PARTIAL. | FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md); FA-016 remediation evidence is recorded in [`docs/validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md) and remains pending final re-audit. |
 | 2026-09-19 | Accepted FA-013 and reconciled this tracker to FA-014; qualified FS-007 as partial because FA-016 remains TODO and retained FS-020+ as backlog. | Accepted FA-013 chain and independent final audit evidence are recorded in `FILESYSTEM-ACTIVITY-AUDIT-FIXES.md`; FA-014 remains the sole current focus pending re-audit. |
