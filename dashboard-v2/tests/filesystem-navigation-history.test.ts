@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement, useEffect } from "react";
+import { act, createElement, useEffect, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -793,7 +793,6 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
           selectedSessionIdRef.current = id;
         },
       });
-
       useEffect(() => {
         state.navigationCoordinator.bindDomainAdapter({
           getAllSessions: () => [],
@@ -840,6 +839,97 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     expect(loadHistorySpy).toHaveBeenCalledTimes(1);
     expect(hookResult.navigationCoordinator.isPopStatePending()).toBe(false);
     remoteCoordinator.destroy();
+  });
+
+  it("Finding 1 (production hook): initial deep-link adoption is write-free, then automatic selection synchronizes once", () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/filesystem-activity?view=audit&sessionId=initial-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=initial-hop",
+    );
+    const pushStateSpy = vi.spyOn(window.history, "pushState");
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const initialSession = makeSession("initial-session", {
+      cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
+    });
+    const fallbackSession = makeSession("fallback-session", {
+      cwdState: { path: "/var/log", status: "confirmed", sourceEventId: null, observedAt: "" },
+      auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 1 },
+    });
+    const snapshot: FilesystemTopologySnapshot = {
+      sessions: [initialSession, fallbackSession],
+      recentClosedSessions: [],
+      nodes: [],
+      truncated: false,
+      generatedAt: "",
+    };
+    const selectedSessionIdRef = { current: null as string | null };
+    let automaticSelect!: (id: string) => void;
+    let hookResult!: UseFilesystemUrlStateReturn;
+
+    function ProductionHydrationHarness() {
+      const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+      automaticSelect = (id) => {
+        selectedSessionIdRef.current = id;
+        setSelectedSessionId(id);
+      };
+      const state = useFilesystemUrlState({
+        isHydrated: true,
+        snapshot,
+        extraAuditSessions: new Map(),
+        selectedSessionId,
+        selectedSessionIdRef,
+        setSelectedSessionId: (id) => {
+          selectedSessionIdRef.current = id;
+          setSelectedSessionId(id);
+        },
+      });
+      const { applyInitialUrlState, navigationCoordinator } = state;
+
+      useEffect(() => {
+        navigationCoordinator.bindDomainAdapter({
+          getAllSessions: () => snapshot.sessions,
+          getSessionById: () => new Map(snapshot.sessions.map((session) => [session.sessionId, session])),
+          selectSession: (id) => {
+            selectedSessionIdRef.current = id;
+            setSelectedSessionId(id);
+          },
+          resetHistory: vi.fn(),
+          resetRequestedHopState: vi.fn(),
+        });
+      }, [navigationCoordinator]);
+
+      useEffect(() => {
+        applyInitialUrlState();
+      }, [applyInitialUrlState]);
+
+      hookResult = state;
+      return null;
+    }
+
+    act(() => {
+      root.render(createElement(ProductionHydrationHarness));
+    });
+
+    expect(pushStateSpy).not.toHaveBeenCalled();
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+    expect(window.location.search).toBe(
+      "?view=audit&sessionId=initial-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=initial-hop",
+    );
+
+    act(() => {
+      automaticSelect("fallback-session");
+    });
+
+    expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    expect(replaceStateSpy.mock.calls[0]?.[2]).toBe(
+      "/filesystem-activity?view=audit&sessionId=fallback-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=initial-hop",
+    );
+    expect(hookResult.navigationCoordinator.isPopStatePending()).toBe(false);
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
   // =========================================================================

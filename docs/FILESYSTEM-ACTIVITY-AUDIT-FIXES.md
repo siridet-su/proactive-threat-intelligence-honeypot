@@ -347,12 +347,18 @@ Real-browser evidence:
   and preserves the absolute hop/URL. It also exercises explicit unknown-hop
   and lookup-error recovery plus Show latest and Clear hop without silently
   clearing the URL.
-- Scenario C uses intentional production UI navigation and actual browser
-  `window.history` traversal (`page.goBack()`/`page.goForward()` for the main
-  path, and browser `history.back()`/`history.forward()` for rapid traversal).
-  It verifies view, session, hide-home, target path, and hop restoration,
-  history length, no feedback entries, and a delayed retained-session lookup
-  from A → B → A → B whose late A response cannot overwrite B.
+- Scenario C starts from the production Live view, builds the Audit → session
+  selection → hide-home → target-path → hop stack through production UI, and
+  uses actual `page.goBack()`/`page.goForward()` and browser history traversal
+  across every traversable audit entry. Each step asserts the canonical URL,
+  selected audit state, filters, and visible hop context; it also checks that
+  traversal does not add feedback entries. Its delayed retained-session proof
+  creates same-document A/B entries, goes Back to start A, goes Forward to B,
+  and resolves A without any document navigation; the late A result cannot
+  overwrite B's URL, session, hop, filters, or recovery state. The initial
+  Live baseline is asserted before the production Audit transition; the first
+  Playwright document entry itself is not treated as a traversable history
+  entry.
 - Scenario G uses a real Chromium layout engine at 375, 768, and 1440 CSS
   pixels. It checks bounding-box reachability, page and toolbar horizontal
   overflow, and actual timeline collapse to an inert/hidden panel followed by
@@ -365,9 +371,13 @@ Real-browser evidence:
 
 Hydration and browser failure policy: URL-owned state and persisted timeline
 preferences use deterministic server/client initial values, then the mounted
-production page applies the original search transaction after hydration. This
-preserves deep-link URLs without push/replace feedback entries and retains
-session/hop lookup and navigation transaction behavior. The browser harness
+production page applies the original search transaction after hydration. The
+navigation coordinator owns transaction protection and canonical URL
+deduplication; initial adoption is therefore write-free without a permanent
+search-string suppression guard, while later automatic state transitions may
+use the existing deduplicated replaceState synchronization. This preserves
+deep-link URLs and retains session/hop lookup and navigation transaction
+behavior. The browser harness
 fails on every `pageerror` and every unexpected `console.error`; the only
 narrow allowlist is the intentionally intercepted HTTP 500 for the
 `error-hop` recovery scenario. Direct audit, filter, session, and hop URLs are
@@ -383,21 +393,24 @@ MongoDB, or response agents, and writes Playwright output to
 dirty the repository.
 
 Validation recorded for this follow-up: from `dashboard-v2`, `npm test` passed
-22 files with 457 passing and 2 skipped tests (459 total), and
+22 files with 458 passing and 2 skipped tests (460 total), and
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`
-passed 5 Chromium tests in 26.2 seconds. `npm run lint` passed with 0 errors
+passed 5 Chromium tests in 25.9 seconds. `npm run lint` passed with 0 errors
 and 0 warnings; `npm run build` passed TypeScript, static generation, and route
 optimization; `git diff --check` passed; and
 `go test -count=1 ./...` passed in each of the five Go modules
 (`collector-agent`, `hardware-agent`, `processor-agent`, `response-agent`, and
 `ti-worker`). The browser command is the repository's `npm run test:browser`
 script; this environment used the documented explicit system-browser override
-because its Playwright-managed binary is not installed. Preflight began at
-`0f688ec85787707dc611891a7e80c1c904f713e7` on
-`feat/cwd-filesystem-telemetry` with a clean tree; fetch authentication was
-unavailable over the configured SSH remote, and the existing
-`origin/main` (`4e90071c788ec7f1d61b4756ed527a445d993973`) equaled the merge
-base, so no merge was required. FA-013 remains `IN PROGRESS` pending audit.
+because its Playwright-managed binary is not installed. Current preflight began
+at `bee351b6195d2c44b831a5faa5c0204d138af33d` on
+`feat/cwd-filesystem-telemetry` with a clean tree. `git fetch origin --prune`
+failed exactly with `git@github.com: Permission denied (publickey).` and
+`fatal: Could not read from remote repository.`; the existing local
+`origin/main` (`4e90071c788ec7f1d61b4756ed527a445d993973`) was already an
+ancestor of HEAD, so no merge was required and the remote was not claimed
+current. No manual/live validation was performed. FA-013 remains `IN PROGRESS`
+pending audit.
 FA-014 and later items remain `TODO` and were not started.
 
 ## Required validation gate

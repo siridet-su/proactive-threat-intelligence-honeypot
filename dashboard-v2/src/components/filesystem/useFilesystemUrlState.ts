@@ -145,7 +145,6 @@ export function useFilesystemUrlState(
   const [navigationCoordinator] = useState(() => new FilesystemNavigationCoordinator());
   const initialUrlAppliedRef = useRef(false);
   const initialUrlApplicationScheduledRef = useRef(false);
-  const initialUrlSearchRef = useRef<string | null>(null);
 
   // Synchronize dynamic URL state bindings owned exclusively by useFilesystemUrlState
   useEffect(() => {
@@ -244,16 +243,16 @@ export function useFilesystemUrlState(
   const applyInitialUrlState = useCallback(() => {
     if (typeof window === "undefined" || initialUrlApplicationScheduledRef.current) return;
     initialUrlApplicationScheduledRef.current = true;
-    initialUrlSearchRef.current = window.location.search;
     navigationCoordinator.handlePopState(window.location.search);
     initialUrlAppliedRef.current = true;
   }, [navigationCoordinator]);
 
   // Synchronize React navigation & filter state with the URL for initial hydration and system-driven fallbacks
-  // Guarded against overwriting pending popstate targets with stale pre-navigation React state
+  // The coordinator owns transaction protection and canonical deduplication. Initial URL
+  // adoption therefore needs no permanent search-string guard: once that transaction is
+  // safely adopted, later automatic state changes may use replaceState as intended.
   useEffect(() => {
     if (!isHydrated || !initialUrlAppliedRef.current || typeof window === "undefined") return;
-    if (initialUrlSearchRef.current === window.location.search) return;
     navigationCoordinator.synchronizeUrlState();
   }, [
     isHydrated,

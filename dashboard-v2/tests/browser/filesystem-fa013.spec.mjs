@@ -305,42 +305,213 @@ test.describe("FA-013 real-browser evidence", () => {
   test("C: actual browser Back/Forward restores view, session, filters, and hop without feedback entries", async ({ page }) => {
     monitorBrowserFailures(page);
     const fixtures = await installApiFixtures(page);
+
+    const assertFilesystemState = async ({
+      search,
+      live,
+      sessionIp,
+      hideHome,
+      targetPath,
+      selectedContext,
+    }) => {
+      await expect.poll(() => page.evaluate(() => `${window.location.pathname}${window.location.search}`))
+        .toBe(`/filesystem-activity${search}`);
+      await expect(page.getByRole("tab", {
+        name: live ? "Live Topology" : "Session Audit & Replay",
+        selected: true,
+      })).toBeVisible();
+      if (live) return;
+
+      await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toBeVisible();
+      await expect(page.getByRole("combobox").first()).toContainText(sessionIp);
+      await expect(page.getByRole("button", { name: "Exclude home-only" }))
+        .toHaveAttribute("aria-pressed", String(hideHome));
+      await expect(page.getByRole("combobox").nth(1)).toContainText(targetPath);
+      await expect(page.locator("strong").filter({ hasText: selectedContext }).first())
+        .toHaveText(selectedContext);
+    };
+
+    // Start on the production Live page, then build the rest through its UI.
     await page.goto("/filesystem-activity");
     await expect(page.getByRole("tab", { name: "Live Topology" })).toBeVisible({ timeout: 15_000 });
+    await assertFilesystemState({
+      search: "",
+      live: true,
+      sessionIp: "",
+      hideHome: false,
+      targetPath: "",
+      selectedContext: "",
+    });
+
     await page.getByRole("tab", { name: "Session Audit & Replay" }).evaluate((element) => element.click());
     await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toBeVisible();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=live-session",
+      live: false,
+      sessionIp: "192.0.2.10",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+
     await page.getByRole("combobox").first().click();
     await page.getByRole("option", { name: /198\.51\.100\.7/ }).click();
-    await page.getByRole("button", { name: /Exclude home-only/ }).click();
-    await selectTargetPath(page);
     await expect(page.getByTitle("Previous hop", { exact: true })).toBeVisible();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+
+    await page.getByRole("button", { name: /Exclude home-only/ }).click();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+
+    await selectTargetPath(page);
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/var",
+    });
+
     const historyLength = await page.evaluate(() => window.history.length);
     await page.getByTitle("Previous hop", { exact: true }).click();
-    await expect(page).toHaveURL(/hop=hop-one/);
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/",
+    });
     expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1);
 
+    // Traverse the complete production-created audit stack backward through
+    // session selection, filters, and hop, then forward to the same tip.
     await page.goBack();
-    await expect(page).toHaveURL(/targetPath=%2Fvar%2Flog/);
-    await expect(page.getByRole("button", { name: "Exclude home-only" })).toHaveAttribute("aria-pressed", "true");
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/var",
+    });
     await page.goBack();
-    await expect(page).toHaveURL(/view=audit&sessionId=closed-session/);
-    await page.goForward();
-    await expect(page).toHaveURL(/targetPath=%2Fvar%2Flog/);
-    await page.goForward();
-    await expect(page).toHaveURL(/hop=hop-one/);
-
-    // A retained-session lookup remains pending while the browser traverses
-    // A -> B -> A -> B. Its eventual response must not overwrite B.
-    await page.goto("/filesystem-activity?view=audit&sessionId=retained-a");
-    await expect.poll(() => fixtures.requests.some((request) => request.query === "retained-a")).toBe(true);
-    await page.goto("/filesystem-activity?view=audit&sessionId=closed-session");
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
     await page.evaluate(() => window.history.back());
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+    await page.evaluate(() => window.history.back());
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=live-session",
+      live: false,
+      sessionIp: "192.0.2.10",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: false,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "All paths",
+      selectedContext: "/var",
+    });
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/var",
+    });
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/",
+    });
+    expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1);
+
+    // Keep this document and mounted coordinator alive. Same-document entries
+    // create A and B, then Back starts A's deferred lookup before Forward
+    // supersedes it with known session B.
+    await page.evaluate(() => {
+      window.history.pushState(
+        null,
+        "",
+        "/filesystem-activity?view=audit&sessionId=retained-a&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-two",
+      );
+      window.history.pushState(
+        null,
+        "",
+        "/filesystem-activity?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one",
+      );
+    });
+    await page.goBack();
+    await expect.poll(() => fixtures.requests.some((request) => request.query === "retained-a")).toBe(true);
     await expect(page).toHaveURL(/sessionId=retained-a/);
-    await page.evaluate(() => window.history.forward());
-    await expect(page).toHaveURL(/sessionId=closed-session/);
+    await page.goForward();
+    await assertFilesystemState({
+      search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one",
+      live: false,
+      sessionIp: "198.51.100.7",
+      hideHome: true,
+      targetPath: "/var/log",
+      selectedContext: "/",
+    });
+    const delayedHistoryLength = await page.evaluate(() => window.history.length);
     fixtures.resolveRetainedLookup();
+    await expect.poll(() => page.evaluate(() => `${window.location.pathname}${window.location.search}`))
+      .toBe("/filesystem-activity?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one");
     await expect(page.getByRole("combobox").first()).toContainText("198.51.100.7");
+    await expect(page.getByRole("button", { name: "Exclude home-only" })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("combobox").nth(1)).toContainText("/var/log");
+    await expect(page.locator("strong").filter({ hasText: "/" }).first()).toHaveText("/");
     await expect(page.getByText(/retained-a has expired/)).toHaveCount(0);
+    expect(fixtures.requests.filter((request) => request.query === "retained-a")).toHaveLength(1);
+    expect(await page.evaluate(() => window.history.length)).toBe(delayedHistoryLength);
     await assertNoBrowserFailures(page);
   });
 
