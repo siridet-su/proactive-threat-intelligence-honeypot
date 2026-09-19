@@ -290,10 +290,10 @@ func (mw *MongoWriter) clearCwdEventProjectionWork(ctx context.Context, eventID 
 }
 
 func (mw *MongoWriter) advanceCwdProjectionGeneration(ctx context.Context, sourceID any) (cwdProjectionWork, error) {
-	return mw.advanceCwdProjectionGenerationForEvent(ctx, sourceID, false)
+	return mw.advanceCwdProjectionGenerationForEvent(ctx, sourceID)
 }
 
-func (mw *MongoWriter) advanceCwdProjectionGenerationForEvent(ctx context.Context, sourceID any, eventWork bool) (cwdProjectionWork, error) {
+func (mw *MongoWriter) advanceCwdProjectionGenerationForEvent(ctx context.Context, sourceID any) (cwdProjectionWork, error) {
 	if sourceID == nil {
 		return cwdProjectionWork{}, fmt.Errorf("CWD source identity is missing")
 	}
@@ -302,7 +302,6 @@ func (mw *MongoWriter) advanceCwdProjectionGenerationForEvent(ctx context.Contex
 		"auditProjectionGeneration":        nextGeneration,
 		"auditProjectionPendingGeneration": nextGeneration,
 	}
-	_ = eventWork // Retained for rolling-writer source compatibility.
 	var state bson.M
 	err := mw.db.Collection("cwd_session_state").FindOneAndUpdate(
 		ctx,

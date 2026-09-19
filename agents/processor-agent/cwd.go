@@ -429,7 +429,7 @@ func (mw *MongoWriter) recordCwdObservation(ctx context.Context, observation cwd
 	}
 	// Establish the generation-owned pending marker before the durable history
 	// write. This closes the non-transactional crash window for stale events.
-	eventWork, err := mw.advanceCwdProjectionGenerationForEvent(ctx, stateWork.sourceID, true)
+	eventWork, err := mw.advanceCwdProjectionGenerationForEvent(ctx, stateWork.sourceID)
 	if err != nil {
 		return fmt.Errorf("mark CWD history projection pending: %w", err)
 	}

@@ -6,7 +6,7 @@ FS-007 remains `PARTIAL`.
 ## Scope and architecture
 
 This remediation starts at `b94b69af2e853a4e43560a7756b932ddba9eb821` and is
-implemented through audited HEAD `60a73c4` plus this follow-up on
+implemented through audited HEAD `53c9cc6` plus this follow-up on
 `feat/cwd-filesystem-telemetry`. The processor owns the durable
 `cwd_audit_projection` read model; `cwd_session_state` and `cwd_events` remain
 authoritative source records. `cwd_audit_projection_meta` is only a readiness
@@ -28,10 +28,14 @@ persisted `entered`/`changed` transition history contributes transition paths;
 
 Event delivery is at-least-once: `cwd_events._id` is the idempotency key, and
 each new event carries an event-level pending outbox bit written in the same
-upsert as the durable history record. Source state also owns a pending-event
-count, which keeps reconciliation discoverable through the close race without
-forcing steady-state history reads. Duplicate retries reconcile from source
-history. The projection no longer
+upsert as the durable history record. That indexed event bit is the sole
+authoritative event-work truth; the retired cross-collection source counter is
+not written or used for readiness. A failed pre-upsert reservation therefore
+leaves only bounded generation work, while a failed post-insert projection is
+rediscovered from the durable event marker. Duplicate retries reconcile from
+source history. Event-marker clearing uses `MatchedCount` as an ownership CAS,
+so a second reconciler cannot acknowledge another worker's event. The
+projection no longer
 stores an unbounded `auditEventIds` array. Distinct transition paths are capped
 at 512 per projection document; `auditPathsOverflow=true` causes an exact
 cursor-aware `$unionWith` composition of every overflow source row with the
@@ -53,7 +57,9 @@ closed lifecycle time plus retention. The processor repairs an existing
 Backfill checks every history cursor error before accepting a result, selects
 separate bounded generation-pending and v1/unversioned cutover branches,
 updates source readiness only after the projection write, and publishes the
-marker only after bounded pending-source, pending-event, and cutover probes.
+marker only after bounded pending-source, indexed pending-event, and cutover
+probes. Pending events are processed incrementally from the indexed cursor;
+they are never materialized in an unbounded slice.
 Each source row owns monotonic
 `auditProjectionGeneration`, `auditProjectionPendingGeneration`, and
 `auditProjectionReadyGeneration` markers; readiness is an exact `_id` plus
@@ -88,13 +94,13 @@ The processor provisions and verifies:
 - `cwd_session_state`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "session_id": -1 }`;
 - `cwd_session_state`: `{ "lifecycle.status": 1, "auditProjectionVersion": 1 }` for readiness checks;
 - `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingGeneration": 1 }` for steady-state generation reconciliation;
-- `cwd_session_state`: partial `{ "lifecycle.status": 1, "auditProjectionPendingEventCount": 1 }` for event ownership probes;
 - `cwd_session_state`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditHomeOnly": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "lifecycle.status": 1, "auditVisitedPaths": 1, "lifecycle.closedAt": -1, "sessionId": -1 }`;
 - `cwd_audit_projection`: `{ "auditPathsOverflow": 1 }` for bounded-readiness checks;
 - `cwd_audit_projection`: `{ "expires_at": 1 }`, `expireAfterSeconds: 0`;
+- `cwd_events`: partial `{ "auditProjectionPending": 1, "_id": 1 }` for the bounded event outbox probe;
 - canonical and legacy `cwd_events` session compound indexes, canonical/legacy pending-event indexes, plus its TTL index.
 
 Go unit tests assert exact key patterns/options. Integration setup first creates
@@ -122,13 +128,17 @@ been removed; the prior full-fan-out behavior remains reproducible through the
 legacy production pipeline and is explicitly the migration fallback, not an
 accepted steady-state bound.
 
-The readiness fixture separately provisions the production source indexes and
-records `executionStats` for the required branches: fully converged `1,900`
-rows examined `0` documents and keys; one pending v2 row examined `1/1`; one
-stale-version migration row examined `1/1`; and malformed rows remained
-outside the eligible contract with `2/2` bounded examination in the combined
-pending probe. All plans were index-backed. A steady-state reconciliation pass
-also performed no `cwd_events` reads for converged rows.
+The readiness fixture separately provisions the production source and event
+indexes and records `executionStats` for the required branches: fully
+converged `1,900` rows examined `0` documents and keys; the indexed pending
+event probe examined `0/0` for zero pending events, `0/0` for one pending event,
+and `0/0` for multiple pending events under its limit-one existence contract;
+one pending v2 row examined `1/1`; one stale-version migration row examined
+`1/1`; and malformed rows remained outside the eligible contract with `2/2`
+bounded examination in the combined pending probe. All plans were
+index-backed. A steady-state reconciliation pass performed no authoritative
+session/action history reads; only the bounded pending-marker existence probe
+remained.
 
 ## Isolated integration safety and validation
 
