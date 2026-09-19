@@ -11,7 +11,7 @@ import {
   PanelRightOpen,
   Pause,
   Play,
-  Radio,
+  
   RefreshCw,
   Route,
 } from "lucide-react";
@@ -30,6 +30,8 @@ import { ResponseActionPanel } from "./ResponseActionPanel";
 import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { TimelineSplitter } from "./TimelineSplitter";
+import { FilesystemPageHeader } from "./FilesystemPageHeader";
+import { AuditNoticeRegion } from "./AuditNoticeRegion";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
@@ -37,7 +39,7 @@ import {
   buildAuditSnapshot,
   buildAuditUrlSearch,
   clampTimelineSidebarWidth,
-  formatPageBadgeText,
+  
   type AuditUrlParams,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
@@ -825,136 +827,18 @@ export function FilesystemActivity() {
         </div>
       ) : null}
       {/* Header Section: Global view controls and real-time telemetry status */}
-      <section className="flex flex-col gap-3.5 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-text">Filesystem activity</h1>
-          <p className="mt-0.5 max-w-2xl text-xs text-text-muted">
-            {viewMode === "live"
-              ? "Inspect observed Cowrie working-directory topology and live threat clusters."
-              : "Step-by-step forensic route replay and directory timeline for audited attacker session."}
-          </p>
-        </div>
-
-        {/* Global view controls: View switcher & real-time telemetry status */}
-        <div
-          className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0"
-          role="toolbar"
-          aria-label="Global filesystem controls"
-        >
-          {/* Mode Switcher Tabs */}
-          <div
-            className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5 shadow-2xs shrink-0 flex-nowrap"
-            role="tablist"
-            aria-label="Filesystem view modes"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "live"}
-              onClick={() => switchViewMode("live")}
-              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                viewMode === "live"
-                  ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text border border-transparent"
-              }`}
-            >
-              <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Live Topology</span>
-              {snapshot?.sessions.length ? (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                  {snapshot.sessions.length}
-                </span>
-              ) : null}
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "audit"}
-              onClick={() => switchViewMode("audit")}
-              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                viewMode === "audit"
-                  ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text border border-transparent"
-              }`}
-            >
-              <Route className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Session Audit & Replay</span>
-              {selectedSession && (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                  .{selectedSession.sourceIp.split(".").pop()}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Telemetry Status Bar & Actions */}
-          <div
-            className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap rounded-lg border border-border/70 bg-surface-subtle/50 p-1"
-            role="region"
-            aria-label="Stream telemetry status"
-          >
-            <span
-              className={`ui-badge ${
-                streamState === "live"
-                  ? "border-success-border bg-success-subtle text-success"
-                  : streamState === "connecting"
-                  ? "border-border bg-surface-subtle text-text-subtle"
-                  : "border-warning-border bg-warning-subtle text-warning"
-              }`}
-              title={
-                streamState === "live"
-                  ? "Real-time SSE event stream connected"
-                  : streamState === "connecting"
-                  ? "Connecting to real-time event stream"
-                  : "SSE event stream disconnected, reconnecting..."
-              }
-            >
-              <Radio className={`h-3.5 w-3.5 ${streamState === "live" ? "" : "animate-pulse"}`} aria-hidden="true" />
-              {streamState === "live" ? "Live stream" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
-            </span>
-
-            {snapshot && (
-              <span
-                className={`ui-badge ${freshnessState.badgeClass}`}
-                title={freshnessState.detail}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
-                <span>{formatPageBadgeText(freshnessState)}</span>
-              </span>
-            )}
-
-            {(freshnessState.isDegraded || streamState === "stale") && (
-              <button
-                type="button"
-                className="ui-button border-warning-border bg-warning-subtle text-warning hover:bg-warning/20 font-semibold"
-                onClick={handleReconnect}
-                title="Force reconnect SSE stream and refresh snapshot"
-              >
-                <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-                Reconnect
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="ui-button"
-              disabled={!isHydrated || regionStatus === "loading" || regionStatus === "refreshing"}
-              onClick={() => {
-                if (!isHydrated || regionStatus === "loading" || regionStatus === "refreshing") return;
-                void refresh();
-              }}
-              title="Fetch fresh snapshot via HTTP"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${regionStatus === "refreshing" || regionStatus === "loading" ? "animate-spin text-primary" : ""}`}
-                aria-hidden="true"
-              />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </section>
+      <FilesystemPageHeader
+        viewMode={viewMode}
+        switchViewMode={switchViewMode}
+        snapshot={snapshot}
+        selectedSession={selectedSession}
+        streamState={streamState}
+        freshnessState={freshnessState}
+        handleReconnect={handleReconnect}
+        isHydrated={isHydrated}
+        regionStatus={regionStatus}
+        refresh={refresh}
+      />
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
@@ -1170,98 +1054,24 @@ export function FilesystemActivity() {
           <div className="min-h-0 flex-1 flex overflow-hidden">
             {/* Left Canvas: Flex-1 fills available width smoothly */}
             <div className="min-w-0 flex-1 h-full flex flex-col">
-              {expiredSessionId ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
-                    <span>
-                      <strong>Requested audit session is no longer available:</strong> Session{" "}
-                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {allSessions.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = allSessions[0];
-                          setExpiredSessionId(null);
-                          if (first) {
-                            handleUserSelectSession(first.sessionId);
-                          }
-                        }}
-                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
-                      >
-                        View latest available session
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpiredSessionId(null);
-                        switchViewMode("live");
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Return to live view
-                    </button>
-                  </div>
-                </div>
-              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                    <span>
-                      {filteredSessionsCount === 0 ? (
-                        <>
-                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
-                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
-                          {hideHomeOnly ? " [excluding /home]" : ""}.
-                          {selectedSession ? (
-                            <span className="text-text-muted ml-1">
-                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {filteredSessionsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) handleUserSelectSession(first.sessionId);
-                        }}
-                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
-                      >
-                        Switch to match
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleResetAuditFilters}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Reset filters
-                    </button>
-                    {selectedSession && filteredSessionsCount === 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearSelection}
-                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                      >
-                        Clear selection
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : null}
+              <AuditNoticeRegion
+                expiredSessionId={expiredSessionId}
+                allSessions={allSessions}
+                setExpiredSessionId={setExpiredSessionId}
+                handleUserSelectSession={handleUserSelectSession}
+                switchViewMode={switchViewMode}
+                hasActiveFilters={hasActiveFilters}
+                isSelectedFilteredOut={isSelectedFilteredOut}
+                filteredSessionsCount={filteredSessionsCount}
+                totalSessionsCount={totalSessionsCount}
+                targetPathFilter={targetPathFilter}
+                hideHomeOnly={hideHomeOnly}
+                selectedSession={selectedSession}
+                filteredActiveSessions={filteredActiveSessions}
+                filteredClosedSessions={filteredClosedSessions}
+                handleResetAuditFilters={handleResetAuditFilters}
+                handleClearSelection={handleClearSelection}
+              />
               <TopologyCanvas
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
@@ -1468,98 +1278,24 @@ export function FilesystemActivity() {
           {/* Side-by-Side Audit Layout */}
           <div className="flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]">
             <div className="min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0">
-              {expiredSessionId ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
-                    <span>
-                      <strong>Requested audit session is no longer available:</strong> Session{" "}
-                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {allSessions.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = allSessions[0];
-                          setExpiredSessionId(null);
-                          if (first) {
-                            handleUserSelectSession(first.sessionId);
-                          }
-                        }}
-                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
-                      >
-                        View latest available session
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpiredSessionId(null);
-                        switchViewMode("live");
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Return to live view
-                    </button>
-                  </div>
-                </div>
-              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                    <span>
-                      {filteredSessionsCount === 0 ? (
-                        <>
-                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
-                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
-                          {hideHomeOnly ? " [excluding /home]" : ""}.
-                          {selectedSession ? (
-                            <span className="text-text-muted ml-1">
-                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {filteredSessionsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) handleUserSelectSession(first.sessionId);
-                        }}
-                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
-                      >
-                        Switch to match
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleResetAuditFilters}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Reset filters
-                    </button>
-                    {selectedSession && filteredSessionsCount === 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearSelection}
-                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                      >
-                        Clear selection
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : null}
+              <AuditNoticeRegion
+                expiredSessionId={expiredSessionId}
+                allSessions={allSessions}
+                setExpiredSessionId={setExpiredSessionId}
+                handleUserSelectSession={handleUserSelectSession}
+                switchViewMode={switchViewMode}
+                hasActiveFilters={hasActiveFilters}
+                isSelectedFilteredOut={isSelectedFilteredOut}
+                filteredSessionsCount={filteredSessionsCount}
+                totalSessionsCount={totalSessionsCount}
+                targetPathFilter={targetPathFilter}
+                hideHomeOnly={hideHomeOnly}
+                selectedSession={selectedSession}
+                filteredActiveSessions={filteredActiveSessions}
+                filteredClosedSessions={filteredClosedSessions}
+                handleResetAuditFilters={handleResetAuditFilters}
+                handleClearSelection={handleClearSelection}
+              />
               <TopologyCanvas
                 snapshot={auditSnapshot ?? snapshot}
                 regionStatus={regionStatus}
