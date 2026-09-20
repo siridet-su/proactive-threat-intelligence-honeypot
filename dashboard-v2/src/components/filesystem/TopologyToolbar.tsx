@@ -36,6 +36,8 @@ interface TopologyToolbarProps {
   resetMapWorkspace: () => void;
   densityPreference: TopologyDensityPreference;
   setDensityPreference: (pref: TopologyDensityPreference) => void;
+  showGrid: boolean;
+  setShowGrid: (show: boolean) => void;
   effectiveDensityMode: TopologyDensityMode;
   densityAnalysisHiddenNodes: number;
   isTopologyExpanded: boolean;
@@ -60,6 +62,8 @@ export function TopologyToolbar({
   resetMapWorkspace,
   densityPreference,
   setDensityPreference,
+  showGrid,
+  setShowGrid,
   effectiveDensityMode,
   densityAnalysisHiddenNodes,
   isTopologyExpanded,
@@ -270,6 +274,19 @@ export function TopologyToolbar({
                   {densityAnalysisHiddenNodes} {densityAnalysisHiddenNodes === 1 ? "path" : "paths"} aggregated
                 </div>
               )}
+
+              <div className="my-1 h-px bg-border" aria-hidden="true" />
+              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+                Appearance
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowGrid(!showGrid)}
+                className="flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                <span>Show background grid</span>
+                {showGrid && <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
+              </button>
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
               <div className="px-2 py-1 text-[11px] font-medium text-text-muted">

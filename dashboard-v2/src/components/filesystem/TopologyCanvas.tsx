@@ -154,6 +154,7 @@ export function TopologyCanvas({
   const clusterSessionRefs = useRef(new Map<string, HTMLButtonElement>());
   const [userCollapsedIps, setUserCollapsedIps] = useState<Set<string>>(new Set());
   const [userExpandedIps, setUserExpandedIps] = useState<Set<string>>(new Set());
+  const [showGrid, setShowGrid] = useState(true);
 
   const isClusterExpanded = useCallback(
     (callout: GraphCallout) => {
@@ -169,12 +170,14 @@ export function TopologyCanvas({
     if (isCurrentlyExpanded) {
       setUserCollapsedIps((prev) => new Set(prev).add(sourceIp));
       setUserExpandedIps((prev) => {
+  const [showGrid, setShowGrid] = useState(true);
         const next = new Set(prev);
         next.delete(sourceIp);
         return next;
       });
     } else {
       setUserExpandedIps((prev) => new Set(prev).add(sourceIp));
+  const [showGrid, setShowGrid] = useState(true);
       setUserCollapsedIps((prev) => {
         const next = new Set(prev);
         next.delete(sourceIp);
@@ -624,6 +627,8 @@ export function TopologyCanvas({
           resetMapWorkspace={resetMapWorkspace}
           densityPreference={densityPreference}
           setDensityPreference={setDensityPreference}
+          showGrid={showGrid}
+          setShowGrid={setShowGrid}
           effectiveDensityMode={effectiveDensityMode}
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
@@ -685,7 +690,7 @@ export function TopologyCanvas({
                 onPointerCancel={onPointerEnd}
               >
                 <div
-                  className="pointer-events-none absolute opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
+                  className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
                   aria-hidden="true"
                 />
 
@@ -1187,6 +1192,7 @@ export function TopologyCanvas({
                                     return next;
                                   });
                                   setUserExpandedIps((prev) => new Set(prev).add(callout.sourceIp));
+  const [showGrid, setShowGrid] = useState(true);
                                 } else {
                                   toggleClusterExpand(callout.sourceIp, expanded);
                                 }
@@ -1349,6 +1355,8 @@ export function TopologyCanvas({
                 densityAnalysisTotalNodes={densityAnalysis.totalNodes}
                 densityPreference={densityPreference}
                 setDensityPreference={setDensityPreference}
+          showGrid={showGrid}
+          setShowGrid={setShowGrid}
                 setIsPathsExpanded={setIsPathsExpanded}
                 effectiveSessionsLength={effectiveSessions.length}
                 isSourcesTruncated={isSourcesTruncated}
