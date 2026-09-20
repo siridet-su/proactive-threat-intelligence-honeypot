@@ -170,14 +170,12 @@ export function TopologyCanvas({
     if (isCurrentlyExpanded) {
       setUserCollapsedIps((prev) => new Set(prev).add(sourceIp));
       setUserExpandedIps((prev) => {
-  const [showGrid, setShowGrid] = useState(true);
         const next = new Set(prev);
         next.delete(sourceIp);
         return next;
       });
     } else {
       setUserExpandedIps((prev) => new Set(prev).add(sourceIp));
-  const [showGrid, setShowGrid] = useState(true);
       setUserCollapsedIps((prev) => {
         const next = new Set(prev);
         next.delete(sourceIp);
@@ -1192,7 +1190,6 @@ export function TopologyCanvas({
                                     return next;
                                   });
                                   setUserExpandedIps((prev) => new Set(prev).add(callout.sourceIp));
-  const [showGrid, setShowGrid] = useState(true);
                                 } else {
                                   toggleClusterExpand(callout.sourceIp, expanded);
                                 }
@@ -1358,8 +1355,6 @@ export function TopologyCanvas({
           showGrid={showGrid}
           setShowGrid={setShowGrid}
                 setIsPathsExpanded={setIsPathsExpanded}
-                effectiveSessionsLength={effectiveSessions.length}
-                isSourcesTruncated={isSourcesTruncated}
                 renderedSourcesCount={renderedSourcesCount}
                 totalLiveSources={totalLiveSources}
                 isSourcesExpanded={isSourcesExpanded}
