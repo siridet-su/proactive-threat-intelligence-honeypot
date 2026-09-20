@@ -136,9 +136,9 @@ export function FilesystemPageHeader({
           <button
             type="button"
             className="ui-button"
-            disabled={!isHydrated || regionStatus === "loading" || regionStatus === "refreshing"}
+            disabled={regionStatus === "loading" || regionStatus === "refreshing"}
             onClick={() => {
-              if (!isHydrated || regionStatus === "loading" || regionStatus === "refreshing") return;
+              if (regionStatus === "loading" || regionStatus === "refreshing") return;
               void refresh();
             }}
             title="Fetch fresh snapshot via HTTP"
