@@ -8,7 +8,7 @@ This implementation adds a separate post-persistence AI advisory path. The
 reviewed hosted adapter is `google_vertex_gemini`, implemented with the current
 `google-genai` SDK in Vertex AI mode and standard Application Default
 Credentials (ADC). Its reviewed runtime identity is model
-`gemini-2.5-flash`, location `global`, API `v1`, endpoint
+`gemini-3.6-flash`, location `global`, API `v1`, endpoint
 `https://aiplatform.googleapis.com`, and adapter revision
 `google-genai.vertex-adc.v2`. The offline fixture remains available for
 deterministic contract tests. Enabling any other hosted provider fails at
@@ -333,7 +333,7 @@ Compute Engine service account
 project `project-dff4b23a-3010-4936-a02`, and the VM has the `cloud-platform`
 OAuth scope. The identity has the direct project-level role
 `roles/aiplatform.user`. Metadata-ADC Vertex requests to location `global` and
-model `gemini-2.5-flash` returned visible content with `ON_DEMAND` routing.
+model `gemini-3.6-flash` returned visible content with `ON_DEMAND` routing.
 
 The deployed venv contains `google-genai==2.13.0` and
 `google-auth==2.56.3`. The `honeypot` runtime user has no user ADC file;
