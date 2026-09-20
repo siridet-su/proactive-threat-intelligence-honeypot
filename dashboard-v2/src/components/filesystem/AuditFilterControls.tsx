@@ -145,6 +145,27 @@ export function AuditFilterControls({
     }
   }, [timeDropdownOpen, openTimeWithFocus]);
 
+  const handleCustomTimeChange = useCallback((type: 'from' | 'to', timeString: string) => {
+    if (!customDateRange) return;
+    const [hours, minutes] = timeString.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return;
+    
+    if (type === 'from' && customDateRange.from) {
+      const newDate = new Date(customDateRange.from);
+      newDate.setHours(hours, minutes, 0, 0);
+      onSelectCustomDateRange?.({ ...customDateRange, from: newDate });
+    } else if (type === 'to' && customDateRange.to) {
+      const newDate = new Date(customDateRange.to);
+      newDate.setHours(hours, minutes, 0, 0);
+      onSelectCustomDateRange?.({ ...customDateRange, to: newDate });
+    }
+  }, [customDateRange, onSelectCustomDateRange]);
+
+  const formatTimeInput = useCallback((date?: Date) => {
+    if (!date) return "";
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }, []);
+
   const hasActiveFilters = hideHomeOnly || targetPath !== null;
 
   // Filter distinct paths based on search input
@@ -289,7 +310,7 @@ export function AuditFilterControls({
           className="min-w-[200px] p-1.5"
         >
           {timeRange === "custom" ? (
-            <div className="flex flex-col p-1">
+            <div className="flex flex-col p-1 w-[280px]">
               <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-border">
                 <span className="text-xs font-semibold text-text">Custom Range</span>
                 <button
@@ -304,14 +325,47 @@ export function AuditFilterControls({
                 selected={customDateRange}
                 onSelect={(range) => {
                   onSelectCustomDateRange?.(range);
-                  if (range?.from && range?.to) {
-                    setTimeDropdownOpen(false);
-                    timeTriggerRef.current?.focus();
-                  }
+                  // Do not auto-close so the user can edit time
                 }}
                 numberOfMonths={1}
-                className="pointer-events-auto"
+                className="pointer-events-auto flex justify-center"
               />
+              
+              {customDateRange?.from && (
+                <div className="flex flex-col gap-2 px-3 pt-3 pb-1 mt-1 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs text-text-subtle w-12">Start</label>
+                    <input 
+                      type="time"
+                      className="bg-surface-subtle border border-border rounded-md px-2 py-1 text-xs text-text outline-none focus:border-primary w-[100px] cursor-pointer"
+                      value={formatTimeInput(customDateRange.from)}
+                      onChange={(e) => handleCustomTimeChange('from', e.target.value)}
+                    />
+                  </div>
+                  {customDateRange?.to && (
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-text-subtle w-12">End</label>
+                      <input 
+                        type="time"
+                        className="bg-surface-subtle border border-border rounded-md px-2 py-1 text-xs text-text outline-none focus:border-primary w-[100px] cursor-pointer"
+                        value={formatTimeInput(customDateRange.to)}
+                        onChange={(e) => handleCustomTimeChange('to', e.target.value)}
+                      />
+                    </div>
+                  )}
+                  
+                  <button
+                    onClick={() => {
+                      setTimeDropdownOpen(false);
+                      timeTriggerRef.current?.focus();
+                    }}
+                    disabled={!customDateRange?.from || !customDateRange?.to}
+                    className="mt-3 w-full bg-primary text-primary-content rounded-md py-1.5 text-xs font-medium hover:bg-primary-action transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Apply Range
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div
