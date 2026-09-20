@@ -51,7 +51,7 @@ export function FilesystemTimelinePanel({
         style={innerStyle}
         className={isFullscreen ? "h-full flex flex-col min-h-0" : "w-full lg:w-[var(--timeline-width)] h-full flex flex-col min-h-0"}
       >
-        <CwdRouteHistory {...historyProps} layout="sidebar" />
+        <CwdRouteHistory {...historyProps} layout="sidebar" isDragging={isDragging} />
       </div>
     </div>
   );

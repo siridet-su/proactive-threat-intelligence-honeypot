@@ -54,6 +54,7 @@ export interface CwdRouteHistoryProps {
   onShowLatestHop: () => void;
   onSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
   onLoadEarlier: () => void;
+  isDragging?: boolean;
 }
 
 export function CwdRouteHistory({
@@ -76,6 +77,7 @@ export function CwdRouteHistory({
   onShowLatestHop,
   onSelectHistoryEventId,
   onLoadEarlier,
+  isDragging,
 }: CwdRouteHistoryProps) {
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
   const shouldReduceMotion = useReducedMotion();
@@ -192,7 +194,7 @@ export function CwdRouteHistory({
                   className="rounded-md border border-border bg-surface shadow-2xs"
                   style={{ gridColumnStart: sidebarTabColumn }}
                   transition={
-                    shouldReduceMotion
+                    shouldReduceMotion || isDragging
                       ? { duration: 0 }
                       : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
                   }
