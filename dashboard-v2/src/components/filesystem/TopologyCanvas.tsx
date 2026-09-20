@@ -674,6 +674,13 @@ export function TopologyCanvas({
             }
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* Global override during dragging to prevent text selection and force cursor */}
+              {(isDraggingSurface || draggedNodePath || draggedCalloutIp) && (
+                <style>{`
+                  body { user-select: none !important; -webkit-user-select: none !important; }
+                  body * { cursor: grabbing !important; }
+                `}</style>
+              )}
               <div
                 ref={mapSurfaceRef}
                 tabIndex={0}
