@@ -129,6 +129,41 @@ def test_abuseipdb_data_persists_bounded_context(tmp_path: Path) -> None:
     assert "password" not in encoded.lower()
 
 
+def test_otx_source_ip_data_persists_bounded_pulse_context(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    service = SourceIPCacheService(storage)
+    entry = service.store_result(
+        "otx",
+        FIXTURE_IP,
+        _result(
+            "otx",
+            {
+                "pulse_info": {
+                    "pulses": [
+                        {
+                            "id": "pulse-1",
+                            "name": "bounded fixture pulse",
+                            "created": "2026-09-04T00:00:00Z",
+                            "modified": "2026-09-04T01:00:00Z",
+                            "tags": ["malware", "fixture"],
+                            "references": ["https://example.invalid/pulse-1"],
+                        }
+                    ]
+                }
+            },
+        ),
+        _settings("otx"),
+        now="2026-09-05T09:00:00Z",
+    )
+    assert entry is not None
+    assert entry["lookup_status"] == "DATA"
+    assert entry["normalized_context"]["pulses"][0]["pulse_id"] == "pulse-1"
+    encoded = json.dumps(entry, sort_keys=True)
+    assert "pulse_info" not in encoded
+    assert "api_key" not in encoded.lower()
+    assert "password" not in encoded.lower()
+
+
 def test_shodan_data_persists_only_bounded_normalized_context(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     service = SourceIPCacheService(storage)
@@ -206,7 +241,7 @@ def test_fresh_same_provider_ip_requires_no_new_lookup_and_providers_stay_distin
             calls += 1
     assert calls == 0
     rows = storage.list_rows(SOURCE_IP_CACHE_COLLECTION)
-    assert len(rows) == 2
+    assert len(rows) == len(SOURCE_IP_CACHE_PROVIDERS)
     assert {row["provider"] for row in rows} == set(SOURCE_IP_CACHE_PROVIDERS)
 
 

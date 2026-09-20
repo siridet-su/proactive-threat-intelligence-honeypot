@@ -13,7 +13,7 @@ import uuid
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional
@@ -26,9 +26,36 @@ from production.utils.sensitive_data import (
 from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 from production.reporting.artifact_privacy import sanitize_artifact_boundary
+from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
+
+TI_DISPLAY_STATUS = {
+    "POLICY_BLOCKED": "LOOKUP_NOT_EXECUTED",
+    "TI_PENDING": "LOOKUP_PENDING",
+    "TI_PARTIAL": "PARTIAL_CONTEXT",
+    "TI_EXPIRED": "STORED_CONTEXT_STALE",
+    "TI_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
+    "TI_AVAILABLE": "AVAILABLE",
+    "AVAILABLE": "AVAILABLE",
+    "TI_FRESH": "FRESH",
+    "TI_STALE": "STALE",
+    "TI_AUTH_DISABLED": "LOOKUP_AUTH_DISABLED",
+    "TI_RATE_LIMITED": "LOOKUP_RATE_LIMITED",
+    "PROVIDER_EVIDENCE_AVAILABLE": "EVIDENCE_AVAILABLE",
+    "NO_ELIGIBLE_OBSERVABLE": "NO_ELIGIBLE_DATA",
+    "NO_STORED_PROVIDER_RESULT": "NO_STORED_RESULT",
+    "PROVIDER_RESULT_PENDING": "LOOKUP_PENDING",
+    "EXPIRED_STORED_RESULT": "STORED_CONTEXT_STALE",
+    "PROVIDER_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
+    "STATUS_NOT_SPECIFIED": "STATE_NOT_AVAILABLE",
+}
+
+
+def _ti_display_status(value: Any) -> str:
+    normalized = str(value or "NOT_AVAILABLE").strip().upper()
+    return TI_DISPLAY_STATUS.get(normalized, normalized)
 
 
 class _PDFExportUnavailable(RuntimeError):
@@ -485,7 +512,7 @@ def _evidence_reference_summary(values: Any) -> str:
         if str(item).strip()
     })
     if not references:
-        return "not recorded"
+        return "Unavailable"
     digest = hashlib.sha256(
         stable_json(sorted(references)).encode("utf-8")
     ).hexdigest()
@@ -499,6 +526,159 @@ def _evidence_reference_summary(values: Any) -> str:
         f"{len(references)} refs; examples: {examples}{suffix}; "
         f"set SHA-256: {digest}"
     )
+
+
+def _report_prediction_context(
+    snapshot: Any,
+    session_id: Any,
+) -> Dict[str, Any]:
+    """Return a bounded, exact-session forecast projection for the report.
+
+    Prediction snapshots are optional presentation context.  This helper is
+    intentionally strict: a snapshot without an exact session binding, or a
+    snapshot whose integrity validator reported an error, is not rendered.
+    Raw features, probabilities, model paths, and arbitrary nested payloads
+    are never copied into the report projection.
+    """
+
+    if not isinstance(snapshot, dict):
+        return {}
+    expected_session = str(session_id or "").strip()
+    payload = snapshot.get("payload") if isinstance(snapshot.get("payload"), dict) else snapshot
+    if not isinstance(payload, dict) or not expected_session:
+        return {}
+    snapshot_session = str(
+        snapshot.get("session_id")
+        or payload.get("session_id")
+        or payload.get("sequence_id")
+        or ""
+    ).strip()
+    if snapshot_session != expected_session:
+        return {}
+    integrity_errors = snapshot.get("integrity_errors") or payload.get("integrity_errors")
+    if integrity_errors:
+        return {}
+
+    def _bounded_text(value: Any, limit: int) -> str:
+        if value in (None, ""):
+            return ""
+        try:
+            sanitized = _safe_artifact_text(value, "prediction_context")
+        except (TypeError, ValueError):
+            return ""
+        if not sanitized or sanitized == "[REDACTED]":
+            return ""
+        return sanitized[:limit]
+
+    def _bounded_digest(*values: Any) -> str:
+        """Keep only an explicitly shaped SHA-256 identity in the report."""
+
+        for value in values:
+            text = _bounded_text(value, 80).strip().lower()
+            if re.fullmatch(r"[0-9a-f]{64}", text):
+                return text
+        return ""
+
+    def _bounded_identity(*values: Any) -> str:
+        """Keep a short binding identity, never an arbitrary nested payload."""
+
+        for value in values:
+            text = _bounded_text(value, 160).strip()
+            if text:
+                return text
+        return ""
+
+    raw_ranking = payload.get("final_ranking")
+    if not isinstance(raw_ranking, list):
+        output = payload.get("next_behavior_output")
+        raw_ranking = output.get("ranked_tactics") if isinstance(output, dict) else []
+    ranking: List[Dict[str, Any]] = []
+    for index, item in enumerate(raw_ranking or [], start=1):
+        if isinstance(item, dict):
+            label = item.get("tactic") or item.get("label") or item.get("prediction")
+            rank = item.get("rank") or index
+        else:
+            label = item
+            rank = index
+        label_text = _bounded_text(label, 120).strip()
+        if not label_text:
+            continue
+        ranking.append({"rank": rank, "label": label_text[:120]})
+        if len(ranking) >= 5:
+            break
+
+    prediction_values = payload.get("prediction")
+    if not isinstance(prediction_values, list):
+        output = payload.get("next_behavior_output")
+        prediction_values = output.get("prediction_set") if isinstance(output, dict) else []
+    predictions = [
+        _bounded_text(item, 120).strip()
+        for item in (prediction_values or [])
+        if _bounded_text(item, 120).strip()
+    ][:5]
+    context = {
+        "status": _bounded_text(payload.get("prediction_status") or "UNAVAILABLE", 80).upper(),
+        "reason": _bounded_text(payload.get("prediction_status_reason"), 240),
+        "predictions": predictions,
+        "ranking": ranking,
+        "generated_at": (
+            payload.get("generated_at")
+            or snapshot.get("created_at")
+            or snapshot.get("recorded_at")
+            or ""
+        ),
+        "snapshot_id": _bounded_text(
+            payload.get("snapshot_id")
+            or snapshot.get("snapshot_id")
+            or snapshot.get("prediction_id")
+            or "",
+            160,
+        ).strip(),
+        "authority": "NON_AUTHORITATIVE_FORECAST_ONLY",
+    }
+    # These are presentation-only binding identities.  They are copied only
+    # after exact session binding and snapshot-integrity checks above; raw
+    # features, checkpoint paths, scores, and arbitrary model payloads stay
+    # outside the report boundary.
+    for key, candidates in {
+        "run_id": (
+            payload.get("run_id"),
+            payload.get("completed_run_id"),
+            snapshot.get("run_id"),
+        ),
+        "measurement_id": (
+            payload.get("measurement_id"),
+            snapshot.get("measurement_id"),
+        ),
+        "episode_id": (
+            payload.get("episode_id"),
+            snapshot.get("episode_id"),
+        ),
+        "model_id": (
+            payload.get("model_id"),
+            payload.get("model_identifier"),
+        ),
+    }.items():
+        identity = _bounded_identity(*candidates)
+        if identity:
+            context[key] = identity
+    model_digest = _bounded_digest(
+        payload.get("model_artifact_sha256"),
+        payload.get("artifact_sha256"),
+        payload.get("model_sha256"),
+        snapshot.get("model_artifact_sha256"),
+        snapshot.get("artifact_sha256"),
+    )
+    feature_digest = _bounded_digest(
+        payload.get("feature_contract_sha256"),
+        payload.get("feature_contract_digest"),
+        snapshot.get("feature_contract_sha256"),
+    )
+    if model_digest:
+        context["model_artifact_sha256"] = model_digest
+    if feature_digest:
+        context["feature_contract_sha256"] = feature_digest
+    return context
 
 
 def _trusted_ttp_ids(report: Dict[str, Any], session_payload: Dict[str, Any]) -> List[str]:
@@ -1051,7 +1231,22 @@ def write_markdown_report(
     artifact_version: str = "",
 ) -> str:
     report = _safe_artifact_mapping(report, "report")
-    session_payload = _safe_artifact_mapping(session_payload, "session")
+    # Keep the same bounded account-label compatibility path as the PDF
+    # renderer.  The legacy login_username key remains redacted; only the
+    # worker-derived non-secret alias may be shown.
+    raw_account = (
+        session_payload.get("observed_account_identifier")
+        or session_payload.get("login_username")
+    )
+    session_input = dict(session_payload)
+    if raw_account not in (None, "", "[REDACTED]"):
+        safe_account = _safe_artifact_text(
+            raw_account,
+            "observed_account_identifier",
+        )
+        if safe_account and safe_account != "[REDACTED]":
+            session_input["observed_account_identifier"] = safe_account
+    session_payload = _safe_artifact_mapping(session_input, "session")
     session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
     version = _resolve_artifact_version(
         artifact_version,
@@ -1065,6 +1260,13 @@ def write_markdown_report(
         f"Generated: {_artifact_timestamp(report, session_payload)}",
         f"Session: {session_id}",
         f"Source IP: {session_payload.get('src_ip', 'unknown')}",
+        f"Source endpoint: {session_payload.get('src_ip', 'Unavailable')}:{session_payload.get('src_port', 'Unavailable')}",
+        f"Destination endpoint: {session_payload.get('dst_ip', 'Unavailable')}:{session_payload.get('dst_port', 'Unavailable')}",
+        f"Protocol: {session_payload.get('protocol') or session_payload.get('service') or 'Unavailable'}",
+        f"Observed account: {session_payload.get('observed_account_identifier') or 'Unavailable'}",
+        f"Login attempts: {session_payload.get('login_attempts', 'Unavailable')}",
+        f"Authentication success: {session_payload.get('login_success', 'Unavailable')}",
+        f"Session end: {session_payload.get('end_time') or session_payload.get('updated_at') or 'Unavailable'}",
         "",
         "## Summary",
         str(
@@ -1192,9 +1394,27 @@ def write_pdf_report(
     artifact_version: str = "",
     external_ti_projection: Optional[Dict[str, Any]] = None,
     ai_advisory_projection: Optional[Dict[str, Any]] = None,
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> str:
     report = _safe_artifact_mapping(report, "report")
-    session_payload = _safe_artifact_mapping(session_payload, "session")
+    # ``login_username`` is intentionally redacted by the generic credential
+    # policy. Preserve a separately named, bounded account label for analyst
+    # context when the worker supplied one (or when an older payload still
+    # contains a non-redacted username). Never bypass the password/secret
+    # scrubber for this compatibility path.
+    raw_account = (
+        session_payload.get("observed_account_identifier")
+        or session_payload.get("login_username")
+    )
+    session_input = dict(session_payload)
+    if raw_account not in (None, "", "[REDACTED]"):
+        safe_account = _safe_artifact_text(
+            raw_account,
+            "observed_account_identifier",
+        )
+        if safe_account and safe_account != "[REDACTED]":
+            session_input["observed_account_identifier"] = safe_account
+    session_payload = _safe_artifact_mapping(session_input, "session")
     external_ti = (
         _safe_artifact_mapping(external_ti_projection, "external_ti_projection")
         if isinstance(external_ti_projection, dict)
@@ -1223,6 +1443,7 @@ def write_pdf_report(
         raise _PDFExportUnavailable("PDF renderer is unavailable") from exc
 
     session_id = session_payload.get("session_id", report.get("session_id", "unknown"))
+    prediction_context = _report_prediction_context(prediction_snapshot, session_id)
     version = _resolve_artifact_version(
         artifact_version,
         report,
@@ -1272,7 +1493,7 @@ def write_pdf_report(
         bulletIndent=0, spaceAfter=3,
     )
 
-    def _value(value: Any, default: str = "not recorded", limit: int = 512) -> str:
+    def _value(value: Any, default: str = "Unavailable", limit: int = 512) -> str:
         if value is None or value == "":
             return default
         if isinstance(value, bool):
@@ -1316,24 +1537,137 @@ def write_pdf_report(
         return table
 
     def _main_technique(value: Any) -> str:
-        text = _value(value, "not recorded", 80).strip()
-        return text.split(".", 1)[0] if text else "not recorded"
+        text = _value(value, "Unavailable", 80).strip()
+        return text.split(".", 1)[0] if text else "Unavailable"
 
     def _evidence_summary(values: Any) -> str:
         return _evidence_reference_summary(values)
 
     def _duration_text(start_value: Any, end_value: Any) -> str:
         if not start_value or not end_value:
-            return "not recorded"
+            return "Unavailable"
         try:
             start = datetime.fromisoformat(str(start_value).replace("Z", "+00:00"))
             end = datetime.fromisoformat(str(end_value).replace("Z", "+00:00"))
             seconds = max((end - start).total_seconds(), 0.0)
         except (TypeError, ValueError):
-            return "not recorded"
+            return "Unavailable"
         if seconds < 60:
             return f"{seconds:.1f} seconds"
         return f"{seconds / 60.0:.1f} minutes"
+
+    ict = timezone(timedelta(hours=7), name="ICT")
+
+    def _format_timestamp(value: Any) -> str:
+        """Render analyst-facing time in ICT while keeping source data unchanged."""
+
+        if value is None or value == "":
+            return "Unavailable"
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return _value(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(ict).strftime("%d %b %Y, %H:%M:%S ICT")
+
+    def _duration_value(value: Any, start_value: Any, end_value: Any) -> str:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            seconds = max(float(value), 0.0)
+            if seconds < 60:
+                return f"{seconds:.1f} seconds"
+            if seconds < 3600:
+                return f"{seconds / 60.0:.1f} minutes"
+            return f"{seconds / 3600.0:.1f} hours"
+        return _duration_text(start_value, end_value)
+
+    def _freshness_age(value: Any, reference: Any) -> str:
+        if not value or not reference:
+            return "Unavailable"
+        try:
+            retrieved = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            rendered = datetime.fromisoformat(str(reference).replace("Z", "+00:00"))
+            if retrieved.tzinfo is None:
+                retrieved = retrieved.replace(tzinfo=timezone.utc)
+            if rendered.tzinfo is None:
+                rendered = rendered.replace(tzinfo=timezone.utc)
+            seconds = max((rendered - retrieved).total_seconds(), 0.0)
+        except (TypeError, ValueError):
+            return "Unavailable"
+        if seconds < 3600:
+            return f"{int(seconds // 60)} minutes old"
+        if seconds < 86400:
+            return f"{int(seconds // 3600)} hours old"
+        return f"{int(seconds // 86400)} days old"
+
+    def _display_list(value: Any, *, limit: int = 8) -> str:
+        if not isinstance(value, (list, tuple)):
+            return "Unavailable"
+        values = [_value(item, "", 100).strip() for item in value]
+        values = [item for item in values if item]
+        if not values:
+            return "Unavailable"
+        visible = values[:limit]
+        suffix = f"; +{len(values) - limit} more" if len(values) > limit else ""
+        return ", ".join(visible) + suffix
+
+    def _present(value: Any) -> bool:
+        return value not in (None, "", [], {}, ())
+
+    def _endpoint(address: Any, port: Any) -> str:
+        if not _present(address):
+            return "Unavailable"
+        return (
+            f"{_value(address)}:{_value(port)}"
+            if _present(port)
+            else _value(address)
+        )
+
+    def _compact(value: Any, default: str = "Unavailable", limit: int = 360) -> str:
+        return _value(value, default=default, limit=limit)
+
+    def _external_evidence_details(item: Dict[str, Any]) -> str:
+        extension = item.get("normalized_extension")
+        if not isinstance(extension, dict):
+            return _value(item.get("summary"), "No normalized provider detail", 800)
+        labels = (
+            ("abuse_confidence_score", "abuse score"),
+            ("total_reports", "reports"),
+            ("last_reported_at", "last reported"),
+            ("country_code", "country"),
+            ("usage_type", "usage"),
+            ("domain", "domain"),
+            ("isp", "ISP"),
+            ("asn", "ASN"),
+            ("ports", "ports"),
+            ("services", "services"),
+            ("hostnames", "hostnames"),
+            ("tags", "tags"),
+            ("vulnerabilities", "vulnerabilities"),
+            ("cpes", "CPEs"),
+            ("malicious", "malicious detections"),
+            ("suspicious", "suspicious detections"),
+            ("malware_family", "malware family"),
+            ("pulse_count", "OTX pulses"),
+        )
+        details: List[str] = []
+        for key, label in labels:
+            value = extension.get(key)
+            if value is None or value == "" or value is False:
+                continue
+            if isinstance(value, (list, tuple)):
+                rendered = _display_list(value, limit=6)
+            elif isinstance(value, dict):
+                rendered = ", ".join(
+                    f"{_value(name, '', 50)}={_value(detail, '', 80)}"
+                    for name, detail in list(value.items())[:6]
+                )
+            else:
+                rendered = _value(value, limit=120)
+            details.append(f"{label}: {rendered}")
+        return "; ".join(details[:8]) or _value(
+            item.get("summary"), "No normalized provider detail", 800
+        )
 
     def _is_private_network_indicator(item: Dict[str, Any]) -> bool:
         if str(item.get("type") or "").strip().lower() not in {"ip", "ipv4", "ipv6"}:
@@ -1363,10 +1697,78 @@ def write_pdf_report(
                 texts.append(str(text).strip())
         return texts[:3]
 
+    def _ai_selection_summary(projection: Dict[str, Any]) -> Dict[str, str]:
+        """Expose only bounded, contract-approved advisory selection IDs."""
+
+        advisory = (
+            projection.get("advisory")
+            if isinstance(projection.get("advisory"), dict)
+            else {}
+        )
+        rendered = (
+            advisory.get("rendered_advisory")
+            if isinstance(advisory.get("rendered_advisory"), dict)
+            else {}
+        )
+        selections = advisory.get("template_selections")
+        if not isinstance(selections, list):
+            selections = rendered.get("paragraphs")
+        if not isinstance(selections, list):
+            selections = []
+
+        def _ids(values: Any, *, limit: int = 12) -> List[str]:
+            if not isinstance(values, (list, tuple)):
+                return []
+            result: List[str] = []
+            for value in values:
+                if len(result) >= limit:
+                    break
+                try:
+                    text = _safe_artifact_text(value, "ai_selection")[:160].strip()
+                except (TypeError, ValueError):
+                    continue
+                if text and text != "[REDACTED]" and text not in result:
+                    result.append(text)
+            return result
+
+        template_ids: List[str] = []
+        finding_ids: List[str] = _ids(advisory.get("selected_finding_ids"))
+        action_ids: List[str] = _ids(advisory.get("ranked_action_ids"))
+        relationship_ids: List[str] = []
+        limitation_codes: List[str] = _ids(advisory.get("limitation_codes"))
+        reason_codes: List[str] = _ids(advisory.get("reason_codes"))
+        finding_families: List[str] = []
+        for item in selections[:12]:
+            if not isinstance(item, dict):
+                continue
+            template_ids.extend(_ids([item.get("template_id")], limit=1))
+            finding_ids.extend(_ids(item.get("finding_ids")))
+            action_ids.extend(_ids(item.get("action_ids")))
+            relationship_ids.extend(_ids(item.get("relationship_ids")))
+            limitation_codes.extend(_ids(item.get("limitation_codes")))
+            reason_codes.extend(_ids(item.get("reason_codes")))
+        for item in rendered.get("paragraphs") or []:
+            if not isinstance(item, dict):
+                continue
+            finding_families.extend(_ids(item.get("finding_types")))
+
+        def _dedupe(values: List[str]) -> List[str]:
+            return list(dict.fromkeys(values))[:12]
+
+        return {
+            "templates": ", ".join(_dedupe(template_ids)),
+            "finding_ids": ", ".join(_dedupe(finding_ids)),
+            "finding_families": ", ".join(_dedupe(finding_families)),
+            "action_ids": ", ".join(_dedupe(action_ids)),
+            "relationship_ids": ", ".join(_dedupe(relationship_ids)),
+            "limitation_codes": ", ".join(_dedupe(limitation_codes)),
+            "reason_codes": ", ".join(_dedupe(reason_codes)),
+        }
+
     session_status = (
         "CLOSED" if session_payload.get("is_ended") is True
         else "ACTIVE" if session_payload.get("is_ended") is False
-        else _value(session_payload.get("status"), "NOT_RECORDED", 40).upper()
+        else _value(session_payload.get("status"), "UNAVAILABLE", 40).upper()
     )
     command_count = session_payload.get("command_count")
     if not isinstance(command_count, int):
@@ -1374,13 +1776,91 @@ def write_pdf_report(
         command_count = len(commands) if isinstance(commands, list) else 0
     source_ip = session_payload.get("src_ip") or session_payload.get("source_ip")
     sensor = session_payload.get("sensor_id") or session_payload.get("sensor")
+    session_start = session_payload.get("start_time")
+    session_updated = session_payload.get("updated_at")
     session_end = session_payload.get("end_time")
+    effective_session_end = session_end or (
+        session_updated if session_status == "CLOSED" else None
+    )
+    duration_display = _duration_value(
+        session_payload.get("duration"),
+        session_start,
+        effective_session_end,
+    )
+    source_port = session_payload.get("src_port")
+    destination_ip = session_payload.get("dst_ip")
+    destination_port = session_payload.get("dst_port")
+    protocol = session_payload.get("protocol") or session_payload.get("service")
+    client_version = session_payload.get("client_version")
+    hassh = session_payload.get("hassh")
+    ja3 = session_payload.get("ja3")
+    login_attempts = session_payload.get("login_attempts")
+    if not isinstance(login_attempts, int) or isinstance(login_attempts, bool):
+        login_attempts = 0
+    login_success = session_payload.get("login_success")
+    observed_account = (
+        session_payload.get("observed_account_identifier")
+        or None
+    )
+    credential_metadata = (
+        session_payload.get("credential_metadata")
+        if isinstance(session_payload.get("credential_metadata"), dict)
+        else {}
+    )
+    credential_observed = credential_metadata.get("credential_observed")
+    if not isinstance(credential_observed, bool):
+        credential_observed = bool(login_attempts or login_success)
+    password_hash_present = credential_metadata.get("password_hash_present") is True
+    password_alias_count = credential_metadata.get("password_hash_alias_count")
+    if not isinstance(password_alias_count, int) or isinstance(password_alias_count, bool):
+        password_alias_count = 0
+    source_geo = session_payload.get("geo")
+    source_geo_mapping = source_geo if isinstance(source_geo, dict) else {}
+    source_country = (
+        source_geo_mapping.get("country")
+        or source_geo_mapping.get("country_name")
+        or (source_geo if isinstance(source_geo, str) else None)
+    )
+    source_region = source_geo_mapping.get("region") or source_geo_mapping.get("region_name")
+    source_city = source_geo_mapping.get("city")
+    source_asn = session_payload.get("asn") or source_geo_mapping.get("asn")
+    source_isp = (
+        session_payload.get("isp")
+        or source_geo_mapping.get("isp")
+        or source_geo_mapping.get("organization")
+        or source_geo_mapping.get("org")
+    )
+    command_success_count = len(session_payload.get("commands_success") or [])
+    command_failure_count = len(session_payload.get("commands_failed") or [])
+    command_outcome_count = command_success_count + command_failure_count
+    command_unknown_count = max(command_count - command_outcome_count, 0)
     actions = _trusted_recommendation_actions(report)
     guidance = report.get("response_guidance_v3") if isinstance(report.get("response_guidance_v3"), dict) else {}
     triage = guidance.get("triage") if isinstance(guidance.get("triage"), dict) else {}
-    review_priority = str(triage.get("review_priority") or "not recorded").upper()
-    urgency = str(triage.get("urgency") or "not recorded").replace("_", " ").upper()
+    review_priority = str(triage.get("review_priority") or "Unavailable").upper()
+    urgency = str(triage.get("urgency") or "Unavailable").replace("_", " ").upper()
     technique_ids = _trusted_ttp_ids(report, session_payload)
+    finding_statements: List[str] = []
+    hypothesis_statements: List[str] = []
+    if report.get("schema_version") == "session_assessment.v4":
+        for finding in report.get("behavioral_findings") or []:
+            if isinstance(finding, dict) and str(finding.get("statement") or "").strip():
+                finding_statements.append(str(finding["statement"]).strip())
+        for hypothesis_set in report.get("hypothesis_sets") or []:
+            if not isinstance(hypothesis_set, dict):
+                continue
+            for hypothesis in hypothesis_set.get("hypotheses") or []:
+                if isinstance(hypothesis, dict) and str(hypothesis.get("statement") or "").strip():
+                    hypothesis_statements.append(str(hypothesis["statement"]).strip())
+    elif report.get("schema_version") == "threat_hypothesis.v2":
+        assessment = report.get("supported_assessment") or {}
+        if isinstance(assessment, dict) and str(assessment.get("behavior_summary") or "").strip():
+            finding_statements.append(str(assessment["behavior_summary"]).strip())
+        follow_on = report.get("follow_on_hypothesis") or {}
+        if isinstance(follow_on, dict):
+            for claim in follow_on.get("claims") or []:
+                if isinstance(claim, dict) and str(claim.get("text") or "").strip():
+                    hypothesis_statements.append(str(claim["text"]).strip())
     ensemble = session_payload.get("ensemble_evidence") or report.get("ensemble_evidence") or {}
     ensemble_results = ensemble.get("results") if isinstance(ensemble, dict) else []
     ensemble_results = [item for item in (ensemble_results or []) if isinstance(item, dict)]
@@ -1403,25 +1883,100 @@ def write_pdf_report(
         and isinstance(external_context.get("external_ti_summary"), dict)
         else external_context if isinstance(external_context, dict) else {}
     )
-    ti_status = str(
+    ti_raw_status = str(
         external_context.get("status")
         or external_summary.get("status")
         or "NOT_RECORDED"
     ).upper()
-    ai_status = str(ai_advisory.get("status") or "NOT_RECORDED").upper()
+    ti_status_reason = str(
+        external_context.get("status_reason")
+        or external_summary.get("status_reason")
+        or "STATUS_NOT_SPECIFIED"
+    ).upper()
+    ti_status_reason_text = str(
+        external_context.get("status_reason_text")
+        or external_summary.get("status_reason_text")
+        or TI_STATUS_REASON_TEXT.get(
+            ti_status_reason,
+            "The external-TI read model did not record a more specific state.",
+        )
+    )
+    ti_status = (
+        ti_status_reason
+        if ti_raw_status in {"TI_PENDING", "NOT_RECORDED"}
+        and ti_status_reason != "STATUS_NOT_SPECIFIED"
+        else ti_raw_status
+    )
+    ti_display_status = _ti_display_status(ti_status)
+    if ti_status_reason == "EXPIRED_STORED_RESULT":
+        # The coarse API status remains backward compatible, but the report
+        # must not present stale context as an in-progress live lookup.
+        ti_display_status = _ti_display_status("TI_EXPIRED")
+    ti_display_status_reason = _ti_display_status(ti_status_reason)
+    ti_freshness = (
+        external_context.get("freshness")
+        if isinstance(external_context, dict)
+        and isinstance(external_context.get("freshness"), dict)
+        else {}
+    )
+    latest_ti_retrieval = ti_freshness.get("latest_retrieved_at")
+    if technique_ids and ti_status in {"TI_AVAILABLE", "AVAILABLE"}:
+        assessment_confidence = "HIGH"
+        assessment_confidence_reason = (
+            "Direct trusted technique evidence and current external context are available."
+        )
+    elif technique_ids:
+        assessment_confidence = "MEDIUM"
+        assessment_confidence_reason = (
+            "Direct trusted technique evidence is available, but external context is incomplete or stale."
+        )
+    else:
+        assessment_confidence = "LOW"
+        assessment_confidence_reason = (
+            "No trusted observed technique was available for a stronger assessment."
+        )
+    ai_status = str(ai_advisory.get("status") or "UNAVAILABLE").upper()
     data_quality_notes: List[str] = []
     if session_status == "CLOSED" and not session_end:
-        data_quality_notes.append("Session is closed but an explicit end timestamp was not recorded")
-    if external_ti and external_ti.get("ok") is False:
+        data_quality_notes.append("Explicit terminal timestamp unavailable; last update is used")
+    if not source_asn and not source_isp:
+        data_quality_notes.append("ASN and organization enrichment unavailable")
+    if not source_country and not source_region and not source_city:
+        data_quality_notes.append("Geographic enrichment unavailable")
+    if not client_version and not hassh and not ja3:
+        data_quality_notes.append("Client fingerprint data unavailable")
+    if login_success is True and not observed_account:
+        data_quality_notes.append("Authenticated account identifier unavailable")
+    if ti_status not in {"TI_AVAILABLE", "AVAILABLE"}:
         data_quality_notes.append(
-            f"ETI projection unavailable ({external_ti.get('error_code') or 'unspecified'})"
+            f"External intelligence unavailable or incomplete ({ti_display_status})"
         )
+    if external_ti and external_ti.get("ok") is False:
+        data_quality_notes.append("External intelligence projection unavailable")
     if not data_quality_notes:
-        data_quality_notes.append("No material completeness warning was detected in displayed fields")
+        data_quality_notes.append("No material completeness gap was detected in displayed fields")
 
-    model_summary = (
+    # These fields have historically been initialized with false/zero values
+    # by the session/enrichment compatibility layer.  Those defaults are not
+    # provider observations: a missing ETI lookup must not be rendered as
+    # ``Tor exit=NO``, ``VPN=NO``, or ``risk score=0``.  Preserve positive
+    # observations when they are explicitly present, but fail closed for the
+    # default negative/zero values.
+    reported_tor_exit = True if session_payload.get("is_tor_exit") is True else None
+    reported_vpn = True if session_payload.get("is_vpn") is True else None
+    reported_risk_score = session_payload.get("risk_score")
+    if isinstance(reported_risk_score, bool):
+        reported_risk_score = None
+    else:
+        try:
+            if reported_risk_score is None or float(reported_risk_score) <= 0:
+                reported_risk_score = None
+        except (TypeError, ValueError):
+            reported_risk_score = None
+
+    analytic_summary = (
         f"{agreement_count} corroboration(s), {disagreement_count} contradiction(s)"
-        if ensemble_results else "No session-bound ensemble result"
+        if ensemble_results else "No session-bound corroboration result"
     )
     disposition = (
         "PROMPT MANUAL REVIEW"
@@ -1432,12 +1987,42 @@ def write_pdf_report(
         if disagreement_count
         else "MONITOR / NO POLICY ACTION"
     )
+    observed_activity = (
+        f"{command_count} command event(s); protocol {protocol or 'Unavailable'}; "
+        f"authentication {'succeeded' if login_success is True else 'failed' if login_success is False else 'outcome unavailable'}; "
+        f"trusted techniques: {', '.join(technique_ids) if technique_ids else 'none recorded'}"
+    )
+    recommended_next_step = (
+        _compact(actions[0].get("description"), limit=420)
+        if actions
+        else "No policy-approved operator action matched the available evidence."
+    )
+    behavioral_assessment = (
+        _compact(finding_statements[0], default="No policy-supported behavioral finding was established.", limit=420)
+        if finding_statements
+        else "No policy-supported behavioral finding was established from this evidence snapshot."
+    )
+    threat_hypothesis = (
+        _compact(hypothesis_statements[0], default="No falsifiable alternative was warranted.", limit=420)
+        if hypothesis_statements
+        else "No falsifiable alternative was warranted by this evidence snapshot."
+    )
+    if prediction_context:
+        forecast_labels = prediction_context["predictions"] or [
+            item["label"] for item in prediction_context["ranking"]
+        ]
+        next_distinct_summary = (
+            f"{prediction_context['status']}: {', '.join(forecast_labels) if forecast_labels else 'no forecast emitted'}; "
+            "forecast only, not an observed technique"
+        )
+    else:
+        next_distinct_summary = "Unavailable — no exact session-bound forecast record was supplied."
     overview_rows = [
         ["Document control", "Value"],
         ["Session ID", session_id],
         ["Artifact version", version],
         ["Report schema", report.get("schema_version")],
-        ["Evidence timestamp", generated_at],
+        ["Evidence timestamp", _format_timestamp(generated_at)],
         ["Session status", session_status],
         ["Source", source_ip],
         ["Sensor", sensor],
@@ -1449,22 +2034,27 @@ def write_pdf_report(
         ["Disposition", disposition],
         ["Policy review priority", review_priority],
         ["Urgency", urgency],
-        ["Trusted technique mappings", len(technique_ids)],
-        ["Model corroboration", model_summary],
-        ["External TI", ti_status],
-        ["AI advisory", ai_status],
+        ["Assessment confidence", assessment_confidence],
+        ["Observed activity", observed_activity],
+        ["Recommended next step", recommended_next_step],
+        ["Behavioral assessment", behavioral_assessment],
+        ["Threat hypothesis", threat_hypothesis],
+        ["Next Distinct forecast", next_distinct_summary],
+        ["External TI", ti_display_status],
+        ["External TI freshness", _ti_display_status(ti_freshness.get("state"))],
         ["Policy-approved actions", len(actions)],
     ]
 
     story = [
         _p("Threat Intelligence Session Report", title),
-        _p("Per-session evidence assessment, model corroboration, and response guidance", subtitle),
+        _p("Per-session evidence, infrastructure context, intelligence findings, and response guidance", subtitle),
         Spacer(1, 0.35 * cm),
         HRFlowable(width="100%", thickness=2.2, color=colors.HexColor("#2F5597"), spaceAfter=12),
         _p("CONFIDENTIAL — AUTHORIZED RECIPIENTS", h2),
         _p(
             "This document summarizes one monitored session using the evidence and policy state recorded for that session. "
-            "It is intended for analyst triage and audit review; it does not establish attribution or authorize an automatic response.",
+            "It is intended for analyst triage and audit review; it does not establish attribution or authorize an automatic response. "
+            "Credential secret values and raw command text are excluded; the authenticated session view remains the detailed source.",
             body,
         ),
         _p("1. Executive Decision Summary", h1),
@@ -1474,8 +2064,7 @@ def write_pdf_report(
         _table(overview_rows, [4.5 * cm, 12.5 * cm]),
         Spacer(1, 0.35 * cm),
         _p(
-            "Privacy boundary: command text and raw event payloads are intentionally excluded from this downloadable report. "
-            "The authenticated session view remains the source for detailed event review.",
+            "Command evidence is summarized by count and reviewed technique mapping. Credential secret values and raw command text are never rendered.",
             small,
         ),
         PageBreak(),
@@ -1485,7 +2074,9 @@ def write_pdf_report(
         (
             f"{disposition}. Recorded policy priority is {review_priority}; "
             f"{len(technique_ids)} trusted technique mapping(s) are present. "
-            f"Model evidence shows {model_summary.lower()}; external-TI status is {ti_status}."
+            f"Assessment confidence is {assessment_confidence.lower()}; {assessment_confidence_reason} "
+            f"Analytic evidence shows {analytic_summary.lower()}; external-TI status is "
+            f"{ti_display_status} ({ti_display_status_reason})."
         )
         if report.get("schema_version") == "session_assessment.v4"
         else (report.get("presentation") or {}).get("summary")
@@ -1505,21 +2096,45 @@ def write_pdf_report(
         _table([
             ["Context field", "Recorded value"],
             ["Session lifecycle", session_status],
-            ["Session start", session_payload.get("start_time")],
-            ["Last update", session_payload.get("updated_at")],
-            ["Session end", session_end],
-            ["Recorded duration", _duration_text(session_payload.get("start_time"), session_end)],
-            ["Source address", source_ip],
+            ["Session start", _format_timestamp(session_start)],
+            ["Last update", _format_timestamp(session_updated)],
+            ["Session end / terminal update", _format_timestamp(effective_session_end)],
+            ["Recorded duration", duration_display],
+            ["Source endpoint", _endpoint(source_ip, source_port)],
+            ["Destination endpoint", _endpoint(destination_ip, destination_port)],
             ["Sensor identifier", sensor],
-            ["Protocol / listener", session_payload.get("protocol") or session_payload.get("service")],
+            ["Protocol / listener", protocol],
+            ["ASN", source_asn],
+            ["Organization / ISP", source_isp],
+            ["Location", ", ".join(str(value) for value in (source_city, source_region, source_country) if value) or None],
             ["Command events", command_count],
-            ["Data quality", "; ".join(data_quality_notes)],
+            ["Data gaps", "; ".join(data_quality_notes)],
         ], [5.0 * cm, 12.0 * cm]),
         Spacer(1, 0.25 * cm),
-        _p("2.2 Evidence Assessment", h2),
+        _p("2.2 Connection and Authentication", h2),
+        _table([
+            ["Authentication / client field", "Recorded value"],
+            ["Login attempts", login_attempts],
+            ["Authentication success", login_success if isinstance(login_success, bool) else None],
+            ["Observed account", observed_account],
+            ["Credential observed", credential_observed],
+            ["Password value", "REDACTED — plaintext is not retained or rendered"],
+            ["Credential correlation available", password_hash_present],
+            ["Credential correlation aliases", password_alias_count],
+            ["SSH client version", client_version],
+            ["HASSH fingerprint", hassh],
+            ["JA3 fingerprint", ja3],
+            ["Observed command inputs", command_count],
+            ["Explicit successful outcomes", command_success_count if command_outcome_count else None],
+            ["Explicit failed outcomes", command_failure_count if command_outcome_count else None],
+            ["Unknown command outcomes", command_unknown_count],
+        ], [5.8 * cm, 11.2 * cm]),
+        Spacer(1, 0.25 * cm),
+        _p("2.3 Evidence Assessment", h2),
         _p(
             "The evidence model is deliberately layered. A direct command observation is stronger than a session correlation, "
-            "and a prediction-only hypothesis is not presented as an observed technique.", body,
+            "and a prediction-only hypothesis is not presented as an observed technique. Command inputs are summarized by count "
+            "and evidence mapping; credential secret values are never rendered.", body,
         ),
     ])
 
@@ -1543,9 +2158,14 @@ def write_pdf_report(
     else:
         story.append(_p("No evidence-layer summary was recorded for this session.", body))
 
-    story.append(_p("2.3 Trusted Technique Mappings", h2))
+    story.append(_p("2.4 Trusted Technique Mappings", h2))
     sources = session_payload.get("ttp_sources", {})
-    technique_rows = [["Main technique", "Tactic", "Evidence source"]]
+    technique_rows = [[
+        "Main technique",
+        "Tactic",
+        "Evidence source",
+        "Evidence references",
+    ]]
     canonical_evidence = report.get("canonical_evidence") or {}
     observed_records = canonical_evidence.get("observed_trusted_ttps") or []
     if not observed_records:
@@ -1557,23 +2177,65 @@ def write_pdf_report(
     for technique_id in _trusted_ttp_ids(report, session_payload):
         main_id = _main_technique(technique_id)
         item = record_by_id.get(main_id, {})
-        raw_sources = item.get("sources") or sources.get(technique_id) or sources.get(main_id) or []
+        raw_sources = (
+            item.get("sources")
+            or item.get("source_ttp_values")
+            or sources.get(technique_id)
+            or sources.get(main_id)
+            or []
+        )
         if not isinstance(raw_sources, list):
             raw_sources = [raw_sources]
+        raw_tactics = (
+            item.get("tactics")
+            or item.get("tactic")
+            or item.get("predicted_tactic")
+        )
+        if not isinstance(raw_tactics, (list, tuple, set)):
+            raw_tactics = [raw_tactics] if raw_tactics else []
+        reference_values: List[Any] = []
+        for reference_key in (
+            "classification_event_refs",
+            "command_evidence_refs",
+            "evidence_refs",
+            "authority_decision_refs",
+        ):
+            values = item.get(reference_key) or []
+            if isinstance(values, (list, tuple, set)):
+                reference_values.extend(values)
+            elif values:
+                reference_values.append(values)
+        event_count = len({
+            str(value).strip()
+            for value in (item.get("classification_event_refs") or [])
+            if str(value).strip()
+        })
+        source_text = ", ".join(
+            _value(value, limit=100) for value in raw_sources if value not in (None, "")
+        )
+        if event_count:
+            source_text = (
+                f"{source_text}; " if source_text else ""
+            ) + f"{event_count} observed event(s)"
         technique_rows.append([
             main_id,
-            item.get("tactic") or item.get("predicted_tactic") or "not recorded",
-            ", ".join(_value(value, limit=100) for value in raw_sources) or "not recorded",
+            _display_list(list(raw_tactics), limit=4) if raw_tactics else None,
+            source_text or None,
+            _evidence_summary(reference_values),
         ])
-    if len(technique_rows) == 1:
-        technique_rows.append(["None recorded", "—", "No trusted observed technique in the report"])
-    story.append(_table(technique_rows, [4.0 * cm, 4.0 * cm, 9.0 * cm]))
+    if len(technique_rows) > 1:
+        story.append(_table(technique_rows, [3.0 * cm, 3.3 * cm, 3.8 * cm, 6.9 * cm]))
+    else:
+        story.append(_p(
+            "No trusted observed technique was recorded for this session.",
+            body,
+        ))
     story.append(_p(
         "Technique identifiers are shown at the main-technique level. This report does not introduce or infer ATT&CK sub-techniques.",
         small,
     ))
 
-    story.extend([_p("2.4 Behavioral Findings and Alternatives", h2)])
+    story.extend([_p("2.5 Behavioral Findings and Alternatives", h2)])
     if report.get("schema_version") == "session_assessment.v4":
         findings = report.get("behavioral_findings") or []
         finding_rows = [["Status", "Finding", "Evidence references"]]
@@ -1586,9 +2248,13 @@ def write_pdf_report(
                 f"{finding.get('statement', '')} [{finding.get('finding_id', 'unidentified')}]",
                 _evidence_summary(refs),
             ])
-        if len(finding_rows) == 1:
-            finding_rows.append(["None", "No policy-supported behavioral finding.", "—"])
-        story.append(_table(finding_rows, [2.8 * cm, 9.0 * cm, 5.2 * cm]))
+        if len(finding_rows) > 1:
+            story.append(_table(finding_rows, [2.8 * cm, 9.0 * cm, 5.2 * cm]))
+        else:
+            story.append(_p(
+                "No policy-supported behavioral finding was established from the recorded evidence.",
+                body,
+            ))
         hypothesis_rows = [["Question / hypothesis set", "Alternative hypotheses"]]
         for hypothesis_set in report.get("hypothesis_sets") or []:
             if not isinstance(hypothesis_set, dict):
@@ -1603,9 +2269,14 @@ def write_pdf_report(
                 f"{hypothesis_set.get('question', '')} [{hypothesis_set.get('hypothesis_set_id', 'unidentified')}]",
                 "\n".join(alternatives) or "No alternatives recorded",
             ])
-        if len(hypothesis_rows) == 1:
-            hypothesis_rows.append(["None", "No evidence-bounded alternative set was warranted."])
-        story.extend([_p("2.5 Falsifiable Alternatives", h2), _table(hypothesis_rows, [7.5 * cm, 9.5 * cm])])
+        story.append(_p("2.6 Falsifiable Alternatives", h2))
+        if len(hypothesis_rows) > 1:
+            story.append(_table(hypothesis_rows, [7.5 * cm, 9.5 * cm]))
+        else:
+            story.append(_p(
+                "No evidence-bounded alternative set was warranted by this evidence snapshot.",
+                body,
+            ))
     elif report.get("schema_version") == "threat_hypothesis.v2":
         assessment = report.get("supported_assessment") or {}
         story.append(_p(assessment.get("behavior_summary") or "No trusted behavioral evidence.", body))
@@ -1617,7 +2288,7 @@ def write_pdf_report(
         else:
             story.append(_p("• No attacker objective inferred from the observed evidence.", bullet))
         follow_on = report.get("follow_on_hypothesis") or {}
-        story.append(_p("2.5 Post-session Follow-on Hypothesis", h2))
+        story.append(_p("2.6 Post-session Follow-on Hypothesis", h2))
         if follow_on.get("abstained"):
             story.append(_p(f"Abstained: {follow_on.get('abstention_reason', '')}", body))
         else:
@@ -1626,57 +2297,34 @@ def write_pdf_report(
     else:
         story.append(_p("No version-specific behavioral assessment was recorded.", body))
 
-    story.append(_p("3. Model and External Intelligence Context", h1))
-    story.append(_p("3.1 Model1 + Model2 Advisory Evidence", h2))
-    if not isinstance(ensemble, dict) or not ensemble:
-        story.append(_p("No session-bound ensemble evidence snapshot is available.", body))
+    story.append(_p("3. External Threat Intelligence", h1))
+    story.append(_p("3.1 Intelligence Status and Coverage", h2))
+    infrastructure_rows = [["Infrastructure field", "Recorded context"]]
+    infrastructure_values = [
+        ("Source IP", source_ip),
+        ("ASN", source_asn),
+        ("Organization / ISP", source_isp),
+        ("Country / region / city", ", ".join(str(value) for value in (source_country, source_region, source_city) if value)),
+        ("Tor exit", reported_tor_exit),
+        ("VPN", reported_vpn),
+        ("Host type", session_payload.get("host_type")),
+        ("Risk score", reported_risk_score),
+        ("Observed open ports", _display_list(session_payload.get("open_ports"))),
+        ("Observed services", _display_list(session_payload.get("running_services"))),
+        ("Infrastructure tags", _display_list(session_payload.get("infrastructure_tags"))),
+    ]
+    for label, value in infrastructure_values:
+        if _present(value) or isinstance(value, bool) or value == 0:
+            infrastructure_rows.append([label, value])
+    if len(infrastructure_rows) > 1:
+        story.append(_table(infrastructure_rows, [5.2 * cm, 11.8 * cm]))
     else:
-        model1 = ensemble.get("model1") if isinstance(ensemble.get("model1"), dict) else {}
-        model2 = ensemble.get("model2") if isinstance(ensemble.get("model2"), dict) else {}
-        architecture = (
-            "UNIFIED_ONE_MODEL" if model2.get("one_model") is True
-            else "NOT_UNIFIED" if model2.get("one_model") is False
-            else "NOT_RECORDED"
-        )
-        model_rows = [
-            ["Model / binding field", "Recorded value"],
-            ["Model1 applicable", model1.get("applicable")],
-            ["Model1 score semantics", model1.get("score_type")],
-            ["Model2 availability", model2.get("available")],
-            ["Model2 status", model2.get("status")],
-            ["Model2 architecture", architecture],
-            ["One inference call", model2.get("one_inference_call")],
-            ["Independent binary heads", model2.get("independent_binary_heads")],
-            ["Model2 artifact", model2.get("artifact_id") or model2.get("model_version")],
-            ["Feature contract SHA-256", model2.get("feature_contract_sha256")],
-            ["Run ID", ensemble.get("run_id")],
-            ["Measurement / episode", f"{model2.get('measurement_id') or 'not recorded'} / {model2.get('episode_id') or 'not recorded'}"],
-            ["Binding", "BOUND" if model2.get("binding") else "NOT_RECORDED"],
-            ["Authority", ensemble.get("ensemble_authority") or "ADVISORY_ONLY"],
-        ]
-        story.append(_table(model_rows, [6.0 * cm, 11.0 * cm]))
-        story.append(_p(
-            "Model1 remains the primary classification evidence where applicable. Model2 is a session/run-bound corroborator. "
-            "No numeric score fusion is performed, and neither model authorizes automatic response.", body,
-        ))
-        result_rows = [["Technique", "Model1", "Model1 margin", "Model2", "Relation", "State"]]
-        for item in ensemble.get("results") or []:
-            if not isinstance(item, dict):
-                continue
-            result_rows.append([
-                _main_technique(item.get("technique_id")),
-                item.get("model1_result") or "NOT_APPLICABLE",
-                item.get("model1_margin") if item.get("model1_margin") is not None else "—",
-                item.get("model2_result") or "UNAVAILABLE",
-                item.get("model2_relation") or "—",
-                item.get("evidence_state") or "—",
-            ])
-        if len(result_rows) > 1:
-            story.extend([_p("3.1.1 Per-technique Advisory State", h2), _table(result_rows, [2.5 * cm, 2.5 * cm, 2.6 * cm, 2.5 * cm, 3.3 * cm, 3.6 * cm])])
-        else:
-            story.append(_p("No per-technique ensemble result rows were recorded.", body))
-
-    story.append(_p("3.2 External Threat-Intelligence Context", h2))
+        story.append(_p("No external infrastructure context was recorded for this session.", body))
+    story.append(_p(
+        "ASN, geolocation, service exposure, and reputation are contextual attributes. They do not by themselves establish malicious intent or actor identity.",
+        small,
+    ))
+    story.append(_p("3.2 Provider Findings", h2))
     if isinstance(external_context, dict) and external_context:
         freshness = (
             external_context.get("freshness")
@@ -1688,42 +2336,79 @@ def write_pdf_report(
             if isinstance(external_context.get("counts"), dict)
             else {}
         )
+        def _ti_count(summary_key: str, count_key: str) -> Any:
+            if summary_key in external_summary:
+                return external_summary.get(summary_key)
+            if count_key in counts:
+                return counts.get(count_key)
+            return None
+
+        eligible_types = external_summary.get("eligible_observable_types")
+        if not isinstance(eligible_types, list):
+            eligible_types = counts.get("eligible_observable_types")
         ti_rows = [
             ["TI field", "Recorded value"],
-            ["Projection status", ti_status],
-            ["Freshness", freshness.get("state") or "not recorded"],
-            ["Latest provider retrieval", freshness.get("latest_retrieved_at")],
-            ["Eligible observables", external_summary.get("eligible_observable_count", counts.get("eligible_observables"))],
-            ["Eligible types", ", ".join(external_summary.get("eligible_observable_types") or counts.get("eligible_observable_types") or []) or "none"],
-            ["Stored records / evidence", f"{external_summary.get('records_found', counts.get('records_found', 0))} / {external_summary.get('evidence_returned', counts.get('evidence_returned', 0))}"],
-            ["Source-IP cache records", external_summary.get("source_ip_cache_records_found", counts.get("source_ip_cache_records", 0))],
-            ["Shared entities", external_summary.get("shared_entity_count", counts.get("shared_entities", 0))],
+            ["Projection status", ti_display_status],
+            ["State reason", ti_display_status_reason],
+            ["State explanation", ti_status_reason_text],
+            ["Freshness", _ti_display_status(freshness.get("state"))],
+            ["Latest provider retrieval", _format_timestamp(freshness.get("latest_retrieved_at"))],
+            ["Provider result age", _freshness_age(freshness.get("latest_retrieved_at"), generated_at)],
+            ["Eligible observables", _ti_count("eligible_observable_count", "eligible_observables")],
+            ["Eligible types", ", ".join(str(item) for item in eligible_types or []) or None],
+            ["Stored records / evidence", (
+                f"{_ti_count('records_found', 'records_found')} / "
+                f"{_ti_count('evidence_returned', 'evidence_returned')}"
+                if _ti_count("records_found", "records_found") is not None
+                or _ti_count("evidence_returned", "evidence_returned") is not None
+                else None
+            )],
+            ["Source-IP cache records", _ti_count("source_ip_cache_records_found", "source_ip_cache_records")],
+            ["Source-IP cache policy binding", ", ".join(
+                str(item)
+                for item in (
+                    external_summary.get("source_ip_cache_policy_bindings")
+                    or []
+                )
+            ) or None],
+            ["Source-IP cache freshness", external_summary.get("source_ip_cache_freshness")],
+            ["Latest source-IP cache lookup", _format_timestamp(
+                external_summary.get("source_ip_cache_latest_lookup_at")
+            )],
+            ["Shared entities", _ti_count("shared_entity_count", "shared_entities")],
             ["Authority", external_summary.get("authority") or "CONTEXT_ONLY"],
         ]
         if external_context.get("ok") is False:
-            ti_rows.append(["Projection error", external_context.get("error_code") or "projection unavailable"])
+            ti_rows.append(["Projection status", "Projection unavailable"])
         story.append(_table(ti_rows, [5.2 * cm, 11.8 * cm]))
 
         provider_rows = [["Provider", "Status", "Lookup / finding", "Records", "Freshness"]]
         provider_status = external_context.get("provider_status")
         if isinstance(provider_status, dict):
             for provider, provider_item in sorted(provider_status.items()):
-                if str(provider).strip().lower() == "censys" or not isinstance(provider_item, dict):
+                if str(provider).strip().lower() in {"censys", "external_policy"} or not isinstance(provider_item, dict):
                     continue
                 status = str(provider_item.get("status") or "unknown").lower()
                 record_count = int(provider_item.get("record_count") or 0)
-                if status == "disabled" and record_count == 0:
+                lookup_status = str(provider_item.get("lookup_status") or "").strip()
+                finding_state = str(provider_item.get("finding_state") or "").strip()
+                if (
+                    record_count == 0
+                    and status in {"disabled", "configured", "unknown"}
+                    and not lookup_status
+                    and not finding_state
+                ):
                     continue
                 provider_rows.append([
                     provider,
                     status,
-                    f"{provider_item.get('lookup_status') or '—'} / {provider_item.get('finding_state') or '—'}",
+                    f"{lookup_status or '—'} / {finding_state or '—'}",
                     record_count,
                     provider_item.get("freshness_state") or "—",
                 ])
         if len(provider_rows) > 1:
             story.extend([
-                _p("Stored provider context", h2),
+                _p("Provider lookup results", h2),
                 _table(provider_rows, [3.3 * cm, 3.0 * cm, 4.6 * cm, 2.0 * cm, 4.1 * cm]),
             ])
 
@@ -1731,29 +2416,70 @@ def write_pdf_report(
         for evidence in (external_context.get("evidence") or [])[:10]:
             if not isinstance(evidence, dict):
                 continue
-            provider = str(evidence.get("provider") or "not recorded")
-            if provider.strip().lower() == "censys":
+            provider = str(evidence.get("provider") or "Unavailable")
+            if provider.strip().lower() in {"", "unknown", "not recorded", "censys", "external_policy"}:
                 continue
             observable = evidence.get("observable") if isinstance(evidence.get("observable"), dict) else {}
+            observable_type = str(
+                observable.get("type") or evidence.get("observable_type") or ""
+            ).strip()
+            observable_value = str(
+                observable.get("value") or evidence.get("observable_value") or ""
+            ).strip()
+            if not observable_type or not observable_value:
+                continue
             observable_text = (
-                f"{observable.get('type') or evidence.get('observable_type') or 'unknown'}: "
-                f"{observable.get('value') or evidence.get('observable_value') or 'not recorded'}"
+                f"{observable_type}: {observable_value}"
             )
             evidence_rows.append([
                 provider,
                 observable_text,
                 f"{evidence.get('lookup_status') or '—'} / {evidence.get('finding_state') or '—'}",
-                f"{evidence.get('summary') or 'No provider summary'}; {evidence.get('freshness_state') or 'freshness not recorded'}",
+                (
+                    f"{_external_evidence_details(evidence)}; "
+                    f"{evidence.get('freshness_state') or 'freshness unavailable'}; "
+                    f"retrieved {_format_timestamp(evidence.get('retrieved_at'))}"
+                ),
+            ])
+        remaining_evidence = max(0, 10 - len(evidence_rows) + 1)
+        for cache_item in (external_context.get("source_ip_cache") or [])[:remaining_evidence]:
+            if not isinstance(cache_item, dict):
+                continue
+            provider = str(cache_item.get("provider") or "Unavailable")
+            if provider.strip().lower() in {"", "unknown", "not recorded", "censys", "external_policy"}:
+                continue
+            normalized_context = cache_item.get("normalized_context")
+            if not isinstance(normalized_context, dict):
+                normalized_context = {}
+            lookup_status = str(cache_item.get("lookup_status") or "UNAVAILABLE").strip()
+            finding_state = str(
+                normalized_context.get("finding_state")
+                or normalized_context.get("status")
+                or "UNKNOWN"
+            ).strip()
+            binding = str(
+                cache_item.get("policy_binding")
+                or "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"
+            )
+            evidence_rows.append([
+                provider,
+                "session source IP",
+                f"{lookup_status} / {finding_state}",
+                (
+                    f"{_external_evidence_details({'normalized_extension': normalized_context})}; "
+                    f"{binding}; retrieved {_format_timestamp(cache_item.get('lookup_at'))}"
+                ),
             ])
         if len(evidence_rows) > 1:
             story.extend([
                 _p("Bounded provider evidence (maximum 10 rows)", h2),
                 _table(evidence_rows, [2.8 * cm, 4.9 * cm, 3.7 * cm, 5.6 * cm]),
             ])
-        elif ti_status in {"TI_PENDING", "NOT_RECORDED"}:
+        else:
             story.append(_p(
-                "No eligible stored provider result was available when this PDF was rendered. "
-                "This is a pending/unavailable context state, not a benign verdict.",
+                f"No usable provider finding is available for this session. "
+                f"Current state: {ti_display_status}. {ti_status_reason_text} "
+                "This is unavailable context, not a benign verdict.",
                 body,
             ))
     else:
@@ -1763,20 +2489,30 @@ def write_pdf_report(
             body,
         ))
 
-    story.append(_p("3.3 AI Advisory Context", h2))
+    story.append(_p("3.3 Analyst Advisory Summary", h2))
     if isinstance(ai_advisory, dict) and ai_advisory:
         advisory_payload = ai_advisory.get("advisory") if isinstance(ai_advisory.get("advisory"), dict) else {}
         ai_validation = advisory_payload.get("validation") if isinstance(advisory_payload.get("validation"), dict) else {}
         ai_rows = [
-            ["AI advisory field", "Recorded value"],
+            ["Advisory field", "Recorded value"],
             ["Status", ai_status],
-            ["Advisory ID", ai_advisory.get("advisory_id")],
-            ["Assessment ID", ai_advisory.get("assessment_id")],
-            ["Schema", advisory_payload.get("schema_version")],
-            ["Validation", ai_validation.get("status") or ai_validation.get("valid") or "not recorded"],
+            ["Validation", ai_validation.get("status") or ai_validation.get("valid") or None],
             ["Authority", advisory_payload.get("authority") or "NON_AUTHORITATIVE"],
-            ["Report binding", ai_advisory.get("report_id") or "not recorded"],
         ]
+        selection_summary = _ai_selection_summary(ai_advisory)
+        selection_parts = [
+            f"{label}: {value}"
+            for label, value in (
+                ("templates", selection_summary["templates"]),
+                ("findings", selection_summary["finding_ids"]),
+                ("actions", selection_summary["action_ids"]),
+                ("limitations", selection_summary["limitation_codes"]),
+                ("reasons", selection_summary["reason_codes"]),
+            )
+            if value
+        ]
+        if selection_parts:
+            ai_rows.append(["Contract selections", "; ".join(selection_parts)])
         story.append(_table(ai_rows, [5.2 * cm, 11.8 * cm]))
         rendered_texts = _ai_rendered_texts(ai_advisory)
         if rendered_texts:
@@ -1791,6 +2527,51 @@ def write_pdf_report(
             ))
     else:
         story.append(_p("No separate AI advisory projection was available for this session.", body))
+
+    story.append(_p("3.4 Next Distinct Forecast Context", h2))
+    if prediction_context:
+        forecast_labels = prediction_context["predictions"] or [
+            item["label"] for item in prediction_context["ranking"]
+        ]
+        forecast_rows = [
+            ["Forecast field", "Recorded value"],
+            ["Status", prediction_context["status"]],
+            ["Predicted next behavior phase(s)", ", ".join(forecast_labels) or None],
+            ["Generated", _format_timestamp(prediction_context["generated_at"])],
+            ["Snapshot ID", prediction_context["snapshot_id"] or None],
+            ["Authority", prediction_context["authority"]],
+        ]
+        for label, key in (
+            ("Run ID", "run_id"),
+            ("Measurement ID", "measurement_id"),
+            ("Episode ID", "episode_id"),
+            ("Model ID", "model_id"),
+            ("Model artifact SHA-256", "model_artifact_sha256"),
+            ("Feature contract SHA-256", "feature_contract_sha256"),
+        ):
+            if prediction_context.get(key):
+                forecast_rows.append([label, prediction_context[key]])
+        if prediction_context["reason"]:
+            forecast_rows.insert(3, ["Status explanation", prediction_context["reason"]])
+        story.append(_table(forecast_rows, [5.2 * cm, 11.8 * cm]))
+        if prediction_context["ranking"]:
+            story.append(_p("Bounded forecast ranking", small))
+            story.append(_table(
+                [["Rank", "Candidate behavior phase"]]
+                + [[item["rank"], item["label"]] for item in prediction_context["ranking"]],
+                [2.5 * cm, 14.5 * cm],
+            ))
+        story.append(_p(
+            "This is a session-bound forecast retained for analyst context only. It is not an observed technique, "
+            "does not establish intent, and cannot select an alert or response action.",
+            small,
+        ))
+    else:
+        story.append(_p(
+            "No exact session-bound Next Distinct forecast was recorded for this report. "
+            "The report does not substitute a forecast from another session or from an unrelated sidecar run.",
+            body,
+        ))
 
     story.append(_p("4. Policy-approved Operator Guidance", h1))
     action_rows = [["Priority", "Policy-approved action", "Evidence references", "Execution"]]
@@ -1821,19 +2602,70 @@ def write_pdf_report(
                 external_ioc_rows.append([
                     item.get("type"), item.get("value"), item.get("confidence") or "unknown",
                 ])
+    if destination_ip and _is_private_network_indicator(
+        {"type": "ip", "value": destination_ip}
+    ):
+        destination_value = (
+            f"{destination_ip}:{destination_port}"
+            if destination_port not in (None, "")
+            else destination_ip
+        )
+        if not any(str(row[1]) == str(destination_value) for row in internal_ioc_rows[1:]):
+            internal_ioc_rows.append([
+                "destination endpoint",
+                destination_value,
+                "Private/reserved monitored destination; infrastructure context, not an external IoC",
+            ])
+    if source_ip and not _is_private_network_indicator({"type": "ip", "value": source_ip}):
+        if not any(str(row[1]) == str(source_ip) for row in external_ioc_rows[1:]):
+            external_ioc_rows.append(["ipv4", source_ip, "observed source"])
     if len(external_ioc_rows) == 1:
         external_ioc_rows.append(["—", "No external indicators of compromise recorded.", "—"])
     story.extend([
         _p("4.1 External Indicators", h2),
         _table(external_ioc_rows, [3.0 * cm, 10.0 * cm, 4.0 * cm]),
     ])
-    if len(internal_ioc_rows) > 1:
+    if len(internal_ioc_rows) == 1:
+        internal_ioc_rows.append([
+            "—",
+            "No private/reserved infrastructure indicator was recorded.",
+            "—",
+        ])
+    story.extend([
+        _p("4.2 Internal Infrastructure Context", h2),
+        _table(internal_ioc_rows, [3.0 * cm, 6.0 * cm, 8.0 * cm]),
+    ])
+
+    fingerprint_rows = [["Fingerprint type", "Value", "Interpretation"]]
+    if hassh:
+        fingerprint_rows.append(["HASSH", hassh, "Observed SSH client fingerprint; useful for cross-session correlation, not attribution"])
+    if ja3:
+        fingerprint_rows.append(["JA3", ja3, "Observed TLS client fingerprint; useful for cross-session correlation, not attribution"])
+    if client_version:
+        fingerprint_rows.append(["Client version", client_version, "Client-declared protocol implementation"])
+    if len(fingerprint_rows) > 1:
         story.extend([
-            _p("4.2 Internal Infrastructure Context", h2),
-            _table(internal_ioc_rows, [3.0 * cm, 6.0 * cm, 8.0 * cm]),
+            _p("4.3 Client and Protocol Fingerprints", h2),
+            _table(fingerprint_rows, [3.2 * cm, 6.2 * cm, 7.6 * cm]),
         ])
 
-    story.extend([PageBreak(), _p("5. Provenance, Limitations, and Integrity", h1)])
+    campaign_summary = session_payload.get("campaign_summary")
+    if isinstance(campaign_summary, dict) and campaign_summary:
+        campaign_rows = [
+            ["Campaign correlation field", "Recorded value"],
+            ["Campaign ID", campaign_summary.get("campaign_id")],
+            ["First observed", _format_timestamp(campaign_summary.get("first_seen"))],
+            ["Last observed", _format_timestamp(campaign_summary.get("last_seen"))],
+            ["Related sessions", campaign_summary.get("session_count")],
+            ["Shared indicators", campaign_summary.get("shared_indicator_count")],
+        ]
+        story.extend([
+            _p("4.4 Related Session Context", h2),
+            _table(campaign_rows, [5.2 * cm, 11.8 * cm]),
+            _p("Correlation indicates shared observables or behavior; it does not establish actor identity.", small),
+        ])
+
+    story.extend([_p("5. Provenance, Limitations, and Integrity", h1)])
     provenance = report.get("provenance") or {}
     behavior_policy = provenance.get("behavior_policy") if isinstance(provenance.get("behavior_policy"), dict) else {}
     classification_policy = provenance.get("classification_policy") if isinstance(provenance.get("classification_policy"), dict) else {}
@@ -1844,21 +2676,22 @@ def write_pdf_report(
         ["Behavior policy SHA-256", behavior_policy.get("sha256")],
         ["Classification policy SHA-256", classification_policy.get("sha256")],
         ["Evaluator revision", provenance.get("evaluator_git_revision")],
-        ["Model2 artifact SHA-256", model2.get("artifact_sha256") if isinstance(ensemble, dict) and isinstance(ensemble.get("model2"), dict) else "not recorded"],
-        ["ETI projection", f"{ti_status} @ {((external_context.get('freshness') or {}).get('latest_retrieved_at') if isinstance(external_context.get('freshness'), dict) else None) or 'no provider retrieval recorded'}" if isinstance(external_context, dict) else "not recorded"],
-        ["AI advisory projection", f"{ai_status} / {ai_advisory.get('advisory_id') or 'no advisory ID'}" if isinstance(ai_advisory, dict) else "not recorded"],
+        ["ETI projection", f"{ti_display_status} @ {_format_timestamp(latest_ti_retrieval)}" if isinstance(external_context, dict) else None],
+        ["ETI compatibility status", ti_display_status],
+        ["ETI state reason", ti_display_status_reason],
+        ["AI advisory projection", f"{ai_status} / {ai_advisory.get('advisory_id') or 'no advisory ID'}" if isinstance(ai_advisory, dict) else None],
         ["Report generation", "Deterministic artifact rendering; source report/session remain authoritative"],
     ]
     story.append(_table(provenance_rows, [5.2 * cm, 11.8 * cm]))
     story.append(_p("Limitations and interpretation boundaries", h2))
     for limitation in (
-        "Confidence values and native model scores are not calibrated probabilities.",
-        "Model1 and Model2 are advisory evidence; the report does not authorize automatic enforcement.",
+        "Assessment confidence expresses evidence completeness and corroboration; it is not a calibrated probability.",
+        "Analytic outputs are advisory evidence; this report does not authorize automatic enforcement.",
         "Technique claims are limited to recorded evidence and policy-supported correlations.",
         "Sub-technique inference is outside the configured scope and is not added by this report.",
         "Absence of a value means unavailable or unrecorded data; the renderer never substitutes zero.",
         "Attribution, intent, and actor identity are not established by this session report.",
-        "Command text and raw event payloads are omitted from the PDF privacy boundary.",
+        "Command inputs are summarized by count and evidence mapping; raw credential values are never rendered.",
         "External TI and AI advisory sections are read-only presentation context and cannot modify the canonical assessment.",
     ):
         story.append(_p(f"• {limitation}", bullet))
@@ -1916,15 +2749,17 @@ def render_pdf_report_bytes(
     artifact_version: str = "",
     external_ti_projection: Optional[Dict[str, Any]] = None,
     ai_advisory_projection: Optional[Dict[str, Any]] = None,
+    prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """Render one authenticated, deterministic PDF without persistent writes.
 
     The session download endpoint uses this for existing reports that were
     originally generated before the optional PDF renderer was installed. The
     temporary directory is outside the configured artifact directory, so a
-    download cannot mutate the canonical report store or MongoDB. Optional TI
-    and AI inputs are already-materialized read projections used only for this
-    presentation; this function never invokes a provider or model.
+    download cannot mutate the canonical report store or MongoDB. Optional TI,
+    AI, and exact-session prediction inputs are already-materialized read
+    projections used only for this presentation; this function never invokes
+    a provider or model.
     """
 
     with tempfile.TemporaryDirectory(prefix="session-report-pdf-") as temporary_dir:
@@ -1935,6 +2770,7 @@ def render_pdf_report_bytes(
             artifact_version=artifact_version,
             external_ti_projection=external_ti_projection,
             ai_advisory_projection=ai_advisory_projection,
+            prediction_snapshot=prediction_snapshot,
         ))
         return path.read_bytes()
 

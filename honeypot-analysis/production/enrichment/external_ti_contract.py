@@ -33,16 +33,27 @@ SOURCE_IP_PROFILE = "source_ip_observables"
 SOURCE_IP_POLICY_ID = "honeypot-thesis-data-lifecycle.source-ip.external-ti"
 SOURCE_IP_POLICY_VERSION = "1.0.0"
 SOURCE_IP_AMENDMENT_SCHEMA = "external_ti_source_ip_governance_amendment.v1"
-SOURCE_IP_PRODUCTION_POLICY_VERSION = "2.0.0"
+SOURCE_IP_PRODUCTION_POLICY_VERSION = "2.1.0"
+SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION = "2.2.0"
+SOURCE_IP_PRODUCTION_POLICY_VERSIONS = frozenset(
+    {
+        SOURCE_IP_PRODUCTION_POLICY_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+    }
+)
+SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256 = (
+    "02a6a7e6fad85fe61bb1cad3df2dbe839921f76675b05d5f0f95a7d5be80e4e0"
+)
 SOURCE_IP_PRODUCTION_SCHEMA = "external_ti_source_ip_governance.v2"
 SOURCE_IP_AMENDMENT_SHA256 = "b8e292d9eeb80e10af8695fe4b3e0a74216894191eca9790c8e75182203beace"
 SOURCE_IP_ENRICHMENT_MODE = "NEW_ELIGIBLE_SIGHTINGS_ONLY"
 SOURCE_IP_CUTOFF_TIMESTAMP_FIELD = "timestamp"
 SOURCE_IP_PROVIDER_NAMES = frozenset(
-    {"abuseipdb", "shodan_official", "shodan_internetdb"}
+    {"abuseipdb", "otx", "shodan_official", "shodan_internetdb"}
 )
 _SOURCE_IP_POLICY_PROVIDER = {
     "abuseipdb": "abuseipdb",
+    "otx": "otx",
     "shodan_official": "shodan",
     "shodan_internetdb": "shodan",
 }
@@ -286,7 +297,7 @@ def load_source_ip_governance_amendment(
     )
     is_production = (
         schema_version == SOURCE_IP_PRODUCTION_SCHEMA
-        and policy_version == SOURCE_IP_PRODUCTION_POLICY_VERSION
+        and policy_version in SOURCE_IP_PRODUCTION_POLICY_VERSIONS
     )
     if document.get("policy_id") != SOURCE_IP_POLICY_ID or not (
         is_preflight or is_production
@@ -296,15 +307,38 @@ def load_source_ip_governance_amendment(
     if not isinstance(scope, Mapping):
         raise ValueError("source-IP governance amendment scope is missing")
     authorized = scope.get("authorized_providers")
-    expected_providers = (
-        {"shodan", "abuseipdb"}
-        if is_preflight
-        else {"shodan_official", "abuseipdb"}
-    )
+    expected_providers = {"shodan", "abuseipdb"} if is_preflight else {
+        "shodan_official",
+        "abuseipdb",
+    }
+    if is_production and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+        expected_providers.add("otx")
     if not isinstance(authorized, list) or {
         str(item).strip().lower() for item in authorized
     } != expected_providers:
         raise ValueError("source-IP governance provider scope is invalid")
+    if is_production and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+        transport_review = document.get("provider_transport_review")
+        otx_review = (
+            transport_review.get("otx")
+            if isinstance(transport_review, Mapping)
+            else None
+        )
+        if not isinstance(otx_review, Mapping) or any(
+            (
+                otx_review.get("endpoint_id") != "otx_general_v1",
+                otx_review.get("adapter") != "otx",
+                otx_review.get("authentication_form")
+                != "X-OTX-API-KEY HTTP header",
+                otx_review.get("request_method") != "GET",
+                otx_review.get("general_lookup_only") is not True,
+                otx_review.get("active_scans") is not False,
+                otx_review.get("real_request_allowed_by_this_policy") is not True,
+                otx_review.get("normalized_retention")
+                != "bounded_pulse_ids_names_tags_references_only",
+            )
+        ):
+            raise ValueError("source-IP OTX transport scope is invalid")
     fields = scope.get("allowed_outbound_fields")
     if fields != ["normalized_source_ip"]:
         raise ValueError("source-IP outbound field scope is invalid")
@@ -488,9 +522,16 @@ def validate_external_ti_config(
                 raise ValueError(f"{name}.{key} must be a non-negative integer")
         if item.get("enabled") and name not in allowlist:
             raise ValueError(f"enabled provider {name} must be in the explicit provider allowlist")
-        if name in SOURCE_IP_PROVIDER_NAMES and str(item.get("policy_identity") or "") != SOURCE_IP_POLICY_ID:
+        source_ip_capable = (
+            name in SOURCE_IP_PROVIDER_NAMES
+            and "ip"
+            in {str(value).strip().lower() for value in item.get("observable_types", []) or []}
+            and "source_ip"
+            in {str(value).strip().lower() for value in item.get("observable_roles", []) or []}
+        )
+        if source_ip_capable and str(item.get("policy_identity") or "") != SOURCE_IP_POLICY_ID:
             raise ValueError(f"source-IP provider {name} must bind the source-IP policy identity")
-        if name in SOURCE_IP_PROVIDER_NAMES and item.get("enabled"):
+        if source_ip_capable and item.get("enabled"):
             if normalized_profile != SOURCE_IP_PROFILE:
                 raise ValueError(f"source-IP provider {name} requires source_ip_observables profile")
             if item.get("max_attempts") != 1 or item.get("max_new_requests") != 1:
@@ -504,11 +545,35 @@ def validate_external_ti_config(
 
     source_ip_selected = any(
         name in SOURCE_IP_PROVIDER_NAMES
+        and "ip"
+        in {
+            str(value).strip().lower()
+            for value in provider_config(name, provider_configs.get(name)).get(
+                "observable_types", []
+            )
+        }
+        and "source_ip"
+        in {
+            str(value).strip().lower()
+            for value in provider_config(name, provider_configs.get(name)).get(
+                "observable_roles", []
+            )
+        }
         for name in allowlist
     ) or any(
         name in SOURCE_IP_PROVIDER_NAMES
         and isinstance(raw, Mapping)
         and bool(raw.get("enabled"))
+        and "ip"
+        in {
+            str(value).strip().lower()
+            for value in provider_config(name, raw).get("observable_types", [])
+        }
+        and "source_ip"
+        in {
+            str(value).strip().lower()
+            for value in provider_config(name, raw).get("observable_roles", [])
+        }
         for name, raw in provider_configs.items()
     )
     mode = str(source_ip_enrichment_mode or "disabled").strip()
@@ -648,13 +713,25 @@ def _source_ip_policy_authorized(
         return False
     policy_id = str(governance.get("policy_id") or "").strip()
     version = str(governance.get("version") or "").strip()
-    if policy_id != SOURCE_IP_POLICY_ID or version != SOURCE_IP_POLICY_VERSION:
+    if policy_id != SOURCE_IP_POLICY_ID or version not in {
+        SOURCE_IP_POLICY_VERSION,
+        *SOURCE_IP_PRODUCTION_POLICY_VERSIONS,
+    }:
         return False
     providers = governance.get("authorized_providers")
     if not isinstance(providers, (list, tuple, set)):
+        scope = governance.get("amendment_scope")
+        providers = scope.get("authorized_providers") if isinstance(scope, Mapping) else None
+    if not isinstance(providers, (list, tuple, set)):
         return False
     normalized = {str(item).strip().lower() for item in providers}
-    if not {"shodan", "abuseipdb"}.issubset(normalized):
+    required = {"shodan", "abuseipdb"} if version == SOURCE_IP_POLICY_VERSION else {
+        "abuseipdb",
+        "shodan_official",
+    }
+    if version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+        required.add("otx")
+    if not required.issubset(normalized):
         return False
     selected = _SOURCE_IP_POLICY_PROVIDER.get(
         str(provider or "").strip().lower(),
