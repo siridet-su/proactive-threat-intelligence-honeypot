@@ -147,86 +147,85 @@ export function ReplayTransport({
       </div>
 
       {/* Controls Row */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-        {/* Left: Playback Controls */}
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            className="ui-button h-8 w-8 p-0 shrink-0 text-text-muted hover:text-text"
-            title="Jump to first hop"
-            aria-label="First hop"
-            disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
-            onClick={() => {
-              selectDisplayedHistoryIndex(0);
-            }}
-          >
-            <Rewind className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            className="ui-button h-8 w-8 p-0 shrink-0 text-text-muted hover:text-text"
-            title="Previous hop"
-            aria-label="Previous hop"
-            disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
-            onClick={() => {
-              selectDisplayedHistoryIndex(Math.max(0, selectedHistoryIndex - 1));
-            }}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </button>
+      {/* Controls Area */}
+      <div className="flex flex-col gap-2.5 pt-2">
+        {/* Playback Controls (Row 1) */}
+        <div className="flex justify-center">
+          <div className="flex items-center rounded-lg border border-border bg-surface shadow-xs p-0.5">
+            <button
+              type="button"
+              className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              title="Jump to first hop"
+              aria-label="First hop"
+              disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
+              onClick={() => selectDisplayedHistoryIndex(0)}
+            >
+              <Rewind className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              title="Previous hop"
+              aria-label="Previous hop"
+              disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
+              onClick={() => selectDisplayedHistoryIndex(Math.max(0, selectedHistoryIndex - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
 
-          <button
-            type="button"
-            className={`ui-button h-8 min-h-8 px-3 flex items-center justify-center gap-1.5 shrink-0 font-medium shadow-xs transition-colors ${
-              isPlaying
-                ? "border-amber-500/40 bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
-                : "border-primary/40 bg-primary/10 text-primary hover:bg-primary/20"
-            }`}
-            onClick={handleTogglePlay}
-            disabled={isAnchoredSelected}
-            aria-label={isPlaying ? "Pause" : "Play"}
-          >
-            {isPlaying ? (
-              <>
-                <Pause className="h-4 w-4 fill-current" />
-                <span className="text-xs">Pause</span>
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 fill-current ml-0.5" />
-                <span className="text-xs">Play</span>
-              </>
-            )}
-          </button>
+            <div className="w-px h-5 bg-border/60 mx-1" />
 
-          <button
-            type="button"
-            className="ui-button h-8 w-8 p-0 shrink-0 text-text-muted hover:text-text"
-            title="Next hop"
-            aria-label="Next hop"
-            disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
-            onClick={() => {
-              selectDisplayedHistoryIndex(Math.min(displayedHistoryLength - 1, selectedHistoryIndex + 1));
-            }}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="ui-button h-8 w-8 p-0 shrink-0 text-text-muted hover:text-text"
-            title="Jump to latest hop"
-            aria-label="Latest hop"
-            disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
-            onClick={() => {
-              selectDisplayedHistoryIndex(displayedHistoryLength - 1);
-            }}
-          >
-            <FastForward className="h-3.5 w-3.5" />
-          </button>
+            <button
+              type="button"
+              className={`h-8 px-4 flex items-center justify-center gap-1.5 shrink-0 font-medium rounded-md transition-colors disabled:opacity-40 ${
+                isPlaying
+                  ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20"
+                  : "bg-primary/10 text-primary hover:bg-primary/20"
+              }`}
+              onClick={handleTogglePlay}
+              disabled={isAnchoredSelected}
+              aria-label={isPlaying ? "Pause" : "Play"}
+            >
+              {isPlaying ? (
+                <>
+                  <Pause className="h-4 w-4 fill-current" />
+                  <span className="text-xs">Pause</span>
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 fill-current ml-0.5" />
+                  <span className="text-xs">Play</span>
+                </>
+              )}
+            </button>
+
+            <div className="w-px h-5 bg-border/60 mx-1" />
+
+            <button
+              type="button"
+              className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              title="Next hop"
+              aria-label="Next hop"
+              disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
+              onClick={() => selectDisplayedHistoryIndex(Math.min(displayedHistoryLength - 1, selectedHistoryIndex + 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+              title="Jump to latest hop"
+              aria-label="Latest hop"
+              disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
+              onClick={() => selectDisplayedHistoryIndex(displayedHistoryLength - 1)}
+            >
+              <FastForward className="h-4 w-4" />
+            </button>
+          </div>
         </div>
 
-        {/* Right: Tools & Metadata */}
-        <div className="flex items-center gap-3 min-w-0">
+        {/* Tools & Metadata (Row 2) */}
+        <div className="flex items-center justify-between min-w-0">
           <div className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5 shrink-0">
             <button
               type="button"
@@ -254,22 +253,20 @@ export function ReplayTransport({
             </button>
           </div>
 
-          <div className="flex items-center gap-3 pl-3 border-l border-border shrink-0">
+          <div className="flex items-center gap-2 pl-2 shrink-0">
             {failedCount > 0 && (
-              <label className="flex items-center gap-1.5 text-xs text-text-subtle cursor-pointer select-none">
+              <label className="flex items-center gap-1.5 text-[11px] text-text-subtle cursor-pointer select-none border border-transparent hover:border-border/50 px-1.5 py-1 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={showFailedAttempts}
-                  onChange={(e) => {
-                    onToggleShowFailedAttempts(e.target.checked);
-                  }}
-                  className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary"
+                  onChange={(e) => onToggleShowFailedAttempts(e.target.checked)}
+                  className="h-3 w-3 rounded border-border text-primary focus:ring-primary"
                 />
                 <span>Fail ({failedCount})</span>
               </label>
             )}
 
-            <div className="text-xs font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2 py-1 rounded-md">
+            <div className="text-[11px] font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2.5 py-1 rounded-md shadow-xs">
               Hop <span className="text-text font-medium">{displayedHistoryMetrics.selectedNumber}</span>/{displayedHistoryMetrics.totalItems}
             </div>
           </div>

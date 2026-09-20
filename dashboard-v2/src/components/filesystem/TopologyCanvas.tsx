@@ -472,7 +472,7 @@ export function TopologyCanvas({
   }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
   const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
-  const showMinimap = isTopologyExpanded || graphNodes.length > 8 || graphCallouts.length > 2;
+  const showMinimap = true;
 
   const {
     pan,
@@ -674,6 +674,13 @@ export function TopologyCanvas({
             }
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              {/* Global override during dragging to prevent text selection and force cursor */}
+              {(isDraggingSurface || draggedNodePath || draggedCalloutIp) && (
+                <style>{`
+                  body { user-select: none !important; -webkit-user-select: none !important; }
+                  body * { cursor: grabbing !important; }
+                `}</style>
+              )}
               <div
                 ref={mapSurfaceRef}
                 tabIndex={0}
@@ -1019,6 +1026,7 @@ export function TopologyCanvas({
                           onPointerCancel={onNodePointerEnd}
                           onClick={() => {
                             if (consumeNodeClickSuppression()) return;
+                            if (isArrangeMode) return;
                             onSelectPath(node.path);
                           }}
                           className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
@@ -1178,6 +1186,7 @@ export function TopologyCanvas({
                             }${isMulti ? (expanded ? "; cluster expanded" : "; click to expand sessions") : ""}`}
                             onClick={() => {
                               if (consumeCalloutClickSuppression()) return;
+                              if (isArrangeMode) return;
                               if (!isMulti) {
                                 onSelectSession(callout.sessionIds[0]);
                               } else {
@@ -1249,12 +1258,18 @@ export function TopologyCanvas({
                           </button>
 
                           {/* Multi-Session Cluster Disclosure Panel */}
-                          {isMulti && expanded && (
-                            <div
-                              role="listbox"
-                              aria-label={`Active sessions for ${callout.sourceIp}`}
-                              className="border-t border-border/70 p-1.5 space-y-1 bg-surface-subtle/60 rounded-b-xl max-h-48 overflow-y-auto overscroll-contain"
-                            >
+                          <AnimatePresence initial={false}>
+                            {isMulti && expanded && (
+                              <motion.div
+                                initial={reducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                                animate={reducedMotion ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+                                exit={reducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                                transition={{ duration: reducedMotion ? 0 : 0.2, ease: "easeOut" }}
+                                role="listbox"
+                                aria-label={`Active sessions for ${callout.sourceIp}`}
+                                className="border-t border-border/70 bg-surface-subtle/60 rounded-b-xl overflow-hidden origin-top"
+                              >
+                                <div className="p-1.5 space-y-1 max-h-48 overflow-y-auto overscroll-contain">
                               {callout.sessions.map((sess, sIdx) => {
                                 const isSessSelected = sess.sessionId === selectedSessionId;
                                 return (
@@ -1269,6 +1284,7 @@ export function TopologyCanvas({
                                     aria-selected={isSessSelected}
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      if (isArrangeMode) return;
                                       onSelectSession(sess.sessionId);
                                     }}
                                     onKeyDown={(e) => {
@@ -1321,8 +1337,10 @@ export function TopologyCanvas({
                                   </button>
                                 );
                               })}
-                            </div>
-                          )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </motion.div>
                       );
                     })}
