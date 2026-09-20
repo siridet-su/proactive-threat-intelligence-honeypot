@@ -974,9 +974,9 @@ export function sourceRailPositions(
   const nodeXs = [...graphNodeByPath.values()].map((n) => n.x);
   const minTreeX = nodeXs.length ? Math.min(...nodeXs) : 50;
   const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
-  const railGap = callouts.length <= 2 ? 24 : callouts.length <= 4 ? 26 : 28;
-  const leftRailX = minTreeX - railGap;
-  const rightRailX = maxTreeX + railGap;
+  const railGap = callouts.length <= 2 ? 18 : callouts.length <= 4 ? 20 : 22;
+  const leftRailX = Math.max(10, minTreeX - railGap);
+  const rightRailX = Math.min(90, maxTreeX + railGap);
 
   const positions = new Map<string, LabelPosition>();
 
