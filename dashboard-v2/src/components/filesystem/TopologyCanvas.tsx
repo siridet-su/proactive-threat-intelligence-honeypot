@@ -1351,8 +1351,6 @@ export function TopologyCanvas({
                 densityAnalysisTotalNodes={densityAnalysis.totalNodes}
                 densityPreference={densityPreference}
                 setDensityPreference={setDensityPreference}
-          showGrid={showGrid}
-          setShowGrid={setShowGrid}
                 setIsPathsExpanded={setIsPathsExpanded}
                 effectiveSessionsLength={effectiveSessions.length}
                 isSourcesTruncated={totalLiveSources > renderedSourcesCount}
