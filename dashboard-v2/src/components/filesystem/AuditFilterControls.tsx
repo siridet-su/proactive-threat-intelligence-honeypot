@@ -501,7 +501,7 @@ export function AuditFilterControls({
               }}
               title="Clear time filter"
               aria-label="Clear time filter"
-              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-danger hover:bg-danger-subtle hover:border-danger-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -825,7 +825,7 @@ export function AuditFilterControls({
               }}
               title="Clear path filter"
               aria-label="Clear path filter"
-              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-danger hover:bg-danger-subtle hover:border-danger-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -1016,7 +1016,7 @@ export function AuditFilterControls({
             onClick={onResetFilters}
             title="Reset all audit filters"
             aria-label="Reset all audit filters"
-            className="flex min-w-14 items-center justify-center gap-1 border-l border-border px-2 font-sans text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
+            className="flex min-w-14 items-center justify-center gap-1 border-l border-border px-2 font-sans text-xs text-text-muted transition-colors hover:bg-danger-subtle hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger"
           >
             <RotateCcw className="h-3 w-3" />
             <span>Reset</span>
