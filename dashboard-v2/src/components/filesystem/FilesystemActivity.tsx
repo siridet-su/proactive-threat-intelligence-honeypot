@@ -900,7 +900,7 @@ export function FilesystemActivity() {
           className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
         >
           {/* Studio Top Navigation Bar */}
-          <header className="grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
+          <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
             <div
               className="flex min-w-0 flex-wrap items-center gap-2.5"
               role="group"
@@ -1150,7 +1150,7 @@ export function FilesystemActivity() {
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
             role="toolbar"
             aria-label="Audit replay toolbar"
           >

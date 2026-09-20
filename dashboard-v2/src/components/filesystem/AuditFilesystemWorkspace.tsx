@@ -89,7 +89,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
   const [mobileTab, setMobileTab] = useState<"map" | "timeline">("map");
 
   return (
-    <div className="flex flex-col h-full w-full">
+    <div className="relative z-10 flex flex-col h-full w-full">
       <div className="flex lg:hidden gap-2 border-b border-border pb-2 mb-4">
         <button
           onClick={() => setMobileTab("map")}
