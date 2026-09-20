@@ -174,8 +174,8 @@ export function RouteEventList({
                         {event.toPath ?? "Unknown"}
                       </span>
                       {isFailed && (
-                        <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning">
-                          Failed
+                        <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning flex items-center gap-1">
+                          <AlertCircle className="h-3 w-3" /> Failed
                         </span>
                       )}
                     </div>

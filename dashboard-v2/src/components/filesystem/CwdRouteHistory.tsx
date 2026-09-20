@@ -20,11 +20,11 @@ import {
 import type { HopResolutionStatus } from "./sessionHopResolver";
 import type { AuditReplayPresentation } from "./useAuditReplay";
 
-type SidebarTab = "replay" | "commands" | "actions";
+type SidebarTab = "replay" | "evidence" | "actions";
 
 const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   replay: 1,
-  commands: 2,
+  evidence: 2,
   actions: 3,
 };
 
@@ -182,6 +182,7 @@ export function CwdRouteHistory({
           {isSidebar && (
             <div
               className="relative isolate grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+              role="tablist"
               aria-label="Forensic studio views"
             >
               <div aria-hidden="true" className="pointer-events-none absolute inset-0.5 grid grid-cols-3 gap-1">
@@ -199,7 +200,7 @@ export function CwdRouteHistory({
               </div>
               {([
                 { id: "replay", label: "Route Replay", icon: null },
-                { id: "commands", label: "Command data", icon: Terminal },
+                { id: "evidence", label: "Evidence", icon: Terminal },
                 { id: "actions", label: "Response", icon: Shield },
               ] as const).map((tab) => {
                 const isActive = sidebarTab === tab.id;
@@ -209,8 +210,11 @@ export function CwdRouteHistory({
                   <button
                     key={tab.id}
                     type="button"
+                    role="tab"
+                    id={`tab-${tab.id}`}
+                    aria-selected={isActive}
+                    aria-controls={`tabpanel-${tab.id}`}
                     onClick={() => handleSidebarTabChange(tab.id)}
-                    aria-pressed={isActive}
                     className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                       isActive ? "text-primary" : "text-text-muted hover:text-text"
                     }`}
@@ -300,6 +304,9 @@ export function CwdRouteHistory({
             <motion.div
               key={isSidebar ? sidebarTab : "route-history"}
               data-forensic-tab-panel={sidebarTab}
+              role="tabpanel"
+              id={`tabpanel-${sidebarTab}`}
+              aria-labelledby={`tab-${sidebarTab}`}
               custom={sidebarContentDirection}
               variants={SIDEBAR_CONTENT_VARIANTS}
               initial={isSidebar ? "enter" : false}
@@ -312,7 +319,7 @@ export function CwdRouteHistory({
               }
               className={isSidebar ? "flex min-h-0 flex-1 flex-col" : undefined}
             >
-              {sidebarTab === "commands" ? (
+              {sidebarTab === "evidence" ? (
                 /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
             <div className="rounded-xl border border-border bg-surface-subtle p-3">
@@ -333,8 +340,8 @@ export function CwdRouteHistory({
             </div>
             <RegionState
               kind="empty"
-              title="Command and file telemetry unavailable"
-              description="No authoritative command, payload, or file event is linked to this CWD hop. Only verified directory transitions are shown."
+              title="Evidence Unavailable"
+              description="No command feed or payload data is currently linked to this CWD hop."
             />
                 </div>
               ) : sidebarTab === "actions" ? (

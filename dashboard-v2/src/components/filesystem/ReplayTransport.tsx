@@ -62,7 +62,7 @@ export function ReplayTransport({
   selectedHistoryEvent,
 }: ReplayTransportProps) {
   return (
-    <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
+    <div className="sticky top-0 z-10 rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
       {isAnchoredSelected && (
         <div
           role="note"

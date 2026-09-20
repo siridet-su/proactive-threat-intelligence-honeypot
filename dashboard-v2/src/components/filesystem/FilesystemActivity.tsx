@@ -77,7 +77,7 @@ function readStoredTimelineWidth(): number | null {
   }
 }
 
-export type ForensicTab = "replay" | "commands" | "actions";
+export type ForensicTab = "replay" | "evidence" | "actions";
 
 export function FilesystemActivity() {
   const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");
