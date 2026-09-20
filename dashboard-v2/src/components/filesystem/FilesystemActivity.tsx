@@ -1,5 +1,6 @@
 // @refresh reset
 "use client";
+import { FilesystemContext } from "./FilesystemContext";
 
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import {
   Route,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   FilesystemClosedSession,
@@ -34,11 +35,8 @@ import { LiveScopeBar } from "./LiveScopeBar";
 import { FilesystemPageHeader } from "./FilesystemPageHeader";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
-  DEFAULT_TIMELINE_SIDEBAR_WIDTH,
-  TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
   buildAuditUrlSearch,
-  clampTimelineSidebarWidth,
   
   type AuditUrlParams,
 } from "./filesystemUtils";
@@ -738,8 +736,91 @@ export function FilesystemActivity() {
     };
   }, [isAuditFullscreen]);
 
+
+  const contextValue = {
+    viewMode,
+    mobileTab,
+    setMobileTab,
+    isAuditFullscreen,
+    setIsAuditFullscreen,
+    directoryHasMore,
+    directoryIsLoading,
+    directoryIsComplete,
+    loadMoreDirectory,
+    auditSearchItems,
+    auditSearchHasMore,
+    auditSearchIsLoading,
+    auditSearchIsComplete,
+    searchAuditSessions,
+    loadMoreAuditSearch,
+    clearAuditSearch,
+    auditStatus,
+    auditErrorMessage,
+    retryInitialDirectory,
+    handleToggleHideHomeOnly,
+    handleSelectTargetPath,
+    distinctPaths,
+    homeOnlyCount,
+    expiredSessionId,
+    allSessions,
+    setExpiredSessionId,
+    handleUserSelectSession,
+    switchViewMode,
+    hasActiveFilters,
+    isSelectedFilteredOut,
+    filteredSessionsCount,
+    totalSessionsCount,
+    targetPathFilter,
+    hideHomeOnly,
+    selectedSession,
+    filteredActiveSessions,
+    filteredClosedSessions,
+    handleResetAuditFilters,
+    handleClearSelection,
+    auditSnapshot,
+    snapshot,
+    regionStatus,
+    streamState,
+    freshnessState,
+    selectedSessionId,
+    selectedPath,
+    activeHop,
+    playbackSpeed,
+    auditCanvasTitle,
+    auditCanvasSubtitle,
+    selectPath,
+    refresh,
+    handleReconnect,
+    isDraggingTimeline,
+    isTimelineCollapsed,
+    timelineWidth,
+    handleSplitterMouseDown,
+    handleResetTimelineWidth,
+    handleSplitterKeyDown,
+    history,
+    anchoredHop,
+    historyStatus,
+    historyCursor,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    replayPresentation,
+    activeForensicTab,
+    setActiveForensicTab,
+    responsePanel,
+    hopResolutionStatus,
+    requestedHop,
+    clearRequestedHop,
+    selectLatestHop,
+    handleSelectHistoryEventId,
+    loadHistory,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (
+    <FilesystemContext.Provider value={contextValue as any}>
     <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
+
       {navigationApplicationError ? (
         <div
           role="alert"
@@ -1004,81 +1085,7 @@ export function FilesystemActivity() {
           </header>
 
           {/* Main Studio Workspace */}
-          <AuditFilesystemWorkspace
-            isFullscreen={true}
-            expiredSessionId={expiredSessionId}
-            allSessions={allSessions}
-            setExpiredSessionId={setExpiredSessionId}
-            handleUserSelectSession={handleUserSelectSession}
-            switchViewMode={switchViewMode}
-            hasActiveFilters={hasActiveFilters}
-            isSelectedFilteredOut={isSelectedFilteredOut}
-            filteredSessionsCount={filteredSessionsCount}
-            totalSessionsCount={totalSessionsCount}
-            targetPathFilter={targetPathFilter}
-            hideHomeOnly={hideHomeOnly}
-            selectedSession={selectedSession}
-            filteredActiveSessions={filteredActiveSessions}
-            filteredClosedSessions={filteredClosedSessions}
-            handleResetAuditFilters={handleResetAuditFilters}
-            handleClearSelection={handleClearSelection}
-            directoryHasMore={directoryHasMore}
-            directoryIsLoading={directoryIsLoading}
-            directoryIsComplete={directoryIsComplete}
-            loadMoreDirectory={loadMoreDirectory}
-            auditSearchItems={auditSearchItems}
-            auditSearchHasMore={auditSearchHasMore}
-            auditSearchIsLoading={auditSearchIsLoading}
-            auditSearchIsComplete={auditSearchIsComplete}
-            searchAuditSessions={(q) => void searchAuditSessions(q)}
-            loadMoreAuditSearch={loadMoreAuditSearch}
-            clearAuditSearch={clearAuditSearch}
-            auditStatus={auditStatus}
-            auditErrorMessage={auditErrorMessage}
-            retryInitialDirectory={retryInitialDirectory}
-            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
-            handleSelectTargetPath={handleSelectTargetPath}
-            distinctPaths={distinctPaths}
-            homeOnlyCount={homeOnlyCount}
-            auditSnapshot={auditSnapshot}
-            snapshot={snapshot}
-            regionStatus={regionStatus}
-            streamState={streamState}
-            freshnessState={freshnessState}
-            selectedSessionId={selectedSessionId}
-            selectedPath={selectedPath}
-            activeHop={activeHop}
-            playbackSpeed={playbackSpeed}
-            auditCanvasTitle={auditCanvasTitle}
-            auditCanvasSubtitle={auditCanvasSubtitle}
-            selectPath={selectPath}
-            onToggleFullscreen={() => setIsAuditFullscreen(false)}
-            refresh={refresh}
-            handleReconnect={handleReconnect}
-            isDraggingTimeline={isDraggingTimeline}
-            isTimelineCollapsed={isTimelineCollapsed}
-            timelineWidth={timelineWidth}
-            handleSplitterMouseDown={handleSplitterMouseDown}
-            handleResetTimelineWidth={handleResetTimelineWidth}
-            handleSplitterKeyDown={handleSplitterKeyDown}
-            history={history}
-            anchoredHop={anchoredHop}
-            historyStatus={historyStatus}
-            historyCursor={historyCursor}
-            historyTotalItems={historyTotalItems}
-            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-            historyComplete={historyComplete}
-            replayPresentation={replayPresentation}
-            activeForensicTab={activeForensicTab}
-            setActiveForensicTab={setActiveForensicTab}
-            responsePanel={responsePanel}
-            hopResolutionStatus={hopResolutionStatus}
-            requestedHop={requestedHop}
-            clearRequestedHop={clearRequestedHop}
-            selectLatestHop={selectLatestHop}
-            handleSelectHistoryEventId={handleSelectHistoryEventId}
-            loadHistory={loadHistory}
-          />
+          <AuditFilesystemWorkspace isFullscreen={true} onToggleFullscreen={() => setIsAuditFullscreen(false)} />
         </div>
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
@@ -1226,83 +1233,10 @@ export function FilesystemActivity() {
           </div>
 
           {/* Side-by-Side Audit Layout */}
-          <AuditFilesystemWorkspace
-            isFullscreen={false}
-            expiredSessionId={expiredSessionId}
-            allSessions={allSessions}
-            setExpiredSessionId={setExpiredSessionId}
-            handleUserSelectSession={handleUserSelectSession}
-            switchViewMode={switchViewMode}
-            hasActiveFilters={hasActiveFilters}
-            isSelectedFilteredOut={isSelectedFilteredOut}
-            filteredSessionsCount={filteredSessionsCount}
-            totalSessionsCount={totalSessionsCount}
-            targetPathFilter={targetPathFilter}
-            hideHomeOnly={hideHomeOnly}
-            selectedSession={selectedSession}
-            filteredActiveSessions={filteredActiveSessions}
-            filteredClosedSessions={filteredClosedSessions}
-            handleResetAuditFilters={handleResetAuditFilters}
-            handleClearSelection={handleClearSelection}
-            directoryHasMore={directoryHasMore}
-            directoryIsLoading={directoryIsLoading}
-            directoryIsComplete={directoryIsComplete}
-            loadMoreDirectory={loadMoreDirectory}
-            auditSearchItems={auditSearchItems}
-            auditSearchHasMore={auditSearchHasMore}
-            auditSearchIsLoading={auditSearchIsLoading}
-            auditSearchIsComplete={auditSearchIsComplete}
-            searchAuditSessions={(q) => void searchAuditSessions(q)}
-            loadMoreAuditSearch={loadMoreAuditSearch}
-            clearAuditSearch={clearAuditSearch}
-            auditStatus={auditStatus}
-            auditErrorMessage={auditErrorMessage}
-            retryInitialDirectory={retryInitialDirectory}
-            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
-            handleSelectTargetPath={handleSelectTargetPath}
-            distinctPaths={distinctPaths}
-            homeOnlyCount={homeOnlyCount}
-            auditSnapshot={auditSnapshot}
-            snapshot={snapshot}
-            regionStatus={regionStatus}
-            streamState={streamState}
-            freshnessState={freshnessState}
-            selectedSessionId={selectedSessionId}
-            selectedPath={selectedPath}
-            activeHop={activeHop}
-            playbackSpeed={playbackSpeed}
-            auditCanvasTitle={auditCanvasTitle}
-            auditCanvasSubtitle={auditCanvasSubtitle}
-            selectPath={selectPath}
-            onToggleFullscreen={enterAuditFullscreen}
-            refresh={refresh}
-            handleReconnect={handleReconnect}
-            isDraggingTimeline={isDraggingTimeline}
-            isTimelineCollapsed={isTimelineCollapsed}
-            timelineWidth={timelineWidth}
-            handleSplitterMouseDown={handleSplitterMouseDown}
-            handleResetTimelineWidth={handleResetTimelineWidth}
-            handleSplitterKeyDown={handleSplitterKeyDown}
-            history={history}
-            anchoredHop={anchoredHop}
-            historyStatus={historyStatus}
-            historyCursor={historyCursor}
-            historyTotalItems={historyTotalItems}
-            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-            historyComplete={historyComplete}
-            replayPresentation={replayPresentation}
-            activeForensicTab={activeForensicTab}
-            setActiveForensicTab={setActiveForensicTab}
-            responsePanel={responsePanel}
-            hopResolutionStatus={hopResolutionStatus}
-            requestedHop={requestedHop}
-            clearRequestedHop={clearRequestedHop}
-            selectLatestHop={selectLatestHop}
-            handleSelectHistoryEventId={handleSelectHistoryEventId}
-            loadHistory={loadHistory}
-          />
+          <AuditFilesystemWorkspace isFullscreen={false} onToggleFullscreen={enterAuditFullscreen} />
         </div>
       )}
     </div>
+    </FilesystemContext.Provider>
   );
 }

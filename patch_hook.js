@@ -1,39 +1,93 @@
 const fs = require('fs');
-const path = '/home/siridet/Projects/proactive-threat-intelligence-honeypot/dashboard-v2/src/components/filesystem/useAuditDirectory.ts';
-let code = fs.readFileSync(path, 'utf8');
+let code = fs.readFileSync('dashboard-v2/src/components/filesystem/FilesystemActivity.tsx', 'utf8');
 
-code = code.replace(
-  /const currentScopeKey = createAuditScopeKey\(\{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `const currentScopeKey = createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
+const contextValueStr = `
+  const contextValue = {
+    viewMode,
+    mobileTab,
+    setMobileTab,
+    isAuditFullscreen,
+    setIsAuditFullscreen,
+    directoryHasMore,
+    directoryIsLoading,
+    directoryIsComplete,
+    loadMoreDirectory,
+    auditSearchItems,
+    auditSearchHasMore,
+    auditSearchIsLoading,
+    auditSearchIsComplete,
+    searchAuditSessions,
+    loadMoreAuditSearch,
+    clearAuditSearch,
+    auditStatus,
+    auditErrorMessage,
+    retryInitialDirectory,
+    handleToggleHideHomeOnly,
+    handleSelectTargetPath,
+    distinctPaths,
+    homeOnlyCount,
+    expiredSessionId,
+    allSessions,
+    setExpiredSessionId,
+    handleUserSelectSession,
+    switchViewMode,
+    hasActiveFilters,
+    isSelectedFilteredOut,
+    filteredSessionsCount,
+    totalSessionsCount,
+    targetPathFilter,
+    hideHomeOnly,
+    selectedSession,
+    filteredActiveSessions,
+    filteredClosedSessions,
+    handleResetAuditFilters,
+    handleClearSelection,
+    auditSnapshot,
+    snapshot,
+    regionStatus,
+    streamState,
+    freshnessState,
+    selectedSessionId,
+    selectedPath,
+    activeHop,
+    playbackSpeed,
+    auditCanvasTitle,
+    auditCanvasSubtitle,
+    selectPath,
+    refresh,
+    handleReconnect,
+    isDraggingTimeline,
+    isTimelineCollapsed,
+    timelineWidth,
+    handleSplitterMouseDown,
+    handleResetTimelineWidth,
+    handleSplitterKeyDown,
+    history,
+    anchoredHop,
+    historyStatus,
+    historyCursor,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    replayPresentation,
+    activeForensicTab,
+    setActiveForensicTab,
+    responsePanel,
+    hopResolutionStatus,
+    requestedHop,
+    clearRequestedHop,
+    selectLatestHop,
+    handleSelectHistoryEventId,
+    loadHistory,
+  };
 
-code = code.replace(
-  /void store\.fetchInitial\(\{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
-code = code.replace(
-  /void store\.fetchSummary\(\{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `void store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
-code = code.replace(
-  /await store\.searchSessions\(query, null, \{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `await store.searchSessions(query, null, { hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
-code = code.replace(
-  /await store\.loadMoreSearch\(\{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `await store.loadMoreSearch({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
-code = code.replace(
-  /await store\.retryInitial\(\{ hideHome: hideHomeOnly, targetPath: targetPathFilter \}\);/g,
-  `await store.retryInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });`
-);
-code = code.replace(
-  /\[hideHomeOnly, targetPathFilter\]/g,
-  `[hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to]`
-);
-code = code.replace(
-  /\[viewMode, hideHomeOnly, targetPathFilter, store\]/g,
-  `[viewMode, hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to, store]`
-);
+  return (
+    <FilesystemContext.Provider value={contextValue as any}>
+    <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
+`;
 
-fs.writeFileSync(path, code);
+code = code.replace(/  return \(\n    <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">/, contextValueStr);
+
+code = code.replace(/    <\/div>\n  \);\n\}/, '    </div>\n    </FilesystemContext.Provider>\n  );\n}');
+
+fs.writeFileSync('dashboard-v2/src/components/filesystem/FilesystemActivity.tsx', code);
