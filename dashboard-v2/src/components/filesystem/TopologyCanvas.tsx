@@ -1026,6 +1026,7 @@ export function TopologyCanvas({
                           onPointerCancel={onNodePointerEnd}
                           onClick={() => {
                             if (consumeNodeClickSuppression()) return;
+                            if (isArrangeMode) return;
                             onSelectPath(node.path);
                           }}
                           className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
@@ -1185,6 +1186,7 @@ export function TopologyCanvas({
                             }${isMulti ? (expanded ? "; cluster expanded" : "; click to expand sessions") : ""}`}
                             onClick={() => {
                               if (consumeCalloutClickSuppression()) return;
+                              if (isArrangeMode) return;
                               if (!isMulti) {
                                 onSelectSession(callout.sessionIds[0]);
                               } else {
@@ -1282,6 +1284,7 @@ export function TopologyCanvas({
                                     aria-selected={isSessSelected}
                                     onClick={(e) => {
                                       e.stopPropagation();
+                                      if (isArrangeMode) return;
                                       onSelectSession(sess.sessionId);
                                     }}
                                     onKeyDown={(e) => {
