@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock, CornerDownRight, FastF
 import type { KeyboardEvent } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
+import { actionLabel, formatElapsedTime, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
 
 export interface ReplayTransportProps {
   isAnchoredSelected: boolean;
@@ -30,6 +30,7 @@ export interface ReplayTransportProps {
       formattedTotalDuration: string;
       formattedCurrentDelta: string;
       timeProgressPercent: number;
+      totalDurationMs: number;
     };
   };
   replayTimeline: import("./filesystemUtils").ReplayTimeline;
@@ -214,9 +215,12 @@ export function ReplayTransport({
             <Clock className="h-3 w-3 text-text-muted" aria-hidden="true" />
             <span className="text-text font-medium">{timeMetrics.summary.formattedCurrentElapsed}</span>
             <span className="text-text-muted/60">/</span>
-            <span>{timeMetrics.summary.formattedTotalDuration}</span>
+            <span title={timeMetrics.summary.formattedTotalDuration}>
+              <span className="sr-only">{timeMetrics.summary.formattedTotalDuration}</span>
+              <span aria-hidden="true">{formatElapsedTime(timeMetrics.summary.totalDurationMs)}</span>
+            </span>
           </span>
-          <span className="truncate">
+          <span className="truncate ml-2">
             {selectedHistoryIndex === 0
               ? "Initial entry"
               : `Dwell: +${timeMetrics.summary.formattedCurrentDelta}`}
