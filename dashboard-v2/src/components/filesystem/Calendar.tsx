@@ -75,10 +75,10 @@ const CalendarIconRight = () => <ChevronRight className="h-3.5 w-3.5" />;
 const CalendarCustomDropdown = ({ value, onChange, children }: DropdownProps) => {
   const options: { value: string; label: string }[] = [];
   React.Children.forEach(children, (child: React.ReactNode) => {
-    if (React.isValidElement<any>(child) && child.props.value !== undefined) {
+    if (React.isValidElement<any>(child) && (child as React.ReactElement<any>).props.value !== undefined) {
       options.push({
-        value: String(child.props.value),
-        label: String(child.props.children),
+        value: String((child as React.ReactElement<any>).props.value),
+        label: String((child as React.ReactElement<any>).props.children),
       });
     }
   });

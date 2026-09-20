@@ -359,7 +359,7 @@ export function AuditFilterControls({
     onSelectCustomDateRange?.(undefined);
   }, [onSelectTimeRange, onSelectCustomDateRange]);
 
-  const hasActiveFilters = hideHomeOnly || targetPath !== null;
+  const hasActiveFilters = hideHomeOnly || targetPath !== null || timeRange !== "all";
 
   // Filter distinct paths based on search input
   const filteredPaths = useMemo(() => {

@@ -931,7 +931,7 @@ export function FilesystemActivity() {
                   selectedSessionId={selectedSessionId}
                   onSelectSession={handleUserSelectSession}
                   totalCount={totalSessionsCount}
-                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  hasActiveFilters={hasActiveFilters}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
                   directoryHasMore={directoryHasMore}
@@ -1109,7 +1109,7 @@ export function FilesystemActivity() {
                   selectedSessionId={selectedSessionId}
                   onSelectSession={handleUserSelectSession}
                   totalCount={totalSessionsCount}
-                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  hasActiveFilters={hasActiveFilters}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
                   directoryHasMore={directoryHasMore}
