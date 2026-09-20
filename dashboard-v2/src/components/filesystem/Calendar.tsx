@@ -37,8 +37,8 @@ function Calendar({
         }
       }}
       modifiersClassNames={{
-        range_hover: "bg-surface-subtle text-text rounded-none",
-        range_hover_end: "bg-surface-hover text-text"
+        range_hover: "bg-slate-500/10 text-text rounded-none",
+        range_hover_end: "bg-slate-500/20 text-text"
       }}
       showOutsideDays={showOutsideDays}
       className={`p-3 ${className}`}
@@ -56,12 +56,12 @@ function Calendar({
         head_cell: "text-text-subtle rounded-md w-9 font-normal text-[0.8rem]",
         row: "flex w-full mt-2",
         cell: "h-9 w-9 text-center text-sm p-0 relative focus-within:relative focus-within:z-20",
-        day: "h-9 w-9 p-0 font-normal hover:bg-surface-subtle hover:text-text rounded-md flex justify-center items-center cursor-pointer transition-colors",
+        day: "h-9 w-9 p-0 font-normal hover:bg-slate-500/20 hover:text-text rounded-md flex justify-center items-center cursor-pointer transition-colors",
         day_selected: "bg-primary text-primary-content hover:bg-primary hover:text-primary-content focus:bg-primary focus:text-primary-content",
-        day_today: "bg-surface-subtle text-text font-bold",
+        day_today: "bg-slate-500/10 text-text font-bold",
         day_outside: "text-text-muted opacity-50",
         day_disabled: "text-text-muted opacity-50",
-        day_range_middle: "aria-selected:bg-surface-subtle aria-selected:text-text",
+        day_range_middle: "aria-selected:bg-slate-500/20 aria-selected:text-text",
         day_hidden: "invisible",
         vhidden: "sr-only",
         ...classNames,
