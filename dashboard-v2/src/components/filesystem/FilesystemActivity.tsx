@@ -1150,10 +1150,58 @@ export function FilesystemActivity() {
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="flex flex-col sm:flex-row sm:items-center justify-end gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
             role="toolbar"
             aria-label="Audit replay toolbar"
           >
+            {/* Left side: Selection & Filters */}
+            <div className="flex items-center justify-start gap-4 flex-1 min-w-0">
+              <div
+                className="flex flex-wrap items-center gap-2 min-w-0"
+                role="group"
+                aria-label="Audited session and filter controls"
+              >
+                <AuditSessionSelect
+                  sessions={filteredActiveSessions}
+                  recentClosedSessions={filteredClosedSessions}
+                  selectedSessionId={selectedSessionId}
+                  onSelectSession={handleUserSelectSession}
+                  totalCount={totalSessionsCount}
+                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  onResetFilters={handleResetAuditFilters}
+                  allSessionsList={allSessions}
+                  directoryHasMore={directoryHasMore}
+                  directoryIsLoading={directoryIsLoading}
+                  directoryIsComplete={directoryIsComplete}
+                  onLoadMoreDirectory={loadMoreDirectory}
+                  searchResults={auditSearchItems}
+                  searchHasMore={auditSearchHasMore}
+                  searchIsLoading={auditSearchIsLoading}
+                  searchIsComplete={auditSearchIsComplete}
+                  onSearch={(q) => void searchAuditSessions(q)}
+                  onLoadMoreSearch={loadMoreAuditSearch}
+                  onClearSearch={clearAuditSearch}
+                  hideHomeOnly={hideHomeOnly}
+                  targetPathFilter={targetPathFilter}
+                  status={auditStatus}
+                  errorMessage={auditErrorMessage}
+                  onRetry={retryInitialDirectory}
+                />
+                <AuditFilterControls
+                  hideHomeOnly={hideHomeOnly}
+                  onToggleHideHomeOnly={handleToggleHideHomeOnly}
+                  targetPath={targetPathFilter}
+                  onSelectTargetPath={handleSelectTargetPath}
+                  distinctPaths={distinctPaths}
+                  homeOnlyCount={homeOnlyCount}
+                  filteredCount={filteredSessionsCount}
+                  totalCount={totalSessionsCount}
+                  onResetFilters={handleResetAuditFilters}
+                  selectedCanvasPath={selectedPath}
+                />
+              </div>
+            </div>
+
             <div
               className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
               role="toolbar"

@@ -1,6 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState } from "react";
-import { AuditScopeBar } from "./AuditScopeBar";
 import { AuditNoticeRegion } from "./AuditNoticeRegion";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { TimelineSplitter } from "./TimelineSplitter";
@@ -137,45 +136,10 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
             handleResetAuditFilters={props.handleResetAuditFilters}
             handleClearSelection={props.handleClearSelection}
           />
-          {!props.isFullscreen && (
-            <div className="mb-4">
-              <AuditScopeBar
-                filteredActiveSessions={props.filteredActiveSessions}
-                filteredClosedSessions={props.filteredClosedSessions}
-                selectedSessionId={props.selectedSessionId}
-                handleUserSelectSession={props.handleUserSelectSession}
-                totalSessionsCount={props.totalSessionsCount}
-                hideHomeOnly={props.hideHomeOnly}
-                targetPathFilter={props.targetPathFilter}
-                handleResetAuditFilters={props.handleResetAuditFilters}
-                allSessions={props.allSessions}
-                directoryHasMore={props.directoryHasMore}
-                directoryIsLoading={props.directoryIsLoading}
-                directoryIsComplete={props.directoryIsComplete}
-                loadMoreDirectory={props.loadMoreDirectory}
-                auditSearchItems={props.auditSearchItems}
-                auditSearchHasMore={props.auditSearchHasMore}
-                auditSearchIsLoading={props.auditSearchIsLoading}
-                auditSearchIsComplete={props.auditSearchIsComplete}
-                searchAuditSessions={props.searchAuditSessions}
-                loadMoreAuditSearch={props.loadMoreAuditSearch}
-                clearAuditSearch={props.clearAuditSearch}
-                auditStatus={props.auditStatus}
-                auditErrorMessage={props.auditErrorMessage}
-                retryInitialDirectory={props.retryInitialDirectory}
-                handleToggleHideHomeOnly={props.handleToggleHideHomeOnly}
-                handleSelectTargetPath={props.handleSelectTargetPath}
-                distinctPaths={props.distinctPaths}
-                homeOnlyCount={props.homeOnlyCount}
-                filteredSessionsCount={props.filteredSessionsCount}
-                selectedPath={props.selectedPath}
-              />
-            </div>
-          )}
           <TopologyCanvas
-          snapshot={props.auditSnapshot ?? props.snapshot}
-          regionStatus={props.regionStatus}
-          streamState={props.streamState}
+            snapshot={props.auditSnapshot ?? props.snapshot}
+            regionStatus={props.regionStatus}
+            streamState={props.streamState}
           freshnessState={props.freshnessState}
           selectedSessionId={props.selectedSessionId}
           selectedPath={props.selectedPath}
