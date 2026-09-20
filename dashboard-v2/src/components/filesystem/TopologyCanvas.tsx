@@ -281,10 +281,6 @@ export function TopologyCanvas({
     [automaticGraphNodes, nodePositions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
-  const graphPlaneHeight = useMemo(
-    () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
-    [graphNodes],
-  );
   const effectiveSessions = useMemo(() => {
     if (!activeHop?.toPath || !selectedSessionId) return snapshot?.sessions ?? [];
     return (snapshot?.sessions ?? []).map((session) => {
@@ -770,17 +766,14 @@ export function TopologyCanvas({
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="relative h-[1500px] w-[1500px] origin-top-left overflow-visible"
+                  className="absolute h-[2000px] w-[2000px] origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
                       ? {
-                          minHeight: graphPlaneHeight,
-                          minWidth: 860,
-                          height: isTopologyExpanded ? "100%" : undefined,
                           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         }
-                      : { minHeight: graphPlaneHeight, minWidth: 860, height: isTopologyExpanded ? "100%" : undefined }
+                      : undefined
                   }
                   transition={
                     reducedMotion || isDraggingSurface || isResizingContainer
