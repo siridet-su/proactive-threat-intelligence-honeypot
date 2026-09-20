@@ -93,38 +93,44 @@ export function FilesystemPageHeader({
 
         {/* Telemetry Status Bar & Actions */}
         <div
-          className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap rounded-lg border border-border/70 bg-surface-subtle/50 p-1"
+          className="flex items-center gap-4 shrink-0 flex-wrap sm:flex-nowrap rounded-lg border border-border/70 bg-surface-subtle/50 p-1.5 px-3"
           role="region"
           aria-label="Stream telemetry status"
         >
-          <span
-            className={`ui-badge ${
-              streamState === "live"
-                ? "border-success-border bg-success-subtle text-success"
-                : streamState === "connecting"
-                ? "border-border bg-surface-subtle text-text-subtle"
-                : "border-warning-border bg-warning-subtle text-warning"
-            }`}
-            title={
-              streamState === "live"
-                ? "Real-time SSE event stream connected"
-                : streamState === "connecting"
-                ? "Connecting to real-time event stream"
-                : "SSE event stream disconnected, reconnecting..."
-            }
-          >
-            <Radio className={`h-3.5 w-3.5 ${streamState === "live" ? "" : "animate-pulse"}`} aria-hidden="true" />
-            {streamState === "live" ? "Live stream" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-text-muted font-medium">Connection:</span>
+            <span
+              className={`ui-badge ${
+                streamState === "live"
+                  ? "border-success-border bg-success-subtle text-success"
+                  : streamState === "connecting"
+                  ? "border-border bg-surface-subtle text-text-subtle"
+                  : "border-warning-border bg-warning-subtle text-warning"
+              }`}
+              title={
+                streamState === "live"
+                  ? "Real-time SSE event stream connected"
+                  : streamState === "connecting"
+                  ? "Connecting to real-time event stream"
+                  : "SSE event stream disconnected, reconnecting..."
+              }
+            >
+              <Radio className={`h-3.5 w-3.5 ${streamState === "live" ? "" : "animate-pulse"}`} aria-hidden="true" />
+              {streamState === "live" ? "Live stream" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
+            </span>
+          </div>
 
           {snapshot && (
-            <span
-              className={`ui-badge ${freshnessState.badgeClass}`}
-              title={freshnessState.detail}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
-              <span>{formatPageBadgeText(freshnessState)}</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-text-muted font-medium">Latest telemetry:</span>
+              <span
+                className={`ui-badge ${freshnessState.badgeClass}`}
+                title={freshnessState.detail}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
+                <span>{formatPageBadgeText(freshnessState)}</span>
+              </span>
+            </div>
           )}
 
           {(freshnessState.isDegraded || streamState === "stale") && (
@@ -153,7 +159,7 @@ export function FilesystemPageHeader({
               className={`h-4 w-4 ${regionStatus === "refreshing" || regionStatus === "loading" ? "animate-spin text-primary" : ""}`}
               aria-hidden="true"
             />
-            Refresh
+            Refresh live topology
           </button>
         </div>
       </div>

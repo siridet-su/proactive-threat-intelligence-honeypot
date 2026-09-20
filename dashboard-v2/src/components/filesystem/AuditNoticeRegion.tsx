@@ -92,13 +92,13 @@ export function AuditNoticeRegion({
                 {hideHomeOnly ? " [excluding /home]" : ""}.
                 {selectedSession ? (
                   <span className="text-text-muted ml-1">
-                    Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
+                    Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> which is retained but falls outside the active filters.
                   </span>
                 ) : null}
               </>
             ) : (
               <>
-                <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
+                <strong>Pinned outside filter:</strong> Retained session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> falls outside the active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
               </>
             )}
           </span>

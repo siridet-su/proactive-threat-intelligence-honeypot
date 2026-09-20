@@ -22,6 +22,7 @@ interface TopologySummaryBarProps {
   totalOverlaps: number;
   autoArrangeTopology: () => void;
   reducedMotion: boolean | null;
+  isAuditMode?: boolean;
 }
 
 export function TopologySummaryBar({
@@ -43,6 +44,7 @@ export function TopologySummaryBar({
   totalOverlaps,
   autoArrangeTopology,
   reducedMotion,
+  isAuditMode = false,
 }: TopologySummaryBarProps) {
   return (
     <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
@@ -107,7 +109,7 @@ export function TopologySummaryBar({
         )}
         <span className="shrink-0 text-border" aria-hidden="true">·</span>
         <span className="shrink-0">
-          <strong className="font-medium text-text">{effectiveSessionsLength}</strong> active {effectiveSessionsLength === 1 ? "session" : "sessions"}
+          <strong className="font-medium text-text">{effectiveSessionsLength}</strong> {isAuditMode ? "retained" : "active"} {effectiveSessionsLength === 1 ? "session" : "sessions"}
           <span className="hidden xl:inline"> with a known CWD</span>
         </span>
         <span className="shrink-0 text-border" aria-hidden="true">·</span>
@@ -146,30 +148,36 @@ export function TopologySummaryBar({
           </span>
         )}
         <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
-        <span
-          className="hidden 2xl:inline truncate text-text-subtle"
-          title={`Snapshot generated at ${formatTimestamp(snapshotGeneratedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
-        >
-          {freshnessState.isStale ? (
-            <span className="font-medium text-warning">
-              {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
-                <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
-              ) : freshnessState.telemetryStatus === "future_skew" ? (
-                <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
-              ) : (
-                <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
-              )}
-            </span>
-          ) : freshnessState.label === "Live · No activity" ? (
-            <span>
-              Live (no activity) · Snapshot {formatTimestamp(snapshotGeneratedAt)}
-            </span>
-          ) : (
-            <span>
-              Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshotGeneratedAt)}
-            </span>
-          )}
-        </span>
+        {isAuditMode ? (
+          <span className="hidden 2xl:inline truncate text-text-subtle font-medium text-primary">
+            Historical audit data
+          </span>
+        ) : (
+          <span
+            className="hidden 2xl:inline truncate text-text-subtle"
+            title={`Snapshot generated at ${formatTimestamp(snapshotGeneratedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
+          >
+            {freshnessState.isStale ? (
+              <span className="font-medium text-warning">
+                {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
+                  <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
+                ) : freshnessState.telemetryStatus === "future_skew" ? (
+                  <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
+                ) : (
+                  <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
+                )}
+              </span>
+            ) : freshnessState.label === "Live · No activity" ? (
+              <span>
+                Live (no activity) · Snapshot {formatTimestamp(snapshotGeneratedAt)}
+              </span>
+            ) : (
+              <span>
+                Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshotGeneratedAt)}
+              </span>
+            )}
+          </span>
+        )}
       </div>
 
       <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3.5">
