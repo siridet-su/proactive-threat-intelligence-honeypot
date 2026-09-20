@@ -82,7 +82,7 @@ export function RouteEventList({
       {/* Scrollable Timeline List */}
       <div
         ref={timelineContainerRef}
-        className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4" : ""}`}
+        className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto pr-1 pb-4" : ""}`}
       >
         <ol className="relative space-y-0 border-l border-border pl-5" aria-label="Verified directory route">
           {displayedHistory.map((event, index) => {
