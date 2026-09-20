@@ -840,7 +840,7 @@ export function FilesystemActivity() {
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
-        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start min-h-[calc(100dvh-12rem)] lg:flex-1">
+        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1">
           {/* Mobile Tabs */}
           <div className="flex lg:hidden gap-2 border-b border-border pb-2">
             <button
