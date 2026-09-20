@@ -174,7 +174,13 @@ export function TopologyToolbar({
         <div ref={viewMenuRef} className="relative">
           <button
             type="button"
-            className={`ui-button h-8 min-h-8 px-2 text-xs flex items-center gap-1.5 ${totalOverlaps > 0 ? "border-warning/70 text-warning" : ""}`}
+            className={`ui-button h-8 min-h-8 px-2 text-xs flex items-center gap-1.5 transition-all ${
+              totalOverlaps > 0
+                ? "border-warning/70 text-warning"
+                : viewMenuOpen
+                  ? "border-primary ring-2 ring-primary/20 text-text"
+                  : ""
+            }`}
             title="View settings"
             aria-label="View settings"
             aria-expanded={viewMenuOpen}
