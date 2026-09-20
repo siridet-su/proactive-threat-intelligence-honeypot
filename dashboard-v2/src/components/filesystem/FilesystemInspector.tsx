@@ -438,47 +438,58 @@ export function FilesystemInspector({
                 </div>
               </div>
 
-              <div className="mt-4">
-                <div className="flex items-center justify-between gap-2 border-b border-border pb-2 text-xs">
-                  <span className="font-semibold text-text">Directory sessions</span>
-                  <div className="flex items-center gap-1" aria-label="Directory session grouping">
-                    <button
-                      type="button"
-                      aria-pressed={directoryView === "all"}
-                      onClick={() => setDirectoryView("all")}
-                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
-                        directoryView === "all"
-                          ? "bg-surface-hover font-semibold text-text"
-                          : "text-text-subtle hover:text-text"
-                      }`}
-                    >
-                      All in branch ({nodeCounts.branchCount})
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={directoryView === "exact"}
-                      onClick={() => setDirectoryView("exact")}
-                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
-                        directoryView === "exact"
-                          ? "bg-surface-hover font-semibold text-text"
-                          : "text-text-subtle hover:text-text"
-                      }`}
-                    >
-                      Exact path ({nodeCounts.exactCount})
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={directoryView === "sources"}
-                      onClick={() => setDirectoryView("sources")}
-                      className={`min-h-8 rounded px-2 text-xs font-medium transition-colors ${
-                        directoryView === "sources"
-                          ? "bg-surface-hover font-semibold text-text"
-                          : "text-text-subtle hover:text-text"
-                      }`}
-                    >
-                      By source ({sourceGroups.length})
-                    </button>
-                  </div>
+              <div className="mt-6">
+                <div className="mb-2 text-sm font-semibold text-text">Directory sessions</div>
+                <div 
+                  className="mb-4 grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-1 text-xs" 
+                  role="tablist" 
+                  aria-label="Directory session grouping"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={directoryView === "all"}
+                    onClick={() => setDirectoryView("all")}
+                    className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
+                      directoryView === "all"
+                        ? "bg-surface text-text shadow-xs border border-border/50"
+                        : "text-text-subtle hover:bg-surface-hover hover:text-text border border-transparent"
+                    }`}
+                    title={`All sessions in this branch (${nodeCounts.branchCount})`}
+                  >
+                    <span className="truncate">Branch</span>
+                    <span className="opacity-60 shrink-0">({nodeCounts.branchCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={directoryView === "exact"}
+                    onClick={() => setDirectoryView("exact")}
+                    className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
+                      directoryView === "exact"
+                        ? "bg-surface text-text shadow-xs border border-border/50"
+                        : "text-text-subtle hover:bg-surface-hover hover:text-text border border-transparent"
+                    }`}
+                    title={`Sessions ending exactly here (${nodeCounts.exactCount})`}
+                  >
+                    <span className="truncate">Exact</span>
+                    <span className="opacity-60 shrink-0">({nodeCounts.exactCount})</span>
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={directoryView === "sources"}
+                    onClick={() => setDirectoryView("sources")}
+                    className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
+                      directoryView === "sources"
+                        ? "bg-surface text-text shadow-xs border border-border/50"
+                        : "text-text-subtle hover:bg-surface-hover hover:text-text border border-transparent"
+                    }`}
+                    title={`Grouped by source IP (${sourceGroups.length})`}
+                  >
+                    <span className="truncate">Sources</span>
+                    <span className="opacity-60 shrink-0">({sourceGroups.length})</span>
+                  </button>
                 </div>
 
                 {directoryView === "all" ? (
