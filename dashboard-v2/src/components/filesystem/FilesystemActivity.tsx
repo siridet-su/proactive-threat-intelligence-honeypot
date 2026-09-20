@@ -24,7 +24,7 @@ import type {
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
 import type { DateRange } from "react-day-picker";
-import { AuditFilterControls } from "./AuditFilterControls";
+import { AuditFilterControls, type TimeRangeFilter } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { ResponseActionPanel } from "./ResponseActionPanel";
 import { useResponseActionController } from "./ResponseActionController";
@@ -226,7 +226,7 @@ export function FilesystemActivity() {
     await lookupRemoteAuditSessionRef.current?.(intentOrId, explicitHop);
   }, []);
 
-  const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d" | "custom">("all");
+  const [timeRange, setTimeRange] = useState<TimeRangeFilter>("all");
   const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
 
   // URL state synchronization and routing hook
@@ -454,6 +454,8 @@ export function FilesystemActivity() {
       targetPathFilter,
       selectedSessionId,
       isDirectoryComplete: directoryIsComplete,
+      timeRange,
+      customDateRange,
     });
   }, [
     viewMode,
@@ -469,6 +471,8 @@ export function FilesystemActivity() {
     targetPathFilter,
     selectedSessionId,
     directoryIsComplete,
+    timeRange,
+    customDateRange,
   ]);
 
   const selectedSession = useMemo(
@@ -517,10 +521,12 @@ export function FilesystemActivity() {
     [selectedPath, snapshot],
   );
 
-  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
+  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null || timeRange !== "all";
 
   const handleResetAuditFilters = useCallback(() => {
     navigationCoordinator.userResetFilters();
+    setTimeRange("all");
+    setCustomDateRange(undefined);
   }, [navigationCoordinator]);
 
   const auditCanvasTitle = useMemo(() => {

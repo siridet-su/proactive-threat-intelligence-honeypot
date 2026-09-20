@@ -23,6 +23,11 @@ export async function GET(request: Request) {
     const summaryParam = url.searchParams.get("summary") ?? url.searchParams.get("facets");
     const includeSummary = summaryParam === "1" || summaryParam === "true";
 
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    const from = fromParam ? parseInt(fromParam, 10) : undefined;
+    const to = toParam ? parseInt(toParam, 10) : undefined;
+
     const page = await getAuditSessions({
       search: search || null,
       targetPath: targetPath || null,
@@ -30,6 +35,8 @@ export async function GET(request: Request) {
       cursor: cursor || null,
       limit: Number.isNaN(limit) ? 25 : limit,
       includeSummary,
+      from: from && !Number.isNaN(from) ? from : undefined,
+      to: to && !Number.isNaN(to) ? to : undefined,
     });
 
     return Response.json(page, {

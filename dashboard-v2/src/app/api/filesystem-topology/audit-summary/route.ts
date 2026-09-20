@@ -17,10 +17,17 @@ export async function GET(request: Request) {
     const hideHomeParam = url.searchParams.get("hideHome");
     const hideHome = hideHomeParam === "1" || hideHomeParam === "true";
 
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    const from = fromParam ? parseInt(fromParam, 10) : undefined;
+    const to = toParam ? parseInt(toParam, 10) : undefined;
+
     const summary = await getAuditDirectorySummary({
       search: search || null,
       targetPath: targetPath || null,
       hideHome,
+      from: from && !Number.isNaN(from) ? from : undefined,
+      to: to && !Number.isNaN(to) ? to : undefined,
     });
 
     return Response.json(summary, {

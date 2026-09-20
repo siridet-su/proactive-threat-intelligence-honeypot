@@ -14,6 +14,8 @@ import {
   isHomeOnlySession,
   sessionTouchesPath,
 } from "./filesystemUtils";
+import { getPresetDateRange, type TimeRangeFilter } from "./AuditFilterControls";
+
 
 export const DEFAULT_AUDIT_DIRECTORY_LIMIT = 50;
 
@@ -21,6 +23,8 @@ export interface AuditScope {
   hideHome: boolean;
   targetPath: string | null;
   q?: string | null;
+  from?: number;
+  to?: number;
 }
 
 export function normalizeAuditScopeTargetPath(path: string | null | undefined): string | null {
@@ -37,16 +41,13 @@ export function normalizeAuditScopeQuery(q: string | null | undefined): string |
   return trimmed ? trimmed.toLowerCase() : null;
 }
 
-/**
- * Creates a deterministic canonical string key for an audit query scope as a JSON tuple:
- * [hideHome: boolean, targetPath: string | null, q: string | null]
- * Round-trips characters such as &, |, %, =, spaces, and Unicode without collision.
- */
 export function createAuditScopeKey(scope: AuditScope): string {
   const hideHome = Boolean(scope.hideHome);
   const targetPath = normalizeAuditScopeTargetPath(scope.targetPath);
   const q = normalizeAuditScopeQuery(scope.q);
-  return JSON.stringify([hideHome, targetPath, q]);
+  const from = scope.from;
+  const to = scope.to;
+  return JSON.stringify([hideHome, targetPath, q, from, to]);
 }
 
 export function parseAuditScopeKey(key: string): AuditScope {
@@ -55,17 +56,19 @@ export function parseAuditScopeKey(key: string): AuditScope {
   }
   try {
     const parsed = JSON.parse(key);
-    if (Array.isArray(parsed) && parsed.length === 3) {
+    if (Array.isArray(parsed) && parsed.length >= 3) {
       return {
         hideHome: Boolean(parsed[0]),
-        targetPath: typeof parsed[1] === "string" ? parsed[1] : null,
-        q: typeof parsed[2] === "string" ? parsed[2] : null,
+        targetPath: parsed[1] === null ? null : String(parsed[1]),
+        q: parsed[2] === null ? null : String(parsed[2]),
+        from: typeof parsed[3] === "number" ? parsed[3] : undefined,
+        to: typeof parsed[4] === "number" ? parsed[4] : undefined,
       };
     }
+    return { hideHome: false, targetPath: null, q: null };
   } catch {
-    // fallback
+    return { hideHome: false, targetPath: null, q: null };
   }
-  return { hideHome: false, targetPath: null, q: null };
 }
 
 /**
@@ -161,6 +164,8 @@ export interface BuildAuditSessionsUrlOptions {
   q?: string;
   hideHome?: boolean;
   targetPath?: string | null;
+  from?: number;
+  to?: number;
 }
 
 export function buildAuditSessionsUrl({
@@ -170,6 +175,8 @@ export function buildAuditSessionsUrl({
   q,
   hideHome,
   targetPath,
+  from,
+  to,
 }: BuildAuditSessionsUrlOptions = {}): string {
   const params = new URLSearchParams();
   if (limit) params.set("limit", String(limit));
@@ -178,6 +185,8 @@ export function buildAuditSessionsUrl({
   if (q && q.trim()) params.set("q", q.trim());
   if (hideHome) params.set("hideHome", "1");
   if (targetPath) params.set("targetPath", targetPath);
+  if (from != null) params.set("from", String(from));
+  if (to != null) params.set("to", String(to));
   const query = params.toString();
   return query ? `/api/filesystem-topology/audit-sessions?${query}` : "/api/filesystem-topology/audit-sessions";
 }
@@ -218,6 +227,26 @@ export interface AuthoritativeAuditMetricsOptions {
   targetPathFilter?: string | null;
   selectedSessionId?: string | null;
   isDirectoryComplete?: boolean;
+  timeRange?: TimeRangeFilter;
+  customDateRange?: DateRange;
+}
+
+export function getSessionTimestamp(s: FilesystemTopologySession | FilesystemClosedSession): number {
+  if ("lifecycle" in s && s.lifecycle) {
+    if (s.lifecycle.startedAt) {
+      const t = new Date(s.lifecycle.startedAt).getTime();
+      if (!Number.isNaN(t) && t > 0) return t;
+    }
+    if (s.lifecycle.closedAt) {
+      const t = new Date(s.lifecycle.closedAt).getTime();
+      if (!Number.isNaN(t) && t > 0) return t;
+    }
+  }
+  if (s.cwdState?.observedAt) {
+    const t = new Date(s.cwdState.observedAt).getTime();
+    if (!Number.isNaN(t) && t > 0) return t;
+  }
+  return 0;
 }
 
 export interface AuthoritativeAuditMetrics {
@@ -254,6 +283,8 @@ export function deriveAuthoritativeAuditMetrics({
   targetPathFilter = null,
   selectedSessionId = null,
   isDirectoryComplete = false,
+  timeRange = "all",
+  customDateRange,
 }: AuthoritativeAuditMetricsOptions): AuthoritativeAuditMetrics {
   const isAudit = viewMode === "audit";
 
@@ -278,7 +309,15 @@ export function deriveAuthoritativeAuditMetrics({
   );
 
   const resolvedCurrentScopeKey =
-    currentScopeKey ?? createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    currentScopeKey ?? createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: (function(){
+      if (!timeRange || timeRange === "all") return undefined;
+      if (timeRange === "custom") return customDateRange?.from?.getTime();
+      return getPresetDateRange(timeRange)?.from?.getTime();
+    })(), to: (function(){
+      if (!timeRange || timeRange === "all") return undefined;
+      if (timeRange === "custom") return customDateRange?.to?.getTime();
+      return getPresetDateRange(timeRange)?.to?.getTime();
+    })() });
   const resolvedSummaryScopeKey =
     summaryScopeKey !== undefined ? summaryScopeKey : summary ? resolvedCurrentScopeKey : null;
 
@@ -314,10 +353,25 @@ export function deriveAuthoritativeAuditMetrics({
     }
   }
 
+  const hasTimeFilter = Boolean(timeRange && timeRange !== "all");
+
   // Filter predicate
   const filterFn = (s: FilesystemTopologySession | FilesystemClosedSession) => {
     if (hideHomeOnly && isHomeOnlySession(s)) return false;
     if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
+    if (hasTimeFilter && timeRange) {
+      const ts = getSessionTimestamp(s);
+      if (ts > 0) {
+        if (timeRange === "custom") {
+          if (customDateRange?.from && ts < customDateRange.from.getTime()) return false;
+          if (customDateRange?.to && ts > customDateRange.to.getTime()) return false;
+        } else {
+          const presetRange = getPresetDateRange(timeRange);
+          if (presetRange?.from && ts < presetRange.from.getTime()) return false;
+          if (presetRange?.to && ts > presetRange.to.getTime()) return false;
+        }
+      }
+    }
     return true;
   };
 
@@ -337,10 +391,12 @@ export function deriveAuthoritativeAuditMetrics({
 
   // Filtered sessions count
   let filteredSessionsCount = 0;
-  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null;
+  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null || hasTimeFilter;
   const isAuthoritative = !isAudit || (isScopeMatch && Boolean(summary)) || isDirectoryComplete;
 
-  if (!hasActiveFilters && isAudit) {
+  if (hasTimeFilter) {
+    filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
+  } else if (!hasActiveFilters && isAudit) {
     // When no filter is active in audit mode:
     // If scope matches, totalSessionsCount is authoritative.
     // If summary is loading or failed, totalSessionsCount is loaded count, and isAuthoritative is false.
@@ -383,6 +439,8 @@ export function deriveAuthoritativeAuditMetrics({
       if (hideHomeOnly && isHomeOnlySession(selectedSession)) {
         isSelectedFilteredOut = true;
       } else if (targetPathFilter && !sessionTouchesPath(selectedSession, targetPathFilter)) {
+        isSelectedFilteredOut = true;
+      } else if (hasTimeFilter && !filterFn(selectedSession)) {
         isSelectedFilteredOut = true;
       }
     }
@@ -498,7 +556,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     notify();
   }
 
-  const fetchInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
+  const fetchInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number; }) => {
     // When hideHome or targetPath changes (or on any initial scope fetch),
     // abort and clear any active search state before the new directory scope becomes active.
     clearSearch();
@@ -510,7 +568,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
 
     const hideHome = Boolean(filterOptions?.hideHome);
     const targetPath = filterOptions?.targetPath ?? null;
-    const scopeKey = createAuditScopeKey({ hideHome, targetPath });
+    const scopeKey = createAuditScopeKey({ hideHome, targetPath, from: filterOptions?.from, to: filterOptions?.to });
 
     setState({
       directoryItems: [],
@@ -528,6 +586,8 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         limit: defaultLimit,
         hideHome,
         targetPath,
+        from: filterOptions?.from,
+        to: filterOptions?.to,
       });
 
       const res = await fetcher(url, { cache: "no-store", signal });
@@ -560,7 +620,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     }
   };
 
-  const retryInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
+  const retryInitial = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number; }) => {
     return fetchInitial(filterOptions);
   };
 
@@ -576,6 +636,8 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         cursor: state.directoryCursor,
         hideHome: parsedScope.hideHome,
         targetPath: parsedScope.targetPath,
+        from: parsedScope.from,
+        to: parsedScope.to,
       });
 
       const res = await fetcher(url, { cache: "no-store" });
@@ -607,7 +669,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   const searchSessions = async (
     query: string,
     cursor: string | null = null,
-    filterOptions?: { hideHome?: boolean; targetPath?: string | null },
+    filterOptions?: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number },
   ) => {
     const trimmed = query.trim();
     if (!trimmed) {
@@ -617,7 +679,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
 
     const hideHome = Boolean(filterOptions?.hideHome);
     const targetPath = filterOptions?.targetPath ?? null;
-    const scopeKey = createAuditScopeKey({ hideHome, targetPath, q: trimmed });
+    const scopeKey = createAuditScopeKey({ hideHome, targetPath, q: trimmed, from: filterOptions?.from, to: filterOptions?.to });
 
     if (cursor) {
       // Never combine a search cursor created under one scope with filters from another scope.
@@ -690,7 +752,7 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     }
   };
 
-  const loadMoreSearch = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null }) => {
+  const loadMoreSearch = async (filterOptions?: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number; }) => {
     if (state.searchIsLoading || !state.searchHasMore || !state.searchCursor || !state.searchQuery) return;
     const parsed = parseAuditScopeKey(state.searchScopeKey);
 
@@ -756,6 +818,8 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
       if (scope.hideHome) params.set("hideHome", "1");
       if (scope.targetPath) params.set("targetPath", scope.targetPath);
       if (scope.q?.trim()) params.set("q", scope.q.trim());
+      if (scope.from != null) params.set("from", String(scope.from));
+      if (scope.to != null) params.set("to", String(scope.to));
 
       const res = await fetcher(`/api/filesystem-topology/audit-summary?${params.toString()}`, {
         cache: "no-store",
@@ -819,12 +883,15 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
   };
 }
 
+import type { DateRange } from "react-day-picker";
 export interface UseAuditDirectoryOptions {
   viewMode: "live" | "audit";
   snapshotRecentClosedSessions: readonly FilesystemClosedSession[];
   extraAuditSessions?: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
   hideHomeOnly?: boolean;
   targetPathFilter?: string | null;
+  timeRange?: TimeRangeFilter;
+  customDateRange?: DateRange;
 }
 
 export function useAuditDirectory({
@@ -833,7 +900,24 @@ export function useAuditDirectory({
   extraAuditSessions,
   hideHomeOnly = false,
   targetPathFilter = null,
+  timeRange = "all",
+  customDateRange,
 }: UseAuditDirectoryOptions) {
+  const timeRangeMs = useMemo(() => {
+    if (!timeRange || timeRange === "all") return null;
+    let from: number | undefined;
+    let to: number | undefined;
+    if (timeRange === "custom") {
+      from = customDateRange?.from?.getTime();
+      to = customDateRange?.to?.getTime();
+    } else {
+      const presetRange = getPresetDateRange(timeRange);
+      from = presetRange?.from?.getTime();
+      to = presetRange?.to?.getTime();
+    }
+    return { from, to };
+  }, [timeRange, customDateRange]);
+
   const store = useMemo(() => createAuditDirectoryStore(), []);
   const storeState = useSyncExternalStore(store.subscribe, store.getState, store.getState);
 
@@ -845,14 +929,14 @@ export function useAuditDirectory({
       prevScopeRef.current = "";
       return;
     }
-    const currentScopeKey = createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    const currentScopeKey = createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
     if (prevScopeRef.current === currentScopeKey) return;
     prevScopeRef.current = currentScopeKey;
 
     store.clearSearch();
-    void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
-    void store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
-  }, [viewMode, hideHomeOnly, targetPathFilter, store]);
+    void store.fetchInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
+    void store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
+  }, [viewMode, hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to, store]);
 
   const authoritativeClosedSessions = useMemo(() => {
     return mergeAuthoritativeClosedSessions(
@@ -864,23 +948,23 @@ export function useAuditDirectory({
 
   const searchSessions = useCallback(
     async (query: string) => {
-      await store.searchSessions(query, null, { hideHome: hideHomeOnly, targetPath: targetPathFilter });
+      await store.searchSessions(query, null, { hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
     },
     [store, hideHomeOnly, targetPathFilter],
   );
 
   const loadMoreSearch = useCallback(async () => {
-    await store.loadMoreSearch({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    await store.loadMoreSearch({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
   }, [store, hideHomeOnly, targetPathFilter]);
 
   const retryInitialDirectory = useCallback(async () => {
-    await store.retryInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
-    await store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter });
+    await store.retryInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
+    await store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
   }, [store, hideHomeOnly, targetPathFilter]);
 
   const currentScopeKey = useMemo(
-    () => createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter }),
-    [hideHomeOnly, targetPathFilter],
+    () => createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to }),
+    [hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to],
   );
 
   return {
