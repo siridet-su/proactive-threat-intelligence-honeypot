@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:external-ti": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/external-ti-presentation.test.mjs",
     "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs"
   },
   "dependencies": {
