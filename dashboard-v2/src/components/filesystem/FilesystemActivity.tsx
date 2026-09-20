@@ -858,7 +858,7 @@ export function FilesystemActivity() {
             </button>
           </div>
 
-          <div className={`min-w-0 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex h-full`}>
+          <div className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}>
             <LiveScopeBar snapshot={snapshot} />
             <TopologyCanvas
               snapshot={snapshot}
@@ -876,7 +876,7 @@ export function FilesystemActivity() {
             />
           </div>
 
-          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block h-full`}>
+          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}>
             <FilesystemContextPanel
               selectedSession={selectedSession}
               selectedClosedSession={selectedClosedSession}

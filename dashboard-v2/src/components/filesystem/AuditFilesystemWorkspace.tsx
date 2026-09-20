@@ -115,8 +115,8 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
         <div
           className={
             props.isFullscreen
-              ? `min-w-0 flex-1 h-full ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
-              : `min-w-0 flex-1 h-full ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
+              ? `min-w-0 flex-1 ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
+              : `min-w-0 flex-1 ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
           }
         >
           <AuditNoticeRegion
@@ -192,7 +192,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
           staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
           isAuditMode={true}
           isResizingContainer={props.isDraggingTimeline}
-          className="h-full flex-1 min-h-0"
+          className="flex-1 min-h-0"
         />
       </div>
 
@@ -207,7 +207,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
         />
       )}
 
-      <div className={`${mobileTab === "timeline" ? "flex" : "hidden"} lg:flex h-full`}>
+      <div className={`${mobileTab === "timeline" ? "flex" : "hidden"} lg:flex`}>
         <FilesystemTimelinePanel
         collapsed={props.isTimelineCollapsed}
         isDragging={props.isDraggingTimeline}
