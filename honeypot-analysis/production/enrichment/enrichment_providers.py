@@ -169,6 +169,11 @@ class HTTPProvider(EnrichmentProvider):
         provider_config_identity_value: str = "",
     ) -> None:
         self.api_key = api_key
+        # The activation gate deliberately consumes an explicit credential
+        # presence signal instead of inspecting provider internals.  Built-in
+        # HTTP adapters receive their credential through the reviewed config
+        # file, so expose only the boolean needed by that gate.
+        self.credential_present = bool(api_key)
         self.timeout = timeout
         self.ttl_seconds = ttl_seconds
         self.max_response_bytes = max(int(max_response_bytes), 1024)

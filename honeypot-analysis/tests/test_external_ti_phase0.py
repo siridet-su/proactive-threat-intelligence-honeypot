@@ -167,6 +167,20 @@ def test_phase0_defaults_disable_every_real_provider(tmp_path) -> None:
     assert all(not provider.enabled for provider in providers if hasattr(provider, "enabled"))
 
 
+def test_builtin_http_provider_reports_credential_presence_to_activation_gate() -> None:
+    assert OTXProvider(api_key="configured-test-value").credential_present is True
+    assert OTXProvider(api_key="").credential_present is False
+
+
+def test_session_worker_credential_gate_accepts_configured_builtin_key(tmp_path) -> None:
+    config = _source_ip_config(tmp_path)
+    config.abuseipdb_api_key = "configured-test-value"
+    providers = build_default_providers(config)
+    provider = next(item for item in providers if item.name == "abuseipdb")
+
+    assert EnrichmentWorker._credential_present(provider) is True
+
+
 @pytest.mark.parametrize(
     "sighting,expected_code",
     [
