@@ -11,7 +11,7 @@ import {
   PanelRightOpen,
   Pause,
   Play,
-  Radio,
+  
   RefreshCw,
   Route,
 } from "lucide-react";
@@ -25,11 +25,12 @@ import type {
 } from "@/lib/dashboardTypes";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
-import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
 import { ResponseActionPanel } from "./ResponseActionPanel";
 import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
-import { TimelineSplitter } from "./TimelineSplitter";
+import { AuditFilesystemWorkspace } from "./AuditFilesystemWorkspace";
+import { LiveScopeBar } from "./LiveScopeBar";
+import { FilesystemPageHeader } from "./FilesystemPageHeader";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
   DEFAULT_TIMELINE_SIDEBAR_WIDTH,
@@ -37,7 +38,7 @@ import {
   buildAuditSnapshot,
   buildAuditUrlSearch,
   clampTimelineSidebarWidth,
-  formatPageBadgeText,
+  
   type AuditUrlParams,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
@@ -76,9 +77,10 @@ function readStoredTimelineWidth(): number | null {
   }
 }
 
-type ForensicTab = "replay" | "commands" | "actions";
+export type ForensicTab = "replay" | "evidence" | "actions";
 
 export function FilesystemActivity() {
+  const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");
   const shouldReduceMotion = useReducedMotion();
 
   // Selected session and path state
@@ -825,141 +827,38 @@ export function FilesystemActivity() {
         </div>
       ) : null}
       {/* Header Section: Global view controls and real-time telemetry status */}
-      <section className="flex flex-col gap-3.5 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight text-text">Filesystem activity</h1>
-          <p className="mt-0.5 max-w-2xl text-xs text-text-muted">
-            {viewMode === "live"
-              ? "Inspect observed Cowrie working-directory topology and live threat clusters."
-              : "Step-by-step forensic route replay and directory timeline for audited attacker session."}
-          </p>
-        </div>
-
-        {/* Global view controls: View switcher & real-time telemetry status */}
-        <div
-          className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0"
-          role="toolbar"
-          aria-label="Global filesystem controls"
-        >
-          {/* Mode Switcher Tabs */}
-          <div
-            className="flex items-center rounded-lg border border-border bg-surface-subtle p-0.5 shadow-2xs shrink-0 flex-nowrap"
-            role="tablist"
-            aria-label="Filesystem view modes"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "live"}
-              onClick={() => switchViewMode("live")}
-              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                viewMode === "live"
-                  ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text border border-transparent"
-              }`}
-            >
-              <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Live Topology</span>
-              {snapshot?.sessions.length ? (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                  {snapshot.sessions.length}
-                </span>
-              ) : null}
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={viewMode === "audit"}
-              onClick={() => switchViewMode("audit")}
-              className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
-                viewMode === "audit"
-                  ? "bg-surface text-primary shadow-xs border border-border"
-                  : "text-text-muted hover:text-text border border-transparent"
-              }`}
-            >
-              <Route className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Session Audit & Replay</span>
-              {selectedSession && (
-                <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                  .{selectedSession.sourceIp.split(".").pop()}
-                </span>
-              )}
-            </button>
-          </div>
-
-          {/* Telemetry Status Bar & Actions */}
-          <div
-            className="flex items-center gap-2 shrink-0 flex-wrap sm:flex-nowrap rounded-lg border border-border/70 bg-surface-subtle/50 p-1"
-            role="region"
-            aria-label="Stream telemetry status"
-          >
-            <span
-              className={`ui-badge ${
-                streamState === "live"
-                  ? "border-success-border bg-success-subtle text-success"
-                  : streamState === "connecting"
-                  ? "border-border bg-surface-subtle text-text-subtle"
-                  : "border-warning-border bg-warning-subtle text-warning"
-              }`}
-              title={
-                streamState === "live"
-                  ? "Real-time SSE event stream connected"
-                  : streamState === "connecting"
-                  ? "Connecting to real-time event stream"
-                  : "SSE event stream disconnected, reconnecting..."
-              }
-            >
-              <Radio className={`h-3.5 w-3.5 ${streamState === "live" ? "" : "animate-pulse"}`} aria-hidden="true" />
-              {streamState === "live" ? "Live stream" : streamState === "connecting" ? "Connecting" : "Reconnecting"}
-            </span>
-
-            {snapshot && (
-              <span
-                className={`ui-badge ${freshnessState.badgeClass}`}
-                title={freshnessState.detail}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${freshnessState.dotClass}`} aria-hidden="true" />
-                <span>{formatPageBadgeText(freshnessState)}</span>
-              </span>
-            )}
-
-            {(freshnessState.isDegraded || streamState === "stale") && (
-              <button
-                type="button"
-                className="ui-button border-warning-border bg-warning-subtle text-warning hover:bg-warning/20 font-semibold"
-                onClick={handleReconnect}
-                title="Force reconnect SSE stream and refresh snapshot"
-              >
-                <Radio className="h-3.5 w-3.5" aria-hidden="true" />
-                Reconnect
-              </button>
-            )}
-
-            <button
-              type="button"
-              className="ui-button"
-              disabled={!isHydrated || regionStatus === "loading" || regionStatus === "refreshing"}
-              onClick={() => {
-                if (!isHydrated || regionStatus === "loading" || regionStatus === "refreshing") return;
-                void refresh();
-              }}
-              title="Fetch fresh snapshot via HTTP"
-            >
-              <RefreshCw
-                className={`h-4 w-4 ${regionStatus === "refreshing" || regionStatus === "loading" ? "animate-spin text-primary" : ""}`}
-                aria-hidden="true"
-              />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </section>
+      <FilesystemPageHeader
+        viewMode={viewMode}
+        switchViewMode={switchViewMode}
+        snapshot={snapshot}
+        streamState={streamState}
+        freshnessState={freshnessState}
+        handleReconnect={handleReconnect}
+        regionStatus={regionStatus}
+        refresh={refresh}
+      />
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
-          <div className="min-w-0">
+        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start min-h-[calc(100dvh-12rem)] lg:flex-1">
+          {/* Mobile Tabs */}
+          <div className="flex lg:hidden gap-2 border-b border-border pb-2">
+            <button
+              onClick={() => setMobileTab('map')}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'map' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
+            >
+              Map
+            </button>
+            <button
+              onClick={() => setMobileTab('details')}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'details' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
+            >
+              Details
+            </button>
+          </div>
+
+          <div className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}>
+            <LiveScopeBar snapshot={snapshot} />
             <TopologyCanvas
               snapshot={snapshot}
               regionStatus={regionStatus}
@@ -972,20 +871,23 @@ export function FilesystemActivity() {
               onRefresh={refresh}
               onReconnect={handleReconnect}
               staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
+              className="flex-1"
             />
           </div>
 
-          <FilesystemContextPanel
-            selectedSession={selectedSession}
-            selectedClosedSession={selectedClosedSession}
-            selectedNode={selectedNode}
-            sessions={snapshot?.sessions ?? []}
-            recentClosedSessions={snapshot?.recentClosedSessions ?? []}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={selectSession}
-            onSelectPath={selectPath}
-            onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
-          />
+          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}>
+            <FilesystemContextPanel
+              selectedSession={selectedSession}
+              selectedClosedSession={selectedClosedSession}
+              selectedNode={selectedNode}
+              sessions={snapshot?.sessions ?? []}
+              recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={selectSession}
+              onSelectPath={selectPath}
+              onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
+            />
+          </div>
         </div>
       ) : isAuditFullscreen ? (
         /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
@@ -1167,220 +1069,91 @@ export function FilesystemActivity() {
           </header>
 
           {/* Main Studio Workspace */}
-          <div className="min-h-0 flex-1 flex overflow-hidden">
-            {/* Left Canvas: Flex-1 fills available width smoothly */}
-            <div className="min-w-0 flex-1 h-full flex flex-col">
-              {expiredSessionId ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
-                    <span>
-                      <strong>Requested audit session is no longer available:</strong> Session{" "}
-                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {allSessions.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = allSessions[0];
-                          setExpiredSessionId(null);
-                          if (first) {
-                            handleUserSelectSession(first.sessionId);
-                          }
-                        }}
-                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
-                      >
-                        View latest available session
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpiredSessionId(null);
-                        switchViewMode("live");
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Return to live view
-                    </button>
-                  </div>
-                </div>
-              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                    <span>
-                      {filteredSessionsCount === 0 ? (
-                        <>
-                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
-                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
-                          {hideHomeOnly ? " [excluding /home]" : ""}.
-                          {selectedSession ? (
-                            <span className="text-text-muted ml-1">
-                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {filteredSessionsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) handleUserSelectSession(first.sessionId);
-                        }}
-                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
-                      >
-                        Switch to match
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleResetAuditFilters}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Reset filters
-                    </button>
-                    {selectedSession && filteredSessionsCount === 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearSelection}
-                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                      >
-                        Clear selection
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-              <TopologyCanvas
-                snapshot={auditSnapshot ?? snapshot}
-                regionStatus={regionStatus}
-                streamState={streamState}
-                freshnessState={freshnessState}
-                selectedSessionId={selectedSessionId}
-                selectedPath={selectedPath}
-                activeHop={activeHop}
-                hopDurationMs={playbackSpeed}
-                title={auditCanvasTitle}
-                subtitle={auditCanvasSubtitle}
-                onSelectSession={handleUserSelectSession}
-                onSelectPath={selectPath}
-                isExpanded={isAuditFullscreen}
-                onToggleExpand={() => setIsAuditFullscreen(false)}
-                onRefresh={refresh}
-                onReconnect={handleReconnect}
-                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-                isAuditMode={true}
-                isResizingContainer={isDraggingTimeline}
-                className="h-full flex-1 min-h-0"
-              />
-            </div>
-
-            {/* Draggable Splitter Handle */}
-            {!isTimelineCollapsed && (
-              <TimelineSplitter
-                isDragging={isDraggingTimeline}
-                width={timelineWidth}
-                onMouseDown={handleSplitterMouseDown}
-                onDoubleClick={handleResetTimelineWidth}
-                onKeyDown={handleSplitterKeyDown}
-                className="hidden sm:flex"
-              />
-            )}
-
-            <FilesystemTimelinePanel
-              collapsed={isTimelineCollapsed}
-              isDragging={isDraggingTimeline}
-              width={timelineWidth}
-              variant="fullscreen"
-                  selectedSession={selectedSession}
-                  history={history}
-                  anchoredHop={anchoredHop}
-                  historyStatus={historyStatus}
-                  historyCursor={historyCursor}
-                  historyTotalItems={historyTotalItems}
-                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-                  historyComplete={historyComplete}
-                  replay={replayPresentation}
-                  activeTab={activeForensicTab}
-                  onTabChange={setActiveForensicTab}
-                  responsePanel={responsePanel}
-                  hopResolutionStatus={hopResolutionStatus}
-                  requestedHop={requestedHop}
-                  onClearHop={clearRequestedHop}
-                  onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={handleSelectHistoryEventId}
-                  onLoadEarlier={() => {
-                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-                  }}
-            />
-          </div>
+          <AuditFilesystemWorkspace
+            isFullscreen={true}
+            expiredSessionId={expiredSessionId}
+            allSessions={allSessions}
+            setExpiredSessionId={setExpiredSessionId}
+            handleUserSelectSession={handleUserSelectSession}
+            switchViewMode={switchViewMode}
+            hasActiveFilters={hasActiveFilters}
+            isSelectedFilteredOut={isSelectedFilteredOut}
+            filteredSessionsCount={filteredSessionsCount}
+            totalSessionsCount={totalSessionsCount}
+            targetPathFilter={targetPathFilter}
+            hideHomeOnly={hideHomeOnly}
+            selectedSession={selectedSession}
+            filteredActiveSessions={filteredActiveSessions}
+            filteredClosedSessions={filteredClosedSessions}
+            handleResetAuditFilters={handleResetAuditFilters}
+            handleClearSelection={handleClearSelection}
+            directoryHasMore={directoryHasMore}
+            directoryIsLoading={directoryIsLoading}
+            directoryIsComplete={directoryIsComplete}
+            loadMoreDirectory={loadMoreDirectory}
+            auditSearchItems={auditSearchItems}
+            auditSearchHasMore={auditSearchHasMore}
+            auditSearchIsLoading={auditSearchIsLoading}
+            auditSearchIsComplete={auditSearchIsComplete}
+            searchAuditSessions={(q) => void searchAuditSessions(q)}
+            loadMoreAuditSearch={loadMoreAuditSearch}
+            clearAuditSearch={clearAuditSearch}
+            auditStatus={auditStatus}
+            auditErrorMessage={auditErrorMessage}
+            retryInitialDirectory={retryInitialDirectory}
+            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
+            handleSelectTargetPath={handleSelectTargetPath}
+            distinctPaths={distinctPaths}
+            homeOnlyCount={homeOnlyCount}
+            auditSnapshot={auditSnapshot}
+            snapshot={snapshot}
+            regionStatus={regionStatus}
+            streamState={streamState}
+            freshnessState={freshnessState}
+            selectedSessionId={selectedSessionId}
+            selectedPath={selectedPath}
+            activeHop={activeHop}
+            playbackSpeed={playbackSpeed}
+            auditCanvasTitle={auditCanvasTitle}
+            auditCanvasSubtitle={auditCanvasSubtitle}
+            selectPath={selectPath}
+            onToggleFullscreen={() => setIsAuditFullscreen(false)}
+            refresh={refresh}
+            handleReconnect={handleReconnect}
+            isDraggingTimeline={isDraggingTimeline}
+            isTimelineCollapsed={isTimelineCollapsed}
+            timelineWidth={timelineWidth}
+            handleSplitterMouseDown={handleSplitterMouseDown}
+            handleResetTimelineWidth={handleResetTimelineWidth}
+            handleSplitterKeyDown={handleSplitterKeyDown}
+            history={history}
+            anchoredHop={anchoredHop}
+            historyStatus={historyStatus}
+            historyCursor={historyCursor}
+            historyTotalItems={historyTotalItems}
+            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+            historyComplete={historyComplete}
+            replayPresentation={replayPresentation}
+            activeForensicTab={activeForensicTab}
+            setActiveForensicTab={setActiveForensicTab}
+            responsePanel={responsePanel}
+            hopResolutionStatus={hopResolutionStatus}
+            requestedHop={requestedHop}
+            clearRequestedHop={clearRequestedHop}
+            selectLatestHop={selectLatestHop}
+            handleSelectHistoryEventId={handleSelectHistoryEventId}
+            loadHistory={loadHistory}
+          />
         </div>
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="flex flex-col sm:flex-row sm:items-center justify-end gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
             role="toolbar"
-            aria-label="Audit session and replay toolbar"
+            aria-label="Audit replay toolbar"
           >
-            <div
-              className="flex flex-wrap items-center gap-2 min-w-0"
-              role="group"
-              aria-label="Audited session and filter controls"
-            >
-              <AuditSessionSelect
-                sessions={filteredActiveSessions}
-                recentClosedSessions={filteredClosedSessions}
-                selectedSessionId={selectedSessionId}
-                onSelectSession={handleUserSelectSession}
-                totalCount={totalSessionsCount}
-                hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
-                onResetFilters={handleResetAuditFilters}
-                allSessionsList={allSessions}
-                directoryHasMore={directoryHasMore}
-                directoryIsLoading={directoryIsLoading}
-                directoryIsComplete={directoryIsComplete}
-                onLoadMoreDirectory={loadMoreDirectory}
-                searchResults={auditSearchItems}
-                searchHasMore={auditSearchHasMore}
-                searchIsLoading={auditSearchIsLoading}
-                searchIsComplete={auditSearchIsComplete}
-                onSearch={(q) => void searchAuditSessions(q)}
-                onLoadMoreSearch={loadMoreAuditSearch}
-                onClearSearch={clearAuditSearch}
-                hideHomeOnly={hideHomeOnly}
-                targetPathFilter={targetPathFilter}
-                status={auditStatus}
-                errorMessage={auditErrorMessage}
-                onRetry={retryInitialDirectory}
-              />
-              <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
-              <AuditFilterControls
-                hideHomeOnly={hideHomeOnly}
-                onToggleHideHomeOnly={handleToggleHideHomeOnly}
-                targetPath={targetPathFilter}
-                onSelectTargetPath={handleSelectTargetPath}
-                distinctPaths={distinctPaths}
-                homeOnlyCount={homeOnlyCount}
-                filteredCount={filteredSessionsCount}
-                totalCount={totalSessionsCount}
-                onResetFilters={handleResetAuditFilters}
-                selectedCanvasPath={selectedPath}
-              />
-            </div>
-
             <div
               className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
               role="toolbar"
@@ -1466,163 +1239,81 @@ export function FilesystemActivity() {
           </div>
 
           {/* Side-by-Side Audit Layout */}
-          <div className="flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]">
-            <div className="min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0">
-              {expiredSessionId ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-danger-border bg-danger-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
-                    <span>
-                      <strong>Requested audit session is no longer available:</strong> Session{" "}
-                      <span className="font-mono font-semibold text-text">{expiredSessionId}</span> has expired or was not found in retained telemetry.
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {allSessions.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = allSessions[0];
-                          setExpiredSessionId(null);
-                          if (first) {
-                            handleUserSelectSession(first.sessionId);
-                          }
-                        }}
-                        className="rounded border border-primary-border bg-primary px-2 py-0.5 text-xs font-semibold text-surface hover:bg-primary/90 transition-colors"
-                      >
-                        View latest available session
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpiredSessionId(null);
-                        switchViewMode("live");
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Return to live view
-                    </button>
-                  </div>
-                </div>
-              ) : hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0) ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                    <span>
-                      {filteredSessionsCount === 0 ? (
-                        <>
-                          <strong>0 of {totalSessionsCount} sessions match filter</strong>
-                          {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
-                          {hideHomeOnly ? " [excluding /home]" : ""}.
-                          {selectedSession ? (
-                            <span className="text-text-muted ml-1">
-                              Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> pinned outside result set.
-                            </span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <strong>Pinned outside filter:</strong> Session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> does not match active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
-                        </>
-                      )}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {filteredSessionsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
-                          if (first) handleUserSelectSession(first.sessionId);
-                        }}
-                        className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
-                      >
-                        Switch to match
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleResetAuditFilters}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                    >
-                      Reset filters
-                    </button>
-                    {selectedSession && filteredSessionsCount === 0 && (
-                      <button
-                        type="button"
-                        onClick={handleClearSelection}
-                        className="rounded border border-border bg-surface px-2 py-0.5 text-xs text-text-muted hover:text-text hover:bg-surface-hover transition-colors"
-                      >
-                        Clear selection
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-              <TopologyCanvas
-                snapshot={auditSnapshot ?? snapshot}
-                regionStatus={regionStatus}
-                streamState={streamState}
-                freshnessState={freshnessState}
-                selectedSessionId={selectedSessionId}
-                selectedPath={selectedPath}
-                activeHop={activeHop}
-                hopDurationMs={playbackSpeed}
-                title={auditCanvasTitle}
-                subtitle={auditCanvasSubtitle}
-                onSelectSession={handleUserSelectSession}
-                onSelectPath={selectPath}
-                isExpanded={false}
-                onToggleExpand={enterAuditFullscreen}
-                onRefresh={refresh}
-                onReconnect={handleReconnect}
-                staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-                isAuditMode={true}
-                isResizingContainer={isDraggingTimeline}
-                className="h-full flex-1 min-h-0"
-              />
-            </div>
-
-            {/* Draggable Splitter Handle (desktop only) */}
-            {!isTimelineCollapsed && (
-              <TimelineSplitter
-                isDragging={isDraggingTimeline}
-                width={timelineWidth}
-                onMouseDown={handleSplitterMouseDown}
-                onDoubleClick={handleResetTimelineWidth}
-                onKeyDown={handleSplitterKeyDown}
-                className="hidden lg:flex"
-              />
-            )}
-
-            <FilesystemTimelinePanel
-              collapsed={isTimelineCollapsed}
-              isDragging={isDraggingTimeline}
-              width={timelineWidth}
-              variant="page"
-                  selectedSession={selectedSession}
-                  history={history}
-                  anchoredHop={anchoredHop}
-                  historyStatus={historyStatus}
-                  historyCursor={historyCursor}
-                  historyTotalItems={historyTotalItems}
-                  historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-                  historyComplete={historyComplete}
-                  replay={replayPresentation}
-                  activeTab={activeForensicTab}
-                  onTabChange={setActiveForensicTab}
-                  responsePanel={responsePanel}
-                  hopResolutionStatus={hopResolutionStatus}
-                  requestedHop={requestedHop}
-                  onClearHop={clearRequestedHop}
-                  onShowLatestHop={selectLatestHop}
-                  onSelectHistoryEventId={handleSelectHistoryEventId}
-                  onLoadEarlier={() => {
-                    if (selectedSessionId) void loadHistory(selectedSessionId, historyCursor, true);
-                  }}
-            />
-          </div>
+          <AuditFilesystemWorkspace
+            isFullscreen={false}
+            expiredSessionId={expiredSessionId}
+            allSessions={allSessions}
+            setExpiredSessionId={setExpiredSessionId}
+            handleUserSelectSession={handleUserSelectSession}
+            switchViewMode={switchViewMode}
+            hasActiveFilters={hasActiveFilters}
+            isSelectedFilteredOut={isSelectedFilteredOut}
+            filteredSessionsCount={filteredSessionsCount}
+            totalSessionsCount={totalSessionsCount}
+            targetPathFilter={targetPathFilter}
+            hideHomeOnly={hideHomeOnly}
+            selectedSession={selectedSession}
+            filteredActiveSessions={filteredActiveSessions}
+            filteredClosedSessions={filteredClosedSessions}
+            handleResetAuditFilters={handleResetAuditFilters}
+            handleClearSelection={handleClearSelection}
+            directoryHasMore={directoryHasMore}
+            directoryIsLoading={directoryIsLoading}
+            directoryIsComplete={directoryIsComplete}
+            loadMoreDirectory={loadMoreDirectory}
+            auditSearchItems={auditSearchItems}
+            auditSearchHasMore={auditSearchHasMore}
+            auditSearchIsLoading={auditSearchIsLoading}
+            auditSearchIsComplete={auditSearchIsComplete}
+            searchAuditSessions={(q) => void searchAuditSessions(q)}
+            loadMoreAuditSearch={loadMoreAuditSearch}
+            clearAuditSearch={clearAuditSearch}
+            auditStatus={auditStatus}
+            auditErrorMessage={auditErrorMessage}
+            retryInitialDirectory={retryInitialDirectory}
+            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
+            handleSelectTargetPath={handleSelectTargetPath}
+            distinctPaths={distinctPaths}
+            homeOnlyCount={homeOnlyCount}
+            auditSnapshot={auditSnapshot}
+            snapshot={snapshot}
+            regionStatus={regionStatus}
+            streamState={streamState}
+            freshnessState={freshnessState}
+            selectedSessionId={selectedSessionId}
+            selectedPath={selectedPath}
+            activeHop={activeHop}
+            playbackSpeed={playbackSpeed}
+            auditCanvasTitle={auditCanvasTitle}
+            auditCanvasSubtitle={auditCanvasSubtitle}
+            selectPath={selectPath}
+            onToggleFullscreen={enterAuditFullscreen}
+            refresh={refresh}
+            handleReconnect={handleReconnect}
+            isDraggingTimeline={isDraggingTimeline}
+            isTimelineCollapsed={isTimelineCollapsed}
+            timelineWidth={timelineWidth}
+            handleSplitterMouseDown={handleSplitterMouseDown}
+            handleResetTimelineWidth={handleResetTimelineWidth}
+            handleSplitterKeyDown={handleSplitterKeyDown}
+            history={history}
+            anchoredHop={anchoredHop}
+            historyStatus={historyStatus}
+            historyCursor={historyCursor}
+            historyTotalItems={historyTotalItems}
+            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
+            historyComplete={historyComplete}
+            replayPresentation={replayPresentation}
+            activeForensicTab={activeForensicTab}
+            setActiveForensicTab={setActiveForensicTab}
+            responsePanel={responsePanel}
+            hopResolutionStatus={hopResolutionStatus}
+            requestedHop={requestedHop}
+            clearRequestedHop={clearRequestedHop}
+            selectLatestHop={selectLatestHop}
+            handleSelectHistoryEventId={handleSelectHistoryEventId}
+            loadHistory={loadHistory}
+          />
         </div>
       )}
     </div>

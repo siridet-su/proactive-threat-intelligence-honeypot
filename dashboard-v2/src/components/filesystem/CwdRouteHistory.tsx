@@ -1,45 +1,30 @@
 "use client";
 
 import {
-  AlertCircle,
-  AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  CornerDownRight,
-  FastForward,
   History,
-  Pause,
-  Play,
-  Plus,
-  RefreshCw,
-  Rewind,
   Shield,
   Terminal,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
+import { ReplayTransport } from "./ReplayTransport";
+import { RouteEventList } from "./RouteEventList";
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
-  actionLabel,
-  formatFromPath,
   formatTimestamp,
   isReplayTimelineKeyboardKey,
-  isInitialSshEntry,
   mapReplayTimelineKeyToIndex,
-  mapReplayTimelineValueToIndex,
-  statusLabel,
 } from "./filesystemUtils";
 import type { HopResolutionStatus } from "./sessionHopResolver";
 import type { AuditReplayPresentation } from "./useAuditReplay";
 
-type SidebarTab = "replay" | "commands" | "actions";
+type SidebarTab = "replay" | "evidence" | "actions";
 
 const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   replay: 1,
-  commands: 2,
+  evidence: 2,
   actions: 3,
 };
 
@@ -69,6 +54,7 @@ export interface CwdRouteHistoryProps {
   onShowLatestHop: () => void;
   onSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
   onLoadEarlier: () => void;
+  isDragging?: boolean;
 }
 
 export function CwdRouteHistory({
@@ -91,6 +77,7 @@ export function CwdRouteHistory({
   onShowLatestHop,
   onSelectHistoryEventId,
   onLoadEarlier,
+  isDragging,
 }: CwdRouteHistoryProps) {
   const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
   const shouldReduceMotion = useReducedMotion();
@@ -197,6 +184,7 @@ export function CwdRouteHistory({
           {isSidebar && (
             <div
               className="relative isolate grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+              role="tablist"
               aria-label="Forensic studio views"
             >
               <div aria-hidden="true" className="pointer-events-none absolute inset-0.5 grid grid-cols-3 gap-1">
@@ -206,7 +194,7 @@ export function CwdRouteHistory({
                   className="rounded-md border border-border bg-surface shadow-2xs"
                   style={{ gridColumnStart: sidebarTabColumn }}
                   transition={
-                    shouldReduceMotion
+                    shouldReduceMotion || isDragging
                       ? { duration: 0 }
                       : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
                   }
@@ -214,7 +202,7 @@ export function CwdRouteHistory({
               </div>
               {([
                 { id: "replay", label: "Route Replay", icon: null },
-                { id: "commands", label: "Command data", icon: Terminal },
+                { id: "evidence", label: "Evidence", icon: Terminal },
                 { id: "actions", label: "Response", icon: Shield },
               ] as const).map((tab) => {
                 const isActive = sidebarTab === tab.id;
@@ -224,8 +212,11 @@ export function CwdRouteHistory({
                   <button
                     key={tab.id}
                     type="button"
+                    role="tab"
+                    id={`tab-${tab.id}`}
+                    aria-selected={isActive}
+                    aria-controls={`tabpanel-${tab.id}`}
                     onClick={() => handleSidebarTabChange(tab.id)}
-                    aria-pressed={isActive}
                     className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                       isActive ? "text-primary" : "text-text-muted hover:text-text"
                     }`}
@@ -315,6 +306,9 @@ export function CwdRouteHistory({
             <motion.div
               key={isSidebar ? sidebarTab : "route-history"}
               data-forensic-tab-panel={sidebarTab}
+              role="tabpanel"
+              id={`tabpanel-${sidebarTab}`}
+              aria-labelledby={`tab-${sidebarTab}`}
               custom={sidebarContentDirection}
               variants={SIDEBAR_CONTENT_VARIANTS}
               initial={isSidebar ? "enter" : false}
@@ -327,7 +321,7 @@ export function CwdRouteHistory({
               }
               className={isSidebar ? "flex min-h-0 flex-1 flex-col" : undefined}
             >
-              {sidebarTab === "commands" ? (
+              {sidebarTab === "evidence" ? (
                 /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
             <div className="rounded-xl border border-border bg-surface-subtle p-3">
@@ -348,8 +342,8 @@ export function CwdRouteHistory({
             </div>
             <RegionState
               kind="empty"
-              title="Command and file telemetry unavailable"
-              description="No authoritative command, payload, or file event is linked to this CWD hop. Only verified directory transitions are shown."
+              title="Evidence Unavailable"
+              description="No command feed or payload data is currently linked to this CWD hop."
             />
                 </div>
               ) : sidebarTab === "actions" ? (
@@ -376,477 +370,50 @@ export function CwdRouteHistory({
                     />
                   ) : (
                     <>
-                      {/* Sleek Compact Hop Deck */}
-                      <div className="rounded-xl border border-border bg-surface-subtle p-2.5 shadow-2xs" aria-live="polite">
-                        {isAnchoredSelected && (
-                          <div
-                            role="note"
-                            className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-200"
-                            data-testid="anchored-hop-banner"
-                          >
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                              <span>Anchored deep hop: intervening events are unloaded. Replay and adjacent stepping are paused across this gap.</span>
-                              {!historyComplete && (
-                                <button
-                                  type="button"
-                                  onClick={onLoadEarlier}
-                                  className="shrink-0 rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
-                                >
-                                  Load earlier hops
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Controls & Scrubber Row */}
-                        <div className="flex items-center justify-between gap-1.5">
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              className="ui-button h-9 w-9 p-0 shrink-0"
-                              title="Jump to first hop"
-                              aria-label="First hop"
-                              disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
-                              onClick={() => {
-                                selectDisplayedHistoryIndex(0);
-                              }}
-                            >
-                              <Rewind className="h-3 w-3" />
-                            </button>
-
-                            <button
-                              type="button"
-                              className="ui-button h-9 w-9 p-0 shrink-0"
-                              title="Previous hop"
-                              aria-label="Previous hop"
-                              disabled={isAnchoredSelected || selectedHistoryIndex <= 0}
-                              onClick={() => {
-                                selectDisplayedHistoryIndex(selectedHistoryIndex - 1);
-                              }}
-                            >
-                              <ChevronLeft className="h-3.5 w-3.5" />
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={handleTogglePlay}
-                              disabled={isAnchoredSelected}
-                              className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 shrink-0 ${
-                                isPlaying ? "border-primary bg-primary text-surface" : ""
-                              } ${isAnchoredSelected ? "opacity-40 cursor-not-allowed" : ""}`}
-                              title={isPlaying ? "Pause playback" : "Play route trajectory"}
-                              aria-label={isPlaying ? "Pause" : "Play"}
-                            >
-                              {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-                              <span>{isPlaying ? "Pause" : "Play"}</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              className="ui-button h-9 w-9 p-0 shrink-0"
-                              title="Next hop"
-                              aria-label="Next hop"
-                              disabled={isAnchoredSelected || selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                              onClick={() => {
-                                selectDisplayedHistoryIndex(selectedHistoryIndex + 1);
-                              }}
-                            >
-                              <ChevronRight className="h-3.5 w-3.5" />
-                            </button>
-
-                            <button
-                              type="button"
-                              className="ui-button h-9 w-9 p-0 shrink-0"
-                              title="Jump to latest hop"
-                              aria-label="Latest hop"
-                              disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistory.length - 1}
-                              onClick={() => {
-                                selectDisplayedHistoryIndex(displayedHistory.length - 1);
-                              }}
-                            >
-                              <FastForward className="h-3 w-3" />
-                            </button>
-
-                  <button
-                    type="button"
-                    onClick={onToggleSpeed}
-                    className="ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0"
-                    title="Toggle playback speed (1x / 2x)"
-                  >
-                    {playbackSpeed === 1400 ? "1x" : "2x"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={onTogglePacingMode}
-                    className={`ui-button h-9 min-h-9 px-2 font-mono text-xs shrink-0 flex items-center gap-1 ${
-                      pacingMode === "realistic" ? "border-primary/50 text-primary" : ""
-                    }`}
-                    title={`Playback pacing: ${
-                      pacingMode === "realistic"
-                        ? "Realistic (proportional delay based on real attacker dwell time)"
-                        : "Step (uniform fixed interval)"
-                    }`}
-                    aria-label={`Playback pacing mode: ${pacingMode}`}
-                  >
-                    <Clock className="h-3 w-3" />
-                    <span>{pacingMode === "realistic" ? "Real" : "Step"}</span>
-                  </button>
-                </div>
-
-                {/* Right side: Failures + Hop indicator */}
-                <div className="flex items-center gap-2">
-                  {failedCount > 0 && (
-                    <label className="flex items-center gap-1 text-xs text-text-subtle cursor-pointer select-none whitespace-nowrap shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={showFailedAttempts}
-                        onChange={(e) => {
-                          onToggleShowFailedAttempts(e.target.checked);
-                        }}
-                        className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                      <ReplayTransport
+                        isAnchoredSelected={isAnchoredSelected}
+                        historyComplete={historyComplete}
+                        onLoadEarlier={onLoadEarlier}
+                        selectedHistoryIndex={selectedHistoryIndex}
+                        displayedHistoryLength={displayedHistory.length}
+                        selectDisplayedHistoryIndex={selectDisplayedHistoryIndex}
+                        handleTogglePlay={handleTogglePlay}
+                        isPlaying={isPlaying}
+                        onToggleSpeed={onToggleSpeed}
+                        playbackSpeed={playbackSpeed}
+                        onTogglePacingMode={onTogglePacingMode}
+                        pacingMode={pacingMode}
+                        failedCount={failedCount}
+                        showFailedAttempts={showFailedAttempts}
+                        onToggleShowFailedAttempts={onToggleShowFailedAttempts}
+                        displayedHistoryMetrics={displayedHistoryMetrics}
+                        timeMetrics={timeMetrics}
+                        replayTimeline={replayTimeline}
+                        handleScrubberKeyDown={handleScrubberKeyDown}
+                        isFailedHop={isFailedHop}
+                        selectedHistoryEvent={selectedHistoryEvent}
                       />
-                      <span>Failures ({failedCount})</span>
-                    </label>
-                  )}
-
-                  <span className="rounded-full bg-surface px-2 py-0.5 font-mono text-xs font-semibold text-primary border border-primary-border shrink-0 flex items-center gap-1">
-                    <span>Hop {displayedHistoryMetrics.selectedNumber}/{displayedHistoryMetrics.totalItems}</span>
-                    {isAnchoredSelected && (
-                      <span className="rounded bg-amber-500/20 px-1 py-0.2 text-[9px] uppercase font-bold text-amber-300">
-                        Anchored
-                      </span>
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              {/* Interactive Time Scrubber Slider */}
-              <div className="mt-2.5 px-0.5">
-                <div className="flex items-center justify-between gap-2 text-xs font-mono text-text-subtle mb-1">
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3 text-text-muted" aria-hidden="true" />
-                    <span className="text-text font-medium">{timeMetrics.summary.formattedCurrentElapsed}</span>
-                    <span className="text-text-muted/60">/</span>
-                    <span>{timeMetrics.summary.formattedTotalDuration}</span>
-                  </span>
-                  <span className="truncate">
-                    {selectedHistoryIndex === 0
-                      ? "Initial entry"
-                      : `Dwell: +${timeMetrics.summary.formattedCurrentDelta}`}
-                  </span>
-                </div>
-
-                {/* Scrub slider */}
-                <div className="relative flex items-center">
-                  <input
-                    type="range"
-                    min={0}
-                    max={replayTimeline.maxValue}
-                    step={1}
-                    value={replayTimeline.value}
-                    disabled={isAnchoredSelected || displayedHistory.length <= 1}
-                    onKeyDown={handleScrubberKeyDown}
-                    onChange={(e) => {
-                      const targetIndex = mapReplayTimelineValueToIndex(replayTimeline, Number(e.target.value));
-                      selectDisplayedHistoryIndex(targetIndex);
-                    }}
-                    aria-label="Replay timeline scrubber"
-                    aria-valuemin={replayTimeline.minValue}
-                    aria-valuemax={replayTimeline.maxValue}
-                    aria-valuenow={replayTimeline.value}
-                    aria-valuetext={
-                      isAnchoredSelected
-                        ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems} (Anchored deep target, replay scrubber paused across unloaded gap)`
-                        : `${replayTimeline.timingLabel}; ${replayTimeline.durationLabel}; Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}, elapsed ${timeMetrics.summary.formattedCurrentElapsed}, dwell ${timeMetrics.summary.formattedCurrentDelta}`
-                    }
-                    className="w-full h-1.5 bg-border/60 rounded-lg appearance-none cursor-pointer accent-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:opacity-40 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
-
-              {/* Transition Summary Bar & Progress */}
-              <div
-                className={`mt-2 rounded-lg border px-2.5 py-1.5 transition-colors overflow-hidden ${
-                  isFailedHop
-                    ? "border-warning-border bg-warning-subtle text-text"
-                    : "border-primary-border bg-primary-subtle text-text"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2 font-mono text-xs">
-                  <div className="flex items-center gap-1.5 truncate min-w-0">
-                    {isFailedHop ? (
-                      <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" />
-                    ) : (
-                      <CornerDownRight className="h-3.5 w-3.5 text-primary shrink-0" />
-                    )}
-                    <span className="text-xs text-text-subtle truncate max-w-[120px]" title={selectedHistoryEvent?.fromPath ?? undefined}>
-                      {isInitialSshEntry(selectedHistoryEvent) ? "[SSH Login]" : formatFromPath(selectedHistoryEvent)}
-                    </span>
-                    <span className="text-text-subtle">→</span>
-                    <strong className={`truncate ${isFailedHop ? "line-through text-warning" : "text-text"}`} title={selectedHistoryEvent?.toPath ?? undefined}>
-                      {selectedHistoryEvent?.toPath ?? "Unknown"}
-                    </strong>
-                  </div>
-
-                  <span className="text-xs font-sans text-text-subtle shrink-0">
-                    {isFailedHop ? "Failed" : (selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "")}
-                  </span>
-                </div>
-
-                {/* Dual Progress bar: Step progress + Time progress */}
-                <div
-                  className="mt-1.5 relative h-1.5 w-full rounded-full bg-border/40 overflow-hidden"
-                  title={`Time elapsed: ${Math.round(timeMetrics.summary.timeProgressPercent)}% | Hop: ${displayedHistoryMetrics.selectedNumber}/${displayedHistoryMetrics.totalItems}`}
-                >
-                  <div
-                    className="absolute inset-y-0 left-0 bg-primary/25 transition-all duration-200"
-                    style={{ width: `${timeMetrics.summary.timeProgressPercent}%` }}
-                  />
-                  <div
-                    className={`relative h-full rounded-full transition-all duration-200 ${
-                      isFailedHop ? "bg-warning" : "bg-primary"
-                    }`}
-                    style={{
-                      width: `${
-                        displayedHistoryMetrics.totalItems > 0
-                          ? Math.min(100, Math.max(0, (displayedHistoryMetrics.selectedNumber / displayedHistoryMetrics.totalItems) * 100))
-                          : 0
-                      }%`,
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-subtle" aria-live="polite">
-              <span>{historyComplete
-                ? replayTimeline.durationScope === "retained" ? "Complete retained history loaded" : "Complete displayed history loaded"
-                : `${replayTimeline.durationLabel} · ${history.length} of ${historyTotalItems} retained events loaded`}</span>
-              <span className="shrink-0 font-mono">{historyTotalItems} total</span>
-            </div>
-
-            {!historyComplete && historyCursor && (
-              <button
-                type="button"
-                className="ui-button mt-3"
-                onClick={onLoadEarlier}
-                disabled={historyStatus === "refreshing"}
-              >
-                {historyStatus === "refreshing" ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                Load earlier moves ({Math.max(0, historyTotalItems - history.length)} remaining)
-              </button>
-            )}
-
-            {/* Scrollable Timeline List */}
-            <div
-              ref={timelineContainerRef}
-              className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4" : ""}`}
-            >
-              <ol className="relative space-y-0 border-l border-border pl-5" aria-label="Verified directory route">
-                {displayedHistory.map((event, index) => {
-                  const isCurrent = event.id === activeHistoryEventId;
-                  const isFailed = event.action === "failed_change";
-                  const hopMetric = timeMetrics.hopMetrics[index];
-                  const isPauseDetected = (hopMetric?.deltaMs ?? 0) >= 60_000;
-
-                  return (
-                    <li key={event.id} className="relative pb-2.5 last:pb-0">
-                      {index > 0 && isPauseDetected && (
-                        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-mono text-warning select-none">
-                          <div className="h-px w-3 bg-warning/40" aria-hidden="true" />
-                          <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-[10px] font-medium">
-                            <Clock className="h-2.5 w-2.5" aria-hidden="true" />
-                            Attacker pause: +{hopMetric?.formattedDelta}
-                          </span>
-                        </div>
-                      )}
-                      <span
-                        className={`absolute -left-[27px] top-2.5 flex h-2.5 w-2.5 rounded-full border-2 border-surface ${
-                          isFailed
-                            ? "bg-warning ring-2 ring-warning/30"
-                            : isCurrent
-                              ? "bg-primary ring-2 ring-primary/40"
-                              : "bg-border-strong"
-                        }`}
-                        aria-hidden="true"
+                      <RouteEventList
+                        historyComplete={historyComplete}
+                        historyCursor={historyCursor}
+                        historyStatus={historyStatus}
+                        historyLength={history.length}
+                        historyTotalItems={historyTotalItems}
+                        replayTimeline={replayTimeline}
+                        onLoadEarlier={onLoadEarlier}
+                        timelineContainerRef={timelineContainerRef}
+                        isSidebar={isSidebar}
+                        displayedHistory={displayedHistory}
+                        activeHistoryEventId={activeHistoryEventId}
+                        timeMetrics={timeMetrics}
+                        activeItemRef={activeItemRef}
+                        handlePause={handlePause}
+                        onSelectHistoryEventId={onSelectHistoryEventId}
+                        displayedHistoryMetrics={displayedHistoryMetrics}
+                        anchoredHop={anchoredHop}
+                        isAnchoredSelected={isAnchoredSelected}
+                        showFailedAttempts={showFailedAttempts}
                       />
-                      <button
-                        type="button"
-                        ref={isCurrent ? activeItemRef : undefined}
-                        aria-current={isCurrent ? "step" : undefined}
-                        onClick={() => {
-                          handlePause();
-                          onSelectHistoryEventId(event.id);
-                        }}
-                        className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors duration-150 ${
-                          isCurrent
-                            ? isFailed
-                              ? "border-warning-border bg-warning-subtle"
-                              : "border-primary-border bg-primary-subtle"
-                            : "border-transparent hover:border-border hover:bg-surface-hover"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1.5 min-w-0">
-                          <p className="truncate font-medium text-xs text-text min-w-0">
-                            <span className="mr-1.5 font-mono text-xs text-text-subtle">
-                              {String(displayedHistoryMetrics.indexOffset + index + 1).padStart(2, "0")}
-                            </span>
-                            {actionLabel(event)}
-                          </p>
-                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1 flex items-center gap-1.5">
-                            <span>{formatTimestamp(event.at)}</span>
-                            <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-[10px] text-text-muted">
-                              {hopMetric?.formattedElapsed ?? "+00:00"}
-                            </span>
-                          </time>
-                        </div>
-                        <div className="mt-1.5 space-y-0.5 font-mono text-xs">
-                          {/* Line 1: Origin */}
-                          <div className="flex items-center gap-1.5 text-text-subtle text-xs min-w-0">
-                            <span className="shrink-0 font-sans text-xs uppercase tracking-wider text-text-subtle/70">
-                              from
-                            </span>
-                            {isInitialSshEntry(event) ? (
-                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-xs font-medium text-text-subtle">
-                                [SSH Login]
-                              </span>
-                            ) : (
-                              <span className="truncate text-text-muted" title={event.fromPath ?? undefined}>
-                                {formatFromPath(event)}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Line 2: Destination */}
-                          <div className="flex items-center gap-1.5 text-xs min-w-0">
-                            <CornerDownRight
-                              className={`h-3.5 w-3.5 shrink-0 ${isFailed ? "text-warning" : "text-primary"}`}
-                              aria-hidden="true"
-                            />
-                            <span
-                              className={`truncate font-semibold ${
-                                isFailed ? "line-through text-text-muted/60" : "text-text"
-                              }`}
-                              title={event.toPath ?? undefined}
-                            >
-                              {event.toPath ?? "Unknown"}
-                            </span>
-                            {isFailed && (
-                              <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning">
-                                Failed
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div
-                          className="mt-1.5 flex items-center justify-between gap-1.5 text-xs text-text-subtle"
-                          title={event.sequence !== null ? `Event Sequence: ${event.sequence}` : undefined}
-                        >
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span
-                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                                event.status === "confirmed"
-                                  ? "bg-success"
-                                  : event.status === "conditional_candidate"
-                                    ? "bg-warning"
-                                    : isFailed
-                                      ? "bg-warning"
-                                      : "bg-info"
-                              }`}
-                              aria-hidden="true"
-                            />
-                            <span className="truncate">{statusLabel(event.status)}</span>
-                          </div>
-
-                          <span
-                            className={`inline-flex shrink-0 items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded ${
-                              isPauseDetected
-                                ? "bg-warning-subtle text-warning border border-warning-border font-medium"
-                                : "text-text-subtle bg-surface border border-border/50"
-                            }`}
-                            title={`Dwell before this hop: ${hopMetric?.formattedDelta ?? "0s"}`}
-                          >
-                            <Clock className="h-2.5 w-2.5" aria-hidden="true" />
-                            <span>{index === 0 ? "Entry" : `+${hopMetric?.formattedDelta ?? "0s"}`}</span>
-                          </span>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-
-                {/* Explicit unloaded gap & anchored hop target */}
-                {anchoredHop && !displayedHistory.some((e) => e.id === anchoredHop.id) && (
-                  <>
-                    <li className="relative my-3 pl-2" data-testid="unloaded-gap-callout">
-                      <div className="rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 p-2 text-xs text-amber-200/90 flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-1.5 font-mono">
-                          <AlertCircle className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                          <span>Unloaded history gap</span>
-                        </div>
-                        {!historyComplete && (
-                          <button
-                            type="button"
-                            onClick={onLoadEarlier}
-                            className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
-                          >
-                            Load earlier
-                          </button>
-                        )}
-                      </div>
-                    </li>
-
-                    <li key={anchoredHop.id} className="relative pb-2.5 last:pb-0" data-testid="anchored-hop-card">
-                      <span
-                        className={`absolute -left-[27px] top-2.5 flex h-2.5 w-2.5 rounded-full border-2 border-surface ${
-                          isAnchoredSelected ? "bg-primary ring-2 ring-primary/40" : "bg-border-strong"
-                        }`}
-                        aria-hidden="true"
-                      />
-                      <button
-                        type="button"
-                        aria-current={isAnchoredSelected ? "step" : undefined}
-                        onClick={() => {
-                          handlePause();
-                          onSelectHistoryEventId(anchoredHop.id);
-                        }}
-                        className={`w-full rounded-lg border px-2.5 py-1.5 text-left transition-colors duration-150 ${
-                          isAnchoredSelected
-                            ? "border-primary-border bg-primary-subtle"
-                            : "border-transparent hover:border-border hover:bg-surface-hover"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1.5 min-w-0">
-                          <p className="truncate font-medium text-xs text-text min-w-0">
-                            <span className="mr-1.5 font-mono text-xs text-text-subtle">
-                              {String((showFailedAttempts ? anchoredHop.hopNumber : anchoredHop.successfulHopNumber ?? anchoredHop.hopNumber) ?? 1).padStart(2, "0")}
-                            </span>
-                            {actionLabel(anchoredHop)}
-                            <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-[10px] text-amber-300 font-sans">
-                              Anchored
-                            </span>
-                          </p>
-                          <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1">
-                            {formatTimestamp(anchoredHop.at)}
-                          </time>
-                        </div>
-                        <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
-                          <span>{formatFromPath(anchoredHop)}</span>
-                          <span>→</span>
-                          <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
-                        </div>
-                      </button>
-                    </li>
-                  </>
-                )}
-              </ol>
-            </div>
           </>
         )}
       </>

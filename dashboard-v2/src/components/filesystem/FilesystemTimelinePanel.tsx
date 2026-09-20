@@ -25,10 +25,10 @@ export function FilesystemTimelinePanel({
   const isFullscreen = variant === "fullscreen";
   const outerStyle: CSSProperties = isFullscreen
     ? { width: collapsed ? 0 : width }
-    : { width: collapsed ? 0 : undefined };
+    : { width: collapsed ? 0 : undefined, ["--timeline-width" as string]: `${width}px` };
   const innerStyle: CSSProperties = isFullscreen
     ? { width }
-    : { ["--timeline-width" as string]: `${width}px` };
+    : {};
 
   return (
     <div
@@ -36,7 +36,7 @@ export function FilesystemTimelinePanel({
       aria-hidden={collapsed}
       style={outerStyle}
       className={`${isFullscreen ? "h-full" : ""} flex flex-col shrink-0 overflow-hidden ${
-        isDragging ? "transition-none" : isFullscreen ? "transition-[width,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none" : "transition-all duration-300 ease-in-out motion-reduce:transition-none"
+        isDragging ? "transition-none" : isFullscreen ? "transition-[width,opacity,margin] duration-300 ease-in-out motion-reduce:transition-none" : "transition-[width,opacity,margin,max-height] duration-300 ease-in-out motion-reduce:transition-none"
       } ${
         collapsed
           ? isFullscreen
@@ -51,7 +51,7 @@ export function FilesystemTimelinePanel({
         style={innerStyle}
         className={isFullscreen ? "h-full flex flex-col min-h-0" : "w-full lg:w-[var(--timeline-width)] h-full flex flex-col min-h-0"}
       >
-        <CwdRouteHistory {...historyProps} layout="sidebar" />
+        <CwdRouteHistory {...historyProps} layout="sidebar" isDragging={isDragging} />
       </div>
     </div>
   );

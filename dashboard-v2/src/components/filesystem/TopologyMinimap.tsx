@@ -113,21 +113,25 @@ export function TopologyMinimap({
     : null;
 
   return (
-    <div
-      className="absolute bottom-3 right-5 z-20 hidden w-28 overflow-hidden rounded-xl border border-border bg-surface p-1.5 text-left shadow-sm transition-colors duration-150 hover:border-border-strong sm:block select-none"
+    <motion.div
+      initial={{ opacity: 0, y: 15, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 15, scale: 0.95 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="absolute bottom-3 right-5 z-20 hidden w-[124px] overflow-hidden rounded-xl border border-border bg-surface p-1.5 text-left shadow-md transition-colors duration-150 hover:border-border-strong sm:block select-none origin-bottom-right"
     >
       <div>
         <button
           type="button"
           onClick={() => handleToggleCollapse(!isCollapsed)}
-          className="group flex w-full items-center justify-between rounded px-1 py-0.5 text-text-subtle transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+          className="group flex w-full items-center justify-between rounded-md px-1.5 py-1 text-text-subtle transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           title={isCollapsed ? "Expand topology minimap overview" : "Minimize topology minimap overview"}
           aria-label={isCollapsed ? "Expand topology minimap overview" : "Minimize topology minimap overview"}
           aria-expanded={!isCollapsed}
         >
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Map className="h-3 w-3 text-primary" aria-hidden="true" />
-            <span className="text-xs font-semibold uppercase tracking-[0.12em]">Overview</span>
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Overview</span>
           </div>
           <motion.span
             animate={{ rotate: isCollapsed ? 0 : 180 }}
@@ -281,6 +285,6 @@ export function TopologyMinimap({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }

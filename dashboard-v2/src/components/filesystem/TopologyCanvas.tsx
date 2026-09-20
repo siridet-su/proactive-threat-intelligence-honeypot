@@ -9,21 +9,12 @@ import {
   Folder,
   FolderOpen,
   HardDrive,
-  Layers,
-  LayoutGrid,
-  LocateFixed,
-  Maximize2,
-  Minimize2,
-  MousePointer2,
   Move,
   RotateCcw,
   Route,
   ScanLine,
-  Settings2,
   ShieldAlert,
   Undo2,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import {
   useCallback,
@@ -36,6 +27,8 @@ import {
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
+import { TopologyToolbar } from "./TopologyToolbar";
+import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
 import { HopEnergy } from "./HopEnergy";
 import {
@@ -44,7 +37,6 @@ import {
   compactDirectoryPath,
   DEFAULT_DENSITY_THRESHOLDS,
   directorySegment,
-  formatTimestamp,
   formatUpdateAge,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
@@ -162,6 +154,7 @@ export function TopologyCanvas({
   const clusterSessionRefs = useRef(new Map<string, HTMLButtonElement>());
   const [userCollapsedIps, setUserCollapsedIps] = useState<Set<string>>(new Set());
   const [userExpandedIps, setUserExpandedIps] = useState<Set<string>>(new Set());
+  const [showGrid, setShowGrid] = useState(true);
 
   const isClusterExpanded = useCallback(
     (callout: GraphCallout) => {
@@ -230,66 +223,7 @@ export function TopologyCanvas({
     },
   });
 
-  const layoutMenuRef = useRef<HTMLDivElement>(null);
-  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (!layoutMenuOpen) return;
-    const closeLayoutMenu = (event: PointerEvent) => {
-      if (!layoutMenuRef.current?.contains(event.target as Node)) setLayoutMenuOpen(false);
-    };
-    const closeLayoutMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setLayoutMenuOpen(false);
-        layoutMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", closeLayoutMenu);
-    document.addEventListener("keydown", closeLayoutMenuOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeLayoutMenu);
-      document.removeEventListener("keydown", closeLayoutMenuOnEscape);
-    };
-  }, [layoutMenuOpen]);
-
   const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
-  const [densityMenuOpen, setDensityMenuOpen] = useState(false);
-  const densityMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!densityMenuOpen) return;
-    const closeDensityMenu = (event: PointerEvent) => {
-      if (!densityMenuRef.current?.contains(event.target as Node)) setDensityMenuOpen(false);
-    };
-    const closeDensityMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        setDensityMenuOpen(false);
-        densityMenuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-      }
-    };
-    document.addEventListener("pointerdown", closeDensityMenu);
-    document.addEventListener("keydown", closeDensityMenuOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeDensityMenu);
-      document.removeEventListener("keydown", closeDensityMenuOnEscape);
-    };
-  }, [densityMenuOpen]);
-
-  useEffect(() => {
-    if (!isArrangeMode) return;
-    const exitArrangeMode = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || layoutMenuOpen) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setIsArrangeMode(false);
-    };
-    document.addEventListener("keydown", exitArrangeMode);
-    return () => document.removeEventListener("keydown", exitArrangeMode);
-  }, [isArrangeMode, layoutMenuOpen, setIsArrangeMode]);
 
   // Render limits state
   const [isPathsExpanded, setIsPathsExpanded] = useState(false);
@@ -451,7 +385,6 @@ export function TopologyCanvas({
 
   const totalLiveSources = liveSourceCount;
   const renderedSourcesCount = graphCallouts.length;
-  const isSourcesTruncated = totalLiveSources > renderedSourcesCount;
 
 
 
@@ -674,274 +607,31 @@ export function TopologyCanvas({
       aria-busy={regionStatus === "loading"}
     >
       <TopologyCanvasHeader title={title} subtitle={subtitle}>
-        {/* Unified toolbar: Canvas navigation, Layout editing, and Canvas expansion are grouped distinctly to prevent ambiguous wrapping */}
-        <div
-          className="flex shrink-0 flex-wrap items-center justify-start sm:justify-end gap-2"
-          role="toolbar"
-          aria-label="Topology canvas controls"
-        >
-          {/* Group 1: Canvas navigation (Zoom In/Out/%, Fit view, Center selected IP) */}
-          <div
-            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
-            role="group"
-            aria-label="Canvas navigation"
-          >
-            <button
-              type="button"
-              className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Zoom out"
-              aria-label="Zoom out"
-              onClick={() => zoomOut()}
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </button>
-            <span
-              className="ui-badge h-8 min-w-11 justify-center border-none bg-surface/80 px-1 font-mono text-xs tabular-nums"
-              aria-live="polite"
-              aria-label={`Zoom ${Math.round(zoom * 100)} percent`}
-            >
-              {Math.round(zoom * 100)}%
-            </span>
-            <button
-              type="button"
-              className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Zoom in"
-              aria-label="Zoom in"
-              onClick={() => zoomIn()}
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-            </button>
-
-            <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
-
-            <button
-              type="button"
-              className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Fit topology in view"
-              aria-label="Fit topology in view"
-              onClick={fitTopology}
-            >
-              <ScanLine className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              className="ui-button h-8 min-h-8 w-8 p-0"
-              title="Center selected IP"
-              aria-label="Center selected IP"
-              disabled={!selectedGraphCallout}
-              onClick={() => {
-                markUserAdjusted();
-                centerSelectedSource();
-              }}
-            >
-              <LocateFixed className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          {/* Group 2: Layout editing (Explore/Arrange mode toggle, Undo, Layout options menu) */}
-          <div
-            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
-            role="group"
-            aria-label="Layout editing"
-          >
-            <div
-              className="flex items-center"
-              role="group"
-              aria-label="Interaction mode"
-            >
-              <button
-                type="button"
-                aria-pressed={!isArrangeMode}
-                onClick={() => setIsArrangeMode(false)}
-                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                  !isArrangeMode
-                    ? "border border-border bg-surface font-semibold text-text shadow-2xs"
-                    : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
-                }`}
-              >
-                <MousePointer2 className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="hidden sm:inline">Explore</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={isArrangeMode}
-                onClick={() => setIsArrangeMode(true)}
-                className={`flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                  isArrangeMode
-                    ? "border border-primary-border bg-primary-subtle font-semibold text-primary shadow-2xs"
-                    : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
-                }`}
-              >
-                <Move className="h-3.5 w-3.5" aria-hidden="true" />
-                <span className="hidden sm:inline">Arrange</span>
-              </button>
-            </div>
-
-            {canUndoLayout && (
-              <>
-                <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
-                <button
-                  type="button"
-                  className="ui-button h-8 min-h-8 px-2 text-xs"
-                  title="Undo last layout change"
-                  aria-label="Undo last layout change"
-                  onClick={undoLayoutChange}
-                >
-                  <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />
-                  <span className="hidden xl:inline">Undo</span>
-                </button>
-              </>
-            )}
-
-            <div className="mx-0.5 h-4 w-px bg-border/80 shrink-0" aria-hidden="true" />
-
-            <div ref={layoutMenuRef} className="relative">
-              <button
-                type="button"
-                className={`ui-button relative h-8 min-h-8 w-8 p-0 ${
-                  totalOverlaps > 0 ? "border-warning/70 text-warning" : ""
-                }`}
-                title="Layout options"
-                aria-label="Open topology layout options"
-                aria-expanded={layoutMenuOpen}
-                aria-controls="topology-layout-options"
-                onClick={() => setLayoutMenuOpen((current) => !current)}
-              >
-                <Settings2 className="h-3.5 w-3.5" />
-                {totalOverlaps > 0 && (
-                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
-                )}
-              </button>
-              {layoutMenuOpen && (
-                <div
-                  id="topology-layout-options"
-                  aria-label="Topology layout options"
-                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
-                >
-                  <button
-                    type="button"
-                    onClick={() => {
-                      autoArrangeTopology();
-                      setLayoutMenuOpen(false);
-                    }}
-                    className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                  >
-                    <LayoutGrid className="h-4 w-4 text-primary" aria-hidden="true" />
-                    <span className="flex-1">Auto arrange</span>
-                    {totalOverlaps > 0 && <span className="text-warning">{totalOverlaps} overlapping</span>}
-                  </button>
-                  <div className="my-1 h-px bg-border" aria-hidden="true" />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      resetMapWorkspace();
-                      setIsArrangeMode(false);
-                      setLayoutMenuOpen(false);
-                    }}
-                    className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-                  >
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                    Restore default layout
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Group 3: Density mode (Auto / Detailed / Clustered / Aggregated) */}
-          <div
-            className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
-            role="group"
-            aria-label="Density mode"
-          >
-            <div ref={densityMenuRef} className="relative">
-              <button
-                type="button"
-                className="ui-button h-8 min-h-8 px-2 text-xs flex items-center gap-1.5"
-                title="Adjust map density mode"
-                aria-label={`Density mode: ${densityPreference === "auto" ? `Auto (${effectiveDensityMode})` : densityPreference}`}
-                aria-expanded={densityMenuOpen}
-                aria-controls="topology-density-options"
-                onClick={() => setDensityMenuOpen((current) => !current)}
-              >
-                <Layers className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
-                <span className="font-medium capitalize hidden sm:inline">
-                  {densityPreference === "auto" ? `Auto (${effectiveDensityMode})` : densityPreference}
-                </span>
-                <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
-              </button>
-              {densityMenuOpen && (
-                <div
-                  id="topology-density-options"
-                  aria-label="Density options"
-                  className="absolute right-0 top-[calc(100%+6px)] z-50 w-56 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
-                >
-                  <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
-                    Density mode
-                  </div>
-                  {(["auto", "detailed", "clustered", "aggregated"] as const).map((pref) => {
-                    const isSelected = densityPreference === pref;
-                    return (
-                      <button
-                        key={pref}
-                        type="button"
-                        onClick={() => {
-                          setDensityPreference(pref);
-                          setDensityMenuOpen(false);
-                        }}
-                        className={`flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
-                          isSelected
-                            ? "bg-primary-subtle text-primary font-medium"
-                            : "text-text hover:bg-surface-hover"
-                        }`}
-                      >
-                        <span className="capitalize">
-                          {pref === "auto" ? `Auto (${effectiveDensityMode})` : pref}
-                        </span>
-                        {isSelected && <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
-                      </button>
-                    );
-                  })}
-                  {densityAnalysis.hiddenNodes > 0 && (
-                    <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-[11px] text-text-subtle">
-                      {densityAnalysis.hiddenNodes} {densityAnalysis.hiddenNodes === 1 ? "path" : "paths"} aggregated in branches
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Group 4: Workspace expansion action */}
-          <div className="flex items-center shrink-0">
-            <button
-              type="button"
-              className="ui-button h-9 min-h-9 w-9 p-0"
-              title={
-                isTopologyExpanded
-                  ? isAuditMode
-                    ? "Exit fullscreen audit studio"
-                    : "Exit expanded map"
-                  : isAuditMode
-                    ? "Open fullscreen audit studio"
-                    : "Expand map workspace"
-              }
-              aria-label={
-                isTopologyExpanded
-                  ? isAuditMode
-                    ? "Exit fullscreen audit studio"
-                    : "Exit expanded map"
-                  : isAuditMode
-                    ? "Open fullscreen audit studio"
-                    : "Expand map workspace"
-              }
-              aria-pressed={isTopologyExpanded}
-              onClick={handleToggleExpand}
-            >
-              {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
-            </button>
-          </div>
-        </div>
+        <TopologyToolbar
+          zoom={zoom}
+          zoomIn={zoomIn}
+          zoomOut={zoomOut}
+          fitTopology={fitTopology}
+          selectedGraphCallout={selectedGraphCallout}
+          markUserAdjusted={markUserAdjusted}
+          centerSelectedSource={centerSelectedSource}
+          isArrangeMode={isArrangeMode}
+          setIsArrangeMode={setIsArrangeMode}
+          canUndoLayout={canUndoLayout}
+          undoLayoutChange={undoLayoutChange}
+          totalOverlaps={totalOverlaps}
+          autoArrangeTopology={autoArrangeTopology}
+          resetMapWorkspace={resetMapWorkspace}
+          densityPreference={densityPreference}
+          setDensityPreference={setDensityPreference}
+          showGrid={showGrid}
+          setShowGrid={setShowGrid}
+          effectiveDensityMode={effectiveDensityMode}
+          densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
+          isTopologyExpanded={isTopologyExpanded}
+          isAuditMode={isAuditMode}
+          handleToggleExpand={handleToggleExpand}
+        />
       </TopologyCanvasHeader>
 
       {regionStatus === "error" && !snapshot ? (
@@ -997,7 +687,7 @@ export function TopologyCanvas({
                 onPointerCancel={onPointerEnd}
               >
                 <div
-                  className="pointer-events-none absolute inset-0 opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
+                  className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
                   aria-hidden="true"
                 />
 
@@ -1057,21 +747,41 @@ export function TopologyCanvas({
                       <span className="text-text-muted">to finish</span>
                     </motion.div>
                   )}
+                  {activeHop?.toPath && selectedPath && selectedPath !== activeHop.toPath && (
+                    <motion.div
+                      role="status"
+                      initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+                      className="pointer-events-none absolute left-1/2 top-4 z-50 flex min-h-9 -translate-x-1/2 items-center gap-2 rounded-lg border border-primary-border bg-surface-raised px-3 text-xs text-text shadow-sm"
+                    >
+                      <ScanLine className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                      <strong className="font-semibold text-primary">Inspecting directory</strong>
+                      <span className="text-border" aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={() => onSelectPath(activeHop.toPath)}
+                        className="pointer-events-auto rounded border border-border bg-surface-subtle px-2 py-0.5 font-semibold text-text hover:bg-surface hover:text-text transition-colors shadow-2xs"
+                      >
+                        Return to current hop
+                      </button>
+                    </motion.div>
+                  )}
                 </AnimatePresence>
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="relative min-h-[500px] min-w-[860px] origin-top-left overflow-visible"
+                  className="absolute origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
                       ? {
                           minHeight: graphPlaneHeight,
                           minWidth: 860,
-                          height: isTopologyExpanded ? "100%" : undefined,
                           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         }
-                      : { minHeight: graphPlaneHeight, minWidth: 860, height: isTopologyExpanded ? "100%" : undefined }
+                      : { minHeight: graphPlaneHeight, minWidth: 860 }
                   }
                   transition={
                     reducedMotion || isDraggingSurface || isResizingContainer
@@ -1079,7 +789,12 @@ export function TopologyCanvas({
                       : { type: "spring", stiffness: 260, damping: 28 }
                   }
                 >
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute h-full w-full overflow-visible" aria-hidden="true">
+                    <defs>
+                      <marker id="arrowhead-primary" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+                        <polygon points="0 0, 4 2, 0 4" fill="var(--primary)" opacity="0.6" />
+                      </marker>
+                    </defs>
                     <AnimatePresence initial={false}>
                       {graphNodes.map((node) => {
                         const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
@@ -1150,13 +865,14 @@ export function TopologyCanvas({
                                     ? "1.2 0.8"
                                     : "none"
                               }
+                              markerEnd={isTrailEdge ? "url(#arrowhead-primary)" : undefined}
                             />
                           </motion.g>
                         );
                       })}
                     </AnimatePresence>
                   </svg>
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute z-0 h-full w-full overflow-visible" aria-hidden="true">
                     <AnimatePresence initial={false}>
                       {graphCallouts.map((callout, index) => {
                         const position = positionForCallout(callout, index);
@@ -1431,7 +1147,7 @@ export function TopologyCanvas({
                           onPointerMove={onCalloutPointerMove}
                           onPointerUp={onCalloutPointerEnd}
                           onPointerCancel={onCalloutPointerEnd}
-                          className={`absolute z-40 flex flex-col -translate-x-1/2 -translate-y-1/2 touch-none rounded-xl border text-left shadow-sm transition-all duration-200 ${
+                          className={`absolute z-40 flex flex-col -translate-x-1/2 -translate-y-1/2 touch-none rounded-xl border text-left shadow-sm transition-colors duration-200 ${
                             isMulti ? "w-44 sm:w-52" : "w-36"
                           } ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : ""} ${
                             isOverlapping
@@ -1613,185 +1329,42 @@ export function TopologyCanvas({
                   </AnimatePresence>
                 </motion.div>
 
-                {showMinimap && (
-                  <TopologyMinimap
-                    graphNodes={graphNodes}
-                    graphNodeByPath={graphNodeByPath}
-                    graphCallouts={graphCallouts}
-                    selectedPath={selectedPath}
-                    selectedSessionId={selectedSessionId}
-                    minimapViewport={minimapViewport}
-                    positionForCallout={positionForCallout}
-                    onFit={fitTopology}
-                  />
-                )}
+                <AnimatePresence>
+                  {(showMinimap || zoom !== 1) && (
+                    <TopologyMinimap
+                      graphNodes={graphNodes}
+                      graphNodeByPath={graphNodeByPath}
+                      graphCallouts={graphCallouts}
+                      selectedPath={selectedPath}
+                      selectedSessionId={selectedSessionId}
+                      minimapViewport={minimapViewport}
+                      positionForCallout={positionForCallout}
+                      onFit={fitTopology}
+                    />
+                  )}
+                </AnimatePresence>
               </div>
 
-              <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
-                <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:flex-nowrap sm:gap-3">
-                  {densityAnalysis.hiddenNodes > 0 ? (
-                    <span className="shrink-0 flex items-center gap-1.5">
-                      <span>
-                        <strong className="font-medium text-text">{densityAnalysis.renderedNodes}</strong> of{" "}
-                        <strong className="font-medium text-text">{densityAnalysis.totalNodes}</strong> paths{" "}
-                        <span className="text-text-subtle font-normal">
-                          ({densityAnalysis.hiddenNodes} aggregated in branches)
-                        </span>
-                      </span>
-                      {densityPreference !== "detailed" ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDensityPreference("detailed");
-                            setIsPathsExpanded(true);
-                          }}
-                          className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
-                          title="Switch to detailed density mode to render all paths"
-                        >
-                          Expand all
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDensityPreference("auto");
-                            setIsPathsExpanded(false);
-                          }}
-                          className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
-                          title="Reset density mode to Auto"
-                        >
-                          Reset to auto
-                        </button>
-                      )}
-                    </span>
-                  ) : densityPreference !== "auto" ? (
-                    <span className="shrink-0 flex items-center gap-1.5">
-                      <span>
-                        All <strong className="font-medium text-text">{densityAnalysis.renderedNodes}</strong> paths rendered
-                        <span className="text-text-subtle font-normal"> ({densityPreference} mode)</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDensityPreference("auto");
-                          setIsPathsExpanded(false);
-                        }}
-                        className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
-                        title="Reset density mode to Auto"
-                      >
-                        Reset to auto
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="shrink-0">
-                      <strong className="font-medium text-text">{densityAnalysis.totalNodes}</strong> observed paths
-                    </span>
-                  )}
-                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
-                  <span className="shrink-0">
-                    <strong className="font-medium text-text">{effectiveSessions.length}</strong> active {effectiveSessions.length === 1 ? "session" : "sessions"}
-                    <span className="hidden xl:inline"> with a known CWD</span>
-                  </span>
-                  <span className="shrink-0 text-border" aria-hidden="true">·</span>
-                  {isSourcesTruncated ? (
-                    <span className="shrink-0 flex items-center gap-1.5">
-                      <span>
-                        <strong className="font-medium text-text">{renderedSourcesCount}</strong> of{" "}
-                        <strong className="font-medium text-text">{totalLiveSources}</strong> unique {totalLiveSources === 1 ? "source" : "sources"} on map
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsSourcesExpanded(true)}
-                        className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
-                        title="Show all live source callouts on the map"
-                      >
-                        Show all
-                      </button>
-                    </span>
-                  ) : isSourcesExpanded && totalLiveSources > GRAPH_CALLOUT_LIMIT ? (
-                    <span className="shrink-0 flex items-center gap-1.5">
-                      <span>
-                        All <strong className="font-medium text-text">{renderedSourcesCount}</strong> unique {renderedSourcesCount === 1 ? "source" : "sources"} on map
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setIsSourcesExpanded(false)}
-                        className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
-                        title={`Limit to ${GRAPH_CALLOUT_LIMIT} source callouts`}
-                      >
-                        Compact ({GRAPH_CALLOUT_LIMIT})
-                      </button>
-                    </span>
-                  ) : (
-                    <span className="shrink-0">
-                      <strong className="font-medium text-text">{totalLiveSources}</strong> unique {totalLiveSources === 1 ? "source" : "sources"}
-                    </span>
-                  )}
-                  <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
-                  <span
-                    className="hidden 2xl:inline truncate text-text-subtle"
-                    title={`Snapshot generated at ${formatTimestamp(snapshot.generatedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
-                  >
-                    {freshnessState.isStale ? (
-                      <span className="font-medium text-warning">
-                        {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
-                          <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
-                        ) : freshnessState.telemetryStatus === "future_skew" ? (
-                          <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
-                        ) : (
-                          <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshot.generatedAt)}</>
-                        )}
-                      </span>
-                    ) : freshnessState.label === "Live · No activity" ? (
-                      <span>
-                        Live (no activity) · Snapshot {formatTimestamp(snapshot.generatedAt)}
-                      </span>
-                    ) : (
-                      <span>
-                        Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshot.generatedAt)}
-                      </span>
-                    )}
-                  </span>
-                </div>
-
-                <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3.5">
-                  <AnimatePresence>
-                    {totalOverlaps > 0 && (
-                      <motion.div
-                        key="overlap-badge-group"
-                        initial={reducedMotion ? false : { opacity: 0, scale: 0.92, x: 8 }}
-                        animate={{ opacity: 1, scale: 1, x: 0 }}
-                        exit={reducedMotion ? undefined : { opacity: 0, scale: 0.92, x: 8 }}
-                        transition={{ duration: 0.18, ease: "easeOut" }}
-                        className="flex items-center gap-3"
-                      >
-                        <button
-                          type="button"
-                          onClick={autoArrangeTopology}
-                          className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning transition-all hover:border-warning/60 hover:bg-warning/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
-                          title="Click to automatically arrange overlapping elements"
-                          aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
-                        >
-                          <AlertTriangle className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
-                          <span>{totalOverlaps} overlapping · Auto arrange</span>
-                        </button>
-                        <div className="hidden h-3.5 w-px bg-border sm:block" aria-hidden="true" />
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-
-                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Topology map legend">
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
-                      <span>Filesystem route</span>
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-                      <span>Selected source route</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
+              <TopologySummaryBar
+                densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
+                densityAnalysisRenderedNodes={densityAnalysis.renderedNodes}
+                densityAnalysisTotalNodes={densityAnalysis.totalNodes}
+                densityPreference={densityPreference}
+                setDensityPreference={setDensityPreference}
+                setIsPathsExpanded={setIsPathsExpanded}
+                effectiveSessionsLength={effectiveSessions.length}
+                isSourcesTruncated={totalLiveSources > renderedSourcesCount}
+                renderedSourcesCount={renderedSourcesCount}
+                totalLiveSources={totalLiveSources}
+                isSourcesExpanded={isSourcesExpanded}
+                setIsSourcesExpanded={setIsSourcesExpanded}
+                snapshotGeneratedAt={snapshot.generatedAt}
+                freshnessState={freshnessState}
+                staleThresholdMs={staleThresholdMs}
+                totalOverlaps={totalOverlaps}
+                autoArrangeTopology={autoArrangeTopology}
+                reducedMotion={reducedMotion}
+              />
               {snapshot.truncated && (
                 <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
                   <ShieldAlert className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
