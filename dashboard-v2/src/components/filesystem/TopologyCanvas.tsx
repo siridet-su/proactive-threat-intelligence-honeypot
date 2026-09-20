@@ -1256,12 +1256,18 @@ export function TopologyCanvas({
                           </button>
 
                           {/* Multi-Session Cluster Disclosure Panel */}
-                          {isMulti && expanded && (
-                            <div
-                              role="listbox"
-                              aria-label={`Active sessions for ${callout.sourceIp}`}
-                              className="border-t border-border/70 p-1.5 space-y-1 bg-surface-subtle/60 rounded-b-xl max-h-48 overflow-y-auto overscroll-contain"
-                            >
+                          <AnimatePresence initial={false}>
+                            {isMulti && expanded && (
+                              <motion.div
+                                initial={reducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                                animate={reducedMotion ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+                                exit={reducedMotion ? { opacity: 0 } : { height: 0, opacity: 0 }}
+                                transition={{ duration: reducedMotion ? 0 : 0.2, ease: "easeOut" }}
+                                role="listbox"
+                                aria-label={`Active sessions for ${callout.sourceIp}`}
+                                className="border-t border-border/70 bg-surface-subtle/60 rounded-b-xl overflow-hidden origin-top"
+                              >
+                                <div className="p-1.5 space-y-1 max-h-48 overflow-y-auto overscroll-contain">
                               {callout.sessions.map((sess, sIdx) => {
                                 const isSessSelected = sess.sessionId === selectedSessionId;
                                 return (
@@ -1328,8 +1334,10 @@ export function TopologyCanvas({
                                   </button>
                                 );
                               })}
-                            </div>
-                          )}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </motion.div>
                       );
                     })}
