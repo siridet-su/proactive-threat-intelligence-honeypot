@@ -629,12 +629,33 @@ export function pointForGraph(
 
   const byPath = new Map(nodes.map((node) => [node.path, node]));
   const included = new Set<string>(["/"]);
-  const recentSessions = [...sessions].sort((left, right) => {
-    return Date.parse(right.cwdState.observedAt ?? "") - Date.parse(left.cwdState.observedAt ?? "");
-  }).slice(0, GRAPH_CALLOUT_LIMIT);
+  // Do not let an invalid telemetry timestamp turn Array.sort's comparator
+  // into NaN.  A deterministic fallback matters because this ordering decides
+  // which paths remain visible when the graph is capped.
+  const compareSessions = (left: FilesystemTopologySession, right: FilesystemTopologySession) => {
+    const leftTime = Date.parse(left.cwdState.observedAt ?? "");
+    const rightTime = Date.parse(right.cwdState.observedAt ?? "");
+    const leftValid = Number.isFinite(leftTime);
+    const rightValid = Number.isFinite(rightTime);
+    if (leftValid && rightValid && leftTime !== rightTime) return rightTime - leftTime;
+    if (leftValid !== rightValid) return leftValid ? -1 : 1;
+    return left.sessionId.localeCompare(right.sessionId);
+  };
+  const compareNodes = (left: FilesystemTopologyNode, right: FilesystemTopologyNode) => {
+    const leftTime = Date.parse(left.observedAt ?? "");
+    const rightTime = Date.parse(right.observedAt ?? "");
+    const leftValid = Number.isFinite(leftTime);
+    const rightValid = Number.isFinite(rightTime);
+    if (leftValid && rightValid && leftTime !== rightTime) return rightTime - leftTime;
+    if (leftValid !== rightValid) return leftValid ? -1 : 1;
+    return left.path.localeCompare(right.path);
+  };
+  const recentSessions = [...sessions].sort(compareSessions).slice(0, GRAPH_CALLOUT_LIMIT);
   const includePath = (path: string | null) => {
     let current = path;
-    while (current) {
+    const visited = new Set<string>();
+    while (current && !visited.has(current)) {
+      visited.add(current);
       included.add(current);
       current = byPath.get(current)?.parentPath ?? null;
     }
@@ -650,7 +671,7 @@ export function pointForGraph(
 
   if (densityMode === "detailed") {
     const effectiveLimit = options?.nodeLimit !== undefined ? options.nodeLimit : null;
-    for (const node of [...nodes].sort((left, right) => Date.parse(right.observedAt ?? "") - Date.parse(left.observedAt ?? ""))) {
+    for (const node of [...nodes].sort(compareNodes)) {
       if (effectiveLimit !== null && included.size >= effectiveLimit) break;
       includePath(node.path);
     }
@@ -676,7 +697,7 @@ export function pointForGraph(
 
     // 3) Respect explicit nodeLimit if specified
     if (options?.nodeLimit) {
-      const sorted = [...nodes].sort((a, b) => Date.parse(b.observedAt ?? "") - Date.parse(a.observedAt ?? ""));
+      const sorted = [...nodes].sort(compareNodes);
       for (const node of sorted) {
         if (included.size >= options.nodeLimit) break;
         includePath(node.path);
@@ -691,7 +712,7 @@ export function pointForGraph(
           ? null
           : GRAPH_NODE_LIMIT;
 
-    for (const node of [...nodes].sort((left, right) => Date.parse(right.observedAt ?? "") - Date.parse(left.observedAt ?? ""))) {
+    for (const node of [...nodes].sort(compareNodes)) {
       if (effectiveLimit !== null && included.size >= effectiveLimit) break;
       includePath(node.path);
     }
@@ -701,32 +722,60 @@ export function pointForGraph(
   const selectedByPath = new Map(selected.map((node) => [node.path, node]));
   const childrenByPath = new Map<string, FilesystemTopologyNode[]>();
   for (const node of selected) {
-    if (!node.parentPath || !selectedByPath.has(node.parentPath)) continue;
-    const children = childrenByPath.get(node.parentPath) ?? [];
+    const parent = node.parentPath ? selectedByPath.get(node.parentPath) : undefined;
+    // A malformed parent relationship must not recurse forever or turn the
+    // layout into a cyclic graph.  Depth is authoritative for tree edges.
+    if (!parent || parent.depth >= node.depth) continue;
+    const children = childrenByPath.get(parent.path) ?? [];
     children.push(node);
-    childrenByPath.set(node.parentPath, children);
+    childrenByPath.set(parent.path, children);
   }
   for (const children of childrenByPath.values()) {
     children.sort((left, right) => left.path.localeCompare(right.path));
   }
+
+  const descendantCounts = (items: readonly FilesystemTopologyNode[], itemByPath: Map<string, FilesystemTopologyNode>) => {
+    const counts = new Map<string, number>();
+    for (const item of items) counts.set(item.path, 0);
+    // Parent depth must be lower, the same invariant used for rendered tree
+    // edges.  This makes the count finite even when upstream data is corrupt.
+    for (const item of [...items].sort((left, right) => right.depth - left.depth || right.path.localeCompare(left.path))) {
+      const parent = item.parentPath ? itemByPath.get(item.parentPath) : undefined;
+      if (!parent || parent.depth >= item.depth) continue;
+      counts.set(parent.path, (counts.get(parent.path) ?? 0) + (counts.get(item.path) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const totalDescendantCounts = descendantCounts(nodes, byPath);
+  const renderedDescendantCounts = descendantCounts(selected, selectedByPath);
 
   // Tidy tree assignment:
   // Each leaf receives an ordered horizontal index.
   // Each parent is centered over the midpoint of its first and last children.
   const horizontalByPath = new Map<string, number>();
   let leafIndex = 0;
-  const assignHorizontalPosition = (path: string): number => {
-    const children = childrenByPath.get(path) ?? [];
-    if (!children.length) {
-      const position = leafIndex;
-      leafIndex += 1;
-      horizontalByPath.set(path, position);
-      return position;
+  const assignHorizontalPosition = (startPath: string) => {
+    // Iterative post-order traversal avoids a call-stack overflow for a deep
+    // but valid directory chain (for example generated or hostile telemetry).
+    const stack: Array<{ path: string; expanded: boolean }> = [{ path: startPath, expanded: false }];
+    while (stack.length) {
+      const frame = stack.pop()!;
+      if (horizontalByPath.has(frame.path)) continue;
+      const children = childrenByPath.get(frame.path) ?? [];
+      if (!frame.expanded) {
+        stack.push({ path: frame.path, expanded: true });
+        for (let index = children.length - 1; index >= 0; index--) {
+          if (!horizontalByPath.has(children[index].path)) stack.push({ path: children[index].path, expanded: false });
+        }
+        continue;
+      }
+      if (!children.length) {
+        horizontalByPath.set(frame.path, leafIndex++);
+      } else {
+        const childPositions = children.map((child) => horizontalByPath.get(child.path) ?? leafIndex++);
+        horizontalByPath.set(frame.path, (childPositions[0] + childPositions[childPositions.length - 1]) / 2);
+      }
     }
-    const childPositions = children.map((child) => assignHorizontalPosition(child.path));
-    const position = (childPositions[0] + childPositions[childPositions.length - 1]) / 2;
-    horizontalByPath.set(path, position);
-    return position;
   };
 
   if (selectedByPath.has("/")) assignHorizontalPosition("/");
@@ -762,8 +811,8 @@ export function pointForGraph(
   const targetAvailableHeight = isAuditMode ? 70 : 66;
   const rawStep = targetAvailableHeight / maxDepth;
   const depthStep = isAuditMode
-    ? Math.min(24, Math.max(10.5, rawStep))
-    : Math.min(20, Math.max(9.5, rawStep));
+    ? Math.min(24, Math.max(Number.EPSILON, rawStep))
+    : Math.min(20, Math.max(Number.EPSILON, rawStep));
   const startY = 12;
 
   const positioned = selected.map((node) => {
@@ -771,9 +820,8 @@ export function pointForGraph(
     const x = leafCount === 1 ? 50 : treeLeft + (totalTreeWidth * leafPosition) / (leafCount - 1);
     const y = startY + node.depth * depthStep;
 
-    const prefix = node.path === "/" ? "/" : `${node.path}/`;
-    const totalDescendants = nodes.filter((n) => n.path !== node.path && n.path.startsWith(prefix)).length;
-    const renderedDescendants = selected.filter((n) => n.path !== node.path && n.path.startsWith(prefix)).length;
+    const totalDescendants = totalDescendantCounts.get(node.path) ?? 0;
+    const renderedDescendants = renderedDescendantCounts.get(node.path) ?? 0;
     const hiddenChildCount = Math.max(0, totalDescendants - renderedDescendants);
     const isAggregated = hiddenChildCount > 0;
 
@@ -788,8 +836,8 @@ export function pointForGraph(
 
   // Intelligent horizontal clearance enforcement:
   // Ensure no two sibling or adjacent nodes at the same depth level are positioned closer
-  // than the required button clearance width (minimum 18.5% in audit mode, 15.5% in live mode).
-  const minClearance = isAuditMode ? 18.5 : 15.5;
+  // than the preferred button clearance width (18.5% in audit mode, 15.5% in live mode).
+  const preferredClearance = isAuditMode ? 18.5 : 15.5;
   const byDepth = new Map<number, GraphNode[]>();
   for (const node of positioned) {
     const list = byDepth.get(node.depth) ?? [];
@@ -799,6 +847,11 @@ export function pointForGraph(
 
   for (const list of byDepth.values()) {
     if (list.length <= 1) continue;
+    // The old fixed clearance cannot fit more than five nodes in the usable
+    // 14–86% lane, causing auto-arrange to report permanent overlaps.  Scale
+    // it to the available lane; density aggregation remains responsible for
+    // cases where the physical cards themselves cannot fit.
+    const minClearance = Math.min(preferredClearance, 72 / (list.length - 1));
     list.sort((a, b) => a.x - b.x);
     for (let pass = 0; pass < 3; pass++) {
       let moved = false;
@@ -974,8 +1027,9 @@ export function sourceRailPositions(
   const nodeXs = [...graphNodeByPath.values()].map((n) => n.x);
   const minTreeX = nodeXs.length ? Math.min(...nodeXs) : 50;
   const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
-  const railGap = callouts.length <= 2 ? 18 : callouts.length <= 4 ? 20 : 22;
-  const leftRailX = Math.max(10, minTreeX - railGap);
+  // Increase base rail gap so single/few sources start comfortably away from the tree edge
+  const railGap = callouts.length <= 2 ? 22 : callouts.length <= 4 ? 24 : 26;
+  const leftRailX = Math.max(6, minTreeX - railGap);
   const rightRailX = Math.min(90, maxTreeX + railGap);
 
   const positions = new Map<string, LabelPosition>();
@@ -1044,6 +1098,68 @@ export function sourceRailPositions(
   placeOnRail(leftRail, leftRailX);
   placeOnRail(rightRail, rightRailX);
   return positions;
+}
+
+/**
+ * Moves automatically placed source cards clear of the measured directory-card
+ * rectangles. `sourceRailPositions` intentionally runs before the DOM exists,
+ * so it can only use logical centres. This second, deterministic pass runs
+ * after measurement; manually placed labels are applied later and are never
+ * changed here.
+ */
+export function clearAutomaticCalloutCollisions(
+  nodes: readonly GraphNode[],
+  callouts: readonly GraphCallout[],
+  automaticPositions: Map<string, LabelPosition>,
+  nodeElementBounds: Record<string, GraphElementBounds> = {},
+  calloutElementBounds: Record<string, GraphElementBounds> = {},
+): Map<string, LabelPosition> {
+  const cleared = new Map<string, LabelPosition>();
+  const nodeBoxes = nodes.map((node) => {
+    const bounds = nodeElementBounds[node.path];
+    return {
+      x: bounds?.x ?? node.x,
+      y: bounds?.y ?? node.y,
+      hw: (bounds?.width ?? 15) / 2,
+      hh: (bounds?.height ?? 8) / 2,
+    };
+  });
+
+  for (const callout of callouts) {
+    const initial = automaticPositions.get(callout.sourceIp);
+    if (!initial) continue;
+    const bounds = calloutElementBounds[callout.sourceIp];
+    const hw = (bounds?.width ?? 17) / 2;
+    const hh = (bounds?.height ?? 10) / 2;
+    let x = initial.x;
+    let y = initial.y;
+
+    for (const node of nodeBoxes) {
+      const overlaps = Math.abs(x - node.x) < hw + node.hw && Math.abs(y - node.y) < hh + node.hh;
+      if (!overlaps) continue;
+      // Preserve the chosen rail: sources on the right move farther right and
+      // vice versa. A generous 3.5% gutter prevents visually touching borders or shadows.
+      // Crucially, ONLY push the callout outward. Never pull it inward if it was already further away.
+      if (x >= node.x) {
+        const requiredX = node.x + node.hw + hw + 3.5;
+        x = Math.max(x, Math.min(94, requiredX));
+      } else {
+        const requiredX = node.x - node.hw - hw - 3.5;
+        x = Math.min(x, Math.max(6, requiredX));
+      }
+    }
+
+    // Keep cards on the same rail from covering one another after a horizontal
+    // correction. Prefer moving down, then up if the lower canvas edge wins.
+    for (const existing of cleared.values()) {
+      const overlaps = Math.abs(x - existing.x) < hw * 2 && Math.abs(y - existing.y) < hh * 2;
+      if (!overlaps) continue;
+      const downward = existing.y + hh * 2 + 1.5;
+      y = downward <= 82 ? downward : Math.max(18, existing.y - hh * 2 - 1.5);
+    }
+    cleared.set(callout.sourceIp, { x, y });
+  }
+  return cleared;
 }
 
 /**
