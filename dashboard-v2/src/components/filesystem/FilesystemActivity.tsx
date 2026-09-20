@@ -23,6 +23,7 @@ import type {
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
+import type { DateRange } from "react-day-picker";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { ResponseActionPanel } from "./ResponseActionPanel";
@@ -226,6 +227,7 @@ export function FilesystemActivity() {
   }, []);
 
   const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d" | "custom">("all");
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
 
   // URL state synchronization and routing hook
   const {
@@ -948,6 +950,8 @@ export function FilesystemActivity() {
                   onSelectTargetPath={handleSelectTargetPath}
                   timeRange={timeRange}
                   onSelectTimeRange={setTimeRange}
+                  customDateRange={customDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1198,6 +1202,8 @@ export function FilesystemActivity() {
                   onSelectTargetPath={handleSelectTargetPath}
                   timeRange={timeRange}
                   onSelectTimeRange={setTimeRange}
+                  customDateRange={customDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}

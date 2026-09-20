@@ -23,6 +23,8 @@ import {
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
+import { Calendar } from "./Calendar";
+import type { DateRange } from "react-day-picker";
 
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
@@ -36,6 +38,8 @@ export interface AuditFilterControlsProps {
   onSelectTargetPath: (path: string | null) => void;
   timeRange: TimeRangeFilter;
   onSelectTimeRange: (range: TimeRangeFilter) => void;
+  customDateRange?: DateRange;
+  onSelectCustomDateRange?: (range: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
   filteredCount: number;
@@ -67,6 +71,8 @@ export function AuditFilterControls({
   onSelectTargetPath,
   timeRange,
   onSelectTimeRange,
+  customDateRange,
+  onSelectCustomDateRange,
   distinctPaths,
   homeOnlyCount,
   filteredCount,
@@ -262,7 +268,9 @@ export function AuditFilterControls({
               }`}
             />
             <span className="font-sans font-medium text-xs">
-              Time: {timeOptions.find(o => o.value === timeRange)?.label.replace("Last ", "") ?? "All time"}
+              Time: {timeRange === "custom" && customDateRange?.from
+                ? `${customDateRange.from.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}${customDateRange.to ? ` - ${customDateRange.to.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}`
+                : timeOptions.find(o => o.value === timeRange)?.label.replace("Last ", "") ?? "All time"}
             </span>
             <ChevronDown
               className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform ${
@@ -280,46 +288,75 @@ export function AuditFilterControls({
           ariaLabel="Filter sessions by time range"
           className="min-w-[200px] p-1.5"
         >
-          <div
-            role="listbox"
-            id={timeListboxId}
-            aria-label="Filter sessions by time range"
-            tabIndex={-1}
-          >
-            {timeOptions.map((item, index) => {
-              const isSelected = item.value === timeRange;
-              return (
+          {timeRange === "custom" ? (
+            <div className="flex flex-col p-1">
+              <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-border">
+                <span className="text-xs font-semibold text-text">Custom Range</span>
                 <button
-                  key={item.value}
-                  ref={registerTimeOptionRef(index, item.value)}
-                  type="button"
-                  role="option"
-                  id={`${timeListboxId}-opt-${index}`}
-                  aria-selected={isSelected}
-                  tabIndex={timeActiveIndex === index || (timeActiveIndex === -1 && index === 0) ? 0 : -1}
-                  onFocus={() => handleTimeOptionFocus(index, item.value)}
-                  onClick={() => {
-                    onSelectTimeRange(item.value);
+                  onClick={() => onSelectTimeRange("all")}
+                  className="text-xs text-text-subtle hover:text-text cursor-pointer transition-colors"
+                >
+                  Presets
+                </button>
+              </div>
+              <Calendar
+                mode="range"
+                selected={customDateRange}
+                onSelect={(range) => {
+                  onSelectCustomDateRange?.(range);
+                  if (range?.from && range?.to) {
                     setTimeDropdownOpen(false);
                     timeTriggerRef.current?.focus();
-                  }}
-                  onKeyDown={(e) => handleTimeOptionKeyDown(e, index)}
-                  className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
-                    isSelected
-                      ? "bg-primary-subtle text-primary"
-                      : timeActiveIndex === index
-                        ? "bg-surface-hover text-text"
-                        : "text-text-muted hover:bg-surface-hover hover:text-text"
-                  }`}
-                >
-                  <span className="flex-1">{item.label}</span>
-                  {isSelected && (
-                    <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
+                  }
+                }}
+                numberOfMonths={1}
+                className="pointer-events-auto"
+              />
+            </div>
+          ) : (
+            <div
+              role="listbox"
+              id={timeListboxId}
+              aria-label="Filter sessions by time range"
+              tabIndex={-1}
+            >
+              {timeOptions.map((item, index) => {
+                const isSelected = item.value === timeRange;
+                return (
+                  <button
+                    key={item.value}
+                    ref={registerTimeOptionRef(index, item.value)}
+                    type="button"
+                    role="option"
+                    id={`${timeListboxId}-opt-${index}`}
+                    aria-selected={isSelected}
+                    tabIndex={timeActiveIndex === index || (timeActiveIndex === -1 && index === 0) ? 0 : -1}
+                    onFocus={() => handleTimeOptionFocus(index, item.value)}
+                    onClick={() => {
+                      onSelectTimeRange(item.value);
+                      if (item.value !== "custom") {
+                        setTimeDropdownOpen(false);
+                        timeTriggerRef.current?.focus();
+                      }
+                    }}
+                    onKeyDown={(e) => handleTimeOptionKeyDown(e, index)}
+                    className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                      isSelected
+                        ? "bg-primary-subtle text-primary"
+                        : timeActiveIndex === index
+                          ? "bg-surface-hover text-text"
+                          : "text-text-muted hover:bg-surface-hover hover:text-text"
+                    }`}
+                  >
+                    <span className="flex-1">{item.label}</span>
+                    {isSelected && (
+                      <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </ComboboxPopover>
       </div>
       {/* 1. Toggle: Hide /home Only */}
