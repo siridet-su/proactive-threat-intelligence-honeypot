@@ -361,7 +361,7 @@ export function AuditSessionSelect({
         aria-controls={listboxId}
         onClick={handleToggleOpen}
         onKeyDown={handleTriggerKeyDown}
-        className={`h-9 min-h-9 max-w-[280px] sm:max-w-md flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-colors cursor-pointer select-none ${
+        className={`h-9 min-h-9 max-w-[280px] sm:max-w-[320px] flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-colors cursor-pointer select-none ${
           open
             ? "border-primary ring-2 ring-primary/30 bg-surface"
             : "hover:bg-surface-hover hover:border-border-strong"

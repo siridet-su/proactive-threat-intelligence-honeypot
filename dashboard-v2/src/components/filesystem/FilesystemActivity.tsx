@@ -912,9 +912,9 @@ export function FilesystemActivity() {
           className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
         >
           {/* Studio Top Navigation Bar */}
-          <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
+          <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
             <div
-              className="flex min-w-0 flex-wrap items-center gap-2.5"
+              className="flex min-w-0 flex-wrap items-center gap-1.5"
               role="group"
               aria-label="Studio identity and session scope"
             >
@@ -1092,14 +1092,14 @@ export function FilesystemActivity() {
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
             aria-label="Audit replay toolbar"
           >
             {/* Left side: Selection & Filters */}
-            <div className="flex items-center justify-start gap-4 flex-1 min-w-0">
+            <div className="flex items-center justify-start gap-2 flex-1 min-w-0">
               <div
-                className="flex flex-wrap items-center gap-2 min-w-0"
+                className="flex flex-wrap items-center gap-1.5 min-w-0"
                 role="group"
                 aria-label="Audited session and filter controls"
               >
@@ -1149,7 +1149,7 @@ export function FilesystemActivity() {
             </div>
 
             <div
-              className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
+              className="flex items-center gap-1.5 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
               role="toolbar"
               aria-label="Replay and workspace actions"
             >
