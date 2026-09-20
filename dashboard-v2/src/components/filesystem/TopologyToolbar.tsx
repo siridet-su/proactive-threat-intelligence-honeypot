@@ -325,7 +325,6 @@ export function TopologyToolbar({
           )}
           </AnimatePresence>
         </div>
-      </div>
 
       <div className="flex items-center shrink-0">
         <button
