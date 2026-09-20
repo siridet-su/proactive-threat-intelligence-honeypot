@@ -9,7 +9,6 @@ interface FilesystemPageHeaderProps {
   streamState: "live" | "connecting" | "stale";
   freshnessState: FreshnessState;
   handleReconnect: () => void;
-  isHydrated: boolean;
   regionStatus: string;
   refresh: () => void;
 }
@@ -21,7 +20,6 @@ export function FilesystemPageHeader({
   streamState,
   freshnessState,
   handleReconnect,
-  isHydrated,
   regionStatus,
   refresh,
 }: FilesystemPageHeaderProps) {

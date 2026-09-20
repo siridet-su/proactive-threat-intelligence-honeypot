@@ -281,6 +281,10 @@ export function TopologyCanvas({
     [automaticGraphNodes, nodePositions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
+  const graphPlaneHeight = useMemo(
+    () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
+    [graphNodes],
+  );
   const effectiveSessions = useMemo(() => {
     if (!activeHop?.toPath || !selectedSessionId) return snapshot?.sessions ?? [];
     return (snapshot?.sessions ?? []).map((session) => {
@@ -681,7 +685,7 @@ export function TopologyCanvas({
                 onPointerCancel={onPointerEnd}
               >
                 <div
-                  className="pointer-events-none absolute inset-0 opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
+                  className="pointer-events-none absolute opacity-50 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px]"
                   aria-hidden="true"
                 />
 
@@ -766,14 +770,16 @@ export function TopologyCanvas({
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="absolute h-[2000px] w-[2000px] origin-top-left overflow-visible"
+                  className="absolute origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
                       ? {
+                          minHeight: graphPlaneHeight,
+                          minWidth: 860,
                           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                         }
-                      : undefined
+                      : { minHeight: graphPlaneHeight, minWidth: 860 }
                   }
                   transition={
                     reducedMotion || isDraggingSurface || isResizingContainer
@@ -781,7 +787,7 @@ export function TopologyCanvas({
                       : { type: "spring", stiffness: 260, damping: 28 }
                   }
                 >
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute h-full w-full overflow-visible" aria-hidden="true">
                     <defs>
                       <marker id="arrowhead-primary" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
                         <polygon points="0 0, 4 2, 0 4" fill="var(--primary)" opacity="0.6" />
@@ -864,7 +870,7 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
-                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 z-0 h-full w-full overflow-visible" aria-hidden="true">
+                  <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute z-0 h-full w-full overflow-visible" aria-hidden="true">
                     <AnimatePresence initial={false}>
                       {graphCallouts.map((callout, index) => {
                         const position = positionForCallout(callout, index);

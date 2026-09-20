@@ -834,7 +834,6 @@ export function FilesystemActivity() {
         streamState={streamState}
         freshnessState={freshnessState}
         handleReconnect={handleReconnect}
-        isHydrated={isHydrated}
         regionStatus={regionStatus}
         refresh={refresh}
       />
