@@ -472,7 +472,7 @@ export function TopologyCanvas({
   }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
   const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
-  const showMinimap = isTopologyExpanded || graphNodes.length > 8 || graphCallouts.length > 2 || zoom !== 1;
+  const showMinimap = isTopologyExpanded || graphNodes.length > 8 || graphCallouts.length > 2;
 
   const {
     pan,
@@ -1328,7 +1328,7 @@ export function TopologyCanvas({
                   </AnimatePresence>
                 </motion.div>
 
-                {showMinimap && (
+                {(showMinimap || zoom !== 1) && (
                   <TopologyMinimap
                     graphNodes={graphNodes}
                     graphNodeByPath={graphNodeByPath}
