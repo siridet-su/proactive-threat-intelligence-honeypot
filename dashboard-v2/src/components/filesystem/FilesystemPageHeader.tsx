@@ -137,6 +137,7 @@ export function FilesystemPageHeader({
             type="button"
             className="ui-button"
             disabled={regionStatus === "loading" || regionStatus === "refreshing"}
+            suppressHydrationWarning
             onClick={() => {
               if (regionStatus === "loading" || regionStatus === "refreshing") return;
               void refresh();

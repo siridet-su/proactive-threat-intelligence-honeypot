@@ -174,12 +174,12 @@ export function TopologyToolbar({
         <div ref={viewMenuRef} className="relative">
           <button
             type="button"
-            className={`ui-button h-8 min-h-8 px-2 text-xs flex items-center gap-1.5 transition-all ${
+            className={`h-8 min-h-8 flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors cursor-pointer select-none ${
               totalOverlaps > 0
-                ? "border-warning/70 text-warning"
+                ? "border-warning-border bg-warning-subtle text-warning shadow-xs"
                 : viewMenuOpen
-                  ? "border-primary ring-2 ring-primary/20 text-text"
-                  : ""
+                  ? "border-primary ring-2 ring-primary/20 bg-surface text-text"
+                  : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
             }`}
             title="View settings"
             aria-label="View settings"
@@ -187,9 +187,11 @@ export function TopologyToolbar({
             aria-controls="topology-view-settings"
             onClick={() => setViewMenuOpen((current) => !current)}
           >
-            <Settings2 className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
-            <span className="font-medium capitalize hidden sm:inline">View</span>
-            <ChevronDown className={`h-3 w-3 opacity-60 transition-transform duration-200 ${viewMenuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+            <div className="flex items-center gap-1.5">
+              <Settings2 className={`h-3.5 w-3.5 shrink-0 ${viewMenuOpen ? "text-primary" : "text-text-subtle"}`} aria-hidden="true" />
+              <span className={`hidden font-sans font-medium sm:inline ${viewMenuOpen ? "text-text" : "text-text-subtle"}`}>View</span>
+            </div>
+            <ChevronDown className={`h-3 w-3 shrink-0 text-text-subtle transition-transform duration-200 ${viewMenuOpen ? "rotate-180 text-primary" : ""}`} aria-hidden="true" />
             {totalOverlaps > 0 && (
               <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
             )}
