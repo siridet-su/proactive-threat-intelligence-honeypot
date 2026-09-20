@@ -744,15 +744,15 @@ export function pointForGraph(
   if (leafCount === 1) {
     totalTreeWidth = 0;
   } else if (leafCount === 2) {
-    totalTreeWidth = isAuditMode ? 28 : 26;
+    totalTreeWidth = isAuditMode ? 26 : 24;
   } else if (leafCount === 3) {
-    totalTreeWidth = isAuditMode ? 40 : 38;
+    totalTreeWidth = isAuditMode ? 36 : 34;
   } else if (leafCount === 4) {
-    totalTreeWidth = isAuditMode ? 55 : 48;
+    totalTreeWidth = isAuditMode ? 46 : 42;
   } else {
     totalTreeWidth = isAuditMode
-      ? Math.min(58, (leafCount - 1) * 18.5)
-      : Math.min(52, Math.max(46, (leafCount - 1) * 10));
+      ? Math.min(54, (leafCount - 1) * 16)
+      : Math.min(48, Math.max(42, (leafCount - 1) * 10));
   }
   const treeLeft = 50 - totalTreeWidth / 2;
 
@@ -974,9 +974,9 @@ export function sourceRailPositions(
   const nodeXs = [...graphNodeByPath.values()].map((n) => n.x);
   const minTreeX = nodeXs.length ? Math.min(...nodeXs) : 50;
   const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
-  const railGap = callouts.length <= 2 ? 18 : callouts.length <= 4 ? 20 : 22;
-  const leftRailX = Math.max(10, minTreeX - railGap);
-  const rightRailX = Math.min(90, maxTreeX + railGap);
+  const railGap = callouts.length <= 2 ? 24 : callouts.length <= 4 ? 26 : 28;
+  const leftRailX = minTreeX - railGap;
+  const rightRailX = maxTreeX + railGap;
 
   const positions = new Map<string, LabelPosition>();
 
