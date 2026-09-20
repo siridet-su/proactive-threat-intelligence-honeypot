@@ -18,12 +18,9 @@ import {
   useState,
 } from "react";
 
-import {
-  ComboboxPopover,
-  ComboboxSearchInput,
-  useComboboxNavigation,
-} from "./ComboboxPopover";
+import { ComboboxPopover, ComboboxSearchInput, useComboboxNavigation } from "./ComboboxPopover";
 import { Calendar } from "./Calendar";
+import { TimePicker } from "./TimePicker";
 import type { DateRange } from "react-day-picker";
 
 import type { CloseReason } from "./auditSessionSearchManager";
@@ -144,27 +141,6 @@ export function AuditFilterControls({
       setTimeDropdownOpen(true);
     }
   }, [timeDropdownOpen, openTimeWithFocus]);
-
-  const handleCustomTimeChange = useCallback((type: 'from' | 'to', timeString: string) => {
-    if (!customDateRange) return;
-    const [hours, minutes] = timeString.split(':').map(Number);
-    if (isNaN(hours) || isNaN(minutes)) return;
-    
-    if (type === 'from' && customDateRange.from) {
-      const newDate = new Date(customDateRange.from);
-      newDate.setHours(hours, minutes, 0, 0);
-      onSelectCustomDateRange?.({ ...customDateRange, from: newDate });
-    } else if (type === 'to' && customDateRange.to) {
-      const newDate = new Date(customDateRange.to);
-      newDate.setHours(hours, minutes, 0, 0);
-      onSelectCustomDateRange?.({ ...customDateRange, to: newDate });
-    }
-  }, [customDateRange, onSelectCustomDateRange]);
-
-  const formatTimeInput = useCallback((date?: Date) => {
-    if (!date) return "";
-    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
-  }, []);
 
   const hasActiveFilters = hideHomeOnly || targetPath !== null;
 
@@ -333,25 +309,17 @@ export function AuditFilterControls({
               
               {customDateRange?.from && (
                 <div className="flex flex-col gap-2 px-3 pt-3 pb-1 mt-1 border-t border-border">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs text-text-subtle w-12">Start</label>
-                    <input 
-                      type="time"
-                      className="bg-surface-subtle border border-border rounded-md px-2 py-1 text-xs text-text outline-none focus:border-primary w-[100px] cursor-pointer"
-                      value={formatTimeInput(customDateRange.from)}
-                      onChange={(e) => handleCustomTimeChange('from', e.target.value)}
-                    />
-                  </div>
+                  <TimePicker 
+                    label="Start Time" 
+                    date={customDateRange.from} 
+                    onChange={(newDate) => onSelectCustomDateRange?.({ ...customDateRange, from: newDate })} 
+                  />
                   {customDateRange?.to && (
-                    <div className="flex items-center justify-between">
-                      <label className="text-xs text-text-subtle w-12">End</label>
-                      <input 
-                        type="time"
-                        className="bg-surface-subtle border border-border rounded-md px-2 py-1 text-xs text-text outline-none focus:border-primary w-[100px] cursor-pointer"
-                        value={formatTimeInput(customDateRange.to)}
-                        onChange={(e) => handleCustomTimeChange('to', e.target.value)}
-                      />
-                    </div>
+                    <TimePicker 
+                      label="End Time" 
+                      date={customDateRange.to} 
+                      onChange={(newDate) => onSelectCustomDateRange?.({ ...customDateRange, to: newDate })} 
+                    />
                   )}
                   
                   <button
