@@ -727,7 +727,20 @@ function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): 
     ];
   }
   if (targetRegexStr) match.auditVisitedPaths = { $elemMatch: { $regex: targetRegexStr } };
-  if (options.hideHome) match.auditHomeOnly = { $ne: true };
+  if (options.hideHome) {
+    const hideHomeCond = {
+      $or: [
+        { auditHomeOnly: false },
+        { auditVisitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
+      ]
+    };
+    if (match.$or) {
+      match.$and = [{ $or: match.$or }, hideHomeCond];
+      delete match.$or;
+    } else {
+      match.$or = hideHomeCond.$or;
+    }
+  }
   
   if (options.from != null || options.to != null) {
     match["lifecycle.closedAt"] = match["lifecycle.closedAt"] || {};

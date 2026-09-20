@@ -360,7 +360,11 @@ export function deriveAuthoritativeAuditMetrics({
     if (hideHomeOnly && isHomeOnlySession(s)) return false;
     if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
     if (hasTimeFilter && timeRange) {
-      const ts = getSessionTimestamp(s);
+      let ts = 0;
+      if ("lifecycle" in s && s.lifecycle?.closedAt) {
+        ts = new Date(s.lifecycle.closedAt).getTime();
+        if (Number.isNaN(ts)) ts = 0;
+      }
       if (ts > 0) {
         if (timeRange === "custom") {
           if (customDateRange?.from && ts < customDateRange.from.getTime()) return false;
@@ -950,7 +954,7 @@ export function useAuditDirectory({
     async (query: string) => {
       await store.searchSessions(query, null, { hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
     },
-    [store, hideHomeOnly, targetPathFilter],
+    [store, hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to],
   );
 
   const loadMoreSearch = useCallback(async () => {
