@@ -29,7 +29,10 @@ PROOF_GUARD_MODE_REAL = "REAL_PROOF"
 PROOF_GUARD_MODES = frozenset(
     {PROOF_GUARD_MODE_DISABLED, PROOF_GUARD_MODE_PRE_FLIGHT, PROOF_GUARD_MODE_REAL}
 )
-PROOF_GUARD_PROVIDERS = frozenset({"abuseipdb", "shodan_official"})
+# Keep this set aligned with the source-IP governance policy.  OTX is an
+# explicitly authorized bounded source-IP lookup in policy v2.2; omitting it
+# here makes the worker raise before it can record a provider result.
+PROOF_GUARD_PROVIDERS = frozenset({"abuseipdb", "otx", "shodan_official"})
 PROOF_GUARD_RESULT_CLASSES = frozenset(
     {"DATA", "NO_DATA", "AUTH_FAILED", "RATE_LIMITED", "REQUEST_FAILED", "NORMALIZATION_FAILED"}
 )

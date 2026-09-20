@@ -86,6 +86,17 @@ def test_provider_claims_are_distinct_and_completion_is_consumed(tmp_path: Path)
     assert all(row["normalized_source_ip_digest"] == source_ip_digest(IP) for row in rows)
 
 
+def test_otx_source_ip_claim_is_authorized_by_policy_v22(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    guard = _guard(storage)
+    decision = guard.claim_for_provider(
+        "otx", IP, cutoff_utc=CUTOFF, first_observed_at=OBSERVED
+    )
+    assert decision.allowed
+    assert decision.code == "CLAIMED"
+    assert decision.provider == "otx"
+
+
 def test_different_ip_cannot_replace_frozen_target(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     guard = _guard(storage)
