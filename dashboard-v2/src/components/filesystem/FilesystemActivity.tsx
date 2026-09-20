@@ -29,6 +29,7 @@ import { ResponseActionPanel } from "./ResponseActionPanel";
 import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { AuditFilesystemWorkspace } from "./AuditFilesystemWorkspace";
+import { LiveScopeBar } from "./LiveScopeBar";
 import { FilesystemPageHeader } from "./FilesystemPageHeader";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
@@ -79,6 +80,7 @@ function readStoredTimelineWidth(): number | null {
 export type ForensicTab = "replay" | "commands" | "actions";
 
 export function FilesystemActivity() {
+  const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");
   const shouldReduceMotion = useReducedMotion();
 
   // Selected session and path state
@@ -829,7 +831,6 @@ export function FilesystemActivity() {
         viewMode={viewMode}
         switchViewMode={switchViewMode}
         snapshot={snapshot}
-        selectedSession={selectedSession}
         streamState={streamState}
         freshnessState={freshnessState}
         handleReconnect={handleReconnect}
@@ -840,8 +841,25 @@ export function FilesystemActivity() {
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] xl:items-start">
-          <div className="min-w-0">
+        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start min-h-[calc(100dvh-12rem)] lg:flex-1">
+          {/* Mobile Tabs */}
+          <div className="flex lg:hidden gap-2 border-b border-border pb-2">
+            <button
+              onClick={() => setMobileTab('map')}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'map' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
+            >
+              Map
+            </button>
+            <button
+              onClick={() => setMobileTab('details')}
+              className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'details' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
+            >
+              Details
+            </button>
+          </div>
+
+          <div className={`min-w-0 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex h-full`}>
+            <LiveScopeBar snapshot={snapshot} />
             <TopologyCanvas
               snapshot={snapshot}
               regionStatus={regionStatus}
@@ -854,20 +872,23 @@ export function FilesystemActivity() {
               onRefresh={refresh}
               onReconnect={handleReconnect}
               staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
+              className="flex-1"
             />
           </div>
 
-          <FilesystemContextPanel
-            selectedSession={selectedSession}
-            selectedClosedSession={selectedClosedSession}
-            selectedNode={selectedNode}
-            sessions={snapshot?.sessions ?? []}
-            recentClosedSessions={snapshot?.recentClosedSessions ?? []}
-            selectedSessionId={selectedSessionId}
-            onSelectSession={selectSession}
-            onSelectPath={selectPath}
-            onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
-          />
+          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block h-full`}>
+            <FilesystemContextPanel
+              selectedSession={selectedSession}
+              selectedClosedSession={selectedClosedSession}
+              selectedNode={selectedNode}
+              sessions={snapshot?.sessions ?? []}
+              recentClosedSessions={snapshot?.recentClosedSessions ?? []}
+              selectedSessionId={selectedSessionId}
+              onSelectSession={selectSession}
+              onSelectPath={selectPath}
+              onOpenAudit={(sessionId) => switchViewMode("audit", sessionId)}
+            />
+          </div>
         </div>
       ) : isAuditFullscreen ? (
         /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
@@ -1067,6 +1088,24 @@ export function FilesystemActivity() {
             filteredClosedSessions={filteredClosedSessions}
             handleResetAuditFilters={handleResetAuditFilters}
             handleClearSelection={handleClearSelection}
+            directoryHasMore={directoryHasMore}
+            directoryIsLoading={directoryIsLoading}
+            directoryIsComplete={directoryIsComplete}
+            loadMoreDirectory={loadMoreDirectory}
+            auditSearchItems={auditSearchItems}
+            auditSearchHasMore={auditSearchHasMore}
+            auditSearchIsLoading={auditSearchIsLoading}
+            auditSearchIsComplete={auditSearchIsComplete}
+            searchAuditSessions={(q) => void searchAuditSessions(q)}
+            loadMoreAuditSearch={loadMoreAuditSearch}
+            clearAuditSearch={clearAuditSearch}
+            auditStatus={auditStatus}
+            auditErrorMessage={auditErrorMessage}
+            retryInitialDirectory={retryInitialDirectory}
+            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
+            handleSelectTargetPath={handleSelectTargetPath}
+            distinctPaths={distinctPaths}
+            homeOnlyCount={homeOnlyCount}
             auditSnapshot={auditSnapshot}
             snapshot={snapshot}
             regionStatus={regionStatus}
@@ -1112,56 +1151,10 @@ export function FilesystemActivity() {
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="flex flex-col sm:flex-row sm:items-center justify-end gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
             role="toolbar"
-            aria-label="Audit session and replay toolbar"
+            aria-label="Audit replay toolbar"
           >
-            <div
-              className="flex flex-wrap items-center gap-2 min-w-0"
-              role="group"
-              aria-label="Audited session and filter controls"
-            >
-              <AuditSessionSelect
-                sessions={filteredActiveSessions}
-                recentClosedSessions={filteredClosedSessions}
-                selectedSessionId={selectedSessionId}
-                onSelectSession={handleUserSelectSession}
-                totalCount={totalSessionsCount}
-                hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
-                onResetFilters={handleResetAuditFilters}
-                allSessionsList={allSessions}
-                directoryHasMore={directoryHasMore}
-                directoryIsLoading={directoryIsLoading}
-                directoryIsComplete={directoryIsComplete}
-                onLoadMoreDirectory={loadMoreDirectory}
-                searchResults={auditSearchItems}
-                searchHasMore={auditSearchHasMore}
-                searchIsLoading={auditSearchIsLoading}
-                searchIsComplete={auditSearchIsComplete}
-                onSearch={(q) => void searchAuditSessions(q)}
-                onLoadMoreSearch={loadMoreAuditSearch}
-                onClearSearch={clearAuditSearch}
-                hideHomeOnly={hideHomeOnly}
-                targetPathFilter={targetPathFilter}
-                status={auditStatus}
-                errorMessage={auditErrorMessage}
-                onRetry={retryInitialDirectory}
-              />
-              <div className="h-4 w-px bg-border hidden sm:block shrink-0" aria-hidden="true" />
-              <AuditFilterControls
-                hideHomeOnly={hideHomeOnly}
-                onToggleHideHomeOnly={handleToggleHideHomeOnly}
-                targetPath={targetPathFilter}
-                onSelectTargetPath={handleSelectTargetPath}
-                distinctPaths={distinctPaths}
-                homeOnlyCount={homeOnlyCount}
-                filteredCount={filteredSessionsCount}
-                totalCount={totalSessionsCount}
-                onResetFilters={handleResetAuditFilters}
-                selectedCanvasPath={selectedPath}
-              />
-            </div>
-
             <div
               className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
               role="toolbar"
@@ -1265,6 +1258,24 @@ export function FilesystemActivity() {
             filteredClosedSessions={filteredClosedSessions}
             handleResetAuditFilters={handleResetAuditFilters}
             handleClearSelection={handleClearSelection}
+            directoryHasMore={directoryHasMore}
+            directoryIsLoading={directoryIsLoading}
+            directoryIsComplete={directoryIsComplete}
+            loadMoreDirectory={loadMoreDirectory}
+            auditSearchItems={auditSearchItems}
+            auditSearchHasMore={auditSearchHasMore}
+            auditSearchIsLoading={auditSearchIsLoading}
+            auditSearchIsComplete={auditSearchIsComplete}
+            searchAuditSessions={(q) => void searchAuditSessions(q)}
+            loadMoreAuditSearch={loadMoreAuditSearch}
+            clearAuditSearch={clearAuditSearch}
+            auditStatus={auditStatus}
+            auditErrorMessage={auditErrorMessage}
+            retryInitialDirectory={retryInitialDirectory}
+            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
+            handleSelectTargetPath={handleSelectTargetPath}
+            distinctPaths={distinctPaths}
+            homeOnlyCount={homeOnlyCount}
             auditSnapshot={auditSnapshot}
             snapshot={snapshot}
             regionStatus={regionStatus}

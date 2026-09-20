@@ -1,12 +1,11 @@
 import { Radio, Route, RefreshCw } from "lucide-react";
-import type { FilesystemTopologySnapshot, FilesystemTopologySession, FilesystemClosedSession } from "@/lib/dashboardTypes";
+import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { formatPageBadgeText, type FreshnessState } from "./filesystemUtils";
 
 interface FilesystemPageHeaderProps {
   viewMode: "live" | "audit";
   switchViewMode: (mode: "live" | "audit") => void;
   snapshot: FilesystemTopologySnapshot | null;
-  selectedSession: FilesystemTopologySession | FilesystemClosedSession | null;
   streamState: "live" | "connecting" | "stale";
   freshnessState: FreshnessState;
   handleReconnect: () => void;
@@ -19,7 +18,6 @@ export function FilesystemPageHeader({
   viewMode,
   switchViewMode,
   snapshot,
-  selectedSession,
   streamState,
   freshnessState,
   handleReconnect,
@@ -63,11 +61,6 @@ export function FilesystemPageHeader({
           >
             <Radio className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Live Topology</span>
-            {snapshot?.sessions.length ? (
-              <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                {snapshot.sessions.length}
-              </span>
-            ) : null}
           </button>
 
           <button
@@ -83,11 +76,6 @@ export function FilesystemPageHeader({
           >
             <Route className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Session Audit & Replay</span>
-            {selectedSession && (
-              <span className="rounded-full bg-surface-subtle px-1.5 py-0.2 text-xs font-mono text-text-subtle border border-border">
-                .{selectedSession.sourceIp.split(".").pop()}
-              </span>
-            )}
           </button>
         </div>
 

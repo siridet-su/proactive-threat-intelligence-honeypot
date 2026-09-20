@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React from "react";
+import React, { useState } from "react";
+import { AuditScopeBar } from "./AuditScopeBar";
 import { AuditNoticeRegion } from "./AuditNoticeRegion";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { TimelineSplitter } from "./TimelineSplitter";
@@ -9,6 +10,25 @@ import type { FilesystemClosedSession, FilesystemTopologySession, FilesystemTopo
 import type { ForensicTab } from "./FilesystemActivity";
 
 export interface AuditFilesystemWorkspaceProps {
+  directoryHasMore: boolean;
+  directoryIsLoading: boolean;
+  directoryIsComplete: boolean;
+  loadMoreDirectory: () => void;
+  auditSearchItems: any[];
+  auditSearchHasMore: boolean;
+  auditSearchIsLoading: boolean;
+  auditSearchIsComplete: boolean;
+  searchAuditSessions: (q: string) => void;
+  loadMoreAuditSearch: () => void;
+  clearAuditSearch: () => void;
+  auditStatus: any;
+  auditErrorMessage: any;
+  retryInitialDirectory: () => void;
+  handleToggleHideHomeOnly: () => void;
+  handleSelectTargetPath: (path: string | null) => void;
+  distinctPaths: any;
+  homeOnlyCount: number;
+
   isFullscreen: boolean;
   expiredSessionId: string | null;
   allSessions: any[];
@@ -67,40 +87,92 @@ export interface AuditFilesystemWorkspaceProps {
 }
 
 export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
+  const [mobileTab, setMobileTab] = useState<"map" | "timeline">("map");
+
   return (
-    <div
-      className={
-        props.isFullscreen
-          ? "min-h-0 flex-1 flex overflow-hidden"
-          : "flex flex-col lg:flex-row items-stretch lg:h-[600px] xl:h-[660px]"
-      }
-    >
+    <div className="flex flex-col h-full w-full">
+      <div className="flex lg:hidden gap-2 border-b border-border pb-2 mb-4">
+        <button
+          onClick={() => setMobileTab("map")}
+          className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === "map" ? "bg-surface border-b-2 border-primary text-primary" : "text-text-subtle"}`}
+        >
+          Map
+        </button>
+        <button
+          onClick={() => setMobileTab("timeline")}
+          className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === "timeline" ? "bg-surface border-b-2 border-primary text-primary" : "text-text-subtle"}`}
+        >
+          Timeline
+        </button>
+      </div>
       <div
         className={
           props.isFullscreen
-            ? "min-w-0 flex-1 h-full flex flex-col"
-            : "min-w-0 flex-1 h-full flex flex-col min-h-[480px] lg:min-h-0"
+            ? "min-h-0 flex-1 flex overflow-hidden"
+            : "flex flex-col lg:flex-row items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1"
         }
       >
-        <AuditNoticeRegion
-          expiredSessionId={props.expiredSessionId}
-          allSessions={props.allSessions}
-          setExpiredSessionId={props.setExpiredSessionId}
-          handleUserSelectSession={props.handleUserSelectSession}
-          switchViewMode={props.switchViewMode}
-          hasActiveFilters={props.hasActiveFilters}
-          isSelectedFilteredOut={props.isSelectedFilteredOut}
-          filteredSessionsCount={props.filteredSessionsCount}
-          totalSessionsCount={props.totalSessionsCount}
-          targetPathFilter={props.targetPathFilter}
-          hideHomeOnly={props.hideHomeOnly}
-          selectedSession={props.selectedSession}
-          filteredActiveSessions={props.filteredActiveSessions}
-          filteredClosedSessions={props.filteredClosedSessions}
-          handleResetAuditFilters={props.handleResetAuditFilters}
-          handleClearSelection={props.handleClearSelection}
-        />
-        <TopologyCanvas
+        <div
+          className={
+            props.isFullscreen
+              ? `min-w-0 flex-1 h-full ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
+              : `min-w-0 flex-1 h-full ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
+          }
+        >
+          <AuditNoticeRegion
+            expiredSessionId={props.expiredSessionId}
+            allSessions={props.allSessions}
+            setExpiredSessionId={props.setExpiredSessionId}
+            handleUserSelectSession={props.handleUserSelectSession}
+            switchViewMode={props.switchViewMode}
+            hasActiveFilters={props.hasActiveFilters}
+            isSelectedFilteredOut={props.isSelectedFilteredOut}
+            filteredSessionsCount={props.filteredSessionsCount}
+            totalSessionsCount={props.totalSessionsCount}
+            targetPathFilter={props.targetPathFilter}
+            hideHomeOnly={props.hideHomeOnly}
+            selectedSession={props.selectedSession}
+            filteredActiveSessions={props.filteredActiveSessions}
+            filteredClosedSessions={props.filteredClosedSessions}
+            handleResetAuditFilters={props.handleResetAuditFilters}
+            handleClearSelection={props.handleClearSelection}
+          />
+          {!props.isFullscreen && (
+            <div className="mb-4">
+              <AuditScopeBar
+                filteredActiveSessions={props.filteredActiveSessions}
+                filteredClosedSessions={props.filteredClosedSessions}
+                selectedSessionId={props.selectedSessionId}
+                handleUserSelectSession={props.handleUserSelectSession}
+                totalSessionsCount={props.totalSessionsCount}
+                hideHomeOnly={props.hideHomeOnly}
+                targetPathFilter={props.targetPathFilter}
+                handleResetAuditFilters={props.handleResetAuditFilters}
+                allSessions={props.allSessions}
+                directoryHasMore={props.directoryHasMore}
+                directoryIsLoading={props.directoryIsLoading}
+                directoryIsComplete={props.directoryIsComplete}
+                loadMoreDirectory={props.loadMoreDirectory}
+                auditSearchItems={props.auditSearchItems}
+                auditSearchHasMore={props.auditSearchHasMore}
+                auditSearchIsLoading={props.auditSearchIsLoading}
+                auditSearchIsComplete={props.auditSearchIsComplete}
+                searchAuditSessions={props.searchAuditSessions}
+                loadMoreAuditSearch={props.loadMoreAuditSearch}
+                clearAuditSearch={props.clearAuditSearch}
+                auditStatus={props.auditStatus}
+                auditErrorMessage={props.auditErrorMessage}
+                retryInitialDirectory={props.retryInitialDirectory}
+                handleToggleHideHomeOnly={props.handleToggleHideHomeOnly}
+                handleSelectTargetPath={props.handleSelectTargetPath}
+                distinctPaths={props.distinctPaths}
+                homeOnlyCount={props.homeOnlyCount}
+                filteredSessionsCount={props.filteredSessionsCount}
+                selectedPath={props.selectedPath}
+              />
+            </div>
+          )}
+          <TopologyCanvas
           snapshot={props.auditSnapshot ?? props.snapshot}
           regionStatus={props.regionStatus}
           streamState={props.streamState}
@@ -135,7 +207,8 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
         />
       )}
 
-      <FilesystemTimelinePanel
+      <div className={`${mobileTab === "timeline" ? "flex" : "hidden"} lg:flex h-full`}>
+        <FilesystemTimelinePanel
         collapsed={props.isTimelineCollapsed}
         isDragging={props.isDraggingTimeline}
         width={props.timelineWidth}
@@ -163,6 +236,8 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
           }
         }}
       />
+      </div>
+    </div>
     </div>
   );
 }
