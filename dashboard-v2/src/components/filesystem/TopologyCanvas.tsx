@@ -1328,18 +1328,20 @@ export function TopologyCanvas({
                   </AnimatePresence>
                 </motion.div>
 
-                {(showMinimap || zoom !== 1) && (
-                  <TopologyMinimap
-                    graphNodes={graphNodes}
-                    graphNodeByPath={graphNodeByPath}
-                    graphCallouts={graphCallouts}
-                    selectedPath={selectedPath}
-                    selectedSessionId={selectedSessionId}
-                    minimapViewport={minimapViewport}
-                    positionForCallout={positionForCallout}
-                    onFit={fitTopology}
-                  />
-                )}
+                <AnimatePresence>
+                  {(showMinimap || zoom !== 1) && (
+                    <TopologyMinimap
+                      graphNodes={graphNodes}
+                      graphNodeByPath={graphNodeByPath}
+                      graphCallouts={graphCallouts}
+                      selectedPath={selectedPath}
+                      selectedSessionId={selectedSessionId}
+                      minimapViewport={minimapViewport}
+                      positionForCallout={positionForCallout}
+                      onFit={fitTopology}
+                    />
+                  )}
+                </AnimatePresence>
               </div>
 
               <TopologySummaryBar
