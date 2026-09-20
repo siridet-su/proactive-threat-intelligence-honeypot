@@ -225,6 +225,8 @@ export function FilesystemActivity() {
     await lookupRemoteAuditSessionRef.current?.(intentOrId, explicitHop);
   }, []);
 
+  const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d">("all");
+
   // URL state synchronization and routing hook
   const {
     viewMode,
@@ -944,6 +946,8 @@ export function FilesystemActivity() {
                   onToggleHideHomeOnly={handleToggleHideHomeOnly}
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
+                  timeRange={timeRange}
+                  onSelectTimeRange={setTimeRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1192,6 +1196,8 @@ export function FilesystemActivity() {
                   onToggleHideHomeOnly={handleToggleHideHomeOnly}
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
+                  timeRange={timeRange}
+                  onSelectTimeRange={setTimeRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}

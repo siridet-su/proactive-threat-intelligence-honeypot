@@ -3,6 +3,7 @@
 import {
   Check,
   ChevronDown,
+  Clock,
   Folder,
   FolderSearch,
   Home,
@@ -26,11 +27,15 @@ import {
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
 
+export type TimeRangeFilter = "all" | "24h" | "7d" | "30d";
+
 export interface AuditFilterControlsProps {
   hideHomeOnly: boolean;
   onToggleHideHomeOnly: () => void;
   targetPath: string | null;
   onSelectTargetPath: (path: string | null) => void;
+  timeRange: TimeRangeFilter;
+  onSelectTimeRange: (range: TimeRangeFilter) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
   filteredCount: number;
@@ -60,6 +65,8 @@ export function AuditFilterControls({
   onToggleHideHomeOnly,
   targetPath,
   onSelectTargetPath,
+  timeRange,
+  onSelectTimeRange,
   distinctPaths,
   homeOnlyCount,
   filteredCount,
@@ -77,6 +84,59 @@ export function AuditFilterControls({
   const pathTriggerId = `audit-path-filter-trigger-${generatedId}`;
   const pathPopupId = `${pathTriggerId}-popup`;
   const pathListboxId = `${pathTriggerId}-listbox`;
+
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
+  const timeTriggerRef = useRef<HTMLButtonElement>(null);
+  const timeTriggerId = `audit-time-filter-trigger-${generatedId}`;
+  const timePopupId = `${timeTriggerId}-popup`;
+  const timeListboxId = `${timeTriggerId}-listbox`;
+
+  const timeOptions: { value: TimeRangeFilter; label: string }[] = useMemo(() => [
+    { value: "all", label: "All time" },
+    { value: "24h", label: "Last 24 hours" },
+    { value: "7d", label: "Last 7 days" },
+    { value: "30d", label: "Last 30 days" },
+  ], []);
+
+  const selectedTimeIndex = timeOptions.findIndex(o => o.value === timeRange);
+
+  const {
+    activeIndex: timeActiveIndex,
+    registerOptionRef: registerTimeOptionRef,
+    openWithFocus: openTimeWithFocus,
+    handleTriggerKeyDown: handleTimeTriggerKeyDown,
+    handleOptionKeyDown: handleTimeOptionKeyDown,
+    handleOptionFocus: handleTimeOptionFocus,
+  } = useComboboxNavigation<{ value: TimeRangeFilter; label: string }>({
+    isOpen: timeDropdownOpen,
+    onOpen: () => setTimeDropdownOpen(true),
+    onClose: (reason) => {
+      setTimeDropdownOpen(false);
+      if (reason !== "outside") {
+        timeTriggerRef.current?.focus();
+      }
+    },
+    items: timeOptions,
+    getLabel: (item) => item.label,
+    getKey: (item) => item.value,
+    onSelect: (item) => {
+      onSelectTimeRange(item.value);
+      setTimeDropdownOpen(false);
+      timeTriggerRef.current?.focus();
+    },
+    triggerRef: timeTriggerRef,
+    selectedIndex: selectedTimeIndex,
+  });
+
+  const handleToggleTimeDropdown = useCallback(() => {
+    if (timeDropdownOpen) {
+      setTimeDropdownOpen(false);
+      timeTriggerRef.current?.focus();
+    } else {
+      openTimeWithFocus("first");
+      setTimeDropdownOpen(true);
+    }
+  }, [timeDropdownOpen, openTimeWithFocus]);
 
   const hasActiveFilters = hideHomeOnly || targetPath !== null;
 
@@ -175,6 +235,92 @@ export function AuditFilterControls({
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
+      {/* 0. Time Range Selector Dropdown */}
+      <div className="relative inline-block text-left">
+        <div className="flex items-center">
+          <button
+            ref={timeTriggerRef}
+            id={timeTriggerId}
+            type="button"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={timeDropdownOpen}
+            aria-controls={timeListboxId}
+            onClick={handleToggleTimeDropdown}
+            onKeyDown={handleTimeTriggerKeyDown}
+            title="Filter sessions by time range"
+            className={`h-9 min-h-9 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
+              timeRange !== "all"
+                ? "border-primary-border bg-primary-subtle text-primary shadow-xs hover:bg-primary-subtle/80"
+                : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
+            }`}
+          >
+            <Clock
+              className={`h-3.5 w-3.5 shrink-0 ${
+                timeRange !== "all" ? "text-primary" : "text-text-subtle"
+              }`}
+            />
+            <span className="font-sans font-medium text-xs">
+              Time: {timeOptions.find(o => o.value === timeRange)?.label.replace("Last ", "") ?? "All time"}
+            </span>
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform ${
+                timeDropdownOpen ? "rotate-180" : ""
+              }`}
+            />
+          </button>
+        </div>
+
+        <ComboboxPopover
+          id={timePopupId}
+          isOpen={timeDropdownOpen}
+          onClose={() => setTimeDropdownOpen(false)}
+          triggerRef={timeTriggerRef}
+          ariaLabel="Filter sessions by time range"
+          className="min-w-[200px] p-1.5"
+        >
+          <div
+            role="listbox"
+            id={timeListboxId}
+            aria-label="Filter sessions by time range"
+            tabIndex={-1}
+          >
+            {timeOptions.map((item, index) => {
+              const isSelected = item.value === timeRange;
+              return (
+                <button
+                  key={item.value}
+                  ref={registerTimeOptionRef(index, item.value)}
+                  type="button"
+                  role="option"
+                  id={`${timeListboxId}-opt-${index}`}
+                  aria-selected={isSelected}
+                  tabIndex={timeActiveIndex === index || (timeActiveIndex === -1 && index === 0) ? 0 : -1}
+                  onFocus={() => handleTimeOptionFocus(index, item.value)}
+                  onClick={() => {
+                    onSelectTimeRange(item.value);
+                    setTimeDropdownOpen(false);
+                    timeTriggerRef.current?.focus();
+                  }}
+                  onKeyDown={(e) => handleTimeOptionKeyDown(e, index)}
+                  className={`w-full flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                    isSelected
+                      ? "bg-primary-subtle text-primary"
+                      : timeActiveIndex === index
+                        ? "bg-surface-hover text-text"
+                        : "text-text-muted hover:bg-surface-hover hover:text-text"
+                  }`}
+                >
+                  <span className="flex-1">{item.label}</span>
+                  {isSelected && (
+                    <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </ComboboxPopover>
+      </div>
       {/* 1. Toggle: Hide /home Only */}
       <button
         type="button"
