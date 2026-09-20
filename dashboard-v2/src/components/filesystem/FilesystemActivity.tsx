@@ -23,6 +23,7 @@ import type {
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
+import type { DateRange } from "react-day-picker";
 import { AuditFilterControls } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
 import { ResponseActionPanel } from "./ResponseActionPanel";
@@ -224,6 +225,9 @@ export function FilesystemActivity() {
   const dispatchLookupRemoteAuditSession = useCallback(async (intentOrId: RemoteAuditLookupIntent | string, explicitHop?: string | null) => {
     await lookupRemoteAuditSessionRef.current?.(intentOrId, explicitHop);
   }, []);
+
+  const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d" | "custom">("all");
+  const [customDateRange, setCustomDateRange] = useState<DateRange | undefined>();
 
   // URL state synchronization and routing hook
   const {
@@ -944,6 +948,10 @@ export function FilesystemActivity() {
                   onToggleHideHomeOnly={handleToggleHideHomeOnly}
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
+                  timeRange={timeRange}
+                  onSelectTimeRange={setTimeRange}
+                  customDateRange={customDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1192,6 +1200,10 @@ export function FilesystemActivity() {
                   onToggleHideHomeOnly={handleToggleHideHomeOnly}
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
+                  timeRange={timeRange}
+                  onSelectTimeRange={setTimeRange}
+                  customDateRange={customDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}

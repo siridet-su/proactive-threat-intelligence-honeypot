@@ -1,8 +1,11 @@
 "use client";
 
 import {
+  ArrowRight,
+  Calendar as CalendarIcon,
   Check,
   ChevronDown,
+  Clock,
   Folder,
   FolderSearch,
   Home,
@@ -16,21 +19,109 @@ import {
   useRef,
   useState,
 } from "react";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
-import {
-  ComboboxPopover,
-  ComboboxSearchInput,
-  useComboboxNavigation,
-} from "./ComboboxPopover";
+import { ComboboxPopover, ComboboxSearchInput, useComboboxNavigation } from "./ComboboxPopover";
+import { Calendar } from "./Calendar";
+import { TimePicker } from "./TimePicker";
+import type { DateRange } from "react-day-picker";
+import { format, isSameDay } from "date-fns";
 
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
+
+export type TimeRangeFilter =
+  | "all"
+  | "15m"
+  | "1h"
+  | "6h"
+  | "24h"
+  | "7d"
+  | "30d"
+  | "today"
+  | "yesterday"
+  | "custom";
+
+export const PRESET_OPTIONS: { value: TimeRangeFilter; label: string; shortLabel: string }[] = [
+  { value: "all", label: "All time", shortLabel: "All time" },
+  { value: "15m", label: "Last 15 minutes", shortLabel: "Last 15m" },
+  { value: "1h", label: "Last 1 hour", shortLabel: "Last 1h" },
+  { value: "6h", label: "Last 6 hours", shortLabel: "Last 6h" },
+  { value: "24h", label: "Last 24 hours", shortLabel: "Last 24h" },
+  { value: "7d", label: "Last 7 days", shortLabel: "Last 7d" },
+  { value: "30d", label: "Last 30 days", shortLabel: "Last 30d" },
+  { value: "today", label: "Today", shortLabel: "Today" },
+  { value: "yesterday", label: "Yesterday", shortLabel: "Yesterday" },
+];
+
+export function getPresetDateRange(preset: TimeRangeFilter): DateRange | undefined {
+  const now = new Date();
+  switch (preset) {
+    case "15m":
+      return { from: new Date(now.getTime() - 15 * 60 * 1000), to: now };
+    case "1h":
+      return { from: new Date(now.getTime() - 60 * 60 * 1000), to: now };
+    case "6h":
+      return { from: new Date(now.getTime() - 6 * 3600 * 1000), to: now };
+    case "24h":
+      return { from: new Date(now.getTime() - 24 * 3600 * 1000), to: now };
+    case "7d":
+      return { from: new Date(now.getTime() - 7 * 86400 * 1000), to: now };
+    case "30d":
+      return { from: new Date(now.getTime() - 30 * 86400 * 1000), to: now };
+    case "today": {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      return { from: start, to: now };
+    }
+    case "yesterday": {
+      const yesterday = new Date(now.getTime() - 86400 * 1000);
+      const start = new Date(yesterday);
+      start.setHours(0, 0, 0, 0);
+      const end = new Date(yesterday);
+      end.setHours(23, 59, 59, 999);
+      return { from: start, to: end };
+    }
+    default:
+      return undefined;
+  }
+}
+
+export function formatTimeFilterLabel(timeRange: TimeRangeFilter, customDateRange?: DateRange): string {
+  if (timeRange === "all") return "All time";
+  if (timeRange === "custom" && customDateRange?.from) {
+    const fromStr = format(customDateRange.from, "MMM d, HH:mm");
+    if (!customDateRange.to) return `From ${fromStr}`;
+    const toStr = isSameDay(customDateRange.from, customDateRange.to)
+      ? format(customDateRange.to, "HH:mm")
+      : format(customDateRange.to, "MMM d, HH:mm");
+    return `${fromStr} - ${toStr}`;
+  }
+  const found = PRESET_OPTIONS.find((p) => p.value === timeRange);
+  return found?.shortLabel ?? timeRange;
+}
+
+export function formatDuration(from?: Date, to?: Date): string {
+  if (!from || !to) return "";
+  const diffMs = Math.max(0, to.getTime() - from.getTime());
+  const totalMins = Math.floor(diffMs / (60 * 1000));
+  const days = Math.floor(totalMins / (24 * 60));
+  const hours = Math.floor((totalMins % (24 * 60)) / 60);
+  const mins = totalMins % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
 
 export interface AuditFilterControlsProps {
   hideHomeOnly: boolean;
   onToggleHideHomeOnly: () => void;
   targetPath: string | null;
   onSelectTargetPath: (path: string | null) => void;
+  timeRange: TimeRangeFilter;
+  onSelectTimeRange: (range: TimeRangeFilter) => void;
+  customDateRange?: DateRange;
+  onSelectCustomDateRange?: (range: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
   filteredCount: number;
@@ -55,11 +146,26 @@ export function getPathOptionItemLabel(item: PathOptionItem): string {
   return item.label;
 }
 
+const STEP_TAB_COLUMN: Record<"date" | "time", number> = {
+  date: 1,
+  time: 2,
+};
+
+const STEP_CONTENT_VARIANTS = {
+  enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
+  center: { opacity: 1, x: 0 },
+  exit: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * -6 }),
+};
+
 export function AuditFilterControls({
   hideHomeOnly,
   onToggleHideHomeOnly,
   targetPath,
   onSelectTargetPath,
+  timeRange,
+  onSelectTimeRange,
+  customDateRange,
+  onSelectCustomDateRange,
   distinctPaths,
   homeOnlyCount,
   filteredCount,
@@ -77,6 +183,181 @@ export function AuditFilterControls({
   const pathTriggerId = `audit-path-filter-trigger-${generatedId}`;
   const pathPopupId = `${pathTriggerId}-popup`;
   const pathListboxId = `${pathTriggerId}-listbox`;
+
+  const [timeDropdownOpen, setTimeDropdownOpen] = useState(false);
+  const timeTriggerRef = useRef<HTMLButtonElement>(null);
+  const timeTriggerId = `audit-time-filter-trigger-${generatedId}`;
+  const timePopupId = `${timeTriggerId}-popup`;
+
+  const [activeStep, setActiveStep] = useState<"date" | "time">("date");
+  const [stepDirection, setStepDirection] = useState(1);
+  const shouldReduceMotion = useReducedMotion();
+
+  const handleStepChange = useCallback((nextStep: "date" | "time") => {
+    setActiveStep((currentStep) => {
+      if (nextStep !== currentStep) {
+        setStepDirection(STEP_TAB_COLUMN[nextStep] > STEP_TAB_COLUMN[currentStep] ? 1 : -1);
+      }
+      return nextStep;
+    });
+  }, []);
+  const [draftTimeRange, setDraftTimeRange] = useState<TimeRangeFilter>(timeRange);
+  const [draftRange, setDraftRange] = useState<DateRange | undefined>(customDateRange);
+  const [hasCustomTime, setHasCustomTime] = useState<boolean>(false);
+  const [isSelecting, setIsSelecting] = useState<boolean>(false);
+  const [selectionStart, setSelectionStart] = useState<Date | null>(null);
+
+  const handleToggleTimeDropdown = useCallback(() => {
+    if (timeDropdownOpen) {
+      setTimeDropdownOpen(false);
+      setIsSelecting(false);
+      setSelectionStart(null);
+      timeTriggerRef.current?.focus();
+    } else {
+      handleStepChange("date");
+      setIsSelecting(false);
+      setSelectionStart(null);
+      if (customDateRange?.from && customDateRange?.to) {
+        setDraftTimeRange(timeRange);
+        setDraftRange(customDateRange);
+        const isFullDay =
+          customDateRange.from.getHours() === 0 &&
+          customDateRange.from.getMinutes() === 0 &&
+          customDateRange.to.getHours() === 23 &&
+          customDateRange.to.getMinutes() === 59;
+        setHasCustomTime(!isFullDay);
+      } else if (timeRange !== "all" && timeRange !== "custom") {
+        setDraftTimeRange(timeRange);
+        setDraftRange(getPresetDateRange(timeRange));
+        setHasCustomTime(false);
+      } else {
+        // Default to Today: from 00:00 to current time (Now)
+        const now = new Date();
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        setDraftRange({ from: start, to: now });
+        setDraftTimeRange("today");
+        setHasCustomTime(false);
+      }
+      setTimeDropdownOpen(true);
+    }
+  }, [timeDropdownOpen, timeRange, customDateRange]);
+
+  const handleSelectPreset = useCallback((preset: TimeRangeFilter) => {
+    setIsSelecting(false);
+    setSelectionStart(null);
+    setDraftTimeRange(preset);
+    setHasCustomTime(false);
+    if (preset === "all") {
+      setDraftRange(undefined);
+    } else {
+      setDraftRange(getPresetDateRange(preset));
+    }
+  }, []);
+
+  const handleCustomRangeSelect = useCallback(
+    (_newRange: DateRange | undefined, selectedDay?: Date) => {
+      setDraftTimeRange("custom");
+      setHasCustomTime(false);
+      const now = new Date();
+      const clickedDay = selectedDay ?? _newRange?.from ?? now;
+
+      if (!isSelecting || !selectionStart) {
+        // First click: select this day as a single day
+        setIsSelecting(true);
+        setSelectionStart(clickedDay);
+
+        const start = new Date(clickedDay);
+        start.setHours(0, 0, 0, 0);
+
+        let end: Date;
+        if (isSameDay(clickedDay, now)) {
+          // If Today: default to current time (Now)
+          end = new Date(now);
+        } else {
+          // If other date: default to all time (23:59:59.999)
+          end = new Date(clickedDay);
+          end.setHours(23, 59, 59, 999);
+        }
+
+        setDraftRange({ from: start, to: end });
+      } else {
+        // Second click: complete range from selectionStart to clickedDay
+        setIsSelecting(false);
+        setSelectionStart(null);
+
+        const startDay = clickedDay < selectionStart ? clickedDay : selectionStart;
+        const endDay = clickedDay < selectionStart ? selectionStart : clickedDay;
+
+        const start = new Date(startDay);
+        start.setHours(0, 0, 0, 0);
+
+        const end = new Date(endDay);
+        if (isSameDay(startDay, endDay) && isSameDay(endDay, now)) {
+          // If both start and end are Today: current time
+          end.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+        } else {
+          // Range or single day on other date: all time (23:59:59.999)
+          end.setHours(23, 59, 59, 999);
+        }
+
+        setDraftRange({ from: start, to: end });
+      }
+    },
+    [isSelecting, selectionStart],
+  );
+
+  const handleApplyTimeFilter = useCallback(() => {
+    const now = new Date();
+    let finalRange = draftRange;
+    if (finalRange?.from && !finalRange?.to) {
+      if (isSameDay(finalRange.from, now)) {
+        finalRange = { from: finalRange.from, to: now };
+      } else {
+        const endOfDay = new Date(finalRange.from);
+        if (hasCustomTime) {
+          endOfDay.setHours(finalRange.from.getHours(), finalRange.from.getMinutes(), 59, 999);
+        } else {
+          endOfDay.setHours(23, 59, 59, 999);
+        }
+        finalRange = { from: finalRange.from, to: endOfDay };
+      }
+    }
+    setIsSelecting(false);
+    setSelectionStart(null);
+    onSelectTimeRange(draftTimeRange);
+    onSelectCustomDateRange?.(finalRange);
+    setTimeDropdownOpen(false);
+    timeTriggerRef.current?.focus();
+  }, [draftTimeRange, draftRange, hasCustomTime, onSelectTimeRange, onSelectCustomDateRange]);
+
+  const handleSwitchToTime = useCallback(() => {
+    const now = new Date();
+    if (!draftRange?.from) {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      setDraftRange({ from: start, to: now });
+      setDraftTimeRange("today");
+    } else if (!draftRange.to) {
+      if (isSameDay(draftRange.from, now)) {
+        setDraftRange({ from: draftRange.from, to: now });
+      } else {
+        const endOfDay = new Date(draftRange.from);
+        endOfDay.setHours(23, 59, 59, 999);
+        setDraftRange({ from: draftRange.from, to: endOfDay });
+      }
+    }
+    setIsSelecting(false);
+    setSelectionStart(null);
+    handleStepChange("time");
+  }, [draftRange]);
+
+  const handleClearTimeFilter = useCallback(() => {
+    setIsSelecting(false);
+    setSelectionStart(null);
+    onSelectTimeRange("all");
+    onSelectCustomDateRange?.(undefined);
+  }, [onSelectTimeRange, onSelectCustomDateRange]);
 
   const hasActiveFilters = hideHomeOnly || targetPath !== null;
 
@@ -175,6 +456,292 @@ export function AuditFilterControls({
 
   return (
     <div className={`flex flex-wrap items-center gap-1.5 ${className ?? ""}`}>
+      {/* 0. Time Range Selector Dropdown */}
+      <div className="relative inline-block text-left">
+        <div className="flex items-center">
+          <button
+            ref={timeTriggerRef}
+            id={timeTriggerId}
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={timeDropdownOpen}
+            aria-controls={timePopupId}
+            onClick={handleToggleTimeDropdown}
+            title="Filter sessions by time range"
+            className={`h-9 min-h-9 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
+              timeRange !== "all"
+                ? "border-primary-border bg-primary-subtle text-primary shadow-xs hover:bg-primary-subtle/80"
+                : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
+            }`}
+          >
+            <Clock
+              className={`h-3.5 w-3.5 shrink-0 ${
+                timeRange !== "all" ? "text-primary" : "text-text-subtle"
+              }`}
+            />
+            <span className="font-sans font-medium text-xs">
+              Time: {formatTimeFilterLabel(timeRange, customDateRange)}
+            </span>
+            {timeRange !== "all" ? (
+              <span
+                role="button"
+                tabIndex={0}
+                aria-label="Clear time filter"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleClearTimeFilter();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.stopPropagation();
+                    handleClearTimeFilter();
+                  }
+                }}
+                className="ml-0.5 rounded p-0.5 hover:bg-primary/20 text-primary transition-colors cursor-pointer"
+                title="Clear time filter"
+              >
+                <X className="h-3 w-3" />
+              </span>
+            ) : (
+              <ChevronDown
+                className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform duration-150 ${
+                  timeDropdownOpen ? "rotate-180" : ""
+                }`}
+              />
+            )}
+          </button>
+        </div>
+
+        <ComboboxPopover
+          id={timePopupId}
+          isOpen={timeDropdownOpen}
+          onClose={() => setTimeDropdownOpen(false)}
+          triggerRef={timeTriggerRef}
+          ariaLabel="Filter sessions by time range"
+          className="w-[336px] max-w-[340px] p-0 overflow-hidden shadow-2xl border-border bg-surface-raised rounded-2xl"
+        >
+          <div className="flex flex-col text-text">
+            {/* Top Segmented Step Tabs */}
+            <div className="p-2 border-b border-border/60 bg-surface-subtle/40">
+              <div 
+                className="relative isolate grid w-full grid-cols-2 gap-1 rounded-xl border border-border/60 bg-surface-subtle p-1 text-xs"
+                role="tablist"
+              >
+                <div aria-hidden="true" className="pointer-events-none absolute inset-1 grid grid-cols-2 gap-1">
+                  <motion.span
+                    layout="position"
+                    className="rounded-lg border border-border/50 bg-surface shadow-xs"
+                    style={{ gridColumnStart: STEP_TAB_COLUMN[activeStep] }}
+                    transition={
+                      shouldReduceMotion
+                        ? { duration: 0 }
+                        : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
+                    }
+                  />
+                </div>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStep === "date"}
+                  onClick={() => handleStepChange("date")}
+                  className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
+                    activeStep === "date"
+                      ? "text-text font-semibold"
+                      : "text-text-muted hover:text-text font-medium"
+                  }`}
+                >
+                  <CalendarIcon className={`h-3.5 w-3.5 ${activeStep === "date" ? "text-primary" : "text-text-subtle"}`} />
+                  <span>Date Range</span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeStep === "time"}
+                  onClick={handleSwitchToTime}
+                  className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
+                    activeStep === "time"
+                      ? "text-text font-semibold"
+                      : "text-text-muted hover:text-text font-medium"
+                  }`}
+                >
+                  <Clock className={`h-3.5 w-3.5 ${activeStep === "time" ? "text-primary" : "text-text-subtle"}`} />
+                  <span>Time Range</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="relative overflow-hidden">
+              <AnimatePresence initial={false} mode="popLayout" custom={stepDirection}>
+                <motion.div
+                  key={activeStep}
+                  custom={stepDirection}
+                  variants={STEP_CONTENT_VARIANTS}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={
+                    shouldReduceMotion
+                      ? { duration: 0 }
+                      : { duration: 0.18, ease: [0.4, 0, 0.2, 1] }
+                  }
+                  className="flex flex-col w-full"
+                >
+                  {activeStep === "date" ? (
+                    <div className="flex flex-col">
+                      {/* Quick Presets row */}
+                      <div className="grid grid-cols-5 gap-1.5 px-3 pt-3 pb-2">
+                        {[
+                          { key: "all", label: "All" },
+                          { key: "today", label: "Today" },
+                          { key: "yesterday", label: "Yesterday" },
+                          { key: "24h", label: "24h" },
+                          { key: "7d", label: "7d" },
+                        ].map((p) => {
+                          const isSelected = draftTimeRange === p.key;
+                          return (
+                            <button
+                              key={p.key}
+                              type="button"
+                              onClick={() => handleSelectPreset(p.key as TimeRangeFilter)}
+                              className={`h-7 flex items-center justify-center rounded-md text-[11px] font-sans transition-all cursor-pointer text-center tracking-tight ${
+                                isSelected
+                                  ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
+                                  : "bg-surface hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Calendar */}
+                      <div className="px-1 py-0.5 flex justify-center">
+                        <Calendar
+                          mode="range"
+                          captionLayout="dropdown-buttons"
+                          fromYear={2020}
+                          toYear={new Date().getFullYear()}
+                          selected={
+                            isSelecting && selectionStart
+                              ? { from: selectionStart, to: undefined }
+                              : draftRange
+                          }
+                          onSelect={handleCustomRangeSelect}
+                          numberOfMonths={1}
+                          className="pointer-events-auto"
+                        />
+                      </div>
+
+                      {/* Selected Date Summary */}
+                      <div className="px-3 py-1.5 flex items-center justify-center text-[11px] font-mono text-text-muted border-t border-border/40 bg-surface-subtle/30">
+                        {draftTimeRange === "all" ? (
+                          <span className="text-text-subtle">All time</span>
+                        ) : draftRange?.from ? (
+                          <span className="flex items-center gap-1.5">
+                            <strong className="text-text font-semibold">{format(draftRange.from, "MMM d, yyyy")}</strong>
+                            {draftRange.to && !isSameDay(draftRange.from, draftRange.to) && (
+                              <>
+                                <ArrowRight className="h-3 w-3 text-primary/70" />
+                                <strong className="text-text font-semibold">{format(draftRange.to, "MMM d, yyyy")}</strong>
+                              </>
+                            )}
+                          </span>
+                        ) : (
+                          <span className="text-text-subtle">Select a date</span>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Step 2: Time Range Precision View */
+                    <div className="flex flex-col">
+                      {/* Header info */}
+                      <div className="flex items-center justify-between px-3.5 pt-2.5 pb-1">
+                        <div className="flex items-center gap-1.5">
+                          <CalendarIcon className="h-3.5 w-3.5 text-primary" />
+                          <span className="flex items-center gap-1.5 text-xs font-mono font-semibold text-text">
+                            {draftRange?.from ? (
+                              <>
+                                <span>{format(draftRange.from, "MMM d")}</span>
+                                {draftRange.to && !isSameDay(draftRange.from, draftRange.to) && (
+                                  <>
+                                    <ArrowRight className="h-3 w-3 text-primary/70" />
+                                    <span>{format(draftRange.to, "MMM d")}</span>
+                                  </>
+                                )}
+                              </>
+                            ) : (
+                              <span>Today</span>
+                            )}
+                          </span>
+                        </div>
+                        {formatDuration(draftRange?.from, draftRange?.to) && (
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-subtle border border-border/70 text-text-muted">
+                            {formatDuration(draftRange?.from, draftRange?.to)}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Time Pickers (Stacked cleanly) */}
+                      <div className="p-3 flex flex-col gap-2.5">
+                        <TimePicker
+                          label="Start Time"
+                          variant="start"
+                          date={draftRange?.from}
+                          onChange={(newDate) => {
+                            setHasCustomTime(true);
+                            setDraftTimeRange("custom");
+                            setDraftRange((prev) => ({
+                              from: newDate,
+                              to: prev?.to ?? newDate,
+                            }));
+                          }}
+                        />
+                        <TimePicker
+                          label="End Time"
+                          variant="end"
+                          date={draftRange?.to ?? draftRange?.from}
+                          onChange={(newDate) => {
+                            setHasCustomTime(true);
+                            setDraftTimeRange("custom");
+                            setDraftRange((prev) => ({
+                              from: prev?.from ?? newDate,
+                              to: newDate,
+                            }));
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+
+            {/* Unified Popover Footer: Cancel & Apply */}
+            <div className="grid grid-cols-2 gap-2.5 p-3 bg-surface-subtle/50 border-t border-border/60">
+              <button
+                type="button"
+                onClick={() => {
+                  setTimeDropdownOpen(false);
+                  timeTriggerRef.current?.focus();
+                }}
+                className="h-9 w-full flex items-center justify-center rounded-xl text-xs font-sans font-medium text-text-muted hover:text-text bg-surface hover:bg-surface-hover border border-border/80 shadow-2xs cursor-pointer transition-all active:scale-[0.98]"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApplyTimeFilter}
+                className="h-9 w-full flex items-center justify-center gap-1.5 rounded-xl text-xs font-sans font-semibold bg-primary hover:bg-primary-action text-on-primary shadow-xs cursor-pointer transition-all active:scale-[0.98]"
+              >
+                <Check className="h-4 w-4" />
+                <span>Apply</span>
+              </button>
+            </div>
+          </div>
+        </ComboboxPopover>
+      </div>
       {/* 1. Toggle: Hide /home Only */}
       <button
         type="button"
