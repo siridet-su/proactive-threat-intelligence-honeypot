@@ -730,7 +730,7 @@ function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): 
   if (options.hideHome) {
     const hideHomeCond = {
       $or: [
-        { auditHomeOnly: false },
+        { auditVisitedPaths: { $exists: false } },
         { auditVisitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
       ]
     };
@@ -775,7 +775,22 @@ function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptio
       },
     });
   }
-  if (options.hideHome) clauses.push({ $ne: ["$auditHomeOnly", true] });
+  if (options.hideHome) {
+    clauses.push({
+      $or: [
+        { $eq: [{ $type: "$auditVisitedPaths" }, "missing"] },
+        {
+          $anyElementTrue: {
+            $map: {
+              input: { $ifNull: ["$auditVisitedPaths", []] },
+              as: "path",
+              in: { $not: { $regexMatch: { input: "$path", regex: "^/home(/|$)" } } }
+            }
+          }
+        }
+      ]
+    });
+  }
   
   if (options.from != null) clauses.push({ $gte: ["$lifecycle.closedAt", new Date(options.from)] });
   if (options.to != null) clauses.push({ $lte: ["$lifecycle.closedAt", new Date(options.to)] });
