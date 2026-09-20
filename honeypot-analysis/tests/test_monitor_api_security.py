@@ -275,6 +275,7 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("LOCAL_DASHBOARD_COMMANDS_ENABLED", "true")
     sensitive_payload = {
         "ok": True,
         "schema_version": "monitor.internal_command_view.v1",
