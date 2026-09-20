@@ -128,6 +128,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
   const zoomRef = useRef(1);
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
   const hasUserManuallyAdjustedViewRef = useRef(false);
+  const prevSurfaceSizeRef = useRef<{ w: number; h: number } | null>(null);
 
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = clampZoom(value);
@@ -358,9 +359,12 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
     const plane = graphPlaneRef.current;
     if (!surface || !plane) return;
     const handleResize = () => {
+      const currentW = surface.clientWidth;
+      const currentH = surface.clientHeight;
+
       setMapMetrics({
-        surfaceWidth: surface.clientWidth,
-        surfaceHeight: surface.clientHeight,
+        surfaceWidth: currentW,
+        surfaceHeight: currentH,
         planeWidth: plane.offsetWidth,
         planeHeight: plane.offsetHeight,
         planeLeft: plane.offsetLeft,
@@ -381,7 +385,18 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
             setZoom(fit.zoom);
           }
         }
+      } else if (prevSurfaceSizeRef.current) {
+        const deltaW = currentW - prevSurfaceSizeRef.current.w;
+        const deltaH = currentH - prevSurfaceSizeRef.current.h;
+        if (Math.abs(deltaW) > 0 || Math.abs(deltaH) > 0) {
+          const nextPanX = panRef.current.x + deltaW / 2;
+          const nextPanY = panRef.current.y + deltaH / 2;
+          panRef.current = { x: nextPanX, y: nextPanY };
+          setPan(panRef.current);
+        }
       }
+
+      prevSurfaceSizeRef.current = { w: currentW, h: currentH };
     };
     handleResize();
     const observer = new ResizeObserver(handleResize);
