@@ -16,6 +16,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import type { GraphCallout, TopologyDensityMode, TopologyDensityPreference } from "./filesystemUtils";
 
 interface TopologyToolbarProps {
@@ -182,17 +183,22 @@ export function TopologyToolbar({
           >
             <Settings2 className="h-3.5 w-3.5 text-text-subtle" aria-hidden="true" />
             <span className="font-medium capitalize hidden sm:inline">View</span>
-            <ChevronDown className="h-3 w-3 opacity-60" aria-hidden="true" />
+            <ChevronDown className={`h-3 w-3 opacity-60 transition-transform duration-200 ${viewMenuOpen ? "rotate-180" : ""}`} aria-hidden="true" />
             {totalOverlaps > 0 && (
               <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
             )}
           </button>
-          {viewMenuOpen && (
-            <div
-              id="topology-view-settings"
-              aria-label="View settings"
-              className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
-            >
+          <AnimatePresence>
+            {viewMenuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -4, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                transition={{ duration: 0.15, ease: "easeOut" }}
+                id="topology-view-settings"
+                aria-label="View settings"
+                className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 origin-top-right rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
+              >
               <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
                 Interaction Mode
               </div>
@@ -295,8 +301,9 @@ export function TopologyToolbar({
                 <RotateCcw className="h-4 w-4" aria-hidden="true" />
                 Restore default layout
               </button>
-            </div>
+            </motion.div>
           )}
+          </AnimatePresence>
         </div>
       </div>
 
