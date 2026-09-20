@@ -484,34 +484,28 @@ export function AuditFilterControls({
             <span className="font-sans font-medium text-xs">
               Time: {formatTimeFilterLabel(timeRange, customDateRange)}
             </span>
-            {timeRange !== "all" ? (
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label="Clear time filter"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleClearTimeFilter();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    handleClearTimeFilter();
-                  }
-                }}
-                className="ml-1 flex h-4 w-4 items-center justify-center rounded-sm hover:bg-primary/20 hover:text-primary-hover focus:outline-none focus:ring-1 focus:ring-primary"
-                title="Clear time filter"
-              >
-                <X className="h-3 w-3" />
-              </span>
-            ) : (
-              <ChevronDown
-                className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
-                  timeDropdownOpen ? "rotate-180 text-primary" : "text-text-subtle"
-                }`}
-              />
-            )}
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
+                timeDropdownOpen ? "rotate-180 text-primary" : "text-text-subtle"
+              }`}
+            />
           </button>
+
+          {/* Quick Clear Time Filter Button */}
+          {timeRange !== "all" && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleClearTimeFilter();
+              }}
+              title="Clear time filter"
+              aria-label="Clear time filter"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         <ComboboxPopover
