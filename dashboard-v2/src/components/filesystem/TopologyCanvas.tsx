@@ -385,7 +385,6 @@ export function TopologyCanvas({
 
   const totalLiveSources = liveSourceCount;
   const renderedSourcesCount = graphCallouts.length;
-  const isSourcesTruncated = totalLiveSources > renderedSourcesCount;
 
 
 
@@ -625,8 +624,6 @@ export function TopologyCanvas({
           resetMapWorkspace={resetMapWorkspace}
           densityPreference={densityPreference}
           setDensityPreference={setDensityPreference}
-          showGrid={showGrid}
-          setShowGrid={setShowGrid}
           effectiveDensityMode={effectiveDensityMode}
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
@@ -1352,9 +1349,9 @@ export function TopologyCanvas({
                 densityAnalysisTotalNodes={densityAnalysis.totalNodes}
                 densityPreference={densityPreference}
                 setDensityPreference={setDensityPreference}
-          showGrid={showGrid}
-          setShowGrid={setShowGrid}
                 setIsPathsExpanded={setIsPathsExpanded}
+                effectiveSessionsLength={effectiveSessions.length}
+                isSourcesTruncated={totalLiveSources > renderedSourcesCount}
                 renderedSourcesCount={renderedSourcesCount}
                 totalLiveSources={totalLiveSources}
                 isSourcesExpanded={isSourcesExpanded}
