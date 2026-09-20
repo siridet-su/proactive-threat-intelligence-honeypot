@@ -66,17 +66,7 @@ interface NavigationApplicationErrorState {
   message: string;
 }
 
-function readStoredTimelineWidth(): number | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
-    if (!saved) return null;
-    const parsed = parseInt(saved, 10);
-    return Number.isFinite(parsed) ? clampTimelineSidebarWidth(parsed) : null;
-  } catch {
-    return null;
-  }
-}
+import { useTimelineDrag } from "./useTimelineDrag";
 
 export type ForensicTab = "replay" | "evidence" | "actions";
 
@@ -93,20 +83,7 @@ export function FilesystemActivity() {
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
-  const persistedTimelineWidth = useSyncExternalStore(
-    useCallback(() => () => {}, []),
-    readStoredTimelineWidth,
-    () => null,
-  );
-  const [timelineWidthOverride, setTimelineWidthOverride] = useState<number | null>(null);
-  const timelineWidth = timelineWidthOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-  const setTimelineWidth = useCallback((next: number | ((current: number) => number)) => {
-    setTimelineWidthOverride((currentOverride) => {
-      const current = currentOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-      return typeof next === "function" ? next(current) : next;
-    });
-  }, [persistedTimelineWidth]);
-  const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
+
   const [activeForensicTab, setActiveForensicTab] = useState<ForensicTab>("replay");
 
   // Cross-cutting refs
@@ -141,69 +118,13 @@ export function FilesystemActivity() {
   }, [selectedSessionId]);
 
   // Persist timeline width preference
-  useEffect(() => {
-    if (typeof window !== "undefined" && (persistedTimelineWidth !== null || timelineWidthOverride !== null)) {
-      try {
-        localStorage.setItem(TIMELINE_SIDEBAR_STORAGE_KEY, String(timelineWidth));
-      } catch {
-        // ignore
-      }
-    }
-  }, [persistedTimelineWidth, timelineWidth, timelineWidthOverride]);
-
-  // Prevent text selection and preserve resize cursor during drag
-  useEffect(() => {
-    if (isDraggingTimeline) {
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = "col-resize";
-    } else {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    }
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-  }, [isDraggingTimeline]);
-
-  // Draggable splitter mouse handler (relative delta formula)
-  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingTimeline(true);
-    const startX = e.clientX;
-    const startWidth = timelineWidth;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX;
-      setTimelineWidth(clampTimelineSidebarWidth(startWidth + deltaX, window.innerWidth));
-    };
-
-    const onMouseUp = () => {
-      setIsDraggingTimeline(false);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [setTimelineWidth, timelineWidth]);
-
-  const handleResetTimelineWidth = useCallback(() => {
-    setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
-  }, [setTimelineWidth]);
-
-  const handleSplitterKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr + 24, window.innerWidth));
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr - 24, window.innerWidth));
-    } else if (e.key === "Enter" || e.key === " " || e.key === "Home") {
-      e.preventDefault();
-      setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
-    }
-  }, [setTimelineWidth]);
+  const {
+    timelineWidth,
+    isDraggingTimeline,
+    handleSplitterMouseDown,
+    handleResetTimelineWidth,
+    handleSplitterKeyDown,
+  } = useTimelineDrag();
 
   // Streaming & snapshot management hook
   const {

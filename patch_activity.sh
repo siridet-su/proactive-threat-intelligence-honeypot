@@ -1,0 +1,2 @@
+sed -i 's/export function FilesystemActivity() {/export function FilesystemActivity() {\n  const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");/' ./dashboard-v2/src/components/filesystem/FilesystemActivity.tsx
+sed -i 's/import { AuditFilesystemWorkspace } from "\.\/AuditFilesystemWorkspace";/import { AuditFilesystemWorkspace } from "\.\/AuditFilesystemWorkspace";\nimport { LiveScopeBar } from "\.\/LiveScopeBar";/' ./dashboard-v2/src/components/filesystem/FilesystemActivity.tsx

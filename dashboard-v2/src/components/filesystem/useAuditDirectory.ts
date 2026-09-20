@@ -959,12 +959,12 @@ export function useAuditDirectory({
 
   const loadMoreSearch = useCallback(async () => {
     await store.loadMoreSearch({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
-  }, [store, hideHomeOnly, targetPathFilter]);
+  }, [store, hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to]);
 
   const retryInitialDirectory = useCallback(async () => {
     await store.retryInitial({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
     await store.fetchSummary({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to });
-  }, [store, hideHomeOnly, targetPathFilter]);
+  }, [store, hideHomeOnly, targetPathFilter, timeRangeMs?.from, timeRangeMs?.to]);
 
   const currentScopeKey = useMemo(
     () => createAuditScopeKey({ hideHome: hideHomeOnly, targetPath: targetPathFilter, from: timeRangeMs?.from, to: timeRangeMs?.to }),

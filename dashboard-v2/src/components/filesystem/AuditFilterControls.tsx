@@ -241,7 +241,7 @@ export function AuditFilterControls({
       }
       setTimeDropdownOpen(true);
     }
-  }, [timeDropdownOpen, timeRange, customDateRange]);
+  }, [timeDropdownOpen, timeRange, customDateRange, handleStepChange]);
 
   const handleSelectPreset = useCallback((preset: TimeRangeFilter) => {
     setIsSelecting(false);
@@ -350,7 +350,7 @@ export function AuditFilterControls({
     setIsSelecting(false);
     setSelectionStart(null);
     handleStepChange("time");
-  }, [draftRange]);
+  }, [draftRange, handleStepChange]);
 
   const handleClearTimeFilter = useCallback(() => {
     setIsSelecting(false);
