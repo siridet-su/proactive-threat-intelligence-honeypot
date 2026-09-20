@@ -770,7 +770,7 @@ export function TopologyCanvas({
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="relative min-h-[500px] min-w-[860px] origin-top-left overflow-visible"
+                  className="relative h-[1500px] w-[1500px] origin-top-left overflow-visible"
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
