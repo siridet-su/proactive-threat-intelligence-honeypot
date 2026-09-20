@@ -209,11 +209,19 @@ export function TopologySummaryBar({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Topology map legend">
           <span className="flex items-center gap-1.5">
             <span className="h-px w-3 bg-border-strong" aria-hidden="true" />
-            <span>Filesystem route</span>
+            <span>Hierarchy edge</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-            <span>Selected source route</span>
+            <span>Attacker transition</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
+            <span>Entry points</span>
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="flex h-3.5 w-3.5 items-center justify-center rounded bg-primary font-mono text-[8px] font-bold text-surface shadow-xs" aria-hidden="true">H</span>
+            <span>Current hop</span>
           </span>
         </div>
       </div>

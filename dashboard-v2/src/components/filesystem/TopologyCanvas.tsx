@@ -745,6 +745,27 @@ export function TopologyCanvas({
                       <span className="text-text-muted">to finish</span>
                     </motion.div>
                   )}
+                  {activeHop?.toPath && selectedPath && selectedPath !== activeHop.toPath && (
+                    <motion.div
+                      role="status"
+                      initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, y: -6 }}
+                      transition={{ duration: reducedMotion ? 0 : 0.15, ease: "easeOut" }}
+                      className="pointer-events-none absolute left-1/2 top-4 z-50 flex min-h-9 -translate-x-1/2 items-center gap-2 rounded-lg border border-primary-border bg-surface-raised px-3 text-xs text-text shadow-sm"
+                    >
+                      <ScanLine className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                      <strong className="font-semibold text-primary">Inspecting directory</strong>
+                      <span className="text-border" aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={() => onSelectPath(activeHop.toPath)}
+                        className="pointer-events-auto rounded border border-border bg-surface-subtle px-2 py-0.5 font-semibold text-text hover:bg-surface hover:text-text transition-colors shadow-2xs"
+                      >
+                        Return to current hop
+                      </button>
+                    </motion.div>
+                  )}
                 </AnimatePresence>
 
                 <motion.div
@@ -768,6 +789,11 @@ export function TopologyCanvas({
                   }
                 >
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+                    <defs>
+                      <marker id="arrowhead-primary" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
+                        <polygon points="0 0, 4 2, 0 4" fill="var(--primary)" opacity="0.6" />
+                      </marker>
+                    </defs>
                     <AnimatePresence initial={false}>
                       {graphNodes.map((node) => {
                         const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
@@ -838,6 +864,7 @@ export function TopologyCanvas({
                                     ? "1.2 0.8"
                                     : "none"
                               }
+                              markerEnd={isTrailEdge ? "url(#arrowhead-primary)" : undefined}
                             />
                           </motion.g>
                         );
