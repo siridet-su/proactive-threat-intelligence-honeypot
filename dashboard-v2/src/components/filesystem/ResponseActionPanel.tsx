@@ -58,35 +58,35 @@ export function ResponseActionPanel({
 
       {visibleTerminateAction && (
         <div
-          className={`rounded-xl border p-3 ${
-            visibleTerminateAction.status === "verified"
-              ? "border-success-border bg-success-subtle"
-              : visibleTerminateAction.status === "failed"
-                ? "border-danger-border bg-danger-subtle"
-                : "border-warning-border bg-warning-subtle"
-          }`}
+          className="rounded-xl border border-border bg-surface-subtle p-3"
           aria-live="polite"
         >
-          <div className="flex items-center gap-2">
-            {visibleTerminateAction.status === "verified" ? (
-              <CheckCircle2 className="h-4 w-4 text-success" aria-hidden="true" />
-            ) : (
-              <Power
-                className={`h-4 w-4 ${visibleTerminateAction.status === "failed" ? "text-danger" : "text-warning"}`}
-                aria-hidden="true"
-              />
-            )}
-            <span className="text-xs font-semibold text-text">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-text">Termination status</span>
+            <span
+              className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 font-sans text-xs font-semibold ${
+                visibleTerminateAction.status === "verified"
+                  ? "border-success-border bg-success-subtle text-success"
+                  : visibleTerminateAction.status === "failed"
+                    ? "border-danger-border bg-danger-subtle text-danger"
+                    : "border-warning-border bg-warning-subtle text-warning"
+              }`}
+            >
+              {visibleTerminateAction.status === "verified" ? (
+                <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+              ) : (
+                <Power className="h-3 w-3" aria-hidden="true" />
+              )}
               {visibleTerminateAction.status === "verified"
-                ? "Disconnect verified"
+                ? "Verified"
                 : visibleTerminateAction.status === "failed"
-                  ? "Disconnect failed"
+                  ? "Failed"
                   : visibleTerminateAction.status === "requested"
-                    ? "Reconciling session state"
-                    : "Disconnect in progress"}
+                    ? "Requested"
+                    : "In progress"}
             </span>
           </div>
-          <p className="mt-1.5 text-xs leading-5 text-text-muted">
+          <p className="mt-2 text-xs leading-5 text-text-muted">
             {visibleTerminateAction.status === "verified"
               ? "Cowrie confirmed that this exact transport closed."
               : visibleTerminateAction.status === "failed"
@@ -108,7 +108,9 @@ export function ResponseActionPanel({
         <RegionState kind="error" title="Response channel unavailable" description="The control capability could not be verified. No request was sent." />
       ) : !sessionIsLive ? (
         <RegionState kind="empty" title="Session already closed" description="Response actions are disabled for retained audit sessions." />
-      ) : visibleTerminateAction && ["requested", "delivered", "verified"].includes(visibleTerminateAction.status) ? null : (
+      ) : visibleTerminateAction && ["requested", "delivered", "verified"].includes(visibleTerminateAction.status) ? (
+        <RegionState kind="empty" title="No response required" description="No further response actions are available for this session at this time." />
+      ) : (
         <div className="rounded-xl border border-danger-border bg-danger-subtle p-3">
           <div className="flex items-start gap-2.5">
             <Power className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden="true" />
