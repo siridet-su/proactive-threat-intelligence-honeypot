@@ -730,7 +730,19 @@ function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): 
   if (options.hideHome) {
     const hideHomeCond = {
       $or: [
-        { auditVisitedPaths: { $exists: false } },
+        {
+          $and: [
+            { auditVisitedPaths: { $exists: false } },
+            { visitedPaths: { $exists: false } },
+            { "cwdState.path": { $regex: "^(?!/home(/|$))" } }
+          ]
+        },
+        {
+          $and: [
+            { auditVisitedPaths: { $exists: false } },
+            { visitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
+          ]
+        },
         { auditVisitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
       ]
     };
