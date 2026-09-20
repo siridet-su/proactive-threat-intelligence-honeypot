@@ -41,6 +41,22 @@ export function getSessionOptionLabel(
   return `${s.sourceIp} ${s.sessionId} ${s.cwdState?.path ?? ""}`;
 }
 
+export function formatSessionMetadata(s: FilesystemTopologySession | FilesystemClosedSession): { timeStr: string; eventsStr: string } {
+  const count = s.auditSummary?.eventCount ?? 0;
+  const eventsStr = `${count} ${count === 1 ? 'event' : 'events'}`;
+  
+  let timeStr = "";
+  if ("lifecycle" in s && s.lifecycle?.startedAt) {
+    const d = new Date(s.lifecycle.startedAt);
+    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else if (s.cwdState?.observedAt) {
+    const d = new Date(s.cwdState.observedAt);
+    timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  
+  return { timeStr, eventsStr };
+}
+
 export interface AuditSessionSelectProps {
   sessions: readonly FilesystemTopologySession[];
   recentClosedSessions: readonly FilesystemClosedSession[];
@@ -359,7 +375,16 @@ export function AuditSessionSelect({
             <>
               <span className="font-semibold text-text">{selectedSession.sourceIp}</span>
               <span className="text-text-subtle">·</span>
-              <span className="text-text-subtle">{selectedSession.sessionId.slice(0, 8)}…</span>
+              {(() => {
+                 const meta = formatSessionMetadata(selectedSession);
+                 return (
+                   <>
+                     {meta.timeStr && <span className="text-text-subtle hidden sm:inline">{meta.timeStr}</span>}
+                     {meta.timeStr && <span className="text-text-subtle hidden sm:inline">·</span>}
+                     <span className="text-text-subtle">{meta.eventsStr}</span>
+                   </>
+                 );
+              })()}
               <span className="truncate text-text-muted hidden sm:inline">
                 ({isSelectedClosed ? "closed" : selectedSession.cwdState?.path ?? "/"})
               </span>
@@ -498,7 +523,16 @@ export function AuditSessionSelect({
                           {s.sourceIp}
                         </strong>
                         <span className="text-text-subtle">·</span>
-                        <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                        {(() => {
+                           const meta = formatSessionMetadata(s);
+                           return (
+                             <>
+                               {meta.timeStr && <span className="text-text-subtle whitespace-nowrap">{meta.timeStr}</span>}
+                               {meta.timeStr && <span className="text-text-subtle">·</span>}
+                               <span className="text-text-subtle whitespace-nowrap">{meta.eventsStr}</span>
+                             </>
+                           );
+                        })()}
                         {s.cwdState?.path && (
                           <span
                             className={`truncate px-1.5 py-0.2 rounded text-xs border ${
@@ -573,7 +607,16 @@ export function AuditSessionSelect({
                           {s.sourceIp}
                         </strong>
                         <span className="text-text-subtle">·</span>
-                        <span className="text-text-subtle">{s.sessionId.slice(0, 8)}…</span>
+                        {(() => {
+                           const meta = formatSessionMetadata(s);
+                           return (
+                             <>
+                               {meta.timeStr && <span className="text-text-subtle whitespace-nowrap">{meta.timeStr}</span>}
+                               {meta.timeStr && <span className="text-text-subtle">·</span>}
+                               <span className="text-text-subtle whitespace-nowrap">{meta.eventsStr}</span>
+                             </>
+                           );
+                        })()}
                         {s.cwdState?.path && (
                           <span
                             className={`truncate px-1.5 py-0.2 rounded text-xs border ${
