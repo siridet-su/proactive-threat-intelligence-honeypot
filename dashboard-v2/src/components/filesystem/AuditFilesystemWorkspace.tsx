@@ -108,7 +108,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
         className={
           props.isFullscreen
             ? "min-h-0 flex-1 flex overflow-hidden"
-            : "flex flex-col lg:flex-row items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1"
+            : "flex flex-col lg:flex-row items-stretch h-[calc(100dvh-12.5rem)] min-h-[600px] overflow-hidden rounded-b-xl"
         }
       >
         <div
