@@ -27,7 +27,7 @@ import {
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
 
-export type TimeRangeFilter = "all" | "24h" | "7d" | "30d";
+export type TimeRangeFilter = "all" | "24h" | "7d" | "30d" | "custom";
 
 export interface AuditFilterControlsProps {
   hideHomeOnly: boolean;
@@ -96,6 +96,7 @@ export function AuditFilterControls({
     { value: "24h", label: "Last 24 hours" },
     { value: "7d", label: "Last 7 days" },
     { value: "30d", label: "Last 30 days" },
+    { value: "custom", label: "Custom range..." },
   ], []);
 
   const selectedTimeIndex = timeOptions.findIndex(o => o.value === timeRange);

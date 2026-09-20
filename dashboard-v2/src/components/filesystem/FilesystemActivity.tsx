@@ -225,7 +225,7 @@ export function FilesystemActivity() {
     await lookupRemoteAuditSessionRef.current?.(intentOrId, explicitHop);
   }, []);
 
-  const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d">("all");
+  const [timeRange, setTimeRange] = useState<"all" | "24h" | "7d" | "30d" | "custom">("all");
 
   // URL state synchronization and routing hook
   const {
