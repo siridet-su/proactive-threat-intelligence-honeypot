@@ -2,8 +2,6 @@ import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { DayPicker } from "react-day-picker"
 
-import "react-day-picker/dist/style.css"
-
 export type CalendarProps = React.ComponentProps<typeof DayPicker>
 
 function Calendar({
@@ -37,6 +35,7 @@ function Calendar({
         day_disabled: "text-text-muted opacity-50",
         day_range_middle: "aria-selected:bg-surface-hover aria-selected:text-text",
         day_hidden: "invisible",
+        vhidden: "sr-only",
         ...classNames,
       }}
       components={{
