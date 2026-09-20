@@ -784,7 +784,7 @@ export function TopologyCanvas({
                   }
                   transition={
                     reducedMotion || isDraggingSurface || isResizingContainer
-                      ? { duration: 0 }
+                      ? { type: false }
                       : { type: "spring", stiffness: 260, damping: 28 }
                   }
                 >
@@ -824,7 +824,7 @@ export function TopologyCanvas({
                             initial={reducedMotion ? false : { opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={reducedMotion ? undefined : { opacity: 0 }}
-                            transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
+                            transition={reducedMotion ? { type: false } : { duration: 0.3, ease: "easeOut" }}
                           >
                             {/* The active connector is drawn with its packet in HopEnergy. */}
                             <motion.path
@@ -832,7 +832,7 @@ export function TopologyCanvas({
                               animate={{ d: filesystemRoute }}
                               transition={
                                 reducedMotion || Boolean(draggedNodePath)
-                                  ? { duration: 0 }
+                                  ? { type: false }
                                   : TOPOLOGY_TRANSITION
                               }
                               fill="none"
@@ -888,7 +888,7 @@ export function TopologyCanvas({
                             initial={reducedMotion ? false : { opacity: 0 }}
                             animate={{ opacity: 1 }}
                             exit={reducedMotion ? undefined : { opacity: 0 }}
-                            transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
+                            transition={reducedMotion ? { type: false } : { duration: 0.3, ease: "easeOut" }}
                           >
                             {targetPaths.map((path, routeIndex) => {
                               const node = graphNodeByPath.get(path);
@@ -910,7 +910,7 @@ export function TopologyCanvas({
                                     animate={{ d: routePath }}
                                     transition={
                                       reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
-                                        ? { duration: 0 }
+                                        ? { type: false }
                                         : TOPOLOGY_TRANSITION
                                     }
                                     fill="none"
@@ -924,7 +924,7 @@ export function TopologyCanvas({
                                     animate={{ cx: endpoint.startX, cy: endpoint.startY }}
                                     transition={
                                       reducedMotion || Boolean(draggedNodePath || draggedCalloutIp)
-                                        ? { duration: 0 }
+                                        ? { type: false }
                                         : TOPOLOGY_TRANSITION
                                     }
                                     r={isPrimarySelected ? "0.8" : isClusterSelected ? "0.6" : "0.45"}
@@ -948,7 +948,7 @@ export function TopologyCanvas({
                       toBounds={nodeElementBounds[activeHop.toPath]}
                       durationMs={hopDurationMs}
                       reducedMotion={Boolean(reducedMotion)}
-                      transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
+                      transition={reducedMotion || Boolean(draggedNodePath) ? { type: false } : TOPOLOGY_TRANSITION}
                     />
                   )}
                   <AnimatePresence initial={false}>
@@ -976,7 +976,7 @@ export function TopologyCanvas({
                           exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
                           transition={
                             reducedMotion || draggedNodePath === node.path
-                              ? { duration: 0 }
+                              ? { type: false }
                               : {
                                   left: TOPOLOGY_TRANSITION,
                                   top: TOPOLOGY_TRANSITION,
@@ -1134,7 +1134,7 @@ export function TopologyCanvas({
                           exit={reducedMotion ? undefined : { opacity: 0, scale: 0.94 }}
                           transition={
                             reducedMotion || draggedCalloutIp === callout.sourceIp
-                              ? { duration: 0 }
+                              ? { type: false }
                               : {
                                   left: TOPOLOGY_TRANSITION,
                                   top: TOPOLOGY_TRANSITION,
