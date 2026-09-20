@@ -170,36 +170,31 @@ export function TopologyToolbar({
         </button>
       </div>
 
-      <div
-        className="flex items-center gap-0.5 rounded-lg border border-border/80 bg-surface-subtle/80 p-0.5 shadow-2xs shrink-0 flex-nowrap"
-        role="group"
-        aria-label="View settings"
-      >
-        <div ref={viewMenuRef} className="relative">
-          <button
-            type="button"
-            className={`h-8 min-h-8 flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors cursor-pointer select-none ${
-              totalOverlaps > 0
-                ? "border-warning-border bg-warning-subtle text-warning shadow-xs"
-                : viewMenuOpen
-                  ? "border-primary ring-2 ring-primary/20 bg-surface text-text"
-                  : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
-            }`}
-            title="View settings"
-            aria-label="View settings"
-            aria-expanded={viewMenuOpen}
-            aria-controls="topology-view-settings"
-            onClick={() => setViewMenuOpen((current) => !current)}
-          >
-            <div className="flex items-center gap-1.5">
-              <Settings2 className={`h-3.5 w-3.5 shrink-0 ${viewMenuOpen ? "text-primary" : "text-text-subtle"}`} aria-hidden="true" />
-              <span className={`hidden font-sans font-medium sm:inline ${viewMenuOpen ? "text-text" : "text-text-subtle"}`}>View</span>
-            </div>
-            <ChevronDown className={`h-3 w-3 shrink-0 text-text-subtle transition-transform duration-200 ${viewMenuOpen ? "rotate-180 text-primary" : ""}`} aria-hidden="true" />
-            {totalOverlaps > 0 && (
-              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
-            )}
-          </button>
+      <div ref={viewMenuRef} className="relative shrink-0">
+        <button
+          type="button"
+          className={`h-9 min-h-9 flex items-center justify-between gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors cursor-pointer select-none shadow-2xs ${
+            totalOverlaps > 0
+              ? "border-warning-border bg-warning-subtle text-warning shadow-xs"
+              : viewMenuOpen
+                ? "border-primary ring-2 ring-primary/20 bg-surface text-text"
+                : "border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover hover:text-text"
+          }`}
+          title="View settings"
+          aria-label="View settings"
+          aria-expanded={viewMenuOpen}
+          aria-controls="topology-view-settings"
+          onClick={() => setViewMenuOpen((current) => !current)}
+        >
+          <div className="flex items-center gap-1.5">
+            <Settings2 className={`h-3.5 w-3.5 shrink-0 ${viewMenuOpen ? "text-primary" : "text-text-muted"}`} aria-hidden="true" />
+            <span className={`hidden font-sans font-medium sm:inline ${viewMenuOpen ? "text-text" : "text-text"}`}>View</span>
+          </div>
+          <ChevronDown className={`h-3 w-3 shrink-0 transition-transform duration-200 ${viewMenuOpen ? "rotate-180 text-primary" : "text-text-muted"}`} aria-hidden="true" />
+          {totalOverlaps > 0 && (
+            <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-warning ring-1 ring-surface" />
+          )}
+        </button>
           <AnimatePresence>
             {viewMenuOpen && (
               <motion.div
