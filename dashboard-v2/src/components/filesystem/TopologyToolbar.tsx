@@ -72,7 +72,6 @@ export function TopologyToolbar({
 }: TopologyToolbarProps) {
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
-
   useEffect(() => {
     if (!viewMenuOpen) return;
     const closeViewMenu = (event: PointerEvent) => {
@@ -160,8 +159,11 @@ export function TopologyToolbar({
           className="ui-button h-8 min-h-8 w-8 p-0"
           title="Center selected IP"
           aria-label="Center selected IP"
-          disabled={!selectedGraphCallout}
           onClick={() => {
+            // Selection is supplied by the live client stream and can differ
+            // from the SSR snapshot. The callback is already a safe no-op
+            // without a selected source, so keep this attribute deterministic.
+            if (!selectedGraphCallout) return;
             markUserAdjusted();
             centerSelectedSource();
           }}

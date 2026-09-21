@@ -34,6 +34,7 @@ import { HopEnergy } from "./HopEnergy";
 import {
   analyzeTopologyDensity,
   calloutsForGraph,
+  clearAutomaticCalloutCollisions,
   compactDirectoryPath,
   DEFAULT_DENSITY_THRESHOLDS,
   directorySegment,
@@ -345,9 +346,22 @@ export function TopologyCanvas({
       ),
     [snapshot?.nodes, snapshot?.sessions, densityPreference, focusedGraphPath, graphNodes, graphCallouts],
   );
-  const automaticCalloutPositions = useMemo(
+  const sourceRailCalloutPositions = useMemo(
     () => sourceRailPositions(graphCallouts, automaticGraphNodeByPath, isAuditMode),
     [graphCallouts, automaticGraphNodeByPath, isAuditMode],
+  );
+  // Rail assignment happens before cards are measurable. Once the DOM reports
+  // their true dimensions, clear automatic cards from directory cards. Manual
+  // label positions remain intentionally untouched by this pass.
+  const automaticCalloutPositions = useMemo(
+    () => clearAutomaticCalloutCollisions(
+      graphNodes,
+      graphCallouts,
+      sourceRailCalloutPositions,
+      nodeElementBounds,
+      calloutElementBounds,
+    ),
+    [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, sourceRailCalloutPositions],
   );
   const effectiveCalloutPositions = useMemo(
     () => resolveCalloutPositions(graphCallouts, automaticCalloutPositions, labelPositions),
@@ -990,8 +1004,13 @@ export function TopologyCanvas({
                                   top: TOPOLOGY_TRANSITION,
                                   opacity: { duration: 0.3, ease: "easeOut" },
                                   scale: { duration: 0.3, ease: "easeOut" },
-                                }
+                              }
                           }
+                          // Framer Motion changes left/top with transforms; a
+                          // ResizeObserver on the plane does not report those
+                          // child-position changes. Re-measure at the settled
+                          // position so the collision pass receives real bounds.
+                          onAnimationComplete={measureElementBounds}
                           type="button"
                           aria-pressed={isSelected}
                           aria-label={`Inspect directory ${node.path}${
@@ -1149,8 +1168,9 @@ export function TopologyCanvas({
                                   top: TOPOLOGY_TRANSITION,
                                   opacity: { duration: 0.3, ease: "easeOut" },
                                   scale: { duration: 0.3, ease: "easeOut" },
-                                }
+                              }
                           }
+                          onAnimationComplete={measureElementBounds}
                           onPointerDown={(event) => onCalloutPointerDown(event, callout.sourceIp, position)}
                           onPointerMove={onCalloutPointerMove}
                           onPointerUp={onCalloutPointerEnd}

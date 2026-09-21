@@ -10,6 +10,7 @@ import {
   analyzeTopologyDensity,
   calculateTwoDimensionalFit,
   calculateWorldBounds,
+  clearAutomaticCalloutCollisions,
   calloutsForGraph,
   DEFAULT_DENSITY_THRESHOLDS,
   DEFAULT_STALE_THRESHOLD_MS,
@@ -78,6 +79,21 @@ function makeSession(
 }
 
 describe("filesystem source layout", () => {
+  it("clears an automatic source card from a measured directory card", () => {
+    const nodes = [graphNode("/tmp", 50, 50, 1)];
+    const sources = [callout("10.0.0.8", "/tmp")];
+    const positions = clearAutomaticCalloutCollisions(
+      nodes,
+      sources,
+      new Map([["10.0.0.8", { x: 60, y: 50 }]]),
+      { "/tmp": { x: 50, y: 50, width: 14, height: 8 } },
+      { "10.0.0.8": { x: 60, y: 50, width: 20, height: 10 } },
+    );
+
+    // Node right edge is 57; source half-width is 10; one-percent gutter.
+    expect(positions.get("10.0.0.8")).toEqual({ x: 68, y: 50 });
+  });
+
   it("keeps a single live source close to and level with its directory", () => {
     const nodes = new Map<string, GraphNode>([
       ["/", graphNode("/", 50, 12)],
@@ -215,6 +231,50 @@ describe("pointForGraph render limits", () => {
 
     const result = pointForGraph(nodes, [], null, true);
     expect(result.length).toBe(56);
+  });
+
+  it("lays out a very deep valid hierarchy without recursive stack overflow", () => {
+    const nodes: FilesystemTopologyNode[] = [{
+      path: "/",
+      parentPath: null,
+      depth: 0,
+      sessionIds: [],
+      observedAt: "2026-09-15T00:00:00.000Z",
+    }];
+    let parentPath = "/";
+    for (let depth = 1; depth <= 2_000; depth++) {
+      const path = `${parentPath}d`;
+      nodes.push({ path, parentPath, depth, sessionIds: [], observedAt: "2026-09-15T00:00:00.000Z" });
+      parentPath = path;
+    }
+
+    const result = pointForGraph(nodes, [], null, true);
+    expect(result).toHaveLength(2_001);
+    expect(result.at(-1)?.x).toBe(50);
+    expect(result.at(-1)?.y).toBeLessThanOrEqual(82);
+  });
+
+  it("fails closed to independent leaves for cyclic or inverted parent data", () => {
+    const nodes: FilesystemTopologyNode[] = [
+      { path: "/", parentPath: null, depth: 0, sessionIds: [], observedAt: null },
+      { path: "/a", parentPath: "/b", depth: 1, sessionIds: [], observedAt: null },
+      { path: "/b", parentPath: "/a", depth: 1, sessionIds: [], observedAt: null },
+    ];
+
+    const result = pointForGraph(nodes, [], null, true);
+    expect(result.map((node) => node.path)).toEqual(["/", "/a", "/b"]);
+    expect(result.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y))).toBe(true);
+  });
+
+  it("uses a deterministic path tie-break when telemetry timestamps are invalid", () => {
+    const nodes: FilesystemTopologyNode[] = [
+      makeNode("/", "not-a-date", 0),
+      makeNode("/zeta", "not-a-date"),
+      makeNode("/alpha", "not-a-date"),
+    ];
+
+    const result = pointForGraph(nodes, [], null, false, { densityMode: "detailed", nodeLimit: 2 });
+    expect(result.map((node) => node.path)).toEqual(["/", "/alpha"]);
   });
 });
 

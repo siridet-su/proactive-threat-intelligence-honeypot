@@ -334,6 +334,8 @@ export interface AuditScopingPipelineOptions {
   historyCollectionName?: string;
   sessionIds?: string[];
   projectionOverflow?: "exclude" | "only";
+  from?: number;
+  to?: number;
 }
 
 /** Version written by processor-agent into cwd_audit_projection. */
@@ -442,7 +444,7 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
   const searchRegexStr = buildAuditSearchRegexString(options.search);
   const targetRegexStr = buildAuditTargetPathRegexString(options.targetPath);
 
-  return [
+  const stages: Document[] = [
     {
       $match: {
         "lifecycle.status": "closed",
@@ -457,8 +459,20 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
       },
     },
     { $match: { $expr: auditSourceEligibilityExpression() } },
-    ...(options.sessionIds?.length ? [{ $match: { effectiveSessionId: { $in: options.sessionIds } } }] : []),
-    {
+  ];
+
+  if (options.from != null || options.to != null) {
+    const timeMatch: Document = {};
+    if (options.from != null) timeMatch.$gte = new Date(options.from);
+    if (options.to != null) timeMatch.$lte = new Date(options.to);
+    stages.push({ $match: { effectiveClosedAt: timeMatch } });
+  }
+
+  if (options.sessionIds?.length) {
+    stages.push({ $match: { effectiveSessionId: { $in: options.sessionIds } } });
+  }
+
+  stages.push({
       $lookup: {
         from: historyCollection,
         let: { sid: "$effectiveSessionId" },
@@ -591,7 +605,8 @@ export function buildAuditScopingStages(options: AuditScopingPipelineOptions): D
         },
       },
     },
-  ];
+  );
+  return stages;
 }
 
 export function buildAuditSessionsPipeline(options: AuditSessionsPipelineOptions): Document[] {
@@ -712,7 +727,39 @@ function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): 
     ];
   }
   if (targetRegexStr) match.auditVisitedPaths = { $elemMatch: { $regex: targetRegexStr } };
-  if (options.hideHome) match.auditHomeOnly = { $ne: true };
+  if (options.hideHome) {
+    const hideHomeCond = {
+      $or: [
+        {
+          $and: [
+            { auditVisitedPaths: { $exists: false } },
+            { visitedPaths: { $exists: false } },
+            { "cwdState.path": { $regex: "^(?!/home(/|$))" } }
+          ]
+        },
+        {
+          $and: [
+            { auditVisitedPaths: { $exists: false } },
+            { visitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
+          ]
+        },
+        { auditVisitedPaths: { $elemMatch: { $regex: "^(?!/home(/|$))" } } }
+      ]
+    };
+    if (match.$or) {
+      match.$and = [{ $or: match.$or }, hideHomeCond];
+      delete match.$or;
+    } else {
+      match.$or = hideHomeCond.$or;
+    }
+  }
+  
+  if (options.from != null || options.to != null) {
+    match["lifecycle.closedAt"] = match["lifecycle.closedAt"] || {};
+    if (options.from != null) Object.assign(match["lifecycle.closedAt"], { $gte: new Date(options.from) });
+    if (options.to != null) Object.assign(match["lifecycle.closedAt"], { $lte: new Date(options.to) });
+  }
+
   return match;
 }
 
@@ -740,7 +787,26 @@ function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptio
       },
     });
   }
-  if (options.hideHome) clauses.push({ $ne: ["$auditHomeOnly", true] });
+  if (options.hideHome) {
+    clauses.push({
+      $or: [
+        { $eq: [{ $type: "$auditVisitedPaths" }, "missing"] },
+        {
+          $anyElementTrue: {
+            $map: {
+              input: { $ifNull: ["$auditVisitedPaths", []] },
+              as: "path",
+              in: { $not: { $regexMatch: { input: "$path", regex: "^/home(/|$)" } } }
+            }
+          }
+        }
+      ]
+    });
+  }
+  
+  if (options.from != null) clauses.push({ $gte: ["$lifecycle.closedAt", new Date(options.from)] });
+  if (options.to != null) clauses.push({ $lte: ["$lifecycle.closedAt", new Date(options.to)] });
+
   return clauses.length ? { $and: clauses } : true;
 }
 

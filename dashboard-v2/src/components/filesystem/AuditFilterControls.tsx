@@ -471,7 +471,9 @@ export function AuditFilterControls({
             className={`h-9 min-h-9 flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-mono transition-colors cursor-pointer select-none ${
               timeRange !== "all"
                 ? "border-primary-border bg-primary-subtle text-primary shadow-xs hover:bg-primary-subtle/80"
-                : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
+                : timeDropdownOpen
+                  ? "border-primary ring-2 ring-primary/20 bg-surface text-text"
+                  : "border-border bg-surface text-text-muted hover:border-border-strong hover:bg-surface-hover hover:text-text"
             }`}
           >
             <Clock
@@ -497,15 +499,15 @@ export function AuditFilterControls({
                     handleClearTimeFilter();
                   }
                 }}
-                className="ml-0.5 rounded p-0.5 hover:bg-primary/20 text-primary transition-colors cursor-pointer"
+                className="ml-1 flex h-4 w-4 items-center justify-center rounded-sm hover:bg-primary/20 hover:text-primary-hover focus:outline-none focus:ring-1 focus:ring-primary"
                 title="Clear time filter"
               >
                 <X className="h-3 w-3" />
               </span>
             ) : (
               <ChevronDown
-                className={`h-3.5 w-3.5 text-text-subtle shrink-0 transition-transform duration-150 ${
-                  timeDropdownOpen ? "rotate-180" : ""
+                className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
+                  timeDropdownOpen ? "rotate-180 text-primary" : "text-text-subtle"
                 }`}
               />
             )}
@@ -733,7 +735,7 @@ export function AuditFilterControls({
               <button
                 type="button"
                 onClick={handleApplyTimeFilter}
-                className="h-9 w-full flex items-center justify-center gap-1.5 rounded-xl text-xs font-sans font-semibold bg-primary hover:bg-primary-action text-on-primary shadow-xs cursor-pointer transition-all active:scale-[0.98]"
+                className="h-9 w-full flex items-center justify-center gap-1.5 rounded-xl text-xs font-sans font-semibold bg-primary-subtle text-primary border border-primary/40 hover:bg-primary-subtle/80 hover:text-primary-hover shadow-xs cursor-pointer transition-all active:scale-[0.98]"
               >
                 <Check className="h-4 w-4" />
                 <span>Apply</span>

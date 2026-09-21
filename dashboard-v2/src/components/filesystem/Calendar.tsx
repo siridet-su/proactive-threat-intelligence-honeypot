@@ -4,6 +4,7 @@ import * as React from "react";
 import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import { isSameDay, isAfter, isBefore, startOfDay } from "date-fns";
+import { motion, AnimatePresence } from "framer-motion";
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>;
 
@@ -25,32 +26,44 @@ function CalendarSelectMenu({ value, options, onChange }: { value: string, optio
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="h-7 px-2.5 flex items-center gap-1.5 rounded-md border border-border/40 bg-surface-subtle/40 hover:bg-surface-hover hover:border-border/60 transition-colors font-mono text-[11px] font-semibold text-text"
+        className={`h-7 px-2.5 flex items-center gap-1.5 rounded-md border transition-all font-mono text-[11px] font-semibold ${
+          open
+            ? "border-primary ring-2 ring-primary/20 bg-surface text-text shadow-sm"
+            : "border-border/40 bg-surface-subtle/40 hover:bg-surface-hover hover:border-border/60 text-text"
+        }`}
       >
         <span>{selectedOption?.label ?? value}</span>
-        <ChevronDown className={`h-3 w-3 text-text-subtle transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+        <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? "rotate-180 text-primary" : "text-text-subtle"}`} />
       </button>
-      {open && (
-        <div className="absolute top-[calc(100%+4px)] left-1/2 -translate-x-1/2 w-32 max-h-56 overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface-raised p-1 shadow-2xl flex flex-col z-[60]">
-          {options.map((opt) => (
-            <button
-              key={opt.value}
-              type="button"
-              onClick={() => {
-                onChange(opt.value);
-                setOpen(false);
-              }}
-              className={`text-left px-2.5 py-1.5 rounded-md text-[11px] font-mono transition-colors ${
-                opt.value === value
-                  ? "bg-primary-subtle text-primary font-semibold"
-                  : "text-text-muted hover:bg-surface-hover hover:text-text"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
+            className="absolute top-[calc(100%+4px)] left-1/2 -translate-x-1/2 w-32 max-h-56 overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface-raised p-1 shadow-2xl flex flex-col z-[60]"
+          >
+            {options.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  onChange(opt.value);
+                  setOpen(false);
+                }}
+                className={`text-left px-2.5 py-1.5 rounded-md text-[11px] font-mono transition-colors ${
+                  opt.value === value
+                    ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
+                    : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -211,13 +224,13 @@ function Calendar({
         cell: "h-8 w-8 sm:h-8.5 sm:w-8.5 text-center text-xs p-0 relative focus-within:relative focus-within:z-20",
         day: "h-8 w-8 sm:h-8.5 sm:w-8.5 p-0 font-mono text-xs font-normal text-text hover:bg-surface-hover hover:text-text rounded-md flex justify-center items-center cursor-pointer transition-colors select-none",
         day_selected:
-          "!bg-primary !text-on-primary font-semibold hover:!bg-primary-action hover:!text-on-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs",
+          "font-semibold focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring shadow-2xs",
         day_range_start:
-          "day-range-start !rounded-l-md !rounded-r-none !bg-primary !text-on-primary font-semibold hover:!bg-primary-action hover:!text-on-primary",
+          "day-range-start !rounded-l-md !rounded-r-none !bg-primary !text-on-primary font-bold hover:!bg-primary-action hover:!text-on-primary",
         day_range_middle:
-          "!bg-primary/15 !text-primary font-medium !rounded-none hover:!bg-primary/25",
+          "!bg-primary/15 !text-text font-medium !rounded-none hover:!bg-primary/25",
         day_range_end:
-          "day-range-end !rounded-r-md !rounded-l-none !bg-primary !text-on-primary font-semibold hover:!bg-primary-action hover:!text-on-primary",
+          "day-range-end !rounded-r-md !rounded-l-none !bg-primary !text-on-primary font-bold hover:!bg-primary-action hover:!text-on-primary",
         day_today:
           "font-semibold text-primary relative after:content-[''] after:absolute after:bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-1 after:w-1 after:rounded-full after:bg-primary aria-selected:after:hidden aria-selected:text-inherit",
         day_outside: "text-text-subtle/40 opacity-40 hover:opacity-80",

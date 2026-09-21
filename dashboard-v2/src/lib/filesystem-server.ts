@@ -495,6 +495,8 @@ export interface AuditSessionsQueryOptions {
   cursor?: string | null;
   limit?: number;
   includeSummary?: boolean;
+  from?: number;
+  to?: number;
 }
 
 function mapDocumentToClosedSession(document: Document): FilesystemClosedSession | null {
@@ -523,9 +525,7 @@ function mapDocumentToClosedSession(document: Document): FilesystemClosedSession
   const nonRootPaths = visitedPaths.filter((p) => p !== "/");
   const hasHomePath = nonRootPaths.some((p) => p === "/home" || p.startsWith("/home/"));
   const hasOutsideHomePath = nonRootPaths.some((p) => p !== "/home" && !p.startsWith("/home/"));
-  const homeOnly = typeof document.auditHomeOnly === "boolean"
-    ? document.auditHomeOnly
-    : (typeof document.homeOnly === "boolean" ? document.homeOnly : (hasHomePath && !hasOutsideHomePath));
+  const homeOnly = hasHomePath && !hasOutsideHomePath;
 
   const rawEventCount = document.auditEventCount ?? document.eventCount;
   const eventCount = typeof rawEventCount === "number" && Number.isSafeInteger(rawEventCount) && rawEventCount >= 0
@@ -610,6 +610,8 @@ export async function getAuditDirectorySummary(options: {
   search?: string | null;
   targetPath?: string | null;
   hideHome?: boolean;
+  from?: number;
+  to?: number;
 } = {}): Promise<AuditDirectorySummary> {
   const client = await getMongoClient();
   const useProjection = await auditProjectionIsReady();
@@ -625,6 +627,8 @@ export async function getAuditDirectorySummary(options: {
     search: options.search,
     targetPath: options.targetPath,
     hideHome: options.hideHome,
+    from: options.from,
+    to: options.to,
   };
   const projectionResult = await client.db(DATABASE_NAME).collection<Document>(AUDIT_PROJECTION_COLLECTION).aggregate<{
     overview: Array<{ totalSessions: number; homeOnlyCount: number; matchingCount: number }>;
@@ -660,6 +664,8 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
     cursor: options.cursor,
     limit,
     historyCollectionName: HISTORY_COLLECTION,
+    from: options.from,
+    to: options.to,
   };
   if (!useProjection) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
 
@@ -674,7 +680,7 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
       hasOverflow ? buildAuditProjectionOverflowCountPipeline(queryOptions) : buildAuditProjectionCountPipeline(queryOptions),
       { allowDiskUse: true },
     ).toArray(),
-    options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome }) : Promise.resolve(undefined),
+    options.includeSummary ? getAuditDirectorySummary({ search: options.search, targetPath: options.targetPath, hideHome: options.hideHome, from: options.from, to: options.to }) : Promise.resolve(undefined),
   ]);
 
   const rawItems = projectionItems;
@@ -684,6 +690,7 @@ export async function getAuditSessions(options: AuditSessionsQueryOptions = {}):
   // row created by an old writer during the read invalidates the projection
   // result and is retried against the authoritative source pipeline.
   if (!(await auditProjectionIsReady())) return getAuditSessionsFromSource(client, queryOptions, options.includeSummary);
+  console.log("[SERVER] rawItems.length=" + rawItems.length + ", limit=" + limit);
   const pageDocs = rawItems.slice(0, limit);
   const lastDoc = pageDocs.at(-1);
   return {
