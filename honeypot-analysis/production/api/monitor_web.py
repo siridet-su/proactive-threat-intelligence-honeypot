@@ -2980,6 +2980,9 @@ def load_session_report_pdf(
         if authentication_activity.get("attempt_count", 0):
             session_payload["login_attempts"] = authentication_activity["attempt_count"]
             session_payload["login_success"] = authentication_activity.get("success_count", 0) > 0
+            session_payload["observed_account_visibility"] = authentication_activity.get(
+                "username_visibility"
+            )
             observed_accounts = [
                 str(item.get("attacker_username"))
                 for item in authentication_attempts

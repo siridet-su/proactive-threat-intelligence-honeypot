@@ -315,6 +315,7 @@ def test_session_report_pdf_projects_authentication_metadata_without_passwords(
     assert error == {}
     assert captured["session"]["login_attempts"] == 1
     assert captured["session"]["login_success"] is True
+    assert captured["session"]["observed_account_visibility"] == "AVAILABLE"
     assert captured["session"]["observed_account_identifier"] == "observed-report-account"
     assert password_sentinel not in json.dumps(captured["session"], sort_keys=True)
 

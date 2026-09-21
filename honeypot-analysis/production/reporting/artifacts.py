@@ -1830,10 +1830,17 @@ def write_pdf_report(
     if not isinstance(login_attempts, int) or isinstance(login_attempts, bool):
         login_attempts = 0
     login_success = session_payload.get("login_success")
+    account_visibility = str(
+        session_payload.get("observed_account_visibility") or ""
+    ).strip().upper()
     observed_account = (
         session_payload.get("observed_account_identifier")
         or None
     )
+    if not observed_account and account_visibility == "REDACTED_BEFORE_PERSISTENCE":
+        observed_account = "Redacted before persistence"
+    elif not observed_account and account_visibility == "NOT_PERSISTED":
+        observed_account = "Username not persisted"
     credential_metadata = (
         session_payload.get("credential_metadata")
         if isinstance(session_payload.get("credential_metadata"), dict)

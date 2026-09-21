@@ -159,7 +159,7 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     session.update(
         login_attempts=1,
         login_success=True,
-        observed_account_identifier="observed-test-account",
+        observed_account_visibility="REDACTED_BEFORE_PERSISTENCE",
     )
     report["ioc_summary"] = {
         "ips": [
@@ -274,7 +274,7 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     assert "Review the recorded evidence before action." in text
     assert "Latest provider/cache lookup" in text
     assert "28 Jul 2026, 17:10:30 ICT" in text
-    assert "observed-test-account" in text
+    assert "Redacted before persistence" in text
     assert "Internal Infrastructure Context" in text
     assert "10.58.33.42" in text
     assert "Private/reserved network context" in text
