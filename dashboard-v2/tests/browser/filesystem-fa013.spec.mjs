@@ -78,9 +78,10 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect(page).toHaveURL(/sessionId=live-session&hop=deep-hop/);
     await expect.poll(() => fixtures.historyRequests.some((request) => request.hop === "deep-hop")).toBe(true);
     fixtures.resolveDirectLookup();
-    await expect(page.getByTestId("anchored-hop-banner")).toBeVisible();
-    await page.getByRole("button", { name: "Load earlier hops" }).click();
-    await expect(page.getByTestId("anchored-hop-banner")).toHaveCount(0);
+    const anchoredHopNote = page.getByRole("note").filter({ hasText: "Anchored deep hop" });
+    await expect(anchoredHopNote).toBeVisible();
+    await page.getByRole("button", { name: /Load earlier moves/ }).click();
+    await expect(anchoredHopNote).toHaveCount(0);
     await expect(page.getByText("Complete retained history loaded")).toBeVisible();
     await expect(page).toHaveURL(/sessionId=live-session&hop=deep-hop/);
 
@@ -123,8 +124,10 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(page.getByRole("button", { name: "Exclude home-only" }))
         .toHaveAttribute("aria-pressed", String(hideHome));
       await expect(page.getByRole("combobox").nth(1)).toContainText(targetPath);
-      await expect(page.locator("strong").filter({ hasText: selectedContext }).first())
-        .toHaveText(selectedContext);
+      const escapedContext = selectedContext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      await expect(page.getByRole("button", {
+        name: new RegExp(`^Inspect directory ${escapedContext} \\(.*active hop target`),
+      })).toBeVisible();
     };
 
     // Start on the production Live page, then build the rest through its UI.
@@ -331,7 +334,9 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect(page.getByRole("combobox").first()).toContainText("198.51.100.7");
     await expect(page.getByRole("button", { name: "Exclude home-only" })).toHaveAttribute("aria-pressed", "true");
     await expect(page.getByRole("combobox").nth(1)).toContainText("/var/log");
-    await expect(page.locator("strong").filter({ hasText: "/" }).first()).toHaveText("/");
+    await expect(page.getByRole("button", {
+      name: /^Inspect directory \/ \(.*active hop target/,
+    })).toBeVisible();
     await expect(page.getByText(/retained-a has expired/)).toHaveCount(0);
     expect(fixtures.requests.filter((request) => request.query === "retained-a")).toHaveLength(1);
     expect(await page.evaluate(() => window.history.length)).toBe(delayedHistoryLength);
@@ -370,6 +375,8 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(timelinePanel).toHaveAttribute("aria-hidden", "true");
       await expect(timelinePanel).toHaveAttribute("inert", "");
       await page.locator('[title="Show timeline sidebar"], [title="Show timeline panel"]').first().click();
+      const timelineViewButton = page.getByRole("button", { name: "Timeline", exact: true });
+      if (await timelineViewButton.isVisible()) await timelineViewButton.click();
       await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
       await assertNoBrowserFailures(page);
     }
@@ -378,10 +385,10 @@ test.describe("FA-013 real-browser evidence", () => {
   test("H: reduced motion makes production replay transitions immediate while controls remain functional", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await openAuditPage(page);
-    await page.getByRole("button", { name: "Response" }).click();
+    await page.getByRole("tab", { name: "Response" }).click();
     await expect(page.locator('[data-forensic-tab-panel="actions"]')).toBeVisible();
-    await page.getByRole("button", { name: "Command data" }).click();
-    await expect(page.locator('[data-forensic-tab-panel="commands"]')).toBeVisible();
+    await page.getByRole("tab", { name: "Evidence" }).click();
+    await expect(page.locator('[data-forensic-tab-panel="evidence"]')).toBeVisible();
     const transitionDurations = await page.locator('[class*="motion-reduce:transition-none"]').evaluateAll((elements) =>
       elements.map((element) => getComputedStyle(element).transitionDuration),
     );
