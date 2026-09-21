@@ -1,13 +1,15 @@
 "use client";
 
-import { use, useCallback, useMemo, useState } from "react";
-import { Activity, Check, ChevronRight, Copy, Download, MapPin, Printer, Terminal } from "lucide-react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Check, ChevronRight, Copy, Download, Ghost, Lock, MapPin, Printer, Terminal, X } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
 import { SessionAnalysisPanels, type SessionAnalysisLoadState } from "@/components/threat/SessionAnalysisPanels";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState } from "@/components/ui/RegionState";
+import { isDeceptionDecision, type DeceptionDecision, type DeceptionLure } from "@/lib/dashboardTypes";
+import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
 import {
   authoritativeEventTimestamp,
   chronologicalRecords,
@@ -295,6 +297,233 @@ function SourceLocationPanel({
         </dl>
         <p className="mt-3 text-[11px] text-text-subtle">{resolutionLabel}. Location does not identify the attacker or explain the prediction.</p>
       </div>
+    </article>
+  );
+}
+
+type DeceptionLoadState = "loading" | "ready" | "empty" | "unavailable";
+interface DeceptionResult {
+  state: DeceptionLoadState;
+  data: DeceptionDecision | null;
+  reason: string;
+}
+
+const DECEPTION_TIMEOUT_MS = 7_000;
+
+async function fetchDeceptionDecision(ip: string): Promise<DeceptionResult> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), DECEPTION_TIMEOUT_MS);
+  try {
+    const response = await fetch(`/api/deception?ip=${encodeURIComponent(ip)}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (response.status === 404) {
+      return { state: "empty", data: null, reason: "No deception decision recorded for this origin IP." };
+    }
+    const text = await response.text();
+    let parsed: unknown;
+    try {
+      parsed = text ? JSON.parse(text) : {};
+    } catch {
+      return { state: "unavailable", data: null, reason: "Deception service returned a non-JSON response" };
+    }
+    if (!response.ok) {
+      return { state: "unavailable", data: null, reason: textValue(recordValue(parsed).error, `HTTP ${response.status}`) };
+    }
+    if (!isDeceptionDecision(parsed)) {
+      return { state: "unavailable", data: null, reason: "Deception response did not match the expected shape" };
+    }
+    return { state: "ready", data: parsed, reason: "" };
+  } catch (error: unknown) {
+    const aborted = error instanceof Error && error.name === "AbortError";
+    return { state: "unavailable", data: null, reason: aborted ? "Deception panel request timed out" : "Local BFF unavailable" };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+const ATTACKER_TYPE_BADGE_CLASS: Record<string, string> = {
+  APT: "border-danger-border bg-danger-subtle text-danger",
+  ScriptKiddie: "border-warning-border bg-warning-subtle text-warning",
+  Bot: "border-border bg-surface-subtle text-text-muted",
+};
+
+function DeceptionStateFetcher({ ip }: { ip: string }) {
+  const [result, setResult] = useState<DeceptionResult>({ state: "loading", data: null, reason: "" });
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchDeceptionDecision(ip).then((value) => {
+      if (!cancelled) setResult(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [ip]);
+
+  return <DeceptionPanel result={result} />;
+}
+
+function LureDetailModal({ lure, onClose }: { lure: DeceptionLure | null; onClose: () => void }) {
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  const open = lure !== null;
+  useModalFocusTrap(open, dialogRef);
+
+  useEffect(() => {
+    if (!open) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open, onClose]);
+
+  if (!lure) return null;
+
+  return (
+    <div
+      data-open="true"
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] p-4"
+      role="presentation"
+    >
+      <div
+        ref={dialogRef}
+        data-open="true"
+        className="pti-modal-panel max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface shadow-[var(--shadow-raised)]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lure-detail-title"
+        tabIndex={-1}
+      >
+        <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5">
+          <div className="min-w-0">
+            <h3 id="lure-detail-title" className="truncate text-sm font-semibold text-text">{lure.target}</h3>
+            <p className="mt-1 text-xs text-text-muted" title={`door=${lure.door}, tier=${lure.tier}, content_type=${lure.content_type}`}>Shown to attacker at {lure.at}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="ui-button min-h-8 shrink-0 px-2 text-xs"
+            aria-label="Close lure detail"
+            data-autofocus
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </header>
+        <div className="p-5">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-surface-subtle p-3 font-mono text-xs text-text">{lure.content}</pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const PHASE_LABELS: Record<string, string> = {
+  Reconnaissance: "Reconnaissance (scanning/probing)",
+  Weaponization: "Weaponization",
+  Delivery: "File delivery",
+  Exploitation: "Exploitation",
+  Installation: "Installation",
+  Command_and_Control: "Command & control",
+  Actions_on_Objectives: "Objective execution",
+};
+
+function phaseLabel(phase: string): string {
+  return PHASE_LABELS[phase] ?? phase.replace(/_/g, " ");
+}
+
+const ACTION_LABELS: Record<string, string> = {
+  deceive: "Served decoy content to the attacker",
+  observe: "Observed only — no decoy served",
+};
+
+function actionLabel(action: string): string {
+  return ACTION_LABELS[action] ?? action.replace(/_/g, " ");
+}
+
+function DeceptionPanel({ result }: { result: DeceptionResult }) {
+  const { state, data, reason } = result;
+  const [selectedLure, setSelectedLure] = useState<DeceptionLure | null>(null);
+  // Each lure is pre-generated in both "deceive" and "normal" variants ahead of the
+  // decision; only the one matching the latest recorded action was actually served.
+  const servedContentType = data && data.actions.length > 0 ? data.actions[data.actions.length - 1].action : null;
+  const servedLures = data ? data.lures.filter((lure) => !servedContentType || lure.content_type === servedContentType) : [];
+
+  return (
+    <article className="ui-panel flex flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-surface px-5 py-4 sm:px-6">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+          <Ghost className="h-4 w-4" aria-hidden="true" />
+          Track B / deception
+        </div>
+        {state === "ready" && data && (
+          <span className={cn("ui-badge text-xs", ATTACKER_TYPE_BADGE_CLASS[data.attacker_type] ?? "border-border bg-surface-subtle text-text-muted")}>
+            {data.attacker_type}
+            {data.attacker_type_locked && <Lock className="ml-1 inline h-3.5 w-3.5" aria-hidden="true" />}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-1 flex-col p-5 sm:p-6">
+        {state === "loading" && <RegionState kind="loading" title="Loading deception state…" />}
+        {state === "empty" && <RegionState kind="empty" title="No deception decision recorded" description={reason} />}
+        {state === "unavailable" && <RegionState kind="error" title="Deception state unavailable" description={reason} />}
+        {state === "ready" && data && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-text-muted">
+              <span>Phase <span className="font-mono text-text">{data.phase}</span></span>
+              <span>Commands <span className="font-mono text-text">{data.command_count}</span></span>
+              <span>Last seen <span className="font-mono text-text">{data.last_seen}</span></span>
+            </div>
+
+            <div className="grid items-start gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">What the system decided ({data.actions.length})</p>
+                {data.actions.length > 0 ? (
+                  <ol className="ui-scroll-region mt-2 max-h-52 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+                    {data.actions.map((action, index) => (
+                      <li key={`${index}-${action.at}`} className="px-3 py-2 text-sm text-text" title={`phase=${action.phase}, action=${action.action}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="font-medium">{phaseLabel(action.phase)}</span>
+                          <span className="shrink-0 font-mono text-xs text-text-subtle">{action.at.slice(11, 19)}</span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-text-subtle">Chose to: {actionLabel(action.action)}</p>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p className="mt-2 text-sm text-text-muted">None recorded yet.</p>}
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Decoy files shown to attacker ({servedLures.length})</p>
+                {servedLures.length > 0 ? (
+                  <ol className="ui-scroll-region mt-2 max-h-52 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+                    {servedLures.map((lure, index) => (
+                      <li key={`${index}-${lure.at}`} className="flex items-center justify-between gap-3 px-1 py-1">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLure(lure)}
+                          className="flex min-w-0 flex-1 items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm text-text hover:bg-surface-hover"
+                        >
+                          <span className="truncate font-medium">{lure.target} <span className="text-text-subtle">({lure.content_type})</span></span>
+                          <span className="shrink-0 font-mono text-xs text-text-subtle">{lure.at.slice(11, 19)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ol>
+                ) : <p className="mt-2 text-sm text-text-muted">None served yet.</p>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <LureDetailModal lure={selectedLure} onClose={() => setSelectedLure(null)} />
     </article>
   );
 }
@@ -591,6 +820,12 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           )}
         </article>
 
+      </section>
+
+      <section aria-label="Deception state">
+        {originIp === "Unknown"
+          ? <DeceptionPanel result={{ state: "empty", data: null, reason: "No origin IP resolved for this session yet." }} />
+          : <DeceptionStateFetcher key={originIp} ip={originIp} />}
       </section>
 
       <SessionAnalysisPanels
