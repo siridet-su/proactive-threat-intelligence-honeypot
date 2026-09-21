@@ -1,0 +1,44 @@
+import { NextResponse } from "next/server";
+
+import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
+import { loadAdminCowrieCommands } from "@/lib/session-command-server";
+import { CANONICAL_SESSION_ID_PATTERN } from "@/lib/sensor-session-identity";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+const PRIVATE_HEADERS = {
+  "Cache-Control": "private, no-store, no-cache, max-age=0, must-revalidate",
+  Pragma: "no-cache",
+  Vary: "Cookie",
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+};
+
+function json(body: Record<string, unknown>, status: number): NextResponse {
+  return NextResponse.json(body, { status, headers: PRIVATE_HEADERS });
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+): Promise<NextResponse> {
+  try {
+    const session = await getSessionFromRequest(request);
+    if (!session) return json({ ok: false, error: "Authentication required" }, 401);
+    if (!isAdmin(session) || session.mustChangePassword) {
+      return json({ ok: false, error: "Administrator access required" }, 403);
+    }
+
+    const { id } = await context.params;
+    if (!CANONICAL_SESSION_ID_PATTERN.test(id)) {
+      return json({ ok: false, error: "Invalid session identifier" }, 400);
+    }
+
+    const projection = await loadAdminCowrieCommands(id);
+    return json(projection as unknown as Record<string, unknown>, 200);
+  } catch {
+    // Do not log or return command text or event payloads on any failure path.
+    return json({ ok: false, error: "Sensitive command evidence is temporarily unavailable" }, 503);
+  }
+}

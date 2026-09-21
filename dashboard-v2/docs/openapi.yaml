@@ -215,6 +215,35 @@ paths:
       x-upstream-path: /api/sessions
       parameters: [{$ref: '#/components/parameters/OptionalSessionId'}, {$ref: '#/components/parameters/Limit'}, {$ref: '#/components/parameters/Offset'}]
       responses: {200: {description: Session snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/SessionsResponse'}}}}, '401': {$ref: '#/components/responses/Unauthorized'}, '502': {$ref: '#/components/responses/BadGateway'}, '503': {$ref: '#/components/responses/Unavailable'}}
+  /api/sessions/{id}/commands:
+    get:
+      tags: [monitor]
+      security: [{DashboardSession: []}]
+      summary: Sensitive Admin-only Cowrie command evidence
+      description: >-
+        Admin role only; requires no forced password rotation. Returns bounded
+        exact-session Cowrie input, which may contain attacker-entered
+        credentials. Response is no-store and excluded from public projections,
+        reports, and exports. The server uses a private loopback monitor route
+        and a dedicated owner-only credential file.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: string, pattern: '^session_v1_[0-9a-f]{32}$'}
+      responses:
+        '200':
+          description: Bounded sensitive Admin command evidence
+          headers:
+            Cache-Control:
+              schema: {type: string}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/JsonRecord'}
+        '400': {description: Invalid canonical session id}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {description: Admin role required}
+        '503': {$ref: '#/components/responses/Unavailable'}
   /api/session:
     get:
       tags: [monitor]

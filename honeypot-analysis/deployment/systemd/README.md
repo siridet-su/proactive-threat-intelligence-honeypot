@@ -344,11 +344,22 @@ evidence, stored prediction snapshots, job/report status, and recent events.
 
 The monitor's sensitive command view is a separate administrator-only route:
 `/api/internal/session-commands?session_id=...`. Provision
-`MONITOR_RAW_COMMANDS_TOKEN_FILE` in the monitor service environment with an
-owner-only credential, and present it as a Bearer token from the private
-localhost/Tailscale management path. The route returns only the persisted
-Cowrie command input, timestamp, event ID, and bounded classification metadata;
-it is marked sensitive and is never used by public APIs, reports, exports,
-STIX, webhooks, logs, or prediction snapshots. The value is the command text
-remaining after the sensor privacy boundary, so text scrubbed before
-persistence cannot be recovered.
+`/etc/honeypot/credentials/monitor-web/raw-commands-token` as an owner-only
+credential (regular file, no symlink, mode `0600`) and configure its path with
+`MONITOR_RAW_COMMANDS_TOKEN_FILE` for both `monitor-web` and the dashboard-v2
+server. Both services run as the restricted `honeypot` user in the supplied
+units. Set `LOCAL_DASHBOARD_COMMANDS_ENABLED=true` only while the monitor stays
+bound to `127.0.0.1` and the dedicated token is present. The Next server
+forwards the token only to that loopback route; the browser never receives it.
+
+Dashboard-v2 exposes the result only through the authenticated Admin route
+`GET /api/sessions/{canonical_session_id}/commands`; Supporter/analyst roles,
+sessions requiring password rotation, and noncanonical IDs are denied. The
+response is `no-store`, bounded, and contains only Cowrie command input,
+timestamp, event ID, and bounded classification metadata. This raw text may
+contain attacker-entered usernames, passwords, tokens, or other secrets. It is
+excluded from public APIs, print/PDF, exports, STIX, webhooks, logs, and
+prediction snapshots. The sensor policy retains only the exact top-level
+`input` field on the three reviewed Cowrie command-input event types; structured
+authentication fields and non-command text remain redacted. Text already
+redacted before persistence cannot be recovered.

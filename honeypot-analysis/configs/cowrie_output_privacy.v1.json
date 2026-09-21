@@ -1,7 +1,7 @@
 {
-  "schema_version": "cowrie_output_privacy_policy.v1",
-  "policy_id": "cowrie_pre_persistence_credentials",
-  "version": "1.0.1",
+  "schema_version": "cowrie_output_privacy_policy.v2",
+  "policy_id": "cowrie_field_privacy_admin_command_evidence",
+  "version": "2.0.0",
   "redaction_marker": "[REDACTED]",
   "redact_attacker_username": true,
   "credential_value_keys": [
@@ -39,6 +39,11 @@
   "login_summary_keys": [
     "log_text",
     "message"
+  ],
+  "preserve_command_input_event_ids": [
+    "cowrie.command.failed",
+    "cowrie.command.input",
+    "cowrie.command.success"
   ],
   "max_depth": 48,
   "max_registry_values": 256,

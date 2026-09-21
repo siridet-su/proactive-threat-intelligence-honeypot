@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 vi.mock("server-only", () => ({}));
 
@@ -1140,7 +1141,10 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     // Verify the aggregation $match stage uses migration-compatible $or query
     const pipeline = capturedPipeline as Array<Record<string, unknown>>;
     expect(pipeline[0].$match).toEqual({
-      $or: [{ sessionId: "sess-mixed" }, { session_id: "sess-mixed" }],
+      $or: [
+        { sessionId: { $in: ["sess-mixed"] } },
+        { session_id: { $in: ["sess-mixed"] } },
+      ],
     });
   });
 
@@ -1267,6 +1271,85 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
     await expect(getSessionCwdHistoryHop("sess-test", "hop-canonical")).rejects.toThrow(
       "MongoDB connection timeout",
     );
+  });
+
+  it("resolves a Cowrie-local hop only through the verified canonical sensor/session alias", async () => {
+    const sensorId = "pi-cowrie-01";
+    const sensorSessionId = "09afe59d1a00";
+    const canonicalSessionId = `session_v1_${createHash("sha256")
+      .update(JSON.stringify({
+        schema_version: "authenticated_sensor_session.v1",
+        sensor_id: sensorId,
+        sensor_session_id: sensorSessionId,
+      }))
+      .digest("hex")
+      .slice(0, 32)}`;
+    const identityRead = vi.fn().mockResolvedValue({
+      schema_version: "mongodb_canonical_event.v1",
+      session_id: canonicalSessionId,
+      sensor_id: sensorId,
+      payload_json: JSON.stringify({
+        session: canonicalSessionId,
+        sensor_id: sensorId,
+        _honeypot_identity: {
+          schema_version: "authenticated_sensor_session.v1",
+          sensor_id: sensorId,
+          sensor_session_id: sensorSessionId,
+          canonical_session_id: canonicalSessionId,
+        },
+      }),
+    });
+    const target = {
+      _id: "cwd:alias-hop",
+      sessionId: sensorSessionId,
+      eventId: "cwd:alias-hop",
+      at: new Date("2026-09-17T01:00:00.000Z"),
+      action: "changed",
+      status: "confirmed",
+      fromPath: "/home/test",
+      toPath: "/tmp",
+    };
+    const historyFindOne = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(target);
+    const aggregate = vi.fn().mockReturnValue({
+      toArray: vi.fn().mockResolvedValue([{
+        totalItems: [{ count: 1 }],
+        hopNumber: [{ count: 1 }],
+        successfulHopNumber: [{ count: 1 }],
+      }]),
+    });
+    vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
+      db: () => ({
+        collection: (name: string) => name === "events"
+          ? { findOne: identityRead }
+          : { findOne: historyFindOne, aggregate },
+      }),
+    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+
+    const result = await getSessionCwdHistoryHop(canonicalSessionId, "cwd:alias-hop");
+
+    expect(result.item).toMatchObject({
+      id: "cwd:alias-hop",
+      sessionId: canonicalSessionId,
+      fromPath: "/home/test",
+      toPath: "/tmp",
+    });
+    expect(identityRead).toHaveBeenCalledOnce();
+    expect(historyFindOne).toHaveBeenNthCalledWith(1, { _id: "cwd:alias-hop" });
+    expect(historyFindOne).toHaveBeenNthCalledWith(2, {
+      eventId: "cwd:alias-hop",
+      $or: [
+        { sessionId: { $in: [canonicalSessionId, sensorSessionId] } },
+        { session_id: { $in: [canonicalSessionId, sensorSessionId] } },
+      ],
+    });
+    expect(aggregate.mock.calls[0]?.[0]?.[0]?.$match).toEqual({
+      $or: [
+        { sessionId: { $in: [canonicalSessionId, sensorSessionId] } },
+        { session_id: { $in: [canonicalSessionId, sensorSessionId] } },
+      ],
+    });
   });
 
   // 8. Anchored replay controls using production functions

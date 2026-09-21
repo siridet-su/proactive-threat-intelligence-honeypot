@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
 
 vi.mock("server-only", () => ({}));
 
@@ -18,6 +19,16 @@ import { getSessionCwdHistory, MAX_CWD_IDENTIFIER_LENGTH } from "@/lib/filesyste
 import * as mongo from "@/lib/mongodb";
 
 const SESSION_ID = "session-fa-010";
+const SENSOR_ID = "pi-cowrie-01";
+const SENSOR_SESSION_ID = "09afe59d1a00";
+const CANONICAL_SESSION_ID = `session_v1_${createHash("sha256")
+  .update(JSON.stringify({
+    schema_version: "authenticated_sensor_session.v1",
+    sensor_id: SENSOR_ID,
+    sensor_session_id: SENSOR_SESSION_ID,
+  }))
+  .digest("hex")
+  .slice(0, 32)}`;
 const PAGE_SIZE = 80;
 
 type RawHistoryDocument = Record<string, unknown>;
@@ -43,9 +54,9 @@ function compareNewestFirst(left: SessionCwdHistoryEvent, right: SessionCwdHisto
   return right.id > left.id ? 1 : -1;
 }
 
-function asProjectedDocument(event: SessionCwdHistoryEvent): RawHistoryDocument {
+function asProjectedDocument(event: SessionCwdHistoryEvent, canonicalSessionId = event.sessionId): RawHistoryDocument {
   return {
-    sessionId: event.sessionId,
+    sessionId: canonicalSessionId,
     eventId: event.id,
     at: new Date(event.at),
     sequence: event.sequence,
@@ -57,14 +68,18 @@ function asProjectedDocument(event: SessionCwdHistoryEvent): RawHistoryDocument 
   };
 }
 
-function installFacetResponseMock(rawDocuments: RawHistoryDocument[]) {
+function installFacetResponseMock(rawDocuments: RawHistoryDocument[], identityRow: RawHistoryDocument | null = null) {
   const aggregate = vi.fn().mockImplementation((pipeline: Array<Record<string, unknown>>) => {
+    const firstMatch = pipeline[0]?.$match as { $or?: Array<Record<string, string>> } | undefined;
+    const branches = firstMatch?.$or ?? [];
+    const allowedSessionIds = new Set(branches.flatMap((branch) => Object.values(branch)));
+    const canonicalSessionId = String(branches[0]?.sessionId ?? branches[0]?.session_id ?? SESSION_ID);
     const facet = pipeline.at(-1)?.$facet as Record<string, unknown>;
     const itemPipeline = facet.items as Array<Record<string, unknown>>;
     const pageLimit = (itemPipeline.find((stage) => "$limit" in stage)?.$limit as number) ?? PAGE_SIZE + 1;
     const valid = rawDocuments
       .map(normalizeHistoryEvent)
-      .filter((event): event is SessionCwdHistoryEvent => event?.sessionId === SESSION_ID)
+      .filter((event): event is SessionCwdHistoryEvent => event !== null && allowedSessionIds.has(event.sessionId))
       .sort(compareNewestFirst);
 
     const cursorStage = itemPipeline.find((stage) => "$match" in stage) as {
@@ -79,17 +94,23 @@ function installFacetResponseMock(rawDocuments: RawHistoryDocument[]) {
 
     return {
       toArray: vi.fn().mockResolvedValue([{
-        items: afterCursor.slice(0, pageLimit).map(asProjectedDocument),
+        items: afterCursor.slice(0, pageLimit).map((event) => asProjectedDocument(event, canonicalSessionId)),
         totalItems: [{ count: valid.length }],
         totalSuccessfulItems: [{ count: valid.filter((event) => event.action !== "failed_change").length }],
       }]),
     };
   });
 
+  const findIdentity = vi.fn().mockResolvedValue(identityRow);
+
   vi.spyOn(mongo, "getMongoClient").mockResolvedValue({
-    db: () => ({ collection: () => ({ aggregate }) }),
+    db: () => ({
+      collection: (name: string) => name === "events"
+        ? { findOne: findIdentity }
+        : { aggregate },
+    }),
   } as unknown as ReturnType<typeof mongo.getMongoClient>);
-  return aggregate;
+  return { aggregate, findIdentity };
 }
 
 function malformedDocuments(): RawHistoryDocument[] {
@@ -120,7 +141,7 @@ describe("FA-010 application history facet decoding", () => {
       validEvent(PAGE_SIZE + 1, { action: "failed_change" }),
       ...malformedDocuments(),
     ];
-    const aggregate = installFacetResponseMock(raw);
+    const { aggregate } = installFacetResponseMock(raw);
 
     const page = await getSessionCwdHistory(SESSION_ID, null);
 
@@ -219,8 +240,64 @@ describe("FA-010 application history facet decoding", () => {
     });
   });
 
+  it("includes the Cowrie-local CWD ID only after verifying the canonical sensor/session binding", async () => {
+    const identityRow = {
+      schema_version: "mongodb_canonical_event.v1",
+      session_id: CANONICAL_SESSION_ID,
+      sensor_id: SENSOR_ID,
+      payload_json: JSON.stringify({
+        session: CANONICAL_SESSION_ID,
+        sensor_id: SENSOR_ID,
+        _honeypot_identity: {
+          schema_version: "authenticated_sensor_session.v1",
+          sensor_id: SENSOR_ID,
+          sensor_session_id: SENSOR_SESSION_ID,
+          canonical_session_id: CANONICAL_SESSION_ID,
+        },
+      }),
+    };
+    const { aggregate, findIdentity } = installFacetResponseMock([
+      eventDocument({
+        _id: "cwd:cd-tmp",
+        sessionId: SENSOR_SESSION_ID,
+        eventId: "cwd:cd-tmp",
+        at: "2026-09-21T13:36:15.000Z",
+        action: "changed",
+        status: "confirmed",
+        fromPath: "/home/test",
+        toPath: "/tmp",
+      }),
+    ], identityRow);
+
+    const page = await getSessionCwdHistory(CANONICAL_SESSION_ID, null);
+
+    expect(findIdentity).toHaveBeenCalledWith(
+      { session_id: CANONICAL_SESSION_ID, schema_version: "mongodb_canonical_event.v1" },
+      { projection: { _id: 0, sensor_id: 1, payload_json: 1 } },
+    );
+    expect(aggregate).toHaveBeenCalledOnce();
+    const firstMatch = aggregate.mock.calls[0]?.[0]?.[0]?.$match;
+    expect(firstMatch).toEqual({
+      $or: [
+        { sessionId: CANONICAL_SESSION_ID },
+        { session_id: CANONICAL_SESSION_ID },
+        { sessionId: SENSOR_SESSION_ID },
+        { session_id: SENSOR_SESSION_ID },
+      ],
+    });
+    expect(page.items).toEqual([
+      expect.objectContaining({
+        id: "cwd:cd-tmp",
+        sessionId: CANONICAL_SESSION_ID,
+        fromPath: "/home/test",
+        toPath: "/tmp",
+      }),
+    ]);
+    expect(page.totalItems).toBe(1);
+  });
+
   it("keeps bounded invalid-identifier behavior and checks the facet shape without Mongo execution", async () => {
-    const aggregate = installFacetResponseMock([validEvent(1)]);
+    const { aggregate } = installFacetResponseMock([validEvent(1)]);
     const overlength = await getSessionCwdHistory("x".repeat(MAX_CWD_IDENTIFIER_LENGTH + 1), null);
     expect(overlength).toEqual({ items: [], nextCursor: null, totalItems: 0, totalSuccessfulItems: 0, complete: true });
     expect(aggregate).not.toHaveBeenCalled();

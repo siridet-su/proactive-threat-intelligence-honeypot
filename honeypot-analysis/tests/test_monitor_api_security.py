@@ -19,6 +19,42 @@ from production.utils.cowrie_privacy import (
     CredentialValueRegistry,
     sanitize_cowrie_event_for_persistence,
 )
+from production.utils.sensor_identity import (
+    IDENTITY_SCHEMA,
+    canonical_session_id,
+    bind_authenticated_sensor_identity,
+)
+
+
+_COMMAND_TEST_SENSOR_ID = "pi-cowrie-01"
+_COMMAND_TEST_SENSOR_SESSION_ID = "09afe59d1a00"
+_COMMAND_TEST_SESSION_ID = canonical_session_id(
+    _COMMAND_TEST_SENSOR_ID,
+    _COMMAND_TEST_SENSOR_SESSION_ID,
+)
+
+
+def _canonical_command_event_row(
+    event_id: str,
+    eventid: str,
+    timestamp: str,
+    payload: dict,
+) -> dict:
+    event = dict(payload)
+    event["eventid"] = eventid
+    event["timestamp"] = timestamp
+    event["session"] = _COMMAND_TEST_SENSOR_SESSION_ID
+    bound = bind_authenticated_sensor_identity(event, _COMMAND_TEST_SENSOR_ID)
+    assert bound["_honeypot_identity"]["schema_version"] == IDENTITY_SCHEMA
+    return {
+        "schema_version": "mongodb_canonical_event.v1",
+        "event_id": event_id,
+        "session_id": _COMMAND_TEST_SESSION_ID,
+        "sensor_id": _COMMAND_TEST_SENSOR_ID,
+        "eventid": eventid,
+        "timestamp": timestamp,
+        "payload_json": json.dumps(bound),
+    }
 
 
 class FakeMonitorHealthStorage:
@@ -280,7 +316,7 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
         "ok": True,
         "schema_version": "monitor.internal_command_view.v1",
         "sensitive": True,
-        "session_id": "session-safe",
+        "session_id": _COMMAND_TEST_SESSION_ID,
         "commands": [
             {
                 "event_id": "event-command",
@@ -300,14 +336,14 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
 
     missing, missing_responses, _ = _handler(
         config,
-        "/api/internal/session-commands?session_id=session-safe",
+        f"/api/internal/session-commands?session_id={_COMMAND_TEST_SESSION_ID}",
     )
     monitor_web.MonitorHandler.do_GET(missing)
     assert missing_responses[0][0] == HTTPStatus.UNAUTHORIZED
 
     wrong, wrong_responses, _ = _handler(
         config,
-        "/api/internal/session-commands?session_id=session-safe",
+        f"/api/internal/session-commands?session_id={_COMMAND_TEST_SESSION_ID}",
         authorization="Bearer read-secret",
     )
     monitor_web.MonitorHandler.do_GET(wrong)
@@ -315,7 +351,7 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
 
     allowed, allowed_responses, _ = _handler(
         config,
-        "/api/internal/session-commands?session_id=session-safe",
+        f"/api/internal/session-commands?session_id={_COMMAND_TEST_SESSION_ID}",
         authorization="Bearer raw-admin-token",
     )
     monitor_web.MonitorHandler.do_GET(allowed)
@@ -326,7 +362,7 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
 
     remote, remote_responses, _ = _handler(
         config,
-        "/api/internal/session-commands?session_id=session-safe",
+        f"/api/internal/session-commands?session_id={_COMMAND_TEST_SESSION_ID}",
         authorization="Bearer raw-admin-token",
     )
     remote.client_address = ("198.51.100.20", 4242)
@@ -682,38 +718,42 @@ def test_internal_command_projection_is_bounded_and_classified_without_public_re
                     }
                 ]
             if table == "events":
+                forged = _canonical_command_event_row(
+                    "event-forged",
+                    "cowrie.command.input",
+                    "2026-07-17T00:00:02Z",
+                    {"input": "must-not-cross-session"},
+                )
+                forged_payload = json.loads(forged["payload_json"])
+                forged_payload["_honeypot_identity"]["sensor_session_id"] = "another-session"
+                forged["payload_json"] = json.dumps(forged_payload)
                 return [
-                    {
-                        "event_id": "event-1",
-                        "eventid": "cowrie.command.input",
-                        "timestamp": "2026-07-17T00:00:01Z",
-                        "received_at": "2026-07-17T00:00:02Z",
-                        "payload_json": json.dumps(
-                            {
-                                "eventid": "cowrie.command.input",
-                                "input": "cat /tmp/admin-secret",
-                            }
-                        ),
-                    },
-                    {
-                        "event_id": "event-2",
-                        "eventid": "cowrie.session.closed",
-                        "timestamp": "2026-07-17T00:00:03Z",
-                        "payload_json": json.dumps(
-                            {"eventid": "cowrie.session.closed"}
-                        ),
-                    },
+                    _canonical_command_event_row(
+                        "event-1",
+                        "cowrie.command.input",
+                        "2026-07-17T00:00:01Z",
+                        {"input": "cat /tmp/admin-secret"},
+                    ) | {"received_at": "2026-07-17T00:00:02Z"},
+                    _canonical_command_event_row(
+                        "event-2",
+                        "cowrie.session.closed",
+                        "2026-07-17T00:00:03Z",
+                        {},
+                    ),
+                    forged,
                 ]
             return []
 
     result = monitor_web.load_internal_command_detail(
         _config(Path(".")),
-        "session-safe",
+        _COMMAND_TEST_SESSION_ID,
         _storage=RawStorage(),
     )
     assert result["ok"] is True
     assert result["sensitive"] is True
+    assert [command["event_id"] for command in result["commands"]] == ["event-1"]
     assert result["commands"][0]["input"] == "cat /tmp/admin-secret"
+    assert result["truncated"] is False
     assert result["commands"][0]["classification"] == [
         {
             "evidence_id": "class-1",
@@ -728,9 +768,9 @@ def test_internal_command_projection_is_bounded_and_classified_without_public_re
     public = session_detail_view(
         {
             "ok": True,
-            "session_id": "session-safe",
+            "session_id": _COMMAND_TEST_SESSION_ID,
             "overview": {},
-            "session_payload": {"session_id": "session-safe"},
+            "session_payload": {"session_id": _COMMAND_TEST_SESSION_ID},
             "events_table_rows": [
                 {
                     "event_id": "event-1",
@@ -762,25 +802,24 @@ def test_internal_view_preserves_benign_command_after_short_login_credentials() 
         },
         registry=registry,
     )
+    row = _canonical_command_event_row(
+        "event-benign-command",
+        "cowrie.command.input",
+        "2026-08-05T00:00:01Z",
+        retained,
+    )
 
     class RawStorage:
         def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
             if table == "sessions":
-                return [{"session_id": session_id, "payload_json": "{}"}]
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
             if table == "events":
-                return [
-                    {
-                        "event_id": "event-benign-command",
-                        "eventid": retained["eventid"],
-                        "timestamp": retained["timestamp"],
-                        "payload_json": json.dumps(retained),
-                    }
-                ]
+                return [row]
             return []
 
     internal = monitor_web.load_internal_command_detail(
         _config(Path(".")),
-        "session-benign-command",
+        _COMMAND_TEST_SESSION_ID,
         _storage=RawStorage(),
     )
     assert internal["commands"][0]["eventid"] == "cowrie.command.input"
@@ -789,9 +828,9 @@ def test_internal_view_preserves_benign_command_after_short_login_credentials() 
     public = session_detail_view(
         {
             "ok": True,
-            "session_id": "session-benign-command",
+            "session_id": _COMMAND_TEST_SESSION_ID,
             "overview": {},
-            "session_payload": {"session_id": "session-benign-command"},
+            "session_payload": {"session_id": _COMMAND_TEST_SESSION_ID},
             "events_table_rows": [
                 {
                     "event_id": "event-benign-command",

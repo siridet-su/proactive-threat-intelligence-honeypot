@@ -1,8 +1,10 @@
-"""Minimal pre-persistence credential sanitization for Cowrie events.
+"""Field-aware pre-persistence privacy handling for Cowrie events.
 
 This module deliberately has no application or Cowrie dependency.  The Pi
 output observers and the downstream persistence boundaries import the same
-implementation so they cannot drift to separate credential policies.
+implementation so they cannot drift to separate privacy policies. Structured
+authentication credentials remain redacted; exact Cowrie command-input
+events are retained as sensitive evidence for the authenticated Admin view.
 """
 
 from __future__ import annotations
@@ -20,9 +22,16 @@ from typing import Any
 
 
 SCHEMA_VERSION = "cowrie_credential_sanitizer.v1"
-POLICY_SCHEMA_VERSION = "cowrie_output_privacy_policy.v1"
+POLICY_SCHEMA_VERSION = "cowrie_output_privacy_policy.v2"
 REDACTION_MARKER = "[REDACTED]"
 OVERSIZED_JSON_MARKER = "[REDACTED: OVERSIZED JSON]"
+PRESERVED_COMMAND_INPUT_EVENT_IDS = frozenset(
+    {
+        "cowrie.command.failed",
+        "cowrie.command.input",
+        "cowrie.command.success",
+    }
+)
 
 _IDENTITY_KEYS = frozenset(
     {
@@ -180,6 +189,7 @@ _POLICY_KEYS = {
     "credential_container_keys",
     "login_event_prefixes",
     "login_summary_keys",
+    "preserve_command_input_event_ids",
     "max_depth",
     "max_registry_values",
     "max_registered_value_chars",
@@ -187,8 +197,8 @@ _POLICY_KEYS = {
 
 DEFAULT_POLICY_DOCUMENT: dict[str, Any] = {
     "schema_version": POLICY_SCHEMA_VERSION,
-    "policy_id": "cowrie_pre_persistence_credentials",
-    "version": "1.0.1",
+    "policy_id": "cowrie_field_privacy_admin_command_evidence",
+    "version": "2.0.0",
     "redaction_marker": REDACTION_MARKER,
     "redact_attacker_username": True,
     "credential_value_keys": [
@@ -222,6 +232,7 @@ DEFAULT_POLICY_DOCUMENT: dict[str, Any] = {
     ],
     "login_event_prefixes": ["cowrie.login."],
     "login_summary_keys": ["log_text", "message"],
+    "preserve_command_input_event_ids": sorted(PRESERVED_COMMAND_INPUT_EVENT_IDS),
     "max_depth": 48,
     "max_registry_values": 256,
     "max_registered_value_chars": 16_384,
@@ -239,6 +250,7 @@ class CowriePrivacyPolicy:
     credential_container_keys: frozenset[str]
     login_event_prefixes: tuple[str, ...]
     login_summary_keys: frozenset[str]
+    preserve_command_input_event_ids: frozenset[str]
     max_depth: int
     max_registry_values: int
     max_registered_value_chars: int
@@ -291,6 +303,12 @@ def validate_policy_document(document: Any) -> CowriePrivacyPolicy:
     summary_keys = _closed_string_list(
         document["login_summary_keys"], "login_summary_keys"
     )
+    command_event_ids = _closed_string_list(
+        document["preserve_command_input_event_ids"],
+        "preserve_command_input_event_ids",
+    )
+    if set(command_event_ids) != PRESERVED_COMMAND_INPUT_EVENT_IDS:
+        raise ValueError("preserve_command_input_event_ids must match the reviewed Cowrie command-input event set")
     if {"username", "password", "passwd", "pwd"} - set(value_keys):
         raise ValueError("required Cowrie credential keys are missing")
     for field, minimum, maximum in (
@@ -311,6 +329,7 @@ def validate_policy_document(document: Any) -> CowriePrivacyPolicy:
         credential_container_keys=frozenset(container_keys),
         login_event_prefixes=tuple(event_prefixes),
         login_summary_keys=frozenset(summary_keys),
+        preserve_command_input_event_ids=frozenset(command_event_ids),
         max_depth=int(document["max_depth"]),
         max_registry_values=int(document["max_registry_values"]),
         max_registered_value_chars=int(document["max_registered_value_chars"]),
@@ -418,12 +437,21 @@ def sanitize_cowrie_event_for_persistence(
     policy: CowriePrivacyPolicy = DEFAULT_POLICY,
     registry: CredentialValueRegistry | None = None,
 ) -> dict[str, Any]:
-    """Return an idempotent event with credentials removed before persistence."""
+    """Sanitize event fields while retaining exact command input as evidence.
+
+    Command input can contain attacker-supplied credentials and is therefore
+    classified as sensitive. It is stored only so the authenticated Admin
+    session view can show what was typed; public projections and reports keep
+    their independent command redaction. Structured Cowrie login credentials
+    and all non-command free text continue through the redaction rules below.
+    """
 
     if not isinstance(event, Mapping):
         raise ValueError("Cowrie event must be an object")
     registry = registry or PROCESS_CREDENTIAL_REGISTRY
     redacted_fields: set[str] = set()
+    raw_event_id = str(event.get("eventid") or "").strip().lower()
+    preserve_command_input = raw_event_id in policy.preserve_command_input_event_ids
 
     def redact_scalar(value: Any, field: str) -> Any:
         if value in (None, ""):
@@ -459,7 +487,14 @@ def sanitize_cowrie_event_for_persistence(
             for raw_key, item in value.items():
                 key = str(raw_key)
                 normalized = key.strip().lower()
-                if normalized in policy.credential_value_keys:
+                if (
+                    depth == 0
+                    and normalized == "input"
+                    and preserve_command_input
+                    and isinstance(item, str)
+                ):
+                    output[key] = item
+                elif normalized in policy.credential_value_keys:
                     output[key] = redact_scalar(item, normalized)
                 elif normalized in policy.credential_container_keys:
                     output[key] = sanitize(

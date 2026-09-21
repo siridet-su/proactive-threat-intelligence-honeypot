@@ -16,7 +16,6 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 
 import {
-  authoritativeEventTimestamp,
   chronologicalRecords,
   sessionLifecycleStatus,
 } from "@/lib/session-analysis-semantics";
@@ -29,6 +28,8 @@ import {
   externalTiFreshness,
   sourceIpCacheFreshness,
 } from "@/lib/external-ti-presentation";
+import { projectAdminCommandRecords } from "@/lib/session-command-projection";
+import { projectContextualHypotheses } from "@/lib/contextual-hypothesis-presentation";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -93,10 +94,13 @@ async function fetchCapability(
   const controller = new AbortController();
   const timeout = window.setTimeout(
     () => controller.abort(),
-    capability === "detail" ? DETAIL_CLIENT_TIMEOUT_MS : CLIENT_TIMEOUT_MS,
+    capability === "detail" || capability === "commands" ? DETAIL_CLIENT_TIMEOUT_MS : CLIENT_TIMEOUT_MS,
   );
   try {
-    const response = await fetch(`/api/session-analysis/${capability}?${query.toString()}`, {
+    const endpoint = capability === "commands"
+      ? `/api/sessions/${encodeURIComponent(sessionId)}/commands`
+      : `/api/session-analysis/${capability}?${query.toString()}`;
+    const response = await fetch(endpoint, {
       cache: "no-store",
       signal: controller.signal,
     });
@@ -191,42 +195,6 @@ function commandText(value: unknown): string | null {
   return analystCommandText(value);
 }
 
-function buildCommandRecords(detail: JsonRecord): JsonRecord[] {
-  const events = chronologicalRecords(
-    list(detail.events || detail.events_table_rows)
-      .map(record)
-      .filter((event) => event.command_event === true),
-  );
-  const storedCommands = list(detail.commands);
-  const classifications = list(detail.classification_events).map(record);
-  return events.map((event, index) => {
-    const eventId = event.event_id || event.eventid;
-    const timestamp = authoritativeEventTimestamp(event);
-    const classification = classifications.find((item) => {
-      const order = record(item.durable_evidence_order);
-      return order.event_id === eventId || item.event_timestamp === timestamp;
-    });
-    const rawCommand = storedCommands[index];
-    const text = commandText(event) || commandText(rawCommand) || commandText(classification);
-    return {
-      sequence: index + 1,
-      event_id: eventId,
-      eventid: event.eventid,
-      timestamp,
-      received_at: event.received_at,
-      session_id: event.session_id || detail.session_id,
-      sensor_id: event.sensor_id,
-      command_event: true,
-      ...(text ? { input: text, command_text_available: true } : {
-        command_text_available: false,
-        command_text_unavailable_reason: "unrecoverable_after_pre_persistence_redaction",
-      }),
-      classification_event_id: classification?.evidence_id,
-      classification_technique: classification?.ttp || null,
-    };
-  });
-}
-
 function normalizePanelResult(capability: string, result: CapabilityResult): CapabilityResult {
   if (result.state !== "ready") return result;
 
@@ -238,10 +206,16 @@ function normalizePanelResult(capability: string, result: CapabilityResult): Cap
         const commandItems = list(data.commands);
         hasEvidence = commandItems.length > 0;
         if (hasEvidence && commandItems.every((item) => commandText(item) === null)) {
+          const redacted = commandItems.some((item) => {
+            const command = record(item);
+            return typeof command.input === "string" && command.input.trim().toUpperCase() === "[REDACTED]";
+          });
           return terminalResult(
             "limited",
-            "Exact-session command records are present, but their text was removed before persistence and cannot be recovered by the Dashboard.",
-            { ...data, command_text_available: false },
+            redacted
+              ? "Command events are stored, but their input was redacted before persistence; the original text cannot be reconstructed."
+              : "Command events are stored, but no command input text is present in the retained records.",
+            { ...data, command_text_available: false, historical_originals: "unrecoverable_if_redacted_before_persistence" },
             result.status,
           );
         }
@@ -332,7 +306,14 @@ function normalizePanelResult(capability: string, result: CapabilityResult): Cap
   }
   return hasEvidence
     ? result
-    : terminalResult("empty", "No stored evidence is available for this exact session.", data, result.status);
+    : terminalResult(
+        "empty",
+        capability === "recommendations"
+          ? "No policy-valid, evidence-linked response guidance is stored for this exact session; no response action is inferred."
+          : "No stored evidence is available for this exact session.",
+        data,
+        result.status,
+      );
 }
 
 function detailPanelResult(
@@ -347,7 +328,6 @@ function detailPanelResult(
 }
 
 const DERIVED_CAPABILITIES = [
-  "commands",
   "hypothesis",
   "recommendations",
   "ai-advisory",
@@ -358,18 +338,12 @@ const DERIVED_CAPABILITIES = [
 
 function derivedEntries(detailResult: CapabilityResult): Array<readonly [string, CapabilityResult]> {
   const detail = detailResult.data;
-  const commandRecords = buildCommandRecords(detail);
   const base = {
     ok: detail.ok,
     session_id: detail.session_id,
     timestamp: detail.timestamp,
   };
   const projections: Record<string, JsonRecord> = {
-    commands: {
-      ...base,
-      commands: commandRecords,
-      command_text_available: commandRecords.some((item) => item.command_text_available === true),
-    },
     hypothesis: {
       ...base,
       authority: "CONTEXTUAL_NON_AUTHORITATIVE",
@@ -1153,7 +1127,8 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
         ["Freshness", tiState.state],
         ["Latest provider/cache lookup", tiTimestampLabel(tiState.latestRetrievedAt)],
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Stored provider evidence", countOf(Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Stored provider evidence", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Source-IP cache rows", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
         ["Provider calls", sessionData.provider_calls === false || observableData.provider_calls === false ? "0 (stored-only read)" : "Not reported"],
       ]} />
@@ -1176,6 +1151,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const reportSummary = record(data.report_summary);
   const hypotheses = list(data.correlated_ttp_hypotheses);
+  const contextualHypotheses = projectContextualHypotheses(hypotheses);
   const hypothesisSets = list(data.hypothesis_sets).map(record);
   const reports = list(data.reports);
   return (
@@ -1191,6 +1167,37 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
       ]} />
       {hasMeaningfulValue(reportSummary.summary) && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">{summaryValue(reportSummary.summary)}</p>}
       {hasMeaningfulValue(reportSummary.evidence_strength_reason) && <p className="mt-2 text-xs text-text-muted">Evidence note: {summaryValue(reportSummary.evidence_strength_reason)}</p>}
+      {contextualHypotheses.length > 0 && (
+        <div className="mt-3 rounded-lg border border-warning-border bg-warning-subtle/40 p-3" aria-label="Contextual TTP correlations">
+          <p className="text-xs font-semibold text-text">Session-correlated TTP context · not validated findings</p>
+          <ol className="mt-2 space-y-2">
+            {contextualHypotheses.map((hypothesis) => (
+              <li key={hypothesis.key} className="rounded-md border border-border bg-surface p-3 text-xs">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="font-semibold text-text">{hypothesis.techniqueId || "Technique not recorded"}</span>
+                  {hypothesis.techniqueName && <span className="text-text">{hypothesis.techniqueName}</span>}
+                  <span className="ui-badge">{hypothesis.claimStatus}</span>
+                </div>
+                <dl className="mt-2 grid gap-x-4 gap-y-1 text-text-muted sm:grid-cols-2">
+                  {hypothesis.tactic && <div><dt className="inline font-semibold">Tactic: </dt><dd className="inline">{hypothesis.tactic}</dd></div>}
+                  {hypothesis.sourceType && <div><dt className="inline font-semibold">Source: </dt><dd className="inline">{hypothesis.sourceType}</dd></div>}
+                  {hypothesis.ruleId && <div className="sm:col-span-2"><dt className="inline font-semibold">Correlation rule: </dt><dd className="inline break-all font-mono">{hypothesis.ruleId}</dd></div>}
+                </dl>
+                {hypothesis.matchedConditions.length > 0 && (
+                  <ul className="mt-2 list-disc space-y-1 pl-4 text-text-muted">
+                    {hypothesis.matchedConditions.map((condition, index) => (
+                      <li key={`${hypothesis.key}-condition-${index}`}>
+                        {condition.description || condition.type || "Policy condition matched"}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+          <p className="mt-2 text-[11px] text-text-muted">Correlations are contextual and non-authoritative; they do not establish observed ATT&amp;CK findings, attacker intent, or response actions. Raw evidence text is intentionally not repeated here.</p>
+        </div>
+      )}
       {hypothesisSets.length > 0 && (
         <ol className="mt-3 space-y-2">
           {hypothesisSets.slice(0, 10).map((hypothesisSet, index) => (
@@ -1446,7 +1453,11 @@ export function SessionAnalysisPanels({
 }: {
   sessionId: string;
   onDetail?: (data: JsonRecord) => void;
-  onLiveInteraction?: (commands: unknown[], active: boolean) => void;
+  onLiveInteraction?: (
+    commands: unknown[],
+    active: boolean,
+    view: { state: LoadState; reason: string; sensitive: true },
+  ) => void;
   onNextDistinct?: (data: JsonRecord, state: LoadState, reason: string) => void;
 }) {
   const [results, setResults] = useState<Record<string, CapabilityResult>>({});
@@ -1455,6 +1466,7 @@ export function SessionAnalysisPanels({
     let cancelled = false;
     let pollTimer: number | undefined;
     let pollInFlight = false;
+    let lastDetail: JsonRecord = {};
     const allCapabilities = [
       "detail",
       "commands",
@@ -1469,8 +1481,8 @@ export function SessionAnalysisPanels({
       "reports",
       "ai-advisory",
     ] as const;
-    const primaryCapabilities = ["detail", "next-distinct", "session-ti"] as const;
-    const pollCapabilities = ["detail", "next-distinct"] as const;
+    const primaryCapabilities = ["detail", "commands", "next-distinct", "session-ti"] as const;
+    const pollCapabilities = ["detail", "commands", "next-distinct"] as const;
 
     const unavailable = (reason: string): CapabilityResult => terminalResult("unavailable", reason);
     const notApplicable = (reason: string): CapabilityResult => terminalResult("not_applicable", reason);
@@ -1487,8 +1499,20 @@ export function SessionAnalysisPanels({
       }
       const detailEntry = normalizedEntries.find(([capability]) => capability === "detail");
       if (detailEntry?.[1].state === "ready") {
+        lastDetail = detailEntry[1].data;
         onDetail?.(detailEntry[1].data);
-        onLiveInteraction?.(buildCommandRecords(detailEntry[1].data), sessionIsActive(detailEntry[1].data));
+      }
+      const commandEntry = normalizedEntries.find(([capability]) => capability === "commands");
+      if (commandEntry) {
+        const detail = detailEntry?.[1].state === "ready" ? detailEntry[1].data : lastDetail;
+        const commandData = commandEntry[1].state === "ready" || commandEntry[1].state === "limited"
+          ? commandEntry[1].data
+          : {};
+        onLiveInteraction?.(
+          projectAdminCommandRecords(sessionId, detail, commandData),
+          sessionIsActive(detail),
+          { state: commandEntry[1].state, reason: commandEntry[1].reason, sensitive: true },
+        );
       }
     };
 

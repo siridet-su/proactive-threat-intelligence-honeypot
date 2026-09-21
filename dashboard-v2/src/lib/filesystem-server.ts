@@ -37,12 +37,19 @@ import {
 import { deriveLatestTelemetryAt } from "@/lib/filesystem-freshness";
 import { createBoundedLruCache } from "@/lib/bounded-lru-cache";
 import { getMongoClient } from "@/lib/mongodb";
+import {
+  authenticatedSensorSessionAlias,
+  CANONICAL_SESSION_ID_PATTERN,
+  parseStoredCanonicalEvent,
+} from "@/lib/sensor-session-identity";
 
 // CWD is operational Cowrie telemetry. It intentionally remains outside the
 // still-evolving canonical projection so it can be migrated later as one unit.
 const DATABASE_NAME = "honeypot_db";
 const SESSIONS_COLLECTION = "cwd_session_state";
 const HISTORY_COLLECTION = "cwd_events";
+const CANONICAL_EVENTS_COLLECTION = "events";
+const CANONICAL_EVENT_SCHEMA = "mongodb_canonical_event.v1";
 const AUDIT_PROJECTION_COLLECTION = "cwd_audit_projection";
 const AUDIT_PROJECTION_META_COLLECTION = "cwd_audit_projection_meta";
 const TOPOLOGY_LIMIT = 500;
@@ -56,6 +63,50 @@ const RECENT_CLOSED_BUFFER_LIMIT = 12;
 export const CLOSED_AUDIT_PATHS_CACHE_MAX_ENTRIES = RECENT_CLOSED_BUFFER_LIMIT * 2;
 const HISTORY_PAGE_SIZE = 80;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
+
+function historySessionScope(sessionIds: readonly string[]): Document {
+  const identifiers = [...new Set(sessionIds)];
+  return {
+    $or: [
+      { sessionId: { $in: identifiers } },
+      { session_id: { $in: identifiers } },
+    ],
+  };
+}
+
+/**
+ * Resolve the sensor-local Cowrie ID only from an event carrying the
+ * authenticated identity binding for this exact canonical session. CWD
+ * telemetry currently stores the local ID, while dashboard routes use the
+ * canonical ID; never guess aliases from source IP, time, or command text.
+ */
+async function cwdSessionIdentifiers(client: Awaited<ReturnType<typeof getMongoClient>>, sessionId: string): Promise<string[]> {
+  if (!CANONICAL_SESSION_ID_PATTERN.test(sessionId)) return [sessionId];
+
+  const identityRow = await client.db(DATABASE_NAME)
+    .collection<Document>(CANONICAL_EVENTS_COLLECTION)
+    .findOne(
+      {
+        session_id: sessionId,
+        schema_version: CANONICAL_EVENT_SCHEMA,
+      },
+      {
+        projection: {
+          _id: 0,
+          sensor_id: 1,
+          payload_json: 1,
+        },
+      },
+    );
+
+  const event = parseStoredCanonicalEvent(identityRow?.payload_json);
+  const sensorSessionId = authenticatedSensorSessionAlias(
+    sessionId,
+    event,
+    identityRow?.sensor_id,
+  );
+  return sensorSessionId ? [...new Set([sessionId, sensorSessionId])] : [sessionId];
+}
 
 let auditProjectionReadinessTestHook: (() => Promise<void>) | null = null;
 
@@ -335,7 +386,8 @@ export async function getSessionCwdHistory(sessionId: string, cursor: string | n
   }
   const client = await getMongoClient();
   const collection = client.db(DATABASE_NAME).collection<Document>(HISTORY_COLLECTION);
-  const pipeline = buildSessionCwdHistoryPipeline(sanitizedSessionId, cursor, HISTORY_PAGE_SIZE);
+  const sessionIds = await cwdSessionIdentifiers(client, sanitizedSessionId);
+  const pipeline = buildSessionCwdHistoryPipeline(sanitizedSessionId, cursor, HISTORY_PAGE_SIZE, sessionIds.slice(1));
   const [facet] = await collection.aggregate<{
     items?: Document[];
     totalItems?: Array<{ count?: number }>;
@@ -369,22 +421,17 @@ export interface SessionCwdHopResolution {
  * Authoritatively resolves a retained hop for a session.
  *
  * Database operation contract:
- * - Overlength input (>300 chars) / invalid input: 0 MongoDB operations (rejected before querying).
- * - Canonical document success: exactly 2 MongoDB operations:
- *   1. Primary key indexed read on `cwd_events` (`findOne({ _id: eventId })`)
- *   2. Single consolidated aggregation pipeline matching migration-compatible session scope
- *      `{ $or: [{ sessionId }, { session_id }] }` with `$facet` for totalItems, chronological
- *      hopNumber, and successfulHopNumber.
- * - Canonical cross-session hop: exactly 1 MongoDB operation (`findOne({ _id })`), returning null without count work.
- * - Unknown event: exactly 3 MongoDB operations:
- *   1. Primary read `findOne({ _id: eventId })` -> null
- *   2. Legacy fallback read 1 `findOne({ sessionId, eventId })` -> null
- *   3. Legacy fallback read 2 `findOne({ session_id, eventId })` -> null
- *   Returns { item: null } without aggregation.
- * - Legacy document success: 3 to 4 MongoDB operations:
- *   1. Primary read (null) + 1 or 2 legacy fallback reads + 1 `$facet` aggregation.
- * - Database error path: throws without catch-and-retry fan-out (1 operation if primary read fails,
- *   2 if canonical aggregation fails, up to 4 if legacy aggregation fails).
+ * - Overlength/blank input is rejected before any MongoDB operation.
+ * - A non-canonical legacy ID uses the `cwd_events` primary-key read, one or
+ *   two bounded legacy lookups, and at most one `$facet` aggregation.
+ * - A canonical ID first performs one indexed `events` read to verify the
+ *   authenticated sensor/session hash and obtain the Cowrie-local alias.
+ *   It never infers that alias from source IP, time, or command text.
+ * - If the canonical/local alias pair is verified, fallback uses one combined
+ *   indexed query over both spellings; returned rows are normalized back to
+ *   the canonical ID.
+ * - Cross-session or unknown hops return null without count aggregation.
+ * - Failures propagate without broad scans or retry fan-out.
  */
 export async function getSessionCwdHistoryHop(
   sessionId: string,
@@ -406,6 +453,7 @@ export async function getSessionCwdHistoryHop(
   }
 
   const client = await getMongoClient();
+  const sessionIds = await cwdSessionIdentifiers(client, sanitizedSessionId);
   const collection = client.db(DATABASE_NAME).collection<Document & { _id: string }>(HISTORY_COLLECTION);
 
   // 1. Primary indexed read: attempt fast primary key lookup on canonical _id_
@@ -413,33 +461,42 @@ export async function getSessionCwdHistoryHop(
 
   if (doc) {
     const docSessionId = typeof doc.sessionId === "string" ? doc.sessionId : (typeof doc.session_id === "string" ? doc.session_id : null);
-    if (!docSessionId || docSessionId !== sanitizedSessionId) {
+    if (!docSessionId || !sessionIds.includes(docSessionId)) {
       // Cross-session: return null to prevent data leakage across sessions
       return { item: null };
     }
   } else {
-    // 2. Legacy fallback: check sessionId + eventId, then session_id + eventId
-    doc = await collection.findOne({ sessionId: sanitizedSessionId, eventId: sanitizedEventId });
-    if (!doc) {
-      doc = await collection.findOne({ session_id: sanitizedSessionId, eventId: sanitizedEventId });
+    // 2. Legacy fallback. Keep the two index-friendly probes for a single ID;
+    // when a verified canonical/local alias pair exists, match either spelling
+    // and either ID in one bounded indexed read.
+    if (sessionIds.length === 1) {
+      doc = await collection.findOne({ sessionId: sanitizedSessionId, eventId: sanitizedEventId });
       if (!doc) {
-        return { item: null };
+        doc = await collection.findOne({ session_id: sanitizedSessionId, eventId: sanitizedEventId });
       }
+    } else {
+      doc = await collection.findOne({
+        eventId: sanitizedEventId,
+        ...historySessionScope(sessionIds),
+      });
     }
+    const docSessionId = typeof doc?.sessionId === "string" ? doc.sessionId : (typeof doc?.session_id === "string" ? doc.session_id : null);
+    if (!doc || !docSessionId || !sessionIds.includes(docSessionId)) return { item: null };
   }
 
   const item = normalizeHistoryEvent(doc);
   if (!item) {
     return { item: null };
   }
+  // Canonicalize the public response after proving its stored local ID belongs
+  // to this exact authenticated session.
+  item.sessionId = sanitizedSessionId;
 
   // 3. Chronological hop numbering matching normal history pagination:
   // Use migration-compatible query covering both sessionId and session_id
   const docAt = doc.at instanceof Date ? doc.at : new Date(item.at);
   const docEventId = asString(doc.eventId) ?? asString(doc._id?.toString()) ?? item.id;
-  const sessionFilter: Document = {
-    $or: [{ sessionId: sanitizedSessionId }, { session_id: sanitizedSessionId }],
-  };
+  const sessionFilter = historySessionScope(sessionIds);
   const chronologicalFilter: Document = {
     $or: [
       { at: { $lt: docAt } },

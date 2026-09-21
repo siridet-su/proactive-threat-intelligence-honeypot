@@ -143,8 +143,10 @@ export function buildSessionCwdHistoryPipeline(
   sessionId: string,
   cursor: string | null,
   pageSize: number,
+  legacySessionIds: readonly string[] = [],
 ): Document[] {
   const limit = Math.max(1, Math.floor(pageSize));
+  const allowedSessionIds = [...new Set([sessionId, ...legacySessionIds])];
   const effectiveSessionId = {
     $let: {
       vars: {
@@ -181,8 +183,16 @@ export function buildSessionCwdHistoryPipeline(
   itemsPipeline.push({ $sort: { at: -1, eventId: -1 } }, { $limit: limit + 1 });
 
   return [
-    // This initial OR is indexable on either canonical or legacy session key.
-    { $match: { $or: [{ sessionId }, { session_id: sessionId }] } },
+    // The leading OR is indexable for canonical IDs and the authenticated
+    // sensor-local Cowrie ID retained by the legacy CWD writer.
+    {
+      $match: {
+        $or: allowedSessionIds.flatMap((value) => [
+          { sessionId: value },
+          { session_id: value },
+        ]),
+      },
+    },
     {
       $set: {
         effectiveSessionId,
@@ -194,7 +204,9 @@ export function buildSessionCwdHistoryPipeline(
       $match: {
         $expr: {
           $and: [
-            { $eq: ["$effectiveSessionId", sessionId] },
+            allowedSessionIds.length === 1
+              ? { $eq: ["$effectiveSessionId", sessionId] }
+              : { $in: ["$effectiveSessionId", allowedSessionIds] },
             { $ne: ["$effectiveAt", null] },
             { $ne: ["$effectiveEventId", null] },
             { $ne: ["$effectiveEventId", ""] },
@@ -206,7 +218,7 @@ export function buildSessionCwdHistoryPipeline(
     {
       $project: {
         _id: 0,
-        sessionId: "$effectiveSessionId",
+        sessionId: { $literal: sessionId },
         at: "$effectiveAt",
         eventId: "$effectiveEventId",
         sequence: 1,

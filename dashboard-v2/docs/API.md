@@ -2,7 +2,7 @@
 
 Status: source-backed contract for the current `dashboard-v2` tree, audited 2026-09-01.
 
-This document describes the browser-visible contract. The implementation has 36 explicit method/path contracts: 34 authenticated `GET` paths dispatched by `src/app/api/[...path]/route.ts`, plus `POST` and `DELETE` on `/api/auth`. The catch-all Next route is one handler, not an additional logical endpoint.
+This document describes the browser-visible contract. The generic catch-all implements 34 authenticated `GET` mappings plus `POST` and `DELETE` on `/api/auth`; dedicated hardware and sensitive Admin routes are separate handlers.
 
 ## Architecture and authentication
 
@@ -23,7 +23,21 @@ All `GET /api/...` requests require a valid `dashboard_v2_session` cookie before
 
 The BFF forwards only `GET`, sends `Accept: application/json`, disables caching, rejects redirects, applies a 15-second timeout, and caps response bodies at 8 MiB. Unknown query keys and overlong values are dropped. `limit` is capped at 1000 by the BFF, `offset` at 5000, and the upstream applies route-specific bounds. The backend generic table handlers use `limit` only; `offset` and `filter` are accepted by the BFF allowlist but have no generic-table effect. `session_id` is consumed by session-specific routes. `filter` is consumed by feedback review.
 
-Every public backend JSON response passes through a redaction projection. Raw command detail is deliberately excluded from the public session view; `/api/internal/session-commands` is a separate loopback/admin monitor route and is not allowlisted by this BFF.
+Every public backend JSON response passes through a redaction projection. Raw command detail remains excluded from public session views. A separate same-origin Admin route may request a bounded sensitive projection through the loopback-only `/api/internal/session-commands` endpoint; neither route is part of the generic BFF.
+
+## Sensitive Admin command evidence
+
+`GET /api/sessions/{canonical_session_id}/commands` requires a valid dashboard
+Admin session and denies sessions that must change their password. The Next
+server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an owner-only regular file
+and forwards only to `http://127.0.0.1:8090/api/internal/session-commands`.
+The monitor additionally requires `LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a
+loopback bind/client, and the dedicated bearer token. The browser never
+receives this token. Responses are bounded and `no-store`; command input is
+sensitive and may contain attacker-entered credentials. The UI excludes it
+from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
+Invalid/missing credentials or mismatched canonical sensor/session identity
+fail closed. Text already redacted before persistence cannot be recovered.
 
 ## Dedicated hardware endpoints
 
@@ -59,6 +73,7 @@ Authentication errors are `503` when server auth configuration is incomplete, `4
 | GET | `/api/ready` | `/ready` | Readiness alias | `monitor_web` health check; `{ok,service,timestamp}` | None |
 | GET | `/api/sessions` | `/api/sessions` | Bounded session snapshot | `sessions`, plus bounded jobs/reports/events/evidence joins; `{ok,timestamp,summary,sessions,selected_session_id,error}` | Dashboard, Threat Intel |
 | GET | `/api/session` | `/api/session-detail` | One-session detail | Exact `sessions` lookup plus bounded session-scoped `events`, `analysis_jobs`, `reports`, and `prediction_snapshots`; `session_detail_view` projection | Threat Intel session detail |
+| GET | `/api/sessions/{id}/commands` | Loopback `/api/internal/session-commands?session_id={id}` | Sensitive raw Cowrie command input for Admin review | Verified canonical sensor/session event identity; bounded exact-session command-only projection | Threat Intel session detail (Admin only; no-store; excluded from print/PDF) |
 | GET | `/api/events` | `/api/events` | Global or session event view | `events`; `{ok,timestamp,events,error}` | Dashboard freshness/activity |
 | GET | `/api/ai-advisory` | `/api/ai-advisory` | Stored advisory status/detail | advisory/outbox/report records; `{ok,status,advisory,metrics,...}` | Threat Intel session detail |
 | GET | `/api/predictions/current` | `/predictions/current` | Current model snapshot and guidance | `prediction_snapshots` plus feedback; `{item,current_prediction,response_guidance,...}` | Threat Intel session detail |

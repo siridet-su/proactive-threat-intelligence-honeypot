@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Check, ChevronRight, Copy, Download, Ghost, Lock, MapPin, Printer, Terminal, X } from "lucide-react";
+import { Activity, ChevronRight, Download, Ghost, Lock, MapPin, Printer, Terminal, X } from "lucide-react";
 import Link from "next/link";
 import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps";
 
@@ -16,17 +16,25 @@ import {
   sessionLifecycleStatus,
 } from "@/lib/session-analysis-semantics";
 import { analystCommandText } from "@/lib/session-intelligence";
+import { hasValidHistoricalNextDistinct } from "@/lib/next-distinct-projection";
 import { cn } from "@/lib/utils";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 
 type DetailRecord = Record<string, unknown>;
 type NextDistinctResult = {
+  sessionId: string;
   data: DetailRecord;
   state: SessionAnalysisLoadState;
   reason: string;
 };
-type BoundNextDistinctResult = NextDistinctResult & { sessionId: string };
+type BoundNextDistinctResult = NextDistinctResult;
+type BoundCommandView = {
+  sessionId: string;
+  state: SessionAnalysisLoadState;
+  reason: string;
+  sensitive: true;
+};
 
 function recordValue(value: unknown): DetailRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -85,11 +93,7 @@ function nextDistinctState(result: NextDistinctResult): {
   const hasHistoricalPrediction = isEnded
     && !isUnavailable
     && !isStale
-    && predictionStatus === "PREDICTED"
-    && freshnessState === "FRESH"
-    && freshness.history_manifest_match === true
-    && typeof data.stored_next_distinct_tactic === "string"
-    && data.stored_next_distinct_tactic.trim().length > 0;
+    && hasValidHistoricalNextDistinct(data, result.sessionId);
   const isInsufficient = !hasPrediction && (
     ["EMPTY_VALID", "WAITING_FOR_EVIDENCE", "NO_DATA"].includes(rawState)
     || predictionStatus.includes("INSUFFICIENT")
@@ -98,12 +102,12 @@ function nextDistinctState(result: NextDistinctResult): {
   );
   const label = result.state === "loading"
     ? "LOADING"
-    : isEnded
-      ? "SESSION_ENDED"
     : isUnavailable
       ? "UNAVAILABLE"
       : isStale
         ? "STALE"
+        : isEnded
+          ? "SESSION_ENDED"
         : hasPrediction
           ? "PREDICTION"
           : isInsufficient
@@ -111,19 +115,19 @@ function nextDistinctState(result: NextDistinctResult): {
             : rawState;
   const tactic = result.state === "loading"
     ? "Reading Next-Distinct projection…"
-    : isEnded
-      ? hasHistoricalPrediction
-        ? textValue(data.stored_next_distinct_tactic, "No valid stored prediction")
-        : "No valid stored prediction"
-    : hasPrediction
-      ? textValue(data.next_distinct_tactic, "Prediction unavailable")
-      : isUnavailable
-        ? "Next-Distinct unavailable"
-        : isStale
-          ? "Prediction stale"
-          : "WAITING_FOR_EVIDENCE";
+    : isUnavailable
+      ? "Next-Distinct unavailable"
+      : isStale
+        ? "Prediction stale"
+        : isEnded
+          ? hasHistoricalPrediction
+            ? textValue(data.stored_next_distinct_tactic, "No valid stored prediction")
+            : "No valid stored prediction"
+          : hasPrediction
+            ? textValue(data.next_distinct_tactic, "Prediction unavailable")
+            : "WAITING_FOR_EVIDENCE";
   const context = hasHistoricalPrediction
-    ? "Historical advisory from the last fresh, manifest-matched Next-Distinct sidecar result. The final observed tactic path remains authoritative; no session-end prediction is emitted."
+    ? "Historical advisory from the final, manifest-matched Next-Distinct sidecar result. The final observed tactic path remains authoritative; no session-end prediction is emitted."
     : reason || (isInsufficient
     ? "No trusted distinct-tactic progression is available yet."
     : isEnded
@@ -165,7 +169,7 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
             <Activity className="h-4 w-4" aria-hidden="true" />
             Forecast / advisory
           </div>
-          <h2 className="mt-1 text-base font-semibold sm:text-lg">Real-time Next Tactic</h2>
+          <h2 className="mt-1 text-base font-semibold sm:text-lg">{ended ? "Next Tactic assessment" : "Real-time Next Tactic"}</h2>
         </div>
         <span className={`ui-badge text-[11px] ${stateClass}`}>{view.label}</span>
       </div>
@@ -533,42 +537,26 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const sessionId = resolvedParams.id;
   const { threats } = useThreatFeed();
   const threatData = useMemo(() => threats.find((threat) => threat.id === sessionId) ?? null, [sessionId, threats]);
-  const [detailData, setDetailData] = useState<DetailRecord>({});
-  const [liveCommands, setLiveCommands] = useState<unknown[]>([]);
-  const [liveActive, setLiveActive] = useState(false);
+  const [boundDetail, setBoundDetail] = useState<{ sessionId: string; data: DetailRecord }>(() => ({ sessionId, data: {} }));
+  const [liveCommandState, setLiveCommandState] = useState<{ sessionId: string; commands: unknown[]; active: boolean }>(
+    () => ({ sessionId, commands: [], active: false }),
+  );
+  const [commandView, setCommandView] = useState<BoundCommandView>(() => ({ sessionId, state: "loading", reason: "", sensitive: true }));
   const [nextDistinct, setNextDistinct] = useState<BoundNextDistinctResult>({ sessionId, data: {}, state: "loading", reason: "" });
-  const [copiedPayload, setCopiedPayload] = useState(false);
+  const detailData = boundDetail.sessionId === sessionId ? boundDetail.data : {};
+  const currentLiveCommandState = liveCommandState.sessionId === sessionId
+    ? liveCommandState
+    : { sessionId, commands: [], active: false };
   const handleDetail = useCallback((data: DetailRecord) => {
-    setDetailData(data);
-  }, []);
-  const handleLiveInteraction = useCallback((commands: unknown[], active: boolean) => {
-    setLiveCommands(chronologicalRecords(commands));
-    setLiveActive(active);
-  }, []);
+    setBoundDetail({ sessionId, data });
+  }, [sessionId]);
+  const handleLiveInteraction = useCallback((commands: unknown[], active: boolean, view: Omit<BoundCommandView, "sessionId">) => {
+    setLiveCommandState({ sessionId, commands: chronologicalRecords(commands), active });
+    setCommandView({ sessionId, ...view });
+  }, [sessionId]);
   const handleNextDistinct = useCallback((data: DetailRecord, state: SessionAnalysisLoadState, reason: string) => {
     setNextDistinct({ sessionId, data, state, reason });
   }, [sessionId]);
-
-  const handleCopyPayload = async (text: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-      } else {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-      }
-      setCopiedPayload(true);
-      window.setTimeout(() => setCopiedPayload(false), 2000);
-    } catch {
-      setCopiedPayload(false);
-    }
-  };
 
   const detailOverview = recordValue(detailData.overview);
   const detailGeo = recordValue(detailOverview.geo);
@@ -592,14 +580,28 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const destination = textValue(detailOverview.dst_ip || detailOverview.destination, sensor);
   const eventCount = textValue(detailOverview.event_count, String((Array.isArray(detailData.events) ? detailData.events : []).length));
   const sessionStatus = sessionLifecycleStatus(detailData);
-  const payloadItems = liveCommands.map(commandInput).filter((value): value is string => Boolean(value));
-  const fallbackPayload = analystCommandText(threatData?.payloadPreview) || "";
-  const displayCommands = payloadItems.length > 0 ? payloadItems : (fallbackPayload ? [fallbackPayload] : []);
-  const payload = displayCommands.join("\n");
-  const hasCommandEvents = liveCommands.length > 0;
-  const hasPayload = Boolean(payload);
-  const commandTimestamps = liveCommands.map(commandTimestamp);
-  const readableLiveCommands = liveCommands.map(commandInput).filter((value): value is string => Boolean(value));
+  const currentCommandView = commandView.sessionId === sessionId
+    ? commandView
+    : { sessionId, state: "loading" as const, reason: "", sensitive: true as const };
+  const publicEvents = Array.isArray(detailData.events)
+    ? detailData.events
+    : Array.isArray(detailData.events_table_rows) ? detailData.events_table_rows : [];
+  const publicCommandCount = publicEvents.filter((value) => recordValue(value).command_event === true).length;
+  const sessionCommands = currentLiveCommandState.commands.filter((value) => recordValue(value).session_id === sessionId);
+  const liveActive = currentLiveCommandState.active;
+  const hasCommandEvents = sessionCommands.length > 0 || publicCommandCount > 0;
+  const commandCount = sessionCommands.length || publicCommandCount;
+  const commandTimestamps = sessionCommands.map(commandTimestamp);
+  const readableLiveCommands = sessionCommands.map(commandInput).filter((value): value is string => Boolean(value));
+  const textAvailability = readableLiveCommands.length > 0
+    ? `${readableLiveCommands.length} readable`
+    : currentCommandView.state === "unavailable" || currentCommandView.state === "limited"
+      ? currentCommandView.reason
+      : currentCommandView.state === "empty"
+        ? "No retained command input"
+        : currentCommandView.state === "ready"
+          ? "No command input stored"
+          : "Loading Admin-only command evidence";
   const hasStoredReport = Array.isArray(detailData.reports) && detailData.reports.length > 0;
   const reportDownloadHref = `/api/session-report?session_id=${encodeURIComponent(sessionId)}`;
 
@@ -718,7 +720,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <div>
                 <dt className="text-xs font-medium uppercase tracking-[0.1em] text-text-subtle">Observed evidence</dt>
-                <dd className="mt-1 font-mono text-sm text-text">{eventCount} events · {liveCommands.length} commands</dd>
+                <dd className="mt-1 font-mono text-sm text-text">{eventCount} events · {commandCount} commands</dd>
               </div>
             </dl>
           </div>
@@ -730,7 +732,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
         <SourceLocationPanel originIp={originIp} country={country} city={city} lat={lat} lon={lon} />
       </section>
 
-      <section aria-label="Command evidence">
+      <section aria-label="Command evidence" className="print:hidden">
         <article className="ui-panel flex flex-col overflow-hidden">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
             <div>
@@ -740,29 +742,17 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               </div>
               <h2 className="mt-1 text-base font-semibold sm:text-lg">Command activity</h2>
             </div>
-            {hasCommandEvents || hasPayload ? (
+            {hasCommandEvents ? (
               <div className="flex items-center gap-2">
                 <span className="ui-badge border-success-border bg-success-subtle text-success text-xs">
                   {liveActive ? "Live stream" : "Persisted commands"}
                 </span>
-                {hasPayload && (
-                  <button
-                    type="button"
-                    onClick={() => void handleCopyPayload(payload)}
-                    className="ui-button min-h-8 px-2.5 text-xs"
-                    title="Copy captured command evidence"
-                    aria-label="Copy captured command evidence"
-                  >
-                    {copiedPayload ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
-                    {copiedPayload ? "Copied" : "Copy commands"}
-                  </button>
-                )}
               </div>
             ) : (
               <span className="ui-badge">{liveActive ? "Waiting for commands" : "No command stream"}</span>
             )}
           </div>
-          {hasCommandEvents || hasPayload ? (
+          {hasCommandEvents ? (
             <div className="flex flex-1 flex-col overflow-hidden bg-surface-subtle/60 p-4 sm:p-5">
               <div className="flex select-none items-center gap-2 border-b border-border pb-3 text-xs text-text-subtle">
                 <span className={liveActive ? "h-2 w-2 rounded-full bg-success" : "h-2 w-2 rounded-full bg-text-subtle"} aria-hidden="true" />
@@ -771,11 +761,11 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               <dl className="mt-4 grid gap-x-5 gap-y-3 border-b border-border pb-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <dt className="text-[11px] uppercase tracking-[0.1em] text-text-subtle">Command events</dt>
-                  <dd className="mt-1 font-mono text-sm text-text">{liveCommands.length || (payload ? 1 : 0)}</dd>
+                  <dd className="mt-1 font-mono text-sm text-text">{commandCount}</dd>
                 </div>
                 <div>
                   <dt className="text-[11px] uppercase tracking-[0.1em] text-text-subtle">Text availability</dt>
-                  <dd className="mt-1 text-sm text-text">{readableLiveCommands.length > 0 ? `${readableLiveCommands.length} readable` : "Unavailable after pre-persistence redaction"}</dd>
+                  <dd className="mt-1 text-sm text-text">{textAvailability}</dd>
                 </div>
                 <div>
                   <dt className="text-[11px] uppercase tracking-[0.1em] text-text-subtle">Activity</dt>
@@ -786,9 +776,9 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                   <dd className="mt-1 font-mono text-xs text-text">{commandTimestamps.find((value) => value !== "Not recorded") || "Not recorded"} → {[...commandTimestamps].reverse().find((value) => value !== "Not recorded") || "Not recorded"}</dd>
                 </div>
               </dl>
-              {liveCommands.length > 0 ? (
+              {sessionCommands.length > 0 ? (
                 <ol className="mt-3 divide-y divide-border">
-                  {liveCommands.map((command, index) => {
+                  {sessionCommands.map((command, index) => {
                     const text = commandInput(command);
                     const classificationTechnique = textValue(recordValue(command).classification_technique, "");
                     return (
@@ -797,21 +787,22 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                           <span className="font-semibold uppercase tracking-[0.08em]">#{index + 1} · {commandEventId(command)}</span>
                           <span className="font-mono">{commandTimestamp(command)}</span>
                         </div>
-                        <p className="mt-2 font-mono">{text || "Command text unavailable after pre-persistence privacy redaction."}</p>
+                        <p className="mt-2 font-mono"><bdi dir="ltr" className="[unicode-bidi:isolate]">{text || "Command input unavailable in the retained record."}</bdi></p>
                         {classificationTechnique && <p className="mt-2 text-[11px] text-text-muted">ATT&amp;CK mapping: <span className="font-mono text-text">{classificationTechnique}</span></p>}
                       </li>
                     );
                   })}
                 </ol>
-              ) : displayCommands.length > 0 ? (
-                <ol className="mt-3 divide-y divide-border">
-                  {displayCommands.map((command, index) => <li key={`${index}-${command}`} className="py-3 font-mono text-xs text-text first:pt-0 last:pb-0"><span className="mr-2 text-text-subtle">#{index + 1}</span>{command}</li>)}
-                </ol>
               ) : (
                 <p className="mt-4 rounded-lg border border-warning-border bg-warning-subtle p-4 text-sm text-warning">
-                  Command records are present for this exact session, but the original text was removed before persistence. No text is being reconstructed or inferred.
+                  {textAvailability}{currentCommandView.state === "ready" || currentCommandView.reason.toLowerCase().includes("redacted")
+                    ? ". Command text redacted before persistence cannot be recovered."
+                    : "."}
                 </p>
               )}
+              <p className="mt-4 rounded-md border border-warning-border bg-warning-subtle p-3 text-xs text-warning">
+                Sensitive Admin-only evidence: command input may contain attacker-entered usernames, passwords, tokens, or other secrets. It is excluded from print/export reports and is not copied automatically.
+              </p>
             </div>
           ) : (
             <div className="flex flex-1 items-center p-5 sm:p-6">

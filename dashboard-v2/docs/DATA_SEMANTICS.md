@@ -39,7 +39,7 @@ The dashboard page uses `/api/events` for latest-observed context and `/api/sess
 
 ## Redaction and safe fields
 
-Public session/event views use the backend security projection. Event rows retain identifiers, timestamps, sensor/source metadata, and the `command_event` marker; command-shaped values are redacted. Generic row views expose table-specific metadata and recursively apply `public_payload`. Webhook target URLs are represented by hashes. The private `/api/internal/session-commands` route is outside this application contract.
+Public session/event views use the backend security projection. Event rows retain identifiers, timestamps, sensor/source metadata, and the `command_event` marker; command-shaped values are redacted. Generic row views expose table-specific metadata and recursively apply `public_payload`. Webhook target URLs are represented by hashes. The separate `/api/sessions/{id}/commands` Admin-only route returns bounded raw Cowrie input only after canonical sensor/session binding verification; it is `no-store`, excluded from reports/exports/print, and never part of the generic public BFF contract. Command input can contain credentials typed by an attacker and must be handled as sensitive evidence.
 
 ## Empty, stale, and unavailable states
 

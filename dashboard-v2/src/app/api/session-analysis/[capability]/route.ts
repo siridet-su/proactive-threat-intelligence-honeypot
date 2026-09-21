@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest } from "@/lib/auth/session";
+import { projectNextDistinct } from "@/lib/next-distinct-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -150,60 +151,6 @@ function projectDetail(capability: Capability, payload: JsonRecord): JsonRecord 
     return { ...base, reports: payload.reports || [], report_summary: payload.report_summary || {} };
   }
   return payload;
-}
-
-function projectNextDistinct(payload: JsonRecord, sessionId: string): JsonRecord {
-  const nextDistinct = payload.next_distinct_tactic ?? payload.top1 ?? null;
-  const freshness = isRecord(payload.freshness) ? payload.freshness : {};
-  const predictionStatus = String(payload.prediction_status || "").toUpperCase();
-  const freshnessState = String(freshness.state || "").toUpperCase();
-  const unavailable = predictionStatus === "UNAVAILABLE" || freshnessState === "UNAVAILABLE";
-  const rawState = String(payload.state || payload.status || "").toUpperCase();
-  const sessionEnded = rawState === "SESSION_ENDED"
-    || payload.session_ended === true
-    || payload.is_ended === true;
-  const stale = predictionStatus === "STALE" || ["STALE", "EXPIRED"].includes(freshnessState);
-  const hasCurrentData = nextDistinct !== null && nextDistinct !== undefined && nextDistinct !== "";
-  const storedCandidate = payload.stored_next_distinct_tactic;
-  const hasHistoricalData = sessionEnded
-    && predictionStatus === "PREDICTED"
-    && freshnessState === "FRESH"
-    && freshness.history_manifest_match === true
-    && storedCandidate !== null
-    && storedCandidate !== undefined
-    && storedCandidate !== "";
-  const state = sessionEnded
-    ? "SESSION_ENDED"
-    : unavailable
-      ? "UNAVAILABLE"
-      : stale
-        ? "STALE"
-        : hasCurrentData
-          ? "DATA"
-          : "WAITING_FOR_EVIDENCE";
-  return {
-    ...payload,
-    ok: true,
-    session_id: payload.session_id || payload.sequence_id || sessionId,
-    source: "NEXT_DISTINCT_POC",
-    dashboard_source: "NEXT_DISTINCT_POC",
-    read_only: true,
-    advisory_only: true,
-    state,
-    status: state,
-    availability: state === "DATA" ? "AVAILABLE" : state,
-    next_distinct_tactic: state === "DATA" ? nextDistinct : null,
-    stored_next_distinct_tactic: hasHistoricalData ? storedCandidate : null,
-    ...(state === "SESSION_ENDED"
-      ? {
-        prediction_status_reason: hasHistoricalData
-          ? "session ended; no session-end prediction is emitted; the last valid sidecar result is historical advisory context"
-          : stale
-            ? "session ended; the stored sidecar result is stale or history-mismatched; no session-end prediction is emitted"
-            : "session ended; no valid stored prediction is available; no session-end prediction is emitted",
-      }
-      : {}),
-  };
 }
 
 export async function GET(

@@ -68,6 +68,12 @@ from production.utils.http_security import (
 )
 from production.utils.serialization import html_script_json, stable_id, utc_now
 from production.utils.service_lifecycle import serve_http_until_stopped
+from production.storage.mongodb_backend import MONGODB_EVENT_SCHEMA
+from production.utils.sensor_identity import (
+    IDENTITY_SCHEMA as SENSOR_SESSION_IDENTITY_SCHEMA,
+    canonical_session_id as canonical_sensor_session_id,
+    validate_sensor_session_id,
+)
 from production.reporting.response_guidance_v3 import (
     read_legacy_response_guidance,
     validate_response_guidance_v3,
@@ -81,6 +87,8 @@ DEFAULT_SESSION_LIMIT = 500
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
+MAX_ADMIN_COMMAND_EVENTS = 100
+MAX_ADMIN_COMMAND_INPUT_BYTES = 4096
 MONITOR_SUMMARY_SCAN_LIMIT = 100_000
 MONITOR_SESSION_PAGE_SIZE = 256
 MONITOR_SESSION_TRAVERSAL_LIMIT = MAX_SESSIONS
@@ -342,11 +350,63 @@ def _is_persisted_command_event(event_id: Any) -> bool:
         "cowrie.command.input",
         "cowrie.command.success",
         "cowrie.command.failed",
-    } or (
-        normalized.startswith("cowrie.")
-        and normalized.endswith(".input")
-        and "[redacted]" in normalized
+    }
+
+
+def _is_canonical_command_event_for_session(
+    row: Dict[str, Any],
+    payload: Dict[str, Any],
+    session_id: str,
+) -> bool:
+    """Require the stored event's authenticated sensor/session binding."""
+    if (
+        row.get("schema_version") != MONGODB_EVENT_SCHEMA
+        or row.get("session_id") != session_id
+        or payload.get("session") != session_id
+    ):
+        return False
+
+    sensor_id = row.get("sensor_id")
+    identity = payload.get("_honeypot_identity")
+    if not isinstance(sensor_id, str) or not sensor_id or len(sensor_id) > 256:
+        return False
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in sensor_id):
+        return False
+    if not isinstance(identity, dict):
+        return False
+    if (
+        identity.get("schema_version") != SENSOR_SESSION_IDENTITY_SCHEMA
+        or identity.get("sensor_id") != sensor_id
+        or identity.get("canonical_session_id") != session_id
+        or payload.get("sensor_id") != sensor_id
+    ):
+        return False
+    try:
+        sensor_session_id = validate_sensor_session_id(identity.get("sensor_session_id"))
+        expected_session_id = canonical_sensor_session_id(sensor_id, sensor_session_id)
+    except (TypeError, ValueError):
+        return False
+    if expected_session_id != session_id:
+        return False
+
+    row_event_id = row.get("eventid")
+    return (
+        isinstance(row_event_id, str)
+        and bool(row_event_id)
+        and row_event_id == payload.get("eventid")
+        and isinstance(row.get("event_id"), str)
+        and bool(row.get("event_id"))
     )
+
+
+def _bounded_command_input(value: Any) -> Tuple[str, bool] | None:
+    if not isinstance(value, str):
+        return None
+    encoded = value.encode("utf-8", errors="replace")
+    if len(encoded) <= MAX_ADMIN_COMMAND_INPUT_BYTES:
+        return value, False
+    bounded = encoded[:MAX_ADMIN_COMMAND_INPUT_BYTES].decode("utf-8", errors="ignore")
+    return bounded, True
 
 
 def load_internal_command_detail(
@@ -363,17 +423,23 @@ def load_internal_command_detail(
     or report data; command text itself is intentionally sensitive.
     """
     selected_session_id = str(session_id or "").strip()
-    if not selected_session_id or len(selected_session_id) > 256:
-        return {"ok": False, "error": "session_id is required"}
+    if not re.fullmatch(r"session_v1_[0-9a-f]{32}", selected_session_id):
+        return {"ok": False, "error": "canonical session identity is required"}
     try:
         storage = _storage or _open_monitor_storage(config)
-        session_rows, session_error = _storage_session_rows(
+        session_rows, _session_error = _storage_session_rows(
             storage, "sessions", selected_session_id, 1
         )
         if not session_rows:
             return {
                 "ok": False,
-                "error": session_error or "session not found",
+                "error": "session identity is unavailable",
+                "session_id": selected_session_id,
+            }
+        if _row_session_id(dict(session_rows[0])) != selected_session_id:
+            return {
+                "ok": False,
+                "error": "session identity does not match the requested session",
                 "session_id": selected_session_id,
             }
         event_rows, event_error = _storage_session_rows(
@@ -382,7 +448,13 @@ def load_internal_command_detail(
     except Exception as exc:
         return {
             "ok": False,
-            "error": _storage_error("sensitive command query", exc),
+            "error": "command evidence is unavailable",
+            "session_id": selected_session_id,
+        }
+    if event_error:
+        return {
+            "ok": False,
+            "error": "command evidence is unavailable",
             "session_id": selected_session_id,
         }
 
@@ -401,11 +473,21 @@ def load_internal_command_detail(
         ),
     )
     commands: List[Dict[str, Any]] = []
+    truncated = False
     for row in ordered_rows:
         payload = _payload_from_row(row)
+        if not _is_canonical_command_event_for_session(
+            row,
+            payload,
+            selected_session_id,
+        ):
+            continue
         event_id = row.get("eventid") or payload.get("eventid")
         if not _is_persisted_command_event(event_id):
             continue
+        if len(commands) >= MAX_ADMIN_COMMAND_EVENTS:
+            truncated = True
+            break
         timestamp = str(row.get("timestamp") or payload.get("timestamp") or "")
         matching_classifications = []
         for item in classifications:
@@ -439,13 +521,20 @@ def load_internal_command_detail(
                     "evidence_tier": str(item.get("evidence_tier") or ""),
                 }
             )
-        raw_input = payload.get("input")
+        bounded_input = _bounded_command_input(payload.get("input"))
+        if bounded_input is None:
+            raw_input = ""
+            input_truncated = False
+        else:
+            raw_input, input_truncated = bounded_input
+        truncated = truncated or input_truncated
         commands.append(
             {
                 "event_id": str(row.get("event_id") or ""),
                 "eventid": str(event_id or ""),
                 "timestamp": timestamp,
-                "input": str(raw_input) if raw_input is not None else "",
+                "input": raw_input,
+                "input_truncated": input_truncated,
                 "classification": matching_classifications,
             }
         )
@@ -457,7 +546,7 @@ def load_internal_command_detail(
         "content_scope": "persisted_cowrie_input_after_sensor_privacy",
         "historical_originals": "unrecoverable_after_pre_persistence_redaction",
         "commands": commands,
-        "event_error": event_error,
+        "truncated": truncated,
     }
 
 

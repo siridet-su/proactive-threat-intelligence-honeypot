@@ -253,6 +253,46 @@ def test_short_credentials_do_not_corrupt_event_identity_or_benign_commands(
 
 
 @pytest.mark.parametrize(
+    "eventid",
+    [
+        "cowrie.command.input",
+        "cowrie.command.success",
+        "cowrie.command.failed",
+    ],
+)
+def test_sensitive_command_input_is_retained_but_structured_login_secrets_stay_redacted(
+    eventid: str,
+) -> None:
+    command = "echo attacker:synthetic-pass && curl -u attacker:synthetic-pass --password=synthetic-pass https://example.invalid/"
+    serialized = serialize_cowrie_event_for_persistence(
+        {
+            "eventid": eventid,
+            "session": "session-command-evidence",
+            "input": command,
+            "password": "structured-synthetic-pass",
+        }
+    )
+    decoded = json.loads(serialized)
+
+    assert decoded["input"] == command
+    assert decoded["password"] == "[REDACTED]"
+
+
+def test_non_command_free_text_remains_credential_scrubbed() -> None:
+    serialized = serialize_cowrie_event_for_persistence(
+        {
+            "eventid": "cowrie.session.file_download",
+            "session": "session-download-evidence",
+            "url": "https://attacker:synthetic-pass@example.invalid/file?token=synthetic-token",
+        }
+    )
+    decoded = json.loads(serialized)
+
+    assert "synthetic-pass" not in decoded["url"]
+    assert "synthetic-token" not in decoded["url"]
+
+
+@pytest.mark.parametrize(
     "event",
     [
         {
@@ -311,15 +351,15 @@ def test_unstructured_secret_syntax_is_redacted_without_substring_matching(
 ) -> None:
     event = sanitize_cowrie_event_for_persistence(
         {
-            "eventid": "cowrie.command.input",
-            "input": text,
+            "eventid": "cowrie.session.file_download",
+            "message": text,
             "nested": {"message": text},
         },
         registry=CredentialValueRegistry(DEFAULT_POLICY),
     )
     encoded = json.dumps(event, ensure_ascii=False)
     assert "marker-" not in encoded
-    assert event["input"] == safe_fragment
+    assert event["message"] == safe_fragment
     assert event["nested"]["message"] == safe_fragment
 
 
@@ -759,7 +799,8 @@ def test_real_copytruncate_and_compression_never_create_group_readable_history(
 
 def test_policy_is_strict_and_hash_bound(tmp_path: Path) -> None:
     policy = load_policy(ROOT / "configs/cowrie_output_privacy.v1.json")
-    assert policy.policy_id == "cowrie_pre_persistence_credentials"
+    assert policy.policy_id == "cowrie_field_privacy_admin_command_evidence"
+    assert policy.version == "2.0.0"
     document = json.loads(
         (ROOT / "configs/cowrie_output_privacy.v1.json").read_text(encoding="utf-8")
     )
