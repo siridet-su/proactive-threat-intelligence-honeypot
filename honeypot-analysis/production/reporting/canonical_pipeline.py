@@ -222,7 +222,6 @@ class CanonicalAssessmentCoordinator:
             response_guidance_asset_profile_path=(
                 self.response_guidance_asset_profile_path
             ),
-            include_complete_typed_hypotheses=True,
         )
         # The v4 builder performs privacy projection before computing its
         # content-addressed evidence, guidance and assessment identities.
