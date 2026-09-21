@@ -157,7 +157,7 @@ export function useFilesystemUrlState(
       getSelectedSessionId: () => activeSessionIdRef.current,
       getHideHomeOnly: () => hideHomeOnlyRef.current,
       getTargetPathFilter: () => targetPathFilterRef.current,
-      getTimeRange: () => options.timeRange,
+      getTimeRange: () => options.timeRange || "all",
       getCustomDateRange: () => options.customDateRange,
       getSelectedHistoryEventId: () => selectedHistoryEventIdRef.current,
       getRequestedHop: () => requestedHopRef.current,
@@ -178,8 +178,8 @@ export function useFilesystemUrlState(
         targetPathFilterRef.current = next;
         setTargetPathFilter(next);
       },
-      setTimeRange: options.setTimeRange,
-      setCustomDateRange: options.setCustomDateRange,
+      setTimeRange: options.setTimeRange || (() => {}),
+      setCustomDateRange: options.setCustomDateRange || (() => {}),
       setSelectedHistoryEventId: (next) => {
         selectedHistoryEventIdRef.current = next;
         setSelectedHistoryEventId(next);
