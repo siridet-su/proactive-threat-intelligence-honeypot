@@ -415,6 +415,8 @@ export class FilesystemNavigationCoordinator {
 
     this.options.setHideHomeOnly(false);
     this.options.setTargetPathFilter(null);
+    this.options.setTimeRange("all");
+    this.options.setCustomDateRange(undefined);
   }
 
   /**
@@ -606,6 +608,19 @@ export class FilesystemNavigationCoordinator {
       this.options.setViewMode(nextView);
       this.options.setHideHomeOnly(Boolean(parsed.hideHome));
       this.options.setTargetPathFilter(parsed.targetPath ?? null);
+      if (parsed.timeRange) {
+        this.options.setTimeRange(parsed.timeRange);
+      } else {
+        this.options.setTimeRange("all");
+      }
+      if (parsed.timeFrom || parsed.timeTo) {
+        this.options.setCustomDateRange({
+          from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,
+          to: parsed.timeTo ? new Date(parsed.timeTo) : undefined,
+        });
+      } else {
+        this.options.setCustomDateRange(undefined);
+      }
       this.options.setRequestedHop(effectiveHop);
       this.options.setSelectedHistoryEventId(effectiveHop);
     }
@@ -656,6 +671,19 @@ export class FilesystemNavigationCoordinator {
         this.options.setViewMode(nextView);
         this.options.setHideHomeOnly(Boolean(parsed.hideHome));
         this.options.setTargetPathFilter(parsed.targetPath ?? null);
+        if (parsed.timeRange) {
+          this.options.setTimeRange(parsed.timeRange);
+        } else {
+          this.options.setTimeRange("all");
+        }
+        if (parsed.timeFrom || parsed.timeTo) {
+          this.options.setCustomDateRange({
+            from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,
+            to: parsed.timeTo ? new Date(parsed.timeTo) : undefined,
+          });
+        } else {
+          this.options.setCustomDateRange(undefined);
+        }
         this.options.setRequestedHop(effectiveHop);
         this.options.setSelectedHistoryEventId(effectiveHop);
         this.options.setRequestedSessionId(null);
