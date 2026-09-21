@@ -350,6 +350,8 @@ export function FilesystemActivity() {
     extraAuditSessions,
     hideHomeOnly,
     targetPathFilter,
+    timeRange,
+    customDateRange,
   });
 
   const {
