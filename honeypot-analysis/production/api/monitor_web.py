@@ -2337,6 +2337,7 @@ DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
     "reports": 50,
     "analyst_feedback": 50,
     "observable_sightings": 100,
+    "prediction_snapshots": 50,
 }
 
 
@@ -2369,6 +2370,18 @@ def _fail_closed_session_guidance(
     if result["requires_manual_approval"]:
         result["safe_to_auto_execute"] = False
     return result
+
+
+def _model2_result_bound_to_session(model2: Any, session_id: str) -> bool:
+    if not isinstance(model2, dict) or model2.get("available") is not True:
+        return False
+    binding = model2.get("binding")
+    if not isinstance(binding, dict):
+        return False
+    return (
+        _text(binding.get("session_id")) == session_id
+        and bool(_text(binding.get("run_id")))
+    )
 
 
 def load_dashboard_session_detail(
@@ -2456,11 +2469,51 @@ def load_dashboard_session_detail(
     event_rows = related["events"]
     feedback_rows = related["analyst_feedback"]
     sighting_rows = related["observable_sightings"]
+    prediction_rows = [
+        row
+        for row in related["prediction_snapshots"]
+        if _row_session_id(row) == clean_session_id
+    ]
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
     selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
+    latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
+    latest_prediction_payload = _payload_from_row(latest_prediction)
+    if latest_prediction and _row_session_id(latest_prediction) != clean_session_id:
+        latest_prediction = {}
+        latest_prediction_payload = {}
+    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
+    if not isinstance(ensemble_evidence, dict):
+        ensemble_evidence = {}
+    stored_model2 = ensemble_evidence.get("model2")
+    stored_model2_available = (
+        isinstance(stored_model2, dict)
+        and stored_model2.get("available") is True
+    )
+    if not _model2_result_bound_to_session(stored_model2, clean_session_id):
+        try:
+            live_ensemble = build_ensemble_from_session_payload(
+                payload,
+                computed_at=utc_now(),
+            )
+        except Exception:
+            live_ensemble = {}
+        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
+        if (
+            isinstance(live_ensemble, dict)
+            and (
+                not isinstance(live_model2, dict)
+                or live_model2.get("available") is not True
+                or _model2_result_bound_to_session(live_model2, clean_session_id)
+            )
+        ):
+            ensemble_evidence = live_ensemble
+        elif stored_model2_available:
+            # A stored, available result with a missing or mismatched binding
+            # cannot be exposed as evidence for the requested session.
+            ensemble_evidence = {}
     authentication_activity = _authentication_activity(payload, event_rows)
     report_payload = _report_payload(selected.get("report_row"))
     historical_guidance = _historical_response_guidance_payload(
@@ -2516,6 +2569,9 @@ def load_dashboard_session_detail(
         "ttps": payload.get("ttps") or [],
         "ttp_command_map": payload.get("ttp_command_map") or {},
         "enrichment_status": payload.get("enrichment_status") or {},
+        "ensemble_evidence": ensemble_evidence,
+        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
+        "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
         "events_table_rows": [_row_with_payload(row) for row in event_rows],
         "analyst_feedback": [_row_with_payload(row) for row in feedback_rows],

@@ -12,8 +12,14 @@ SESSION_ID = "session-detail-contract"
 
 
 class DetailStorage:
-    def __init__(self, *, present: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        present: bool = True,
+        prediction_rows: list[dict[str, object]] | None = None,
+    ) -> None:
         self.present = present
+        self.prediction_rows = list(prediction_rows or [])
         self.calls: list[tuple[str, str, int]] = []
         self.global_reads = 0
         self.single_enrichment_reads = 0
@@ -85,6 +91,8 @@ class DetailStorage:
                     ),
                 }
             ]
+        if table == "prediction_snapshots":
+            return self.prediction_rows
         if table in {"analyst_feedback", "observable_sightings"}:
             return []
         raise AssertionError(f"unexpected table: {table}")
@@ -130,8 +138,12 @@ def _config(tmp_path: Path) -> monitor_web.MonitorConfig:
     )
 
 
-def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_path: Path) -> None:
+def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     storage = DetailStorage()
+    monkeypatch.setattr(monitor_web, "build_ensemble_from_session_payload", lambda *_args, **_kwargs: {})
 
     detail = monitor_web.load_dashboard_session_detail(
         _config(tmp_path), SESSION_ID, _storage=storage
@@ -165,6 +177,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
         "reports",
         "analyst_feedback",
         "observable_sightings",
+        "prediction_snapshots",
     }
     assert {table: limit for table, _, limit in storage.calls} == {
         "sessions": 1,
@@ -173,6 +186,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
         "reports": 50,
         "analyst_feedback": 50,
         "observable_sightings": 100,
+        "prediction_snapshots": 50,
     }
     serialized = json.dumps(public, sort_keys=True)
     assert "payload_json" not in serialized
@@ -180,6 +194,112 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
     compact_serialized = json.dumps(compact, sort_keys=True)
     assert "payload_json" not in compact_serialized
     assert '"input": "id"' not in compact_serialized
+
+
+def test_dashboard_detail_projects_bound_prediction_snapshot_and_model2(tmp_path: Path, monkeypatch) -> None:
+    ensemble = {
+        "schema_version": "model1_model2_late_evidence_ensemble.v1",
+        "session_id": SESSION_ID,
+        "model2": {
+            "available": True,
+            "one_model": True,
+            "one_inference_call": True,
+            "independent_binary_heads": False,
+            "binding": {"session_id": SESSION_ID, "run_id": "run-bound"},
+        },
+    }
+    storage = DetailStorage(
+        prediction_rows=[
+            {
+                "snapshot_id": "snapshot-bound",
+                "session_id": SESSION_ID,
+                "created_at": "2026-09-01T00:00:05Z",
+                "payload_json": json.dumps(
+                    {
+                        "session_id": SESSION_ID,
+                        "generated_at": "2026-09-01T00:00:05Z",
+                        "ensemble_evidence": ensemble,
+                    }
+                ),
+            }
+        ]
+    )
+
+    def unexpected_live_lookup(*_args, **_kwargs):
+        raise AssertionError("available session-bound Model2 evidence must be reused")
+
+    monkeypatch.setattr(monitor_web, "build_ensemble_from_session_payload", unexpected_live_lookup)
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+    public = session_detail_view(detail, compact=True)
+
+    assert detail["ensemble_evidence"] == ensemble
+    assert detail["latest_prediction_snapshot"]["snapshot_id"] == "snapshot-bound"
+    assert public["ensemble_evidence"]["model2"]["available"] is True
+    assert public["latest_prediction_snapshot"]["snapshot_id"] == "snapshot-bound"
+    assert public["prediction_snapshots"][0]["generated_at"] == "2026-09-01T00:00:05Z"
+
+
+def test_dashboard_detail_uses_exact_session_live_model2_when_snapshot_missing(tmp_path: Path, monkeypatch) -> None:
+    ensemble = {
+        "schema_version": "model1_model2_late_evidence_ensemble.v1",
+        "session_id": SESSION_ID,
+        "model2": {
+            "available": True,
+            "one_model": True,
+            "one_inference_call": True,
+            "independent_binary_heads": False,
+            "binding": {"session_id": SESSION_ID, "run_id": "run-bound"},
+        },
+    }
+    monkeypatch.setattr(
+        monitor_web,
+        "build_ensemble_from_session_payload",
+        lambda payload, *, computed_at: ensemble if payload.get("session_id") == SESSION_ID else {},
+    )
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=DetailStorage()
+    )
+
+    assert detail["ensemble_evidence"] == ensemble
+    assert detail["prediction_snapshots"] == []
+    assert detail["latest_prediction_snapshot"] == {}
+
+
+def test_dashboard_detail_rejects_cross_session_model2_snapshot(tmp_path: Path, monkeypatch) -> None:
+    storage = DetailStorage(
+        prediction_rows=[
+            {
+                "snapshot_id": "snapshot-cross-session",
+                "session_id": SESSION_ID,
+                "created_at": "2026-09-01T00:00:05Z",
+                "payload_json": json.dumps(
+                    {
+                        "session_id": SESSION_ID,
+                        "ensemble_evidence": {
+                            "session_id": SESSION_ID,
+                            "model2": {
+                                "available": True,
+                                "binding": {
+                                    "session_id": "another-session",
+                                    "run_id": "run-other",
+                                },
+                            },
+                        },
+                    }
+                ),
+            }
+        ]
+    )
+    monkeypatch.setattr(monitor_web, "build_ensemble_from_session_payload", lambda *_args, **_kwargs: {})
+
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+
+    assert detail["ensemble_evidence"] == {}
+    assert detail["prediction_snapshots"][0]["session_id"] == SESSION_ID
 
 
 def test_dashboard_detail_missing_and_malformed_identity_fail_closed(tmp_path: Path) -> None:
