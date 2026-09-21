@@ -350,6 +350,8 @@ export function FilesystemActivity() {
     extraAuditSessions,
     hideHomeOnly,
     targetPathFilter,
+    timeRange,
+    customDateRange,
   });
 
   const {
@@ -1106,7 +1108,7 @@ export function FilesystemActivity() {
           <div
             className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
-            aria-label="Audit replay toolbar"
+            aria-label="Audit session and replay toolbar"
           >
             {/* Left side: Selection & Filters */}
             <div className="flex items-center justify-start gap-2 flex-1 min-w-0">

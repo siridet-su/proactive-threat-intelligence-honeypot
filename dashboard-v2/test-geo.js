@@ -1,8 +1,0 @@
-async function main() {
-  const { default: geoip } = await import('geoip-lite');
-  const ip = "207.97.227.239";
-  const geo = geoip.lookup(ip);
-  console.log(geo);
-}
-
-void main();
