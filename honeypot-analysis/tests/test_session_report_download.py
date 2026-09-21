@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import production.api.monitor_web as monitor_web
+from production.reporting.artifacts import _report_prediction_context
 
 
 class ReportStorage:
@@ -57,6 +58,38 @@ def _config(tmp_path: Path, session_id: str) -> monitor_web.MonitorConfig:
     return config
 
 
+def _next_distinct_projection(session_id: str, **overrides):
+    projection = {
+        "ok": True,
+        "source": "NEXT_DISTINCT_POC",
+        "dashboard_source": "NEXT_DISTINCT_POC",
+        "session_id": session_id,
+        "sequence_id": session_id,
+        "session_ended": True,
+        "state": "SESSION_ENDED",
+        "prediction_status": "PREDICTED",
+        "prediction_status_reason": "session ended; last fresh result is historical advisory only",
+        "top1": "discovery",
+        "top3": ["discovery", "execution", "credential-access"],
+        "prediction": [
+            {"tactic": "discovery", "score": 0.6},
+            {"tactic": "execution", "score": 0.25},
+            {"tactic": "credential-access", "score": 0.15},
+        ],
+        "freshness": {
+            "state": "FRESH",
+            "history_manifest_match": True,
+            "generated_at": "2026-09-21T11:35:00Z",
+        },
+        "model": {
+            "model_identifier": "next-distinct-test-model",
+            "checkpoint_sha256": "a" * 64,
+        },
+    }
+    projection.update(overrides)
+    return projection
+
+
 def test_session_report_pdf_uses_exact_stored_report_without_persistence(
     tmp_path: Path,
     monkeypatch,
@@ -75,6 +108,7 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
         "session_id": session_id,
         "advisory": {},
     }
+    expected_prediction = _next_distinct_projection(session_id)
 
     def render(
         report,
@@ -83,12 +117,14 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
         artifact_version="",
         external_ti_projection=None,
         ai_advisory_projection=None,
+        prediction_snapshot=None,
     ):
         captured["report"] = report
         captured["session"] = session
         captured["artifact_version"] = artifact_version
         captured["external_ti_projection"] = external_ti_projection
         captured["ai_advisory_projection"] = ai_advisory_projection
+        captured["prediction_snapshot"] = prediction_snapshot
         return b"%PDF-1.7 bounded fixture"
 
     monkeypatch.setattr(monitor_web, "render_pdf_report_bytes", render)
@@ -102,6 +138,11 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
         "load_ai_advisory_detail",
         lambda config, selected_session_id, _storage=None: expected_ai,
     )
+    monkeypatch.setattr(
+        monitor_web,
+        "load_next_distinct_prediction",
+        lambda config, selected_session_id, _storage=None: expected_prediction,
+    )
     pdf, error = monitor_web.load_session_report_pdf(_config(tmp_path, session_id), session_id)
 
     assert pdf == b"%PDF-1.7 bounded fixture"
@@ -110,7 +151,50 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
     assert captured["session"]["session_id"] == session_id
     assert captured["external_ti_projection"] == expected_ti
     assert captured["ai_advisory_projection"] == expected_ai
+    prediction_snapshot = captured["prediction_snapshot"]
+    assert prediction_snapshot["session_id"] == session_id
+    assert prediction_snapshot["prediction_status"] == "HISTORICAL_ADVISORY"
+    assert prediction_snapshot["prediction"] == [
+        "discovery", "execution", "credential-access"
+    ]
+    assert prediction_snapshot["model_artifact_sha256"] == "a" * 64
+    rendered_context = _report_prediction_context(prediction_snapshot, session_id)
+    assert rendered_context["status"] == "HISTORICAL_ADVISORY"
+    assert rendered_context["predictions"] == prediction_snapshot["prediction"]
+    assert [item["label"] for item in rendered_context["ranking"]] == prediction_snapshot["prediction"]
     assert not (tmp_path / "reports").exists()
+
+
+def test_report_next_distinct_context_rejects_cross_session_and_stale_labels() -> None:
+    session_id = "session_v1_report_prediction"
+
+    mismatched = _next_distinct_projection(
+        "session_v1_other",
+        sequence_id="session_v1_other",
+    )
+    assert monitor_web._report_next_distinct_snapshot(
+        monitor_web._dashboard_next_distinct_projection(mismatched, session_id),
+        session_id,
+    ) is None
+
+    stale = _next_distinct_projection(
+        session_id,
+        prediction_status="STALE",
+        prediction_status_reason="stored result is stale",
+        freshness={
+            "state": "STALE",
+            "history_manifest_match": True,
+            "generated_at": "2026-09-20T00:00:00Z",
+        },
+    )
+    stale_projection = monitor_web._dashboard_next_distinct_projection(stale, session_id)
+    stale_snapshot = monitor_web._report_next_distinct_snapshot(stale_projection, session_id)
+    assert stale_snapshot["prediction_status"] == "STALE"
+    assert stale_snapshot["prediction"] == []
+    assert stale_snapshot["final_ranking"] == []
+    stale_context = _report_prediction_context(stale_snapshot, session_id)
+    assert stale_context["predictions"] == []
+    assert stale_context["ranking"] == []
 
 
 def test_session_report_pdf_fails_context_closed_without_losing_report(

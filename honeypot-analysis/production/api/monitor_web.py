@@ -8,6 +8,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +50,7 @@ from production.enrichment.external_ti_session import (
 from production.correlation.session_ttp_correlation import build_observed_tactic_path
 from production.utils.config import ProductionConfig
 from production.prediction_next_distinct_poc.dashboard_adapter import (
+    LABEL_ORDER as NEXT_DISTINCT_LABEL_ORDER,
     build_dashboard_prediction,
 )
 from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
@@ -2822,6 +2824,99 @@ def _dashboard_next_distinct_projection(
     return result
 
 
+def _report_next_distinct_snapshot(
+    projection: Any,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a small report-only forecast context from the exact-session API.
+
+    Only a validated, fresh sidecar result with an exact session sequence and
+    trusted-history manifest match may contribute tactic labels.  Ended
+    sessions carry the last forecast as a historical advisory, never as a
+    prediction of future behavior.  Stale/unavailable states retain their
+    bounded status/reason but no candidate labels.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not isinstance(projection, dict) or not clean_session_id:
+        return None
+    if (
+        str(projection.get("session_id") or "").strip() != clean_session_id
+        or str(projection.get("sequence_id") or "").strip() != clean_session_id
+        or str(projection.get("source") or "").strip().upper() != "NEXT_DISTINCT_POC"
+    ):
+        return None
+
+    freshness = projection.get("freshness")
+    freshness = freshness if isinstance(freshness, dict) else {}
+    freshness_state = str(freshness.get("state") or "").strip().upper()
+    history_matches = freshness.get("history_manifest_match") is True
+    session_ended = projection.get("session_ended") is True
+    state = str(projection.get("state") or "").strip().upper()
+    prediction_status = str(projection.get("prediction_status") or "UNAVAILABLE").strip().upper()
+
+    visible_top = None
+    report_status = prediction_status
+    eligible = (
+        prediction_status == "PREDICTED"
+        and freshness_state == "FRESH"
+        and history_matches
+    )
+    if eligible and session_ended and state == "SESSION_ENDED":
+        visible_top = projection.get("stored_next_distinct_tactic")
+        report_status = "HISTORICAL_ADVISORY"
+    elif eligible and not session_ended and state == "DATA":
+        visible_top = projection.get("next_distinct_tactic")
+        report_status = "PREDICTED"
+    else:
+        eligible = False
+
+    ranking: List[Dict[str, Any]] = []
+    labels: List[str] = []
+    if eligible:
+        raw_ranking = projection.get("prediction")
+        if not isinstance(raw_ranking, list):
+            return None
+        for item in raw_ranking[:3]:
+            if not isinstance(item, dict):
+                return None
+            label = str(item.get("tactic") or "").strip()
+            if label not in NEXT_DISTINCT_LABEL_ORDER:
+                return None
+            if label in labels:
+                return None
+            labels.append(label)
+            ranking.append({"rank": len(ranking) + 1, "tactic": label})
+        expected_top3 = projection.get("top3")
+        if (
+            not labels
+            or labels[0] != visible_top
+            or not isinstance(expected_top3, list)
+            or labels != [str(item).strip() for item in expected_top3[:3]]
+        ):
+            return None
+
+    model = projection.get("model")
+    model = model if isinstance(model, dict) else {}
+    snapshot: Dict[str, Any] = {
+        "session_id": clean_session_id,
+        "prediction_status": report_status,
+        "prediction_status_reason": str(
+            projection.get("prediction_status_reason") or ""
+        )[:240],
+        "prediction": labels,
+        "final_ranking": ranking,
+        "generated_at": freshness.get("generated_at") or projection.get("generated_at") or "",
+    }
+    model_id = model.get("model_identifier") or model.get("family")
+    if model_id:
+        snapshot["model_identifier"] = str(model_id)[:160]
+    model_digest = model.get("checkpoint_sha256")
+    if isinstance(model_digest, str) and re.fullmatch(r"[0-9a-fA-F]{64}", model_digest.strip()):
+        snapshot["model_artifact_sha256"] = model_digest.strip().lower()
+    return snapshot
+
+
 def load_session_report_pdf(
     config: MonitorConfig,
     session_id: str,
@@ -2831,9 +2926,10 @@ def load_session_report_pdf(
     """Render the exact stored report plus read-only presentation context.
 
     This endpoint is deliberately read-only. It uses the canonical stored
-    report and session payload together with already-materialized external-TI
-    and AI-advisory projections, renders into a temporary directory, and never
-    invokes a provider/model or writes MongoDB/the persistent report directory.
+    report and session payload together with already-materialized external-TI,
+    AI-advisory, and exact-session Next Distinct projections, renders into a
+    temporary directory, and never invokes a provider/model or writes MongoDB
+    or the persistent report directory.
     A report must already exist; the endpoint never invents an assessment for
     a session without a completed analysis job.
     """
@@ -2901,11 +2997,28 @@ def load_session_report_pdf(
                 "session_id": clean_session_id,
                 "timestamp": utc_now(),
             }
+        try:
+            next_distinct_projection = load_next_distinct_prediction(
+                config,
+                clean_session_id,
+                _storage=storage,
+            )
+            next_distinct_projection = _dashboard_next_distinct_projection(
+                next_distinct_projection,
+                clean_session_id,
+            )
+            prediction_snapshot = _report_next_distinct_snapshot(
+                next_distinct_projection,
+                clean_session_id,
+            )
+        except Exception:
+            prediction_snapshot = None
         return render_pdf_report_bytes(
             report_payload,
             session_payload,
             external_ti_projection=external_ti_projection,
             ai_advisory_projection=ai_advisory_projection,
+            prediction_snapshot=prediction_snapshot,
         ), {}
     except Exception as exc:
         return None, {
