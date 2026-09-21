@@ -29,7 +29,10 @@ PROOF_GUARD_MODE_REAL = "REAL_PROOF"
 PROOF_GUARD_MODES = frozenset(
     {PROOF_GUARD_MODE_DISABLED, PROOF_GUARD_MODE_PRE_FLIGHT, PROOF_GUARD_MODE_REAL}
 )
-PROOF_GUARD_PROVIDERS = frozenset({"abuseipdb", "shodan_official"})
+# Keep this set aligned with the source-IP governance policy.  OTX is an
+# explicitly authorized bounded source-IP lookup in policy v2.2; omitting it
+# here makes the worker raise before it can record a provider result.
+PROOF_GUARD_PROVIDERS = frozenset({"abuseipdb", "otx", "shodan_official"})
 PROOF_GUARD_RESULT_CLASSES = frozenset(
     {"DATA", "NO_DATA", "AUTH_FAILED", "RATE_LIMITED", "REQUEST_FAILED", "NORMALIZATION_FAILED"}
 )
@@ -454,6 +457,31 @@ def production_guard_campaigns(
     provider claim for the same source and UTC day.
     """
 
+    quota_campaigns, request_campaign = production_guard_campaign_candidates(
+        campaign_base,
+        normalized_source_ip,
+        observed_at=observed_at,
+        max_daily_targets=max_daily_targets,
+    )
+    return quota_campaigns[0], request_campaign
+
+
+def production_guard_campaign_candidates(
+    campaign_base: str,
+    normalized_source_ip: str,
+    *,
+    observed_at: Any,
+    max_daily_targets: int,
+) -> tuple[tuple[str, ...], str]:
+    """Return every deterministic daily quota slot in probe order.
+
+    A single hash bucket cannot represent a cardinality limit: two distinct
+    source IPs can collide long before the daily limit is reached.  Linear
+    probing preserves the existing secret-free slot identities while allowing
+    every free slot to be used.  Storage claims remain atomic, so concurrent
+    workers still converge without exceeding the configured limit.
+    """
+
     base = _campaign(campaign_base)
     normalized = normalize_public_source_ip(normalized_source_ip)
     digest = source_ip_digest(normalized)
@@ -465,10 +493,16 @@ def production_guard_campaigns(
         raise ProofGuardError("production proof daily target limit is invalid")
     day = _utc_day(observed_at)
     base_digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
-    slot = int(digest[:16], 16) % target_limit
-    quota_campaign = f"eti-prod-quota:{base_digest}:{day}:{slot:03d}"
+    starting_slot = int(digest[:16], 16) % target_limit
+    quota_campaigns = tuple(
+        _campaign(
+            f"eti-prod-quota:{base_digest}:{day}:"
+            f"{(starting_slot + offset) % target_limit:03d}"
+        )
+        for offset in range(target_limit)
+    )
     request_campaign = f"eti-prod-request:{base_digest}:{day}:{digest}"
-    return _campaign(quota_campaign), _campaign(request_campaign)
+    return quota_campaigns, _campaign(request_campaign)
 
 
 class ExternalTIProductionGuard:
@@ -502,29 +536,40 @@ class ExternalTIProductionGuard:
     ) -> ProofGuardDecision:
         name = _provider(provider)
         try:
-            quota_campaign, request_campaign = production_guard_campaigns(
+            quota_campaigns, request_campaign = production_guard_campaign_candidates(
                 self.campaign_base,
                 normalized_source_ip,
                 observed_at=first_observed_at,
                 max_daily_targets=self.max_daily_targets,
             )
-            quota_guard = ExternalTIProofGuard(
-                self.storage,
-                quota_campaign,
-                self.mode,
-            )
-            quota = quota_guard.claim_target(
-                normalized_source_ip,
-                cutoff_utc=cutoff_utc,
-                first_observed_at=first_observed_at,
-            )
-            if not quota.allowed:
+            quota = None
+            for quota_campaign in quota_campaigns:
+                quota_guard = ExternalTIProofGuard(
+                    self.storage,
+                    quota_campaign,
+                    self.mode,
+                )
+                candidate = quota_guard.claim_target(
+                    normalized_source_ip,
+                    cutoff_utc=cutoff_utc,
+                    first_observed_at=first_observed_at,
+                )
+                if candidate.allowed:
+                    quota = candidate
+                    break
+                if candidate.code != "TARGET_MISMATCH":
+                    return ProofGuardDecision(
+                        False,
+                        f"DAILY_QUOTA_{candidate.code}",
+                        provider=name,
+                        target_claim_id=candidate.target_claim_id,
+                        source_ip_digest=candidate.source_ip_digest,
+                    )
+            if quota is None:
                 return ProofGuardDecision(
                     False,
-                    f"DAILY_QUOTA_{quota.code}",
+                    "DAILY_QUOTA_EXHAUSTED",
                     provider=name,
-                    target_claim_id=quota.target_claim_id,
-                    source_ip_digest=quota.source_ip_digest,
                 )
             request_guard = ExternalTIProofGuard(
                 self.storage,

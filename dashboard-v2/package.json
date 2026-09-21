@@ -11,7 +11,8 @@
     "test:browser": "playwright test --config=playwright.config.mjs",
     "test:filesystem-history-integration": "node scripts/validate-filesystem-history-pipeline.mjs",
     "test:filesystem-audit-integration": "node scripts/validate-filesystem-audit-scale.mjs",
-    "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs"
+    "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs",
+    "test:external-ti": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/external-ti-presentation.test.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.23",
@@ -20,19 +21,19 @@
     "date-fns": "^4.4.0",
     "fast-geoip": "^1.1.88",
     "framer-motion": "^13.2.0",
-    "geoip-lite": "^1.4.10",
+    "geoip-lite": "2.0.3",
     "lucide-react": "^1.23.0",
     "mongodb": "^7.5.0",
-    "next": "16.2.10",
+    "next": "16.3.5",
     "react": "19.2.4",
     "react-day-picker": "^8.10.1",
     "react-dom": "19.2.4",
-    "react-simple-maps": "^3.0.0",
+    "react-simple-maps": "5.0.5",
     "recharts": "^3.9.2",
     "tailwind-merge": "^3.6.0"
   },
   "devDependencies": {
-    "@playwright/test": "1.55.0",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/bcryptjs": "^2.4.6",
     "@types/geoip-lite": "^1.4.4",
@@ -41,7 +42,7 @@
     "@types/react-dom": "^19",
     "@types/react-simple-maps": "^3.0.6",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.3.5",
     "happy-dom": "^20.14.5",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",

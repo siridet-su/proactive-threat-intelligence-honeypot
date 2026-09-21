@@ -23,17 +23,17 @@ export function useTimelineDrag() {
     readStoredTimelineWidth,
     () => null,
   );
-  
+
   const [timelineWidthOverride, setTimelineWidthOverride] = useState<number | null>(null);
   const timelineWidth = timelineWidthOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-  
+
   const setTimelineWidth = useCallback((next: number | ((current: number) => number)) => {
     setTimelineWidthOverride((currentOverride) => {
       const current = currentOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
       return typeof next === "function" ? next(current) : next;
     });
   }, [persistedTimelineWidth]);
-  
+
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
 
   useEffect(() => {

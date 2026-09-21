@@ -1029,7 +1029,7 @@ export function sourceRailPositions(
   const maxTreeX = nodeXs.length ? Math.max(...nodeXs) : 50;
   // Increase base rail gap so single/few sources start comfortably away from the tree edge
   const railGap = callouts.length <= 2 ? 22 : callouts.length <= 4 ? 24 : 26;
-  const leftRailX = Math.max(6, minTreeX - railGap);
+  const leftRailX = Math.max(10, minTreeX - railGap);
   const rightRailX = Math.min(90, maxTreeX + railGap);
 
   const positions = new Map<string, LabelPosition>();

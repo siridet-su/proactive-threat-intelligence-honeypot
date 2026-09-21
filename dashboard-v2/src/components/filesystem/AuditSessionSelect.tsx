@@ -44,30 +44,30 @@ export function getSessionOptionLabel(
 export function formatSessionMetadata(s: FilesystemTopologySession | FilesystemClosedSession): { timeStr: string; eventsStr: string } {
   const count = s.auditSummary?.eventCount ?? 0;
   const eventsStr = `${count} ${count === 1 ? 'event' : 'events'}`;
-  
+
   let timeStr = "";
   let dateToFormat: Date | null = null;
-  
+
   if ("lifecycle" in s && s.lifecycle?.startedAt) {
     dateToFormat = new Date(s.lifecycle.startedAt);
   } else if (s.cwdState?.observedAt) {
     dateToFormat = new Date(s.cwdState.observedAt);
   }
-  
+
   if (dateToFormat) {
     const now = new Date();
-    const isToday = 
-      dateToFormat.getDate() === now.getDate() && 
-      dateToFormat.getMonth() === now.getMonth() && 
+    const isToday =
+      dateToFormat.getDate() === now.getDate() &&
+      dateToFormat.getMonth() === now.getMonth() &&
       dateToFormat.getFullYear() === now.getFullYear();
-      
+
     if (isToday) {
       timeStr = dateToFormat.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } else {
       timeStr = dateToFormat.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
   }
-  
+
   return { timeStr, eventsStr };
 }
 

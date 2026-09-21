@@ -9,9 +9,12 @@ from typing import Any, Dict, List, Optional
 from production.storage.backend import StorageError
 from production.storage.canonical_event import CanonicalEventRecord
 from production.storage.mongodb_manifest import (
+    MongoDBManifestError,
     MongoDBSchemaManifest,
     collection_validator,
+    compare_mongodb_schema_compatibility,
     load_mongodb_schema_manifest,
+    load_mongodb_schema_manifest_payload,
 )
 from production.storage.mongodb_operations import MongoDBRuntimeOperations
 from production.storage.session_provenance import (
@@ -203,67 +206,132 @@ class MongoDBStorageBackend(MongoDBRuntimeOperations):
             return {"ok": False, "backend": MONGODB_BACKEND}
         return {"ok": True, "backend": MONGODB_BACKEND}
 
-    def initialize(self) -> None:
-        self.verify_existing_schema()
+    def initialize(self, *, installed_schema_identity: str | None = None) -> None:
+        self.verify_existing_schema(installed_schema_identity=installed_schema_identity)
 
-    def verify_existing_schema(self) -> None:
-        record = self.database["schema_manifests"].find_one(
-            {"_id": self.manifest.sha256},
-            {"manifest_sha256": 1, "payload_json": 1},
-        )
-        if not record:
-            raise StorageError("canonical MongoDB schema manifest is not installed")
-        if (
-            record.get("manifest_sha256") != self.manifest.sha256
-            or record.get("payload_json") != stable_json(self.manifest.document)
+    def _load_installed_schema_manifest(
+        self,
+        identity: str,
+    ) -> MongoDBSchemaManifest:
+        selected = str(identity or "")
+        if len(selected) != 64 or any(
+            character not in "0123456789abcdef" for character in selected
         ):
-            raise StorageError("canonical MongoDB schema manifest integrity mismatch")
-        existing = set(self.database.list_collection_names())
-        required = {item["name"] for item in self.manifest.collections}
-        if not required.issubset(existing):
-            missing = ",".join(sorted(required - existing))
+            raise StorageError("installed MongoDB schema manifest identity is invalid")
+        try:
+            record = self.database["schema_manifests"].find_one(
+                {"_id": selected},
+                {"_id": 1, "schema_version": 1, "manifest_sha256": 1, "payload_json": 1},
+            )
+        except Exception as exc:
             raise StorageError(
-                f"canonical MongoDB collections are incomplete: missing={missing}"
+                "installed MongoDB schema manifest lookup failed"
+            ) from exc
+        if not record:
+            raise StorageError(
+                "installed MongoDB schema manifest is unavailable"
             )
-        for declaration in self.manifest.collections:
-            info = self.database.command(
-                "listCollections", filter={"name": declaration["name"]}
+        if (
+            record.get("_id") != selected
+            or record.get("manifest_sha256") != selected
+            or not isinstance(record.get("payload_json"), str)
+        ):
+            raise StorageError(
+                "installed MongoDB schema manifest integrity mismatch"
             )
-            batches = info.get("cursor", {}).get("firstBatch", [])
-            if len(batches) != 1 or (
-                batches[0].get("options", {}).get("validator")
-                != collection_validator(declaration)
-            ):
-                raise StorageError(
-                    "canonical MongoDB collection validator mismatch: "
-                    f"collection={declaration['name']}"
-                )
-            actual = {
-                item["name"]: item
-                for item in self.database[declaration["name"]].list_indexes()
+        try:
+            manifest = load_mongodb_schema_manifest_payload(
+                record["payload_json"], expected_sha256=selected
+            )
+        except MongoDBManifestError as exc:
+            raise StorageError(
+                "installed MongoDB schema manifest integrity mismatch"
+            ) from exc
+        if record.get("schema_version") != manifest.document["schema_version"]:
+            raise StorageError(
+                "installed MongoDB schema manifest integrity mismatch"
+            )
+        return manifest
+
+    def _read_schema_snapshot(
+        self,
+        manifests: tuple[MongoDBSchemaManifest, ...],
+    ) -> tuple[set[str], Dict[str, Any], Dict[str, Dict[str, Dict[str, Any]]]]:
+        """Read the live schema without administering or mutating MongoDB."""
+
+        try:
+            declared = {
+                declaration["name"]
+                for manifest in manifests
+                for declaration in manifest.collections
             }
-            expected_names = {"_id_", *[item["name"] for item in declaration["indexes"]]}
-            if set(actual) != expected_names:
-                missing = sorted(expected_names - set(actual))
-                unexpected = sorted(set(actual) - expected_names)
-                raise StorageError(
-                    "canonical MongoDB index inventory mismatch: "
-                    f"collection={declaration['name']} missing={missing} "
-                    f"unexpected={unexpected}"
+            existing = set(self.database.list_collection_names())
+            validators: Dict[str, Any] = {}
+            indexes: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            for collection in sorted(declared & existing):
+                info = self.database.command(
+                    "listCollections", filter={"name": collection}
                 )
-            for index in declaration["indexes"]:
-                if index["name"] not in actual:
-                    raise StorageError(
-                        "canonical MongoDB index manifest is incomplete: "
-                        f"collection={declaration['name']} index={index['name']}"
-                    )
-                observed = list(actual[index["name"]]["key"].items())
-                expected = [(field, direction) for field, direction in index["keys"]]
-                if observed != expected or bool(actual[index["name"]].get("unique", False)) != bool(index.get("unique", False)):
-                    raise StorageError(
-                        "canonical MongoDB index manifest mismatch: "
-                        f"collection={declaration['name']} index={index['name']}"
-                    )
+                batches = info.get("cursor", {}).get("firstBatch", [])
+                validators[collection] = (
+                    batches[0].get("options", {}).get("validator")
+                    if len(batches) == 1
+                    else None
+                )
+                indexes[collection] = {
+                    item["name"]: item
+                    for item in self.database[collection].list_indexes()
+                }
+            return existing, validators, indexes
+        except Exception as exc:
+            raise StorageError("canonical MongoDB schema introspection failed") from exc
+
+    def verify_existing_schema(
+        self,
+        *,
+        installed_schema_identity: str | None = None,
+    ) -> Dict[str, Any]:
+        """Bind the receipt's installed manifest to the live schema read-side.
+
+        The candidate manifest and the receipt-bound installed manifest may have
+        different content identities. Both must independently describe a
+        compatible required persistence contract for the actual live schema.
+        """
+
+        selected_identity = installed_schema_identity or self.manifest.sha256
+        installed_manifest = self._load_installed_schema_manifest(selected_identity)
+        existing, validators, indexes = self._read_schema_snapshot(
+            (self.manifest, installed_manifest)
+        )
+        installed_compatibility = compare_mongodb_schema_compatibility(
+            installed_manifest,
+            existing_collections=existing,
+            validators=validators,
+            indexes=indexes,
+        )
+        if not installed_compatibility.schema_compatible:
+            raise StorageError(
+                "installed MongoDB schema is not compatible with the "
+                "receipt-bound manifest: "
+                + installed_compatibility.failure_message()
+            )
+        candidate_compatibility = compare_mongodb_schema_compatibility(
+            self.manifest,
+            existing_collections=existing,
+            validators=validators,
+            indexes=indexes,
+        )
+        if not candidate_compatibility.schema_compatible:
+            raise StorageError(candidate_compatibility.failure_message())
+        return {
+            "candidate_schema_identity": self.manifest.sha256,
+            "installed_schema_identity": installed_manifest.sha256,
+            "required_schema_match": candidate_compatibility.required_schema_match,
+            "schema_compatible": candidate_compatibility.schema_compatible,
+            "installed_required_schema_match": installed_compatibility.required_schema_match,
+            "installed_schema_compatible": installed_compatibility.schema_compatible,
+            "compatible_optional_extras": candidate_compatibility.compatible_optional_extras,
+        }
 
     def operational_metrics(self, *, now: Any = None) -> Dict[str, Any]:
         checked_at = _utc_timestamp(now)

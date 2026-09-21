@@ -5,8 +5,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  // const session = await getSessionFromRequest(request);
-  if (false) {
+  const session = await getSessionFromRequest(request);
+  if (!session || session.mustChangePassword) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -8,6 +8,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -49,6 +50,7 @@ from production.enrichment.external_ti_session import (
 from production.correlation.session_ttp_correlation import build_observed_tactic_path
 from production.utils.config import ProductionConfig
 from production.prediction_next_distinct_poc.dashboard_adapter import (
+    LABEL_ORDER as NEXT_DISTINCT_LABEL_ORDER,
     build_dashboard_prediction,
 )
 from production.reporting.feedback_review import FEEDBACK_FILTERS, build_feedback_review, filter_feedback_rows
@@ -2337,6 +2339,7 @@ DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
     "reports": 50,
     "analyst_feedback": 50,
     "observable_sightings": 100,
+    "prediction_snapshots": 50,
 }
 
 
@@ -2369,6 +2372,18 @@ def _fail_closed_session_guidance(
     if result["requires_manual_approval"]:
         result["safe_to_auto_execute"] = False
     return result
+
+
+def _model2_result_bound_to_session(model2: Any, session_id: str) -> bool:
+    if not isinstance(model2, dict) or model2.get("available") is not True:
+        return False
+    binding = model2.get("binding")
+    if not isinstance(binding, dict):
+        return False
+    return (
+        _text(binding.get("session_id")) == session_id
+        and bool(_text(binding.get("run_id")))
+    )
 
 
 def load_dashboard_session_detail(
@@ -2456,11 +2471,51 @@ def load_dashboard_session_detail(
     event_rows = related["events"]
     feedback_rows = related["analyst_feedback"]
     sighting_rows = related["observable_sightings"]
+    prediction_rows = [
+        row
+        for row in related["prediction_snapshots"]
+        if _row_session_id(row) == clean_session_id
+    ]
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
     selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
+    latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
+    latest_prediction_payload = _payload_from_row(latest_prediction)
+    if latest_prediction and _row_session_id(latest_prediction) != clean_session_id:
+        latest_prediction = {}
+        latest_prediction_payload = {}
+    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
+    if not isinstance(ensemble_evidence, dict):
+        ensemble_evidence = {}
+    stored_model2 = ensemble_evidence.get("model2")
+    stored_model2_available = (
+        isinstance(stored_model2, dict)
+        and stored_model2.get("available") is True
+    )
+    if not _model2_result_bound_to_session(stored_model2, clean_session_id):
+        try:
+            live_ensemble = build_ensemble_from_session_payload(
+                payload,
+                computed_at=utc_now(),
+            )
+        except Exception:
+            live_ensemble = {}
+        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
+        if (
+            isinstance(live_ensemble, dict)
+            and (
+                not isinstance(live_model2, dict)
+                or live_model2.get("available") is not True
+                or _model2_result_bound_to_session(live_model2, clean_session_id)
+            )
+        ):
+            ensemble_evidence = live_ensemble
+        elif stored_model2_available:
+            # A stored, available result with a missing or mismatched binding
+            # cannot be exposed as evidence for the requested session.
+            ensemble_evidence = {}
     authentication_activity = _authentication_activity(payload, event_rows)
     report_payload = _report_payload(selected.get("report_row"))
     historical_guidance = _historical_response_guidance_payload(
@@ -2516,6 +2571,9 @@ def load_dashboard_session_detail(
         "ttps": payload.get("ttps") or [],
         "ttp_command_map": payload.get("ttp_command_map") or {},
         "enrichment_status": payload.get("enrichment_status") or {},
+        "ensemble_evidence": ensemble_evidence,
+        "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
+        "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
         "events_table_rows": [_row_with_payload(row) for row in event_rows],
         "analyst_feedback": [_row_with_payload(row) for row in feedback_rows],
@@ -2719,6 +2777,16 @@ def _dashboard_next_distinct_projection(
         "NO_DATA",
         "INSUFFICIENT_EVIDENCE",
     } or freshness_state in {"NO_DATA", "INSUFFICIENT_EVIDENCE"}
+    historical_prediction = (
+        top1
+        if session_ended
+        and has_data
+        and prediction_status == "PREDICTED"
+        and freshness_state == "FRESH"
+        and isinstance(freshness, dict)
+        and freshness.get("history_manifest_match") is True
+        else None
+    )
     state = (
         "SESSION_ENDED"
         if session_ended
@@ -2736,9 +2804,117 @@ def _dashboard_next_distinct_projection(
     result["status"] = state
     result["availability"] = "AVAILABLE" if state == "DATA" else state
     result["next_distinct_tactic"] = top1 if state == "DATA" else None
+    result["stored_next_distinct_tactic"] = historical_prediction
     if state == "SESSION_ENDED":
-        result["prediction_status_reason"] = "session ended; no session-end prediction is emitted"
+        if historical_prediction is not None:
+            result["prediction_status_reason"] = (
+                "session ended; no session-end prediction is emitted; "
+                "the last fresh, manifest-matched sidecar result is shown as a historical advisory"
+            )
+        elif stale:
+            result["prediction_status_reason"] = (
+                "session ended; the stored sidecar result is stale or history-mismatched; "
+                "no session-end prediction is emitted"
+            )
+        else:
+            result["prediction_status_reason"] = (
+                "session ended; no valid stored prediction is available; "
+                "no session-end prediction is emitted"
+            )
     return result
+
+
+def _report_next_distinct_snapshot(
+    projection: Any,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Build a small report-only forecast context from the exact-session API.
+
+    Only a validated, fresh sidecar result with an exact session sequence and
+    trusted-history manifest match may contribute tactic labels.  Ended
+    sessions carry the last forecast as a historical advisory, never as a
+    prediction of future behavior.  Stale/unavailable states retain their
+    bounded status/reason but no candidate labels.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not isinstance(projection, dict) or not clean_session_id:
+        return None
+    if (
+        str(projection.get("session_id") or "").strip() != clean_session_id
+        or str(projection.get("sequence_id") or "").strip() != clean_session_id
+        or str(projection.get("source") or "").strip().upper() != "NEXT_DISTINCT_POC"
+    ):
+        return None
+
+    freshness = projection.get("freshness")
+    freshness = freshness if isinstance(freshness, dict) else {}
+    freshness_state = str(freshness.get("state") or "").strip().upper()
+    history_matches = freshness.get("history_manifest_match") is True
+    session_ended = projection.get("session_ended") is True
+    state = str(projection.get("state") or "").strip().upper()
+    prediction_status = str(projection.get("prediction_status") or "UNAVAILABLE").strip().upper()
+
+    visible_top = None
+    report_status = prediction_status
+    eligible = (
+        prediction_status == "PREDICTED"
+        and freshness_state == "FRESH"
+        and history_matches
+    )
+    if eligible and session_ended and state == "SESSION_ENDED":
+        visible_top = projection.get("stored_next_distinct_tactic")
+        report_status = "HISTORICAL_ADVISORY"
+    elif eligible and not session_ended and state == "DATA":
+        visible_top = projection.get("next_distinct_tactic")
+        report_status = "PREDICTED"
+    else:
+        eligible = False
+
+    ranking: List[Dict[str, Any]] = []
+    labels: List[str] = []
+    if eligible:
+        raw_ranking = projection.get("prediction")
+        if not isinstance(raw_ranking, list):
+            return None
+        for item in raw_ranking[:3]:
+            if not isinstance(item, dict):
+                return None
+            label = str(item.get("tactic") or "").strip()
+            if label not in NEXT_DISTINCT_LABEL_ORDER:
+                return None
+            if label in labels:
+                return None
+            labels.append(label)
+            ranking.append({"rank": len(ranking) + 1, "tactic": label})
+        expected_top3 = projection.get("top3")
+        if (
+            not labels
+            or labels[0] != visible_top
+            or not isinstance(expected_top3, list)
+            or labels != [str(item).strip() for item in expected_top3[:3]]
+        ):
+            return None
+
+    model = projection.get("model")
+    model = model if isinstance(model, dict) else {}
+    snapshot: Dict[str, Any] = {
+        "session_id": clean_session_id,
+        "prediction_status": report_status,
+        "prediction_status_reason": str(
+            projection.get("prediction_status_reason") or ""
+        )[:240],
+        "prediction": labels,
+        "final_ranking": ranking,
+        "generated_at": freshness.get("generated_at") or projection.get("generated_at") or "",
+    }
+    model_id = model.get("model_identifier") or model.get("family")
+    if model_id:
+        snapshot["model_identifier"] = str(model_id)[:160]
+    model_digest = model.get("checkpoint_sha256")
+    if isinstance(model_digest, str) and re.fullmatch(r"[0-9a-fA-F]{64}", model_digest.strip()):
+        snapshot["model_artifact_sha256"] = model_digest.strip().lower()
+    return snapshot
 
 
 def load_session_report_pdf(
@@ -2750,9 +2926,10 @@ def load_session_report_pdf(
     """Render the exact stored report plus read-only presentation context.
 
     This endpoint is deliberately read-only. It uses the canonical stored
-    report and session payload together with already-materialized external-TI
-    and AI-advisory projections, renders into a temporary directory, and never
-    invokes a provider/model or writes MongoDB/the persistent report directory.
+    report and session payload together with already-materialized external-TI,
+    AI-advisory, and exact-session Next Distinct projections, renders into a
+    temporary directory, and never invokes a provider/model or writes MongoDB
+    or the persistent report directory.
     A report must already exist; the endpoint never invents an assessment for
     a session without a completed analysis job.
     """
@@ -2792,6 +2969,41 @@ def load_session_report_pdf(
             }
         session_payload = _session_payload(session_rows[0])
         session_payload.setdefault("session_id", clean_session_id)
+        event_rows, _event_error = _storage_session_rows(
+            storage,
+            "events",
+            clean_session_id,
+            MAX_SESSION_EVENTS,
+        )
+        authentication_activity = _authentication_activity(session_payload, event_rows)
+        authentication_attempts = authentication_activity.get("attempts") or []
+        if authentication_activity.get("attempt_count", 0):
+            session_payload["login_attempts"] = authentication_activity["attempt_count"]
+            session_payload["login_success"] = authentication_activity.get("success_count", 0) > 0
+            session_payload["observed_account_visibility"] = authentication_activity.get(
+                "username_visibility"
+            )
+            observed_accounts = [
+                str(item.get("attacker_username"))
+                for item in authentication_attempts
+                if isinstance(item, dict)
+                and item.get("username_visibility") == "AVAILABLE"
+                and isinstance(item.get("attacker_username"), str)
+                and item.get("attacker_username")
+            ]
+            successful_accounts = [
+                str(item.get("attacker_username"))
+                for item in authentication_attempts
+                if isinstance(item, dict)
+                and item.get("outcome") == "success"
+                and item.get("username_visibility") == "AVAILABLE"
+                and isinstance(item.get("attacker_username"), str)
+                and item.get("attacker_username")
+            ]
+            if not session_payload.get("observed_account_identifier"):
+                selected_account = (successful_accounts or observed_accounts or [None])[-1]
+                if selected_account:
+                    session_payload["observed_account_identifier"] = selected_account
         try:
             external_ti_projection = build_session_ti_projection(
                 storage,
@@ -2820,11 +3032,28 @@ def load_session_report_pdf(
                 "session_id": clean_session_id,
                 "timestamp": utc_now(),
             }
+        try:
+            next_distinct_projection = load_next_distinct_prediction(
+                config,
+                clean_session_id,
+                _storage=storage,
+            )
+            next_distinct_projection = _dashboard_next_distinct_projection(
+                next_distinct_projection,
+                clean_session_id,
+            )
+            prediction_snapshot = _report_next_distinct_snapshot(
+                next_distinct_projection,
+                clean_session_id,
+            )
+        except Exception:
+            prediction_snapshot = None
         return render_pdf_report_bytes(
             report_payload,
             session_payload,
             external_ti_projection=external_ti_projection,
             ai_advisory_projection=ai_advisory_projection,
+            prediction_snapshot=prediction_snapshot,
         ), {}
     except Exception as exc:
         return None, {
@@ -5734,7 +5963,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
         return False
 
     def _require_local_command_read(self) -> bool:
-        """Require the explicit localhost profile and the normal read token."""
+        """Require the explicit localhost profile and dedicated command token."""
         if os.getenv("LOCAL_DASHBOARD_COMMANDS_ENABLED", "").strip().lower() != "true":
             self._send_json(
                 HTTPStatus.FORBIDDEN,
@@ -5758,7 +5987,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             return False
         decision = authorize_read(
             single_header_value(self.headers, "Authorization"),
-            _monitor_read_token(self.monitor_config),
+            _monitor_raw_commands_token(self.monitor_config),
             allow_anonymous=False,
         )
         if decision.allowed:

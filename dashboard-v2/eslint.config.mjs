@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local database probes are not shipped with the dashboard runtime.
+    "query_test*.js",
   ]),
 ]);
 

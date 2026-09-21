@@ -1,6 +1,6 @@
 // @refresh reset
 "use client";
-import { FilesystemContext } from "./FilesystemContext";
+import { FilesystemContext, type FilesystemContextType } from "./FilesystemContext";
 
 import {
   AlertTriangle,
@@ -12,7 +12,7 @@ import {
   PanelRightOpen,
   Pause,
   Play,
-  
+
   RefreshCw,
   Route,
 } from "lucide-react";
@@ -37,7 +37,7 @@ import {
   DEFAULT_STALE_THRESHOLD_MS,
   buildAuditSnapshot,
   buildAuditUrlSearch,
-  
+
   type AuditUrlParams,
 } from "./filesystemUtils";
 import { TopologyCanvas } from "./TopologyCanvas";
@@ -830,9 +830,8 @@ export function FilesystemActivity() {
     loadHistory,
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (
-    <FilesystemContext.Provider value={contextValue as any}>
+    <FilesystemContext.Provider value={contextValue as FilesystemContextType}>
     <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
 
       {navigationApplicationError ? (
@@ -1109,7 +1108,7 @@ export function FilesystemActivity() {
           <div
             className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
-            aria-label="Audit replay toolbar"
+            aria-label="Audit session and replay toolbar"
           >
             {/* Left side: Selection & Filters */}
             <div className="flex items-center justify-start gap-2 flex-1 min-w-0">

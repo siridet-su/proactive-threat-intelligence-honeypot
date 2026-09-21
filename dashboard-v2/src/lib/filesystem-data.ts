@@ -753,7 +753,7 @@ function buildAuditProjectionFilterMatch(options: AuditScopingPipelineOptions): 
       match.$or = hideHomeCond.$or;
     }
   }
-  
+
   if (options.from != null || options.to != null) {
     match["lifecycle.closedAt"] = match["lifecycle.closedAt"] || {};
     if (options.from != null) Object.assign(match["lifecycle.closedAt"], { $gte: new Date(options.from) });
@@ -803,7 +803,7 @@ function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptio
       ]
     });
   }
-  
+
   if (options.from != null) clauses.push({ $gte: ["$lifecycle.closedAt", new Date(options.from)] });
   if (options.to != null) clauses.push({ $lte: ["$lifecycle.closedAt", new Date(options.to)] });
 

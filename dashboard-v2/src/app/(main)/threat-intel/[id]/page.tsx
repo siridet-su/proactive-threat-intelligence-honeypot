@@ -66,6 +66,7 @@ function nextDistinctState(result: NextDistinctResult): {
   context: string;
   updatedAt: string;
   source: string;
+  historical: boolean;
 } {
   const data = recordValue(result.data);
   const freshness = recordValue(data.freshness);
@@ -73,10 +74,20 @@ function nextDistinctState(result: NextDistinctResult): {
   const freshnessState = textValue(freshness.state, "").toUpperCase();
   const predictionStatus = textValue(data.prediction_status, "").toUpperCase();
   const reason = textValue(data.prediction_status_reason, "");
-  const hasPrediction = typeof data.next_distinct_tactic === "string" && data.next_distinct_tactic.trim().length > 0;
   const isEnded = rawState === "SESSION_ENDED" || data.session_ended === true || data.is_ended === true;
   const isUnavailable = result.state === "unavailable" || rawState === "UNAVAILABLE" || freshnessState === "UNAVAILABLE";
   const isStale = rawState === "STALE" || predictionStatus === "STALE" || ["STALE", "EXPIRED", "TI_STALE", "TI_EXPIRED"].includes(freshnessState);
+  const hasPrediction = !isEnded
+    && typeof data.next_distinct_tactic === "string"
+    && data.next_distinct_tactic.trim().length > 0;
+  const hasHistoricalPrediction = isEnded
+    && !isUnavailable
+    && !isStale
+    && predictionStatus === "PREDICTED"
+    && freshnessState === "FRESH"
+    && freshness.history_manifest_match === true
+    && typeof data.stored_next_distinct_tactic === "string"
+    && data.stored_next_distinct_tactic.trim().length > 0;
   const isInsufficient = !hasPrediction && (
     ["EMPTY_VALID", "WAITING_FOR_EVIDENCE", "NO_DATA"].includes(rawState)
     || predictionStatus.includes("INSUFFICIENT")
@@ -99,7 +110,9 @@ function nextDistinctState(result: NextDistinctResult): {
   const tactic = result.state === "loading"
     ? "Reading Next-Distinct projection…"
     : isEnded
-      ? "No session-end prediction"
+      ? hasHistoricalPrediction
+        ? textValue(data.stored_next_distinct_tactic, "No valid stored prediction")
+        : "No valid stored prediction"
     : hasPrediction
       ? textValue(data.next_distinct_tactic, "Prediction unavailable")
       : isUnavailable
@@ -107,7 +120,9 @@ function nextDistinctState(result: NextDistinctResult): {
         : isStale
           ? "Prediction stale"
           : "WAITING_FOR_EVIDENCE";
-  const context = reason || (isInsufficient
+  const context = hasHistoricalPrediction
+    ? "Historical advisory from the last fresh, manifest-matched Next-Distinct sidecar result. The final observed tactic path remains authoritative; no session-end prediction is emitted."
+    : reason || (isInsufficient
     ? "No trusted distinct-tactic progression is available yet."
     : isEnded
       ? "The final observed path is authoritative for this closed session; no session-end class is emitted."
@@ -122,6 +137,7 @@ function nextDistinctState(result: NextDistinctResult): {
     context,
     updatedAt,
     source: textValue(data.source, "NEXT_DISTINCT_POC"),
+    historical: hasHistoricalPrediction,
   };
 }
 
@@ -169,7 +185,12 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
               </ol>
             ) : <p className="mt-2 text-xs font-medium text-text-muted">WAITING_FOR_EVIDENCE</p>}
           </div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Next distinct tactic / technique</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
+              {view.historical ? "Last stored Next-Distinct tactic / technique" : "Next distinct tactic / technique"}
+            </p>
+            {view.historical && <span className="ui-badge text-[11px]">HISTORICAL ADVISORY</span>}
+          </div>
           <p className="mt-2 text-xl font-semibold tracking-tight text-text sm:text-2xl">{view.tactic}</p>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-text-muted">{view.context}</p>
         </div>
@@ -245,11 +266,7 @@ function SourceLocationPanel({
                     fill="var(--map-land)"
                     stroke="var(--map-border)"
                     strokeWidth={0.5}
-                    style={{
-                      default: { outline: "none" },
-                      hover: { fill: "var(--map-hover)", outline: "none" },
-                      pressed: { fill: "var(--map-hover)", outline: "none" },
-                    }}
+                    className="outline-none transition-[fill] hover:fill-[var(--map-hover)]"
                   />
                 ))}
               </Geographies>

@@ -275,6 +275,7 @@ def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("LOCAL_DASHBOARD_COMMANDS_ENABLED", "true")
     sensitive_payload = {
         "ok": True,
         "schema_version": "monitor.internal_command_view.v1",
@@ -574,6 +575,18 @@ def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> Non
             "raw_events": [{"password": "plaintext"}],
             "commands": ["whoami"],
         },
+        "ensemble_evidence": {
+            "schema_version": "model1_model2_late_evidence_ensemble.v1",
+            "ensemble_authority": "ADVISORY_ONLY",
+            "model2": {
+                "available": True,
+                "status": "VALID_SHADOW",
+                "one_model": True,
+                "one_inference_call": True,
+                "independent_binary_heads": False,
+            },
+            "results": [{"technique_id": "T1105", "evidence_state": "CORROBORATED"}],
+        },
         "events_table_rows": [
             {
                 "event_id": "event-safe",
@@ -591,6 +604,8 @@ def test_monitor_session_api_view_omits_raw_events_and_redacts_commands() -> Non
     assert "secret-token" not in serialized
     assert "password=plaintext" not in serialized
     assert "user:pass" not in serialized
+    assert view["ensemble_evidence"]["model2"]["available"] is True
+    assert view["ensemble_evidence"]["model2"]["one_model"] is True
 
 
 def test_public_session_projection_never_returns_benign_command_text() -> None:

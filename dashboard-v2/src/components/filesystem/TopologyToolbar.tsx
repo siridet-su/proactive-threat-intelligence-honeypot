@@ -1,7 +1,7 @@
 import {
   Check,
   ChevronDown,
-  
+
   LayoutGrid,
   LocateFixed,
   Maximize2,
@@ -239,7 +239,7 @@ export function TopologyToolbar({
                   <span>Arrange</span>
                 </button>
               </div>
-              
+
               <div className="my-1 h-px bg-border" aria-hidden="true" />
               <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
                 Density Mode

@@ -523,7 +523,7 @@ export function AuditFilterControls({
           <div className="flex flex-col text-text">
             {/* Top Segmented Step Tabs */}
             <div className="p-2 border-b border-border/60 bg-surface-subtle/40">
-              <div 
+              <div
                 className="relative isolate grid w-full grid-cols-2 gap-1 rounded-xl border border-border/60 bg-surface-subtle p-1 text-xs"
                 role="tablist"
               >

@@ -422,7 +422,6 @@ def deterministic_baseline_report(
         response_guidance_asset_profile_path=(
             selected.response_guidance_asset_profile_path
         ),
-        include_complete_typed_hypotheses=True,
     )
     report["status"] = "observation_only_abstention"
     report["abstention"] = {

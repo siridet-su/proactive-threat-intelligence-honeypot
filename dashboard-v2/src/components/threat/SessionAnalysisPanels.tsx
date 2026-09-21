@@ -25,6 +25,10 @@ import {
   analystCommandText,
   selectedProviderFields,
 } from "@/lib/session-intelligence";
+import {
+  externalTiFreshness,
+  sourceIpCacheFreshness,
+} from "@/lib/external-ti-presentation";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -868,8 +872,8 @@ function TrustedTraceability({ mapping }: { mapping: JsonRecord }) {
   );
 }
 
-function tiLookupState(value: JsonRecord): string {
-  const freshness = String(value.freshness_state || "").trim().toUpperCase();
+function tiLookupState(value: JsonRecord, freshnessOverride?: unknown): string {
+  const freshness = String(freshnessOverride ?? value.freshness_state ?? "").trim().toUpperCase();
   if (freshness === "STALE" || freshness === "EXPIRED" || freshness === "TI_EXPIRED" || freshness === "TI_STALE") return "STALE";
   const lookup = String(value.lookup_status || value.status || "").trim().toUpperCase();
   if (["OK", "CACHED", "AVAILABLE"].includes(lookup)) return "DATA";
@@ -898,16 +902,28 @@ function dataAge(value: unknown): string {
   return `${Math.floor(ageSeconds / 86_400)}d`;
 }
 
+function tiTimestampLabel(value: unknown): string {
+  if (!hasMeaningfulValue(value)) return "Not recorded";
+  const timestamp = Date.parse(String(value));
+  if (!Number.isFinite(timestamp)) return "Not calculable";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp);
+}
+
 function ProviderContextRows({
   evidence,
   cache,
   providerStatus,
   observable,
+  asOf,
 }: {
   evidence: JsonRecord[];
   cache: JsonRecord[];
   providerStatus: JsonRecord;
   observable: JsonRecord;
+  asOf: number | null;
 }) {
   const statuses = Object.entries(providerStatus)
     .map(([provider, value]) => [provider, record(value)] as const)
@@ -992,13 +1008,14 @@ function ProviderContextRows({
       })}
       {cache.slice(0, 20).map((item, index) => {
         const context = selectedProviderFields(item.normalized_context);
+        const freshness = sourceIpCacheFreshness(item, asOf);
         return (
           <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="font-mono font-semibold text-text">{summaryValue(item.provider, "provider unavailable")} cache</span>
-              <span className="ui-badge text-[11px]">{tiLookupState(item)}</span>
+              <span className="ui-badge text-[11px]">{tiLookupState(item, freshness)}</span>
             </div>
-            <p className="mt-1 text-text-muted">lookup: {summaryValue(item.lookup_at, "Not recorded")} · expires: {summaryValue(item.expires_at, "Not recorded")}</p>
+            <p className="mt-1 text-text-muted">lookup: {summaryValue(item.lookup_at, "Not recorded")} · expires: {summaryValue(item.expires_at, "Not recorded")} · freshness: {freshnessLabel(freshness)}</p>
             <TraceabilityDetails
               title="Cached provider and observable details"
               fields={[
@@ -1006,8 +1023,8 @@ function ProviderContextRows({
                 ["Observable", summaryValue(item.observable_value || observable.value, "Not recorded")],
                 ["Observable type", summaryValue(item.observable_type || observable.type, "source_ip")],
                 ["Observable role", summaryValue(item.observable_role || "source_ip", "Not recorded")],
-                ["Lookup state", tiLookupState(item)],
-                ["Freshness", freshnessLabel(item.freshness_state)],
+                ["Lookup state", tiLookupState(item, freshness)],
+                ["Freshness", freshnessLabel(freshness)],
                 ["Retrieved at", summaryValue(item.lookup_at, "Not recorded")],
                 ["Provider observed at", summaryValue(item.provider_observed_at, "Not recorded")],
                 ["Expires at", summaryValue(item.expires_at, "Not recorded")],
@@ -1103,26 +1120,50 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
 function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonRecord; observableData: JsonRecord }) {
   const sessionCounts = record(sessionData.counts);
   const observableCounts = record(observableData.counts);
-  const summary = record(sessionData.external_ti_summary);
+  const summary = { ...record(sessionData.external_ti_summary), ...record(observableData.external_ti_summary) };
   const entities = list(sessionData.shared_entities).map(record);
   const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
   const cache = [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)].map(record);
   const providerStatus = { ...record(sessionData.provider_status), ...record(observableData.provider_status) };
   const freshness = record(sessionData.freshness);
   const observable = record(observableData.observable);
+  const [asOf, setAsOf] = useState<number | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setAsOf(Date.now()), 0);
+    const interval = window.setInterval(() => setAsOf(Date.now()), 60_000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+    };
+  }, [sessionData, observableData]);
+  const tiState = externalTiFreshness({
+    rawState: freshness.state,
+    freshness,
+    summary,
+    evidence,
+    cache,
+    providerStatus,
+    asOf,
+  });
   return (
     <>
       <SummaryGrid fields={[
         ["Status", summaryValue(sessionData.status || freshness.state, "TI_PENDING")],
         ["Observable", summaryValue(observable.value, "No eligible observable")],
-        ["Freshness", summaryValue(freshness.state, "TI_PENDING")],
+        ["Freshness", tiState.state],
+        ["Latest provider/cache lookup", tiTimestampLabel(tiState.latestRetrievedAt)],
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
         ["Stored provider evidence", countOf(Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
         ["Provider calls", sessionData.provider_calls === false || observableData.provider_calls === false ? "0 (stored-only read)" : "Not reported"],
       ]} />
+      {tiState.state === "MIXED" && (
+        <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
+          Fresh source-IP cache data is available ({tiState.freshCacheCount} provider result{tiState.freshCacheCount === 1 ? "" : "s"}); older stored provider evidence is stale ({tiState.staleEvidenceCount} record{tiState.staleEvidenceCount === 1 ? "" : "s"}). Freshness is shown per record below.
+        </p>
+      )}
       {entities.length > 0 && <ObservableList items={entities} empty="No shared entities are recorded." />}
-      <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} />
+      <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
       {entities.length === 0 && evidence.length === 0 && (
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this exact session. The read model is {summaryValue(summary.uncertainty, "context-only")}; unavailable evidence is not inferred.</p>
       )}

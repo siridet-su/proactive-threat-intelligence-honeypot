@@ -440,9 +440,9 @@ export function FilesystemInspector({
 
               <div className="mt-6">
                 <div className="mb-2 text-sm font-semibold text-text">Directory sessions</div>
-                <div 
-                  className="mb-4 grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-1 text-xs" 
-                  role="tablist" 
+                <div
+                  className="mb-4 grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-1 text-xs"
+                  role="tablist"
                   aria-label="Directory session grouping"
                 >
                   <button

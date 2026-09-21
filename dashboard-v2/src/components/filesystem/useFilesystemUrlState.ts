@@ -7,6 +7,8 @@ import type {
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
+import type { DateRange } from "react-day-picker";
+import type { TimeRangeFilter } from "./AuditFilterControls";
 import {
   parseAuditUrlParams,
   resolveSessionSelection,
@@ -28,10 +30,10 @@ export {
 };
 
 export interface UseFilesystemUrlStateOptions {
-  timeRange?: string;
-  setTimeRange?: (range: any) => void;
-  customDateRange?: any;
-  setCustomDateRange?: (range: any) => void;
+  timeRange?: TimeRangeFilter;
+  setTimeRange?: (range: TimeRangeFilter) => void;
+  customDateRange?: DateRange;
+  setCustomDateRange?: (range: DateRange | undefined) => void;
   isHydrated: boolean;
   snapshot: FilesystemTopologySnapshot | null;
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
@@ -75,10 +77,10 @@ export interface UseFilesystemUrlStateReturn {
   setHideHomeOnly: React.Dispatch<React.SetStateAction<boolean>>;
   targetPathFilter: string | null;
   setTargetPathFilter: React.Dispatch<React.SetStateAction<string | null>>;
-  timeRange?: string;
-  setTimeRange?: (range: any) => void;
-  customDateRange?: any;
-  setCustomDateRange?: (range: any) => void;
+  timeRange?: TimeRangeFilter;
+  setTimeRange?: (range: TimeRangeFilter) => void;
+  customDateRange?: DateRange;
+  setCustomDateRange?: (range: DateRange | undefined) => void;
   selectedHistoryEventId: string | null;
   setSelectedHistoryEventId: React.Dispatch<React.SetStateAction<string | null>>;
   expiredSessionId: string | null;
@@ -208,6 +210,10 @@ export function useFilesystemUrlState(
     snapshot,
     extraAuditSessions,
     options.setExtraAuditSessions,
+    options.timeRange,
+    options.customDateRange,
+    options.setTimeRange,
+    options.setCustomDateRange,
     setViewMode,
     setHideHomeOnly,
     setTargetPathFilter,

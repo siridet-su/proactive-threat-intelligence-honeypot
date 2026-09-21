@@ -3,6 +3,8 @@ import type {
   FilesystemTopologySession,
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
+import type { DateRange } from "react-day-picker";
+import type { TimeRangeFilter } from "./AuditFilterControls";
 import {
   type AuditUrlParams,
   areAuditUrlParamsEqual,
@@ -33,6 +35,25 @@ export interface NavigationStateCommitOptions {
   timeTo?: number | null;
 }
 
+const TIME_RANGE_FILTERS = new Set<TimeRangeFilter>([
+  "all",
+  "15m",
+  "1h",
+  "6h",
+  "24h",
+  "7d",
+  "30d",
+  "today",
+  "yesterday",
+  "custom",
+]);
+
+function normalizeTimeRange(value: string | null | undefined): TimeRangeFilter {
+  return value && TIME_RANGE_FILTERS.has(value as TimeRangeFilter)
+    ? value as TimeRangeFilter
+    : "all";
+}
+
 export interface PopStateTransaction {
   id: number;
   target: AuditUrlParams;
@@ -52,10 +73,10 @@ export interface NavigationUrlStateBindings {
   setHideHomeOnly: (hide: boolean) => void;
   getTargetPathFilter: () => string | null;
   setTargetPathFilter: (path: string | null) => void;
-  getTimeRange: () => string;
-  setTimeRange: (range: any) => void;
-  getCustomDateRange: () => any;
-  setCustomDateRange: (range: any) => void;
+  getTimeRange: () => TimeRangeFilter;
+  setTimeRange: (range: TimeRangeFilter) => void;
+  getCustomDateRange: () => DateRange | undefined;
+  setCustomDateRange: (range: DateRange | undefined) => void;
   getSelectedHistoryEventId: () => string | null;
   setSelectedHistoryEventId: (eventId: string | null) => void;
   getExpiredSessionId: () => string | null;
@@ -147,8 +168,11 @@ export class FilesystemNavigationCoordinator {
   /** Keeps the failed URL authoritative after explicit recovery releases tx state. */
   private recoveredTransactionTarget: AuditUrlParams | null = null;
 
-  constructor(options: FilesystemNavigationCoordinatorOptions = DEFAULT_COORDINATOR_OPTIONS) {
-    this.options = options;
+  constructor(options: Partial<FilesystemNavigationCoordinatorOptions> = {}) {
+    // Keep newly added URL-state dimensions backward compatible with focused
+    // harnesses and incremental domain adapters. Missing callbacks must retain
+    // their safe defaults instead of becoming an avoidable runtime TypeError.
+    this.options = { ...DEFAULT_COORDINATOR_OPTIONS, ...options };
   }
 
   /**
@@ -620,11 +644,7 @@ export class FilesystemNavigationCoordinator {
       this.options.setViewMode(nextView);
       this.options.setHideHomeOnly(Boolean(parsed.hideHome));
       this.options.setTargetPathFilter(parsed.targetPath ?? null);
-      if (parsed.timeRange) {
-        this.options.setTimeRange(parsed.timeRange);
-      } else {
-        this.options.setTimeRange("all");
-      }
+      this.options.setTimeRange(normalizeTimeRange(parsed.timeRange));
       if (parsed.timeFrom || parsed.timeTo) {
         this.options.setCustomDateRange({
           from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,
@@ -683,11 +703,7 @@ export class FilesystemNavigationCoordinator {
         this.options.setViewMode(nextView);
         this.options.setHideHomeOnly(Boolean(parsed.hideHome));
         this.options.setTargetPathFilter(parsed.targetPath ?? null);
-        if (parsed.timeRange) {
-          this.options.setTimeRange(parsed.timeRange);
-        } else {
-          this.options.setTimeRange("all");
-        }
+        this.options.setTimeRange(normalizeTimeRange(parsed.timeRange));
         if (parsed.timeFrom || parsed.timeTo) {
           this.options.setCustomDateRange({
             from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,

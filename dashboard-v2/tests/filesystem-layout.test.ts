@@ -90,8 +90,8 @@ describe("filesystem source layout", () => {
       { "10.0.0.8": { x: 60, y: 50, width: 20, height: 10 } },
     );
 
-    // Node right edge is 57; source half-width is 10; one-percent gutter.
-    expect(positions.get("10.0.0.8")).toEqual({ x: 68, y: 50 });
+    // Node right edge is 57; source half-width is 10; a 3.5% visual gutter.
+    expect(positions.get("10.0.0.8")).toEqual({ x: 70.5, y: 50 });
   });
 
   it("keeps a single live source close to and level with its directory", () => {
@@ -103,7 +103,7 @@ describe("filesystem source layout", () => {
 
     const positions = sourceRailPositions([callout("10.58.33.209", "/home/arch")], nodes);
 
-    expect(positions.get("10.58.33.209")).toEqual({ x: 32, y: 52 });
+    expect(positions.get("10.58.33.209")).toEqual({ x: 28, y: 52 });
   });
 
   it("places a lone live source on the same side as an off-center target", () => {
@@ -114,7 +114,7 @@ describe("filesystem source layout", () => {
 
     const positions = sourceRailPositions([callout("10.58.33.210", "/right")], nodes);
 
-    expect(positions.get("10.58.33.210")).toEqual({ x: 83, y: 54 });
+    expect(positions.get("10.58.33.210")).toEqual({ x: 87, y: 54 });
   });
 
   it("moves rails outward as the topology and source count become denser", () => {
@@ -135,7 +135,7 @@ describe("filesystem source layout", () => {
     const positions = sourceRailPositions(callouts, nodes);
     const xs = [...positions.values()].map((position) => position.x);
 
-    expect(new Set(xs)).toEqual(new Set([13, 87]));
+    expect(new Set(xs)).toEqual(new Set([10, 90]));
     expect([...positions.values()].every(({ x, y }) => x >= 10 && x <= 90 && y >= 18 && y <= 80)).toBe(true);
   });
 

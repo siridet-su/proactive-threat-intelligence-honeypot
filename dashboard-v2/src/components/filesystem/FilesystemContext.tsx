@@ -1,5 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Transitional context bridge for the decomposed filesystem workspace. */
 import { createContext, useContext } from "react";
-import type { AuditFilesystemWorkspaceProps } from "./AuditFilesystemWorkspace";
 
 // We omit 'isFullscreen' and other props that are specific to the layout instance
 
@@ -8,7 +8,7 @@ export interface FilesystemContextType extends Record<string, any> {
   allSessions: any[];
   setExpiredSessionId: (id: string | null) => void;
   handleUserSelectSession: (id: string, sessionObj?: any) => void;
-  // ... and other props will be allowed via Record<string, any>
+  // Remaining workspace props are carried through the transitional record.
 }
 
 

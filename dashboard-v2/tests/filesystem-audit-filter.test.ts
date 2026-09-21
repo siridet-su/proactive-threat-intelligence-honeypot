@@ -155,6 +155,9 @@ describe("audit URL state synchronization and session expiration", () => {
       hideHome: false,
       targetPath: null,
       hop: null,
+      timeRange: null,
+      timeFrom: null,
+      timeTo: null,
     });
   });
 
@@ -166,6 +169,9 @@ describe("audit URL state synchronization and session expiration", () => {
       hideHome: true,
       targetPath: "/etc/nginx",
       hop: "evt-007",
+      timeRange: null,
+      timeFrom: null,
+      timeTo: null,
     });
   });
 
@@ -176,6 +182,9 @@ describe("audit URL state synchronization and session expiration", () => {
       hideHome: true,
       targetPath: "/etc",
       hop: "evt-001",
+      timeRange: null,
+      timeFrom: null,
+      timeTo: null,
     });
     expect(search).toBe("");
   });
@@ -187,6 +196,9 @@ describe("audit URL state synchronization and session expiration", () => {
       hideHome: true,
       targetPath: "/etc",
       hop: "evt-001",
+      timeRange: null,
+      timeFrom: null,
+      timeTo: null,
     });
     expect(search).toBe("?view=audit&sessionId=sess-xyz&hideHome=1&targetPath=%2Fetc&hop=evt-001");
 
@@ -198,6 +210,9 @@ describe("audit URL state synchronization and session expiration", () => {
       hideHome: true,
       targetPath: "/etc",
       hop: "evt-001",
+      timeRange: null,
+      timeFrom: null,
+      timeTo: null,
     });
   });
 
