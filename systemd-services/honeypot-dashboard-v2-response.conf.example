@@ -1,0 +1,10 @@
+# Install as /etc/systemd/system/honeypot-dashboard-v2.service.d/response-control.conf
+# after replacing the response-agent URL placeholder.
+[Unit]
+After=tailscaled.service
+Wants=tailscaled.service
+
+[Service]
+LoadCredential=response-agent-token:/etc/honeypot/response-agent.token
+Environment=COWRIE_RESPONSE_AGENT_URL=http://<pi-tailscale-ip-or-magicdns>:8788
+Environment=COWRIE_RESPONSE_AGENT_TOKEN_FILE=%d/response-agent-token

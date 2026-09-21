@@ -219,7 +219,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             </div>
           </div>
         </header>
-        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1440px] p-4 print:max-w-none print:p-0 md:p-6 lg:p-8">{children}</main>
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1600px] p-4 print:max-w-none print:p-0 md:p-6 lg:px-6 lg:py-8">{children}</main>
       </div>
       <ConfirmDialog open={logoutConfirmationOpen} onOpenChange={setLogoutConfirmationOpen} onConfirm={() => void confirmLogout()} title="Sign out of PTI-Honeypot?" description="Your current dashboard session will end and you will return to the sign-in screen." confirmLabel="Sign out" />
     </div>

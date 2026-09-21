@@ -85,17 +85,8 @@ class DetailStorage:
                     ),
                 }
             ]
-        if table == "prediction_snapshots":
-            return [
-                {
-                    "snapshot_id": "snapshot-detail-1",
-                    "session_id": SESSION_ID,
-                    "created_at": "2026-09-01T00:00:05Z",
-                    "payload_json": json.dumps(
-                        {"schema_version": "prediction_snapshot.v3", "session_id": SESSION_ID}
-                    ),
-                }
-            ]
+        if table in {"analyst_feedback", "observable_sightings"}:
+            return []
         raise AssertionError(f"unexpected table: {table}")
 
     def list_rows(self, *_args, **_kwargs):
@@ -172,14 +163,16 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(tmp_pa
         "events",
         "analysis_jobs",
         "reports",
-        "prediction_snapshots",
+        "analyst_feedback",
+        "observable_sightings",
     }
     assert {table: limit for table, _, limit in storage.calls} == {
         "sessions": 1,
         "events": monitor_web.MAX_SESSION_EVENTS,
         "analysis_jobs": 50,
         "reports": 50,
-        "prediction_snapshots": 50,
+        "analyst_feedback": 50,
+        "observable_sightings": 100,
     }
     serialized = json.dumps(public, sort_keys=True)
     assert "payload_json" not in serialized

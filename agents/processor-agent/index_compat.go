@@ -9,8 +9,9 @@ import (
 )
 
 type existingIndex struct {
-	Name string `bson:"name"`
-	Key  bson.D `bson:"key"`
+	Name               string `bson:"name"`
+	Key                bson.D `bson:"key"`
+	ExpireAfterSeconds *int32 `bson:"expireAfterSeconds,omitempty"`
 }
 
 // ensureIndexModels creates only key patterns that do not already exist.
@@ -40,8 +41,14 @@ func ensureIndexModels(ctx context.Context, collection *mongo.Collection, wanted
 		if !ok {
 			return fmt.Errorf("unsupported index key type %T", model.Keys)
 		}
-		if hasIndexKeys(existing, keys) {
-			continue
+		matching := matchingIndex(existing, keys)
+		if matching != nil {
+			if indexOptionsCompatible(matching, model) {
+				continue
+			}
+			if _, err := collection.Indexes().DropOne(ctx, matching.Name); err != nil {
+				return err
+			}
 		}
 		if _, err := collection.Indexes().CreateOne(ctx, model); err != nil {
 			return err
@@ -57,6 +64,23 @@ func hasIndexKeys(existing []existingIndex, wanted bson.D) bool {
 		}
 	}
 	return false
+}
+
+func matchingIndex(existing []existingIndex, wanted bson.D) *existingIndex {
+	for i := range existing {
+		if sameIndexKeys(existing[i].Key, wanted) {
+			return &existing[i]
+		}
+	}
+	return nil
+}
+
+func indexOptionsCompatible(existing *existingIndex, wanted mongo.IndexModel) bool {
+	wantedTTL := wanted.Options != nil && wanted.Options.ExpireAfterSeconds != nil
+	if !wantedTTL {
+		return existing.ExpireAfterSeconds == nil
+	}
+	return existing.ExpireAfterSeconds != nil && *existing.ExpireAfterSeconds == *wanted.Options.ExpireAfterSeconds
 }
 
 func sameIndexKeys(left, right bson.D) bool {

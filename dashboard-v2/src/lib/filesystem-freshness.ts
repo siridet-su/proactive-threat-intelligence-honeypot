@@ -1,0 +1,687 @@
+import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
+
+export type FilesystemStreamState = "connecting" | "live" | "stale";
+export type FilesystemRegionStatus = "loading" | "ready" | "refreshing" | "error" | "stale";
+
+export const DEFAULT_STALE_THRESHOLD_MS = 30_000;
+
+/**
+ * Maximum acceptable future clock skew (5 seconds).
+ * Timestamps further in the future than this tolerance are treated as untrusted/invalid.
+ */
+export const MAX_FUTURE_TELEMETRY_SKEW_MS = 5_000;
+
+export function formatUpdateAge(ageMs: number): string {
+  if (typeof ageMs !== "number" || isNaN(ageMs) || ageMs < 0) return "Just now";
+  if (ageMs < 3_000) return "Just now";
+  if (ageMs < 60_000) return `${Math.floor(ageMs / 1_000)}s ago`;
+  if (ageMs < 3_600_000) return `${Math.floor(ageMs / 60_000)}m ago`;
+  return `${Math.floor(ageMs / 3_600_000)}h ago`;
+}
+
+/**
+ * Pure extraction function that derives the latest authoritative telemetry timestamp
+ * from a snapshot's active and recent closed sessions.
+ *
+ * Contributing fields:
+ * - active session `cwdState.observedAt`
+ * - retained/recent session `cwdState.observedAt`
+ * - `lifecycle.closedAt` where it represents newer authoritative session telemetry
+ *
+ * NOTE: Server snapshot-build time (`generatedAt`) is deliberately NOT counted as telemetry.
+ */
+export function deriveLatestTelemetryAt(snapshot: {
+  sessions?: Array<{ cwdState?: { observedAt?: string | null } | null }> | null;
+  recentClosedSessions?: Array<{
+    cwdState?: { observedAt?: string | null } | null;
+    lifecycle?: { closedAt?: string | null } | null;
+  }> | null;
+} | null | undefined): string | null {
+  if (!snapshot) return null;
+  let maxMs = -Infinity;
+  let latestIso: string | null = null;
+
+  const consider = (iso: string | null | undefined) => {
+    if (typeof iso !== "string" || !iso.trim()) return;
+    const ms = Date.parse(iso);
+    if (!Number.isNaN(ms) && ms > maxMs) {
+      maxMs = ms;
+      latestIso = iso;
+    }
+  };
+
+  if (Array.isArray(snapshot.sessions)) {
+    for (const session of snapshot.sessions) {
+      consider(session?.cwdState?.observedAt);
+    }
+  }
+
+  if (Array.isArray(snapshot.recentClosedSessions)) {
+    for (const session of snapshot.recentClosedSessions) {
+      consider(session?.cwdState?.observedAt);
+      consider(session?.lifecycle?.closedAt);
+    }
+  }
+
+  return latestIso;
+}
+
+export type TelemetryStatus = "none" | "valid" | "invalid" | "future_skew";
+
+export interface TelemetryAgeMetrics {
+  /** The authoritative telemetry observation timestamp ISO string, or null if absent. */
+  telemetryAt: string | null;
+  /**
+   * Age in milliseconds since latest telemetry observation.
+   * Defined only when telemetryStatus === "valid". Null otherwise.
+   */
+  telemetryAgeMs: number | null;
+  /** Categorized status of the telemetry observation timestamp. */
+  telemetryStatus: TelemetryStatus;
+  /**
+   * Client-local age in milliseconds since the accepted snapshot was received.
+   * Derived from snapshotReceivedAtMs, never generatedAt.
+   */
+  snapshotReceiptAgeMs: number;
+  /**
+   * Legacy alias for snapshotReceiptAgeMs for backward compatibility.
+   */
+  retrievalAgeMs: number;
+  /**
+   * Server generation age in milliseconds, derived from snapshot.generatedAt.
+   * For ordering and truthful display only.
+   */
+  serverGenerationAgeMs: number;
+  /** True when the snapshot contains active or recent closed sessions. */
+  hasTelemetry: boolean;
+}
+
+export interface SnapshotEnvelope {
+  snapshot: FilesystemTopologySnapshot | null;
+  snapshotReceivedAtMs: number | null;
+}
+
+export interface TelemetryTrustMarker {
+  telemetryAt: string;
+  isFutureSkew: boolean;
+}
+
+/**
+ * Pure evaluation helper that updates the telemetry trust marker upon snapshot ingestion.
+ * Preserves existing future_skew trust classification when the incoming telemetry timestamp
+ * matches the current observation (e.g. manual refresh returning the same telemetry time).
+ * Re-evaluates against the arrival timestamp when a genuinely different timestamp is observed.
+ */
+export function evaluateTelemetryTrust(
+  currentTrust: TelemetryTrustMarker | null,
+  telemetryAt: string | null,
+  receivedAtMs: number,
+  toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+): TelemetryTrustMarker | null {
+  if (!telemetryAt || typeof telemetryAt !== "string" || !telemetryAt.trim()) {
+    return null;
+  }
+
+  // Preserve trust classification if the observation timestamp has not changed
+  if (currentTrust && currentTrust.telemetryAt === telemetryAt) {
+    return currentTrust;
+  }
+
+  const parsedMs = Date.parse(telemetryAt);
+  if (Number.isNaN(parsedMs)) {
+    return null;
+  }
+
+  const isFutureSkew = parsedMs > receivedAtMs + toleranceMs;
+  return {
+    telemetryAt,
+    isFutureSkew,
+  };
+}
+
+export interface SnapshotTransitionState {
+  envelope: SnapshotEnvelope;
+  latestSnapshotAt: number;
+  trustMarker: TelemetryTrustMarker | null;
+}
+
+export interface SnapshotTransitionResult {
+  accepted: boolean;
+  state: SnapshotTransitionState;
+}
+
+/**
+ * Pure transition helper that processes incoming snapshots against monotonic generation ordering.
+ * Enforces atomic updates to snapshot, snapshotReceivedAtMs, and trustMarker, and rejects out-of-order
+ * snapshots without mutating or resetting existing receipt timestamps or trust state.
+ */
+export function processSnapshotTransition(
+  current: SnapshotTransitionState,
+  incoming: FilesystemTopologySnapshot,
+  receivedAtMs: number,
+  toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+): SnapshotTransitionResult {
+  const timestamp = Date.parse(incoming.generatedAt) || 0;
+  if (timestamp && timestamp < current.latestSnapshotAt) {
+    return {
+      accepted: false,
+      state: current,
+    };
+  }
+
+  const telemetryAt = incoming.latestTelemetryAt !== undefined
+    ? incoming.latestTelemetryAt
+    : deriveLatestTelemetryAt(incoming);
+
+  const trustMarker = evaluateTelemetryTrust(
+    current.trustMarker,
+    telemetryAt,
+    receivedAtMs,
+    toleranceMs,
+  );
+
+  return {
+    accepted: true,
+    state: {
+      envelope: {
+        snapshot: incoming,
+        snapshotReceivedAtMs: receivedAtMs,
+      },
+      latestSnapshotAt: Math.max(current.latestSnapshotAt, timestamp),
+      trustMarker,
+    },
+  };
+}
+
+/**
+ * Authoritative, synchronous coordinator for snapshot ingestion.
+ * Determines acceptance synchronously against an atomic transition state, preventing React state
+ * batching races and ensuring side effects fire exactly once per accepted snapshot.
+ */
+export class SnapshotIngestionCoordinator {
+  private state: SnapshotTransitionState;
+
+  constructor(initialState?: SnapshotTransitionState) {
+    this.state = initialState ?? {
+      envelope: { snapshot: null, snapshotReceivedAtMs: null },
+      latestSnapshotAt: 0,
+      trustMarker: null,
+    };
+  }
+
+  getState(): SnapshotTransitionState {
+    return this.state;
+  }
+
+  ingest(
+    snapshot: FilesystemTopologySnapshot,
+    receivedAtMs: number,
+    toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+  ): SnapshotTransitionResult {
+    const result = processSnapshotTransition(this.state, snapshot, receivedAtMs, toleranceMs);
+    if (result.accepted) {
+      this.state = result.state;
+    }
+    return result;
+  }
+}
+
+/**
+ * Lightweight, bounded O(1) tracker managing the single current telemetry observation trust marker.
+ */
+export class TelemetryFreshnessTracker {
+  private currentMarker: TelemetryTrustMarker | null = null;
+
+  constructor(initialMarker?: TelemetryTrustMarker | null) {
+    this.currentMarker = initialMarker ?? null;
+  }
+
+  getTrustMarker(): TelemetryTrustMarker | null {
+    return this.currentMarker;
+  }
+
+  isKnownSkewed(timestamp: string): boolean {
+    return this.isSkewed(timestamp);
+  }
+
+  isSkewed(timestamp: string): boolean {
+    return Boolean(
+      this.currentMarker &&
+      this.currentMarker.telemetryAt === timestamp &&
+      this.currentMarker.isFutureSkew,
+    );
+  }
+
+  recordSkew(timestamp: string): void {
+    this.currentMarker = {
+      telemetryAt: timestamp,
+      isFutureSkew: true,
+    };
+  }
+
+  ingestObservation(
+    telemetryAt: string | null,
+    receivedAtMs: number,
+    toleranceMs: number = MAX_FUTURE_TELEMETRY_SKEW_MS,
+  ): TelemetryTrustMarker | null {
+    this.currentMarker = evaluateTelemetryTrust(
+      this.currentMarker,
+      telemetryAt,
+      receivedAtMs,
+      toleranceMs,
+    );
+    return this.currentMarker;
+  }
+
+  clear(): void {
+    this.currentMarker = null;
+  }
+
+  calculateTelemetryAge(params: Omit<CalculateTelemetryAgeParams, "trustMarker">): TelemetryAgeMetrics {
+    return calculateTelemetryAge({
+      ...params,
+      trustMarker: this.currentMarker,
+    });
+  }
+}
+
+export interface CalculateTelemetryAgeParams {
+  snapshot: FilesystemTopologySnapshot | null | undefined;
+  /**
+   * Client timestamp (ms epoch) when the accepted snapshot was received.
+   * If null/omitted, falls back to snapshot.generatedAt parsed ms or now.
+   */
+  snapshotReceivedAtMs?: number | null;
+  /** Injected clock for deterministic testing (defaults to Date.now()). */
+  now?: number;
+  /** Maximum acceptable future clock skew tolerance in ms (defaults to 5,000ms). */
+  futureSkewToleranceMs?: number;
+  /** Trust marker established at snapshot ingestion time. */
+  trustMarker?: TelemetryTrustMarker | null;
+  /** Optional tracker instance for compatibility. */
+  freshnessTracker?: TelemetryFreshnessTracker;
+}
+
+/**
+ * Calculates separate telemetry, client receipt, and server generation ages for a topology snapshot.
+ * This is a completely PURE function during React render with zero side effects or state mutations.
+ */
+export function calculateTelemetryAge(params: CalculateTelemetryAgeParams): TelemetryAgeMetrics {
+  const {
+    snapshot,
+    snapshotReceivedAtMs,
+    now = Date.now(),
+    futureSkewToleranceMs = MAX_FUTURE_TELEMETRY_SKEW_MS,
+    trustMarker,
+    freshnessTracker,
+  } = params;
+
+  if (!snapshot) {
+    return {
+      telemetryAt: null,
+      telemetryAgeMs: null,
+      telemetryStatus: "none",
+      snapshotReceiptAgeMs: 0,
+      retrievalAgeMs: 0,
+      serverGenerationAgeMs: 0,
+      hasTelemetry: false,
+    };
+  }
+
+  // 1. Server generation age (for ordering and display)
+  const serverGenMs = Date.parse(snapshot.generatedAt);
+  const serverGenerationAgeMs = Number.isNaN(serverGenMs)
+    ? 0
+    : Math.max(0, now - Math.min(serverGenMs, now));
+
+  // 2. Client snapshot receipt age: derived from snapshotReceivedAtMs
+  const effectiveReceiptMs = typeof snapshotReceivedAtMs === "number" && Number.isFinite(snapshotReceivedAtMs)
+    ? snapshotReceivedAtMs
+    : (Number.isNaN(serverGenMs) ? now : serverGenMs);
+  const snapshotReceiptAgeMs = Math.max(0, now - Math.min(effectiveReceiptMs, now));
+
+  // 3. Telemetry timestamp resolution
+  const telemetryAt = snapshot.latestTelemetryAt !== undefined
+    ? snapshot.latestTelemetryAt
+    : deriveLatestTelemetryAt(snapshot);
+
+  const hasSessions = Boolean(
+    (snapshot.sessions && snapshot.sessions.length > 0) ||
+    (snapshot.recentClosedSessions && snapshot.recentClosedSessions.length > 0),
+  );
+
+  if (!hasSessions) {
+    return {
+      telemetryAt,
+      telemetryAgeMs: null,
+      telemetryStatus: "none",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: false,
+    };
+  }
+
+  // Sessions exist, evaluate telemetry timestamp
+  if (typeof telemetryAt !== "string" || !telemetryAt.trim()) {
+    return {
+      telemetryAt: null,
+      telemetryAgeMs: null,
+      telemetryStatus: "invalid",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: true,
+    };
+  }
+
+  const parsedTelemetryMs = Date.parse(telemetryAt);
+  if (Number.isNaN(parsedTelemetryMs)) {
+    return {
+      telemetryAt,
+      telemetryAgeMs: null,
+      telemetryStatus: "invalid",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: true,
+    };
+  }
+
+  // Pure trust check: if this observation was classified as future_skew at ingestion, fail closed.
+  // Never mutates state or sets during render!
+  const isMarkedFutureSkew = Boolean(
+    (trustMarker && trustMarker.telemetryAt === telemetryAt && trustMarker.isFutureSkew) ||
+    (freshnessTracker && freshnessTracker.isSkewed(telemetryAt)),
+  );
+
+  if (isMarkedFutureSkew) {
+    return {
+      telemetryAt,
+      telemetryAgeMs: null,
+      telemetryStatus: "future_skew",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: true,
+    };
+  }
+
+  // Pure clock comparison
+  if (parsedTelemetryMs > now) {
+    const futureSkewMs = parsedTelemetryMs - now;
+    if (futureSkewMs <= futureSkewToleranceMs) {
+      // Within tolerance: normalize age to 0, treated as valid
+      return {
+        telemetryAt,
+        telemetryAgeMs: 0,
+        telemetryStatus: "valid",
+        snapshotReceiptAgeMs,
+        retrievalAgeMs: snapshotReceiptAgeMs,
+        serverGenerationAgeMs,
+        hasTelemetry: true,
+      };
+    }
+
+    // Beyond tolerance: excessive clock skew
+    return {
+      telemetryAt,
+      telemetryAgeMs: null,
+      telemetryStatus: "future_skew",
+      snapshotReceiptAgeMs,
+      retrievalAgeMs: snapshotReceiptAgeMs,
+      serverGenerationAgeMs,
+      hasTelemetry: true,
+    };
+  }
+
+  // Valid past/current telemetry
+  const telemetryAgeMs = Math.max(0, now - parsedTelemetryMs);
+  return {
+    telemetryAt,
+    telemetryAgeMs,
+    telemetryStatus: "valid",
+    snapshotReceiptAgeMs,
+    retrievalAgeMs: snapshotReceiptAgeMs,
+    serverGenerationAgeMs,
+    hasTelemetry: true,
+  };
+}
+
+export type FreshnessClassification = "fresh" | "stale" | "degraded" | "offline";
+
+export interface FreshnessState {
+  classification: FreshnessClassification;
+  label: string;
+  detail: string;
+  badgeClass: string;
+  dotClass: string;
+  isDegraded: boolean;
+  isStale: boolean;
+  telemetryAgeMs: number | null;
+  snapshotReceiptAgeMs: number;
+  /** Legacy alias for snapshotReceiptAgeMs. */
+  retrievalAgeMs: number;
+  telemetryStatus: TelemetryStatus;
+}
+
+export interface FreshnessStateParams {
+  telemetryAgeMs?: number | null;
+  telemetryStatus?: TelemetryStatus;
+  snapshotReceiptAgeMs?: number;
+  retrievalAgeMs?: number;
+  lastUpdateAgeMs?: number;
+  hasTelemetry?: boolean;
+  staleThresholdMs?: number;
+  streamState: FilesystemStreamState;
+  regionStatus?: FilesystemRegionStatus;
+  hasSnapshot: boolean;
+}
+
+export function getFreshnessState(params: FreshnessStateParams): FreshnessState {
+  const {
+    lastUpdateAgeMs,
+    staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
+    streamState,
+    regionStatus = "ready",
+    hasSnapshot,
+  } = params;
+
+  // Resolve snapshot receipt age: snapshotReceiptAgeMs -> retrievalAgeMs -> lastUpdateAgeMs -> 0
+  const effectiveReceiptAgeMs = Math.max(
+    0,
+    params.snapshotReceiptAgeMs ?? params.retrievalAgeMs ?? lastUpdateAgeMs ?? 0,
+  );
+
+  // Resolve telemetry existence
+  const hasTelemetry = params.hasTelemetry !== undefined
+    ? params.hasTelemetry
+    : (params.telemetryAgeMs !== undefined ? params.telemetryAgeMs !== null : lastUpdateAgeMs !== undefined);
+
+  // Resolve telemetry status
+  let telemetryStatus: TelemetryStatus;
+  if (params.telemetryStatus !== undefined) {
+    telemetryStatus = params.telemetryStatus;
+  } else if (!hasTelemetry) {
+    telemetryStatus = "none";
+  } else if (params.telemetryAgeMs !== null && params.telemetryAgeMs !== undefined && !Number.isNaN(params.telemetryAgeMs)) {
+    telemetryStatus = "valid";
+  } else if (lastUpdateAgeMs !== undefined) {
+    telemetryStatus = "valid";
+  } else {
+    telemetryStatus = "invalid";
+  }
+
+  // Resolve telemetry age (only valid when status === "valid")
+  const rawTelemetryAgeMs = telemetryStatus === "valid"
+    ? (params.telemetryAgeMs !== undefined ? params.telemetryAgeMs : (lastUpdateAgeMs !== undefined ? lastUpdateAgeMs : null))
+    : null;
+  const effectiveTelemetryAgeMs = rawTelemetryAgeMs !== null && !Number.isNaN(rawTelemetryAgeMs)
+    ? Math.max(0, rawTelemetryAgeMs)
+    : null;
+
+  if (!hasSnapshot) {
+    if (regionStatus === "loading" || regionStatus === "refreshing" || streamState === "connecting") {
+      return {
+        classification: "offline",
+        label: "Connecting",
+        detail: "Connecting to real-time filesystem stream...",
+        badgeClass: "border-border bg-surface-subtle text-text-subtle",
+        dotClass: "bg-text-subtle animate-pulse",
+        isDegraded: false,
+        isStale: false,
+        telemetryAgeMs: null,
+        snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+        retrievalAgeMs: effectiveReceiptAgeMs,
+        telemetryStatus,
+      };
+    }
+    return {
+      classification: "offline",
+      label: "Offline",
+      detail: "Topology stream unavailable. No valid snapshot loaded.",
+      badgeClass: "border-danger-border bg-danger-subtle text-danger",
+      dotClass: "bg-danger",
+      isDegraded: true,
+      isStale: true,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus,
+    };
+  }
+
+  // streamState is the authoritative owner of real-time transport health.
+  // When a snapshot is present and streamState is "live", manual HTTP refresh failures
+  // or in-flight HTTP requests must NEVER downgrade live transport to Degraded or Offline.
+  const isTransportLive = streamState === "live";
+
+  // Retained snapshot with degraded transport or error
+  if (!isTransportLive) {
+    const isStale = telemetryStatus === "valid" && effectiveTelemetryAgeMs !== null
+      ? effectiveTelemetryAgeMs > staleThresholdMs
+      : telemetryStatus !== "none";
+
+    return {
+      classification: "degraded",
+      label: "Degraded",
+      detail: `Reconnecting transport — displaying retained snapshot from ${formatUpdateAge(effectiveReceiptAgeMs)}.`,
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning animate-pulse",
+      isDegraded: true,
+      isStale,
+      telemetryAgeMs: effectiveTelemetryAgeMs,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus,
+    };
+  }
+
+  // Transport is live:
+  // Case 1: Empty snapshot (no session activity)
+  if (telemetryStatus === "none") {
+    return {
+      classification: "fresh",
+      label: "Live · No activity",
+      detail: "Live stream active · no session activity recorded.",
+      badgeClass: "border-border bg-surface-subtle text-text-muted",
+      dotClass: "bg-success",
+      isDegraded: false,
+      isStale: false,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus: "none",
+    };
+  }
+
+  // Case 2: Excessive future clock skew (untrusted)
+  if (telemetryStatus === "future_skew") {
+    return {
+      classification: "stale",
+      label: "Stale",
+      detail: "Connected, but telemetry timestamp is in the future beyond acceptable skew tolerance (clock skew detected).",
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning",
+      isDegraded: false,
+      isStale: true,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus: "future_skew",
+    };
+  }
+
+  // Case 3: Missing/invalid telemetry timestamps with existing sessions
+  if (telemetryStatus === "invalid" || effectiveTelemetryAgeMs === null) {
+    return {
+      classification: "stale",
+      label: "Stale",
+      detail: "Connected, but telemetry timestamps are unavailable or invalid.",
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning",
+      isDegraded: false,
+      isStale: true,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus: "invalid",
+    };
+  }
+
+  // Case 4: Telemetry age exceeds stale threshold
+  if (effectiveTelemetryAgeMs > staleThresholdMs) {
+    return {
+      classification: "stale",
+      label: "Stale",
+      detail: `Connected, but no new telemetry for ${formatUpdateAge(effectiveTelemetryAgeMs)} (threshold: ${Math.round(staleThresholdMs / 1000)}s).`,
+      badgeClass: "border-warning-border bg-warning-subtle text-warning",
+      dotClass: "bg-warning",
+      isDegraded: false,
+      isStale: true,
+      telemetryAgeMs: effectiveTelemetryAgeMs,
+      snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+      retrievalAgeMs: effectiveReceiptAgeMs,
+      telemetryStatus: "valid",
+    };
+  }
+
+  // Case 5: Live transport with fresh telemetry
+  return {
+    classification: "fresh",
+    label: "Live & Fresh",
+    detail: `Live stream active · telemetry observed ${formatUpdateAge(effectiveTelemetryAgeMs)}.`,
+    badgeClass: "border-success-border bg-success-subtle text-success",
+    dotClass: "bg-success",
+    isDegraded: false,
+    isStale: false,
+    telemetryAgeMs: effectiveTelemetryAgeMs,
+    snapshotReceiptAgeMs: effectiveReceiptAgeMs,
+    retrievalAgeMs: effectiveReceiptAgeMs,
+    telemetryStatus: "valid",
+  };
+}
+
+/**
+ * Truthfully formats the page badge display text adhering to strict precedence:
+ * 1. Degraded transport with retained snapshot -> "Degraded · Retained snapshot"
+ * 2. Live transport with valid telemetry -> "Live & Fresh · Xs ago" or "Stale · Xs ago"
+ * 3. Live transport with clock skew -> "Stale · Clock skew"
+ * 4. Live transport with missing timestamp -> "Stale · No timestamp"
+ * 5. Other states (e.g. "Live · No activity", "Connecting", "Offline") -> label
+ */
+export function formatPageBadgeText(freshnessState: FreshnessState): string {
+  if (freshnessState.classification === "degraded") {
+    return `${freshnessState.label} · Retained snapshot`;
+  }
+  if (freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null) {
+    return `${freshnessState.label} · ${formatUpdateAge(freshnessState.telemetryAgeMs)}`;
+  }
+  if (freshnessState.telemetryStatus === "future_skew") {
+    return `${freshnessState.label} · Clock skew`;
+  }
+  if (freshnessState.telemetryStatus === "invalid") {
+    return `${freshnessState.label} · No timestamp`;
+  }
+  return freshnessState.label;
+}

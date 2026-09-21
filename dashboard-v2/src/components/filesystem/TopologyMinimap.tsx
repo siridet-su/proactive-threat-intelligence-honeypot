@@ -113,21 +113,25 @@ export function TopologyMinimap({
     : null;
 
   return (
-    <div
-      className="absolute bottom-3 right-5 z-20 hidden w-28 overflow-hidden rounded-xl border border-border/80 bg-surface/85 backdrop-blur-md p-1.5 text-left shadow-md transition-all duration-200 hover:border-border hover:bg-surface/95 sm:block select-none"
+    <motion.div
+      initial={{ opacity: 0, y: 15, scale: 0.95 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: 15, scale: 0.95 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="absolute bottom-3 right-5 z-20 hidden w-[124px] overflow-hidden rounded-xl border border-border bg-surface p-1.5 text-left shadow-md transition-colors duration-150 hover:border-border-strong sm:block select-none origin-bottom-right"
     >
       <div>
         <button
           type="button"
           onClick={() => handleToggleCollapse(!isCollapsed)}
-          className="group flex w-full items-center justify-between rounded px-1 py-0.5 text-text-subtle transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
+          className="group flex w-full items-center justify-between rounded-md px-1.5 py-1 text-text-subtle transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus-ring"
           title={isCollapsed ? "Expand topology minimap overview" : "Minimize topology minimap overview"}
           aria-label={isCollapsed ? "Expand topology minimap overview" : "Minimize topology minimap overview"}
           aria-expanded={!isCollapsed}
         >
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <Map className="h-3 w-3 text-primary" aria-hidden="true" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.12em]">Overview</span>
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Overview</span>
           </div>
           <motion.span
             animate={{ rotate: isCollapsed ? 0 : 180 }}
@@ -194,25 +198,33 @@ export function TopologyMinimap({
 
                   {/* Callout Leader Lines (Directory Node to Attacker IP) */}
                   {calloutPositions.map(({ callout, position }) => {
-                    const targetNode = graphNodeByPath.get(callout.path);
-                    if (!targetNode) return null;
-                    const isSelectedSession = callout.sessionIds.includes(selectedSessionId ?? "");
-                    const startX = normalizeX(targetNode.x);
-                    const startY = normalizeY(targetNode.y);
-                    const endX = normalizeX(position.x);
-                    const endY = normalizeY(position.y);
-                    const midX = (startX + endX) / 2;
-                    return (
-                      <path
-                        key={`minimap-leader-${callout.sourceIp}`}
-                        d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
-                        fill="none"
-                        stroke={isSelectedSession ? "var(--primary)" : "var(--border-strong)"}
-                        strokeWidth={isSelectedSession ? "1" : "0.6"}
-                        strokeDasharray={isSelectedSession ? undefined : "1.5 1.5"}
-                        strokeOpacity={isSelectedSession ? 0.95 : 0.45}
-                      />
-                    );
+                    const paths = callout.targetPaths?.length ? callout.targetPaths : [callout.path];
+                    const isSelectedCluster = callout.sessionIds.includes(selectedSessionId ?? "");
+                    const selectedSessionPath = selectedSessionId
+                      ? callout.sessions?.find((s) => s.sessionId === selectedSessionId)?.path
+                      : null;
+
+                    return paths.map((path, pIdx) => {
+                      const targetNode = graphNodeByPath.get(path);
+                      if (!targetNode) return null;
+                      const isPrimaryActivePath = isSelectedCluster && (path === selectedSessionPath || (!selectedSessionPath && path === callout.path));
+                      const startX = normalizeX(targetNode.x);
+                      const startY = normalizeY(targetNode.y);
+                      const endX = normalizeX(position.x);
+                      const endY = normalizeY(position.y);
+                      const midX = (startX + endX) / 2;
+                      return (
+                        <path
+                          key={`minimap-leader-${callout.sourceIp}-${path}-${pIdx}`}
+                          d={`M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}`}
+                          fill="none"
+                          stroke={isPrimaryActivePath ? "var(--primary)" : isSelectedCluster ? "var(--primary)" : "var(--border-strong)"}
+                          strokeWidth={isPrimaryActivePath ? "1" : isSelectedCluster ? "0.8" : "0.5"}
+                          strokeDasharray={isPrimaryActivePath ? undefined : "1.5 1.5"}
+                          strokeOpacity={isPrimaryActivePath ? 0.95 : isSelectedCluster ? 0.7 : 0.4}
+                        />
+                      );
+                    });
                   })}
 
                   {/* Directory Nodes */}
@@ -273,6 +285,6 @@ export function TopologyMinimap({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }

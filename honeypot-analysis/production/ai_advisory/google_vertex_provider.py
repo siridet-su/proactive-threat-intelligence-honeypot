@@ -19,7 +19,7 @@ from production.utils.serialization import stable_json
 
 
 PROVIDER_ID = "google_vertex_gemini"
-REVIEWED_MODEL_ID = "gemini-2.5-flash"
+REVIEWED_MODEL_ID = "gemini-3.6-flash"
 REVIEWED_LOCATION = "global"
 REVIEWED_ENDPOINT = "https://aiplatform.googleapis.com"
 REVIEWED_API_VERSION = "v1"
@@ -261,11 +261,21 @@ def _vertex_request_contract_instruction(projection: Mapping[str, Any]) -> str:
             "selected_finding_ids, selected_relationship_ids, ranked_action_ids, "
             "and template_selections arrays."
         )
+    policy_gap_rule = ""
+    if not (projection.get("guidance") or {}).get("actions") and projection.get(
+        "evidence_index"
+    ):
+        policy_gap_rule = (
+            " No reviewed guidance action is available, so also return at least "
+            "one falsifiable shadow candidate using only supplied candidate types, "
+            "identifiers, reason codes, missing-evidence codes, and falsifier codes."
+        )
     return (
         "Request-specific output rule: a non-abstained advisory must select at "
         "least one supplied finding, relationship, action, or valid template. If "
         "nothing is selected, set abstained to true, choose one supplied reason "
         "code, and leave every selection and template array empty."
+        + policy_gap_rule
     )
 
 

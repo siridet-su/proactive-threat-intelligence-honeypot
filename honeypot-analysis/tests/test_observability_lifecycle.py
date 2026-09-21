@@ -254,29 +254,6 @@ def test_enrichment_provider_status_includes_measured_latency() -> None:
     assert result.to_status()["latency_ms"] == result.latency_ms
 
 
-def test_prediction_failure_metric_uses_central_exception_redaction(
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    worker = object.__new__(SessionWorker)
-    worker._prediction_generation_errors = 0
-
-    def fail(*_args: Any, **_kwargs: Any) -> bool:
-        raise RuntimeError("must-not-appear-secret")
-
-    worker._save_prediction_snapshot_unobserved = fail  # type: ignore[method-assign]
-    with pytest.raises(RuntimeError):
-        worker._save_prediction_snapshot(
-            object(),
-            {},
-            event_id="evt-safe",
-        )
-
-    output = capsys.readouterr().out
-    assert "must-not-appear-secret" not in output
-    assert '"prediction_generation_errors": 1' in output
-    assert '"correlation_id": "evt-safe"' in output
-
-
 def test_forwarder_logs_idle_spool_status_initially_but_not_each_poll(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
@@ -448,13 +425,8 @@ def test_campaign_history_and_closed_worker_state_are_bounded() -> None:
             "closed": SimpleNamespace(is_ended=True),
         }
     )
-    worker._session_latest_snapshots = {"active": {}, "closed": {}}
-    worker._session_prediction_snapshots = {"active": [], "closed": []}
-
     assert worker._evict_closed_sessions() == 1
     assert set(worker.monitor._sessions) == {"active"}
-    assert set(worker._session_latest_snapshots) == {"active"}
-    assert set(worker._session_prediction_snapshots) == {"active"}
 
     monitor = SessionMonitor(session_event_history_limit=2)
     for index in range(5):

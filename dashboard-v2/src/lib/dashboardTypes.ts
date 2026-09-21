@@ -75,8 +75,16 @@ export interface DashboardChartDatum {
 export interface HardwareTelemetry extends JsonRecord {
   timestamp?: string | number | Date;
   cpu_percent?: number | string | null;
+  /** Current percentage per logical CPU, ordered by core index. */
+  cpu_core_percent?: number[] | null;
   mem_percent?: number | string | null;
+  mem_total_bytes?: number | string | null;
+  mem_available_bytes?: number | string | null;
+  mem_used_bytes?: number | string | null;
   disk_percent?: number | string | null;
+  disk_total_bytes?: number | string | null;
+  disk_free_bytes?: number | string | null;
+  disk_used_bytes?: number | string | null;
   temperature?: number | string | null;
   net_wlan0_rx_mbps?: number | string | null;
   net_wlan0_tx_mbps?: number | string | null;
@@ -119,6 +127,13 @@ export interface SessionCwdState {
   sourceEventId: string | null;
 }
 
+/** Complete, server-derived path facts used by Audit filters and counts. */
+export interface FilesystemSessionAuditSummary {
+  visitedPaths: string[];
+  homeOnly: boolean;
+  eventCount: number;
+}
+
 export interface FilesystemTopologyNode {
   path: string;
   parentPath: string | null;
@@ -131,6 +146,7 @@ export interface FilesystemTopologySession {
   sessionId: string;
   sourceIp: string;
   cwdState: SessionCwdState;
+  auditSummary: FilesystemSessionAuditSummary;
 }
 
 /** A session that is no longer live but remains available for CWD audit retention. */
@@ -141,6 +157,20 @@ export interface FilesystemClosedSession extends FilesystemTopologySession {
   };
 }
 
+export interface AuditDirectorySummary {
+  totalSessions: number;
+  homeOnlyCount: number;
+  distinctPaths: { path: string; sessionCount: number }[];
+  matchingCount?: number;
+}
+
+export interface AuditSessionsPage {
+  items: FilesystemClosedSession[];
+  nextCursor: string | null;
+  totalItems: number;
+  summary?: AuditDirectorySummary;
+}
+
 export interface FilesystemTopologySnapshot {
   nodes: FilesystemTopologyNode[];
   sessions: FilesystemTopologySession[];
@@ -149,6 +179,11 @@ export interface FilesystemTopologySnapshot {
   /** True when a bounded live snapshot contains only the most recently observed sessions. */
   truncated: boolean;
   generatedAt: string;
+  /**
+   * Authoritative timestamp of the latest session observation or closure in this snapshot,
+   * or null if no session telemetry has been observed.
+   */
+  latestTelemetryAt?: string | null;
 }
 
 export interface SessionCwdHistoryEvent {
@@ -162,11 +197,35 @@ export interface SessionCwdHistoryEvent {
   action: "entered" | "changed" | "failed_change";
   status: CwdObservationStatus;
   sourceEventId: string | null;
+  /** 1-based chronological index within the complete retained session route. */
+  hopNumber?: number;
+  /** 1-based chronological index excluding failed_change attempts. */
+  successfulHopNumber?: number;
 }
 
 export interface SessionCwdHistoryPage {
   items: SessionCwdHistoryEvent[];
   nextCursor: string | null;
+  /** Total retained CWD events for this session, independent of pagination. */
+  totalItems: number;
+  /** Retained events excluding failed directory-change attempts. */
+  totalSuccessfulItems: number;
+  /** True when this response reaches the oldest retained event. */
+  complete: boolean;
+}
+
+export type SessionTerminateActionStatus = "requested" | "delivered" | "verified" | "failed";
+
+export interface SessionTerminateAction {
+  actionId: string;
+  sessionId: string;
+  action: "terminate_session";
+  status: SessionTerminateActionStatus;
+  requestedBy: string;
+  requestedAt: string;
+  deliveredAt: string | null;
+  verifiedAt: string | null;
+  failureCategory: string | null;
 }
 
 function isRecord(value: unknown): value is JsonRecord {
@@ -229,10 +288,17 @@ function isHardwareMetric(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value));
 }
 
+function isHardwareMetricList(value: unknown): boolean {
+  return value === undefined || value === null || (Array.isArray(value) && value.length > 0 && value.every(isHardwareMetric));
+}
+
 export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry {
   if (!isRecord(value)) return false;
   return hardwareTimestampEpoch(value.timestamp) !== null && isHardwareMetric(value.cpu_percent) &&
+    isHardwareMetricList(value.cpu_core_percent) &&
     isHardwareMetric(value.mem_percent) && isHardwareMetric(value.disk_percent) &&
+    isHardwareMetric(value.mem_total_bytes) && isHardwareMetric(value.mem_available_bytes) && isHardwareMetric(value.mem_used_bytes) &&
+    isHardwareMetric(value.disk_total_bytes) && isHardwareMetric(value.disk_free_bytes) && isHardwareMetric(value.disk_used_bytes) &&
     isHardwareMetric(value.temperature) && isHardwareMetric(value.net_wlan0_rx_mbps) &&
     isHardwareMetric(value.net_wlan0_tx_mbps);
 }
@@ -271,8 +337,15 @@ export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRe
   return {
     ...metric,
     cpu_percent: numericHardwareMetric(metric.cpu_percent),
+    cpu_core_percent: numericHardwareMetricList(metric.cpu_core_percent),
     mem_percent: numericHardwareMetric(metric.mem_percent),
+    mem_total_bytes: numericHardwareMetric(metric.mem_total_bytes),
+    mem_available_bytes: numericHardwareMetric(metric.mem_available_bytes),
+    mem_used_bytes: numericHardwareMetric(metric.mem_used_bytes),
     disk_percent: numericHardwareMetric(metric.disk_percent),
+    disk_total_bytes: numericHardwareMetric(metric.disk_total_bytes),
+    disk_free_bytes: numericHardwareMetric(metric.disk_free_bytes),
+    disk_used_bytes: numericHardwareMetric(metric.disk_used_bytes),
     temperature: numericHardwareMetric(metric.temperature),
     net_wlan0_rx_mbps: numericHardwareMetric(metric.net_wlan0_rx_mbps),
     net_wlan0_tx_mbps: numericHardwareMetric(metric.net_wlan0_tx_mbps),
@@ -285,6 +358,12 @@ export function numericHardwareMetric(value: unknown): number | null {
   if (value === undefined || value === null) return null;
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+export function numericHardwareMetricList(value: unknown): number[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const metrics = value.map(numericHardwareMetric);
+  return metrics.every((metric): metric is number => metric !== null) ? metrics : null;
 }
 
 export function isDashboardUser(value: unknown): value is DashboardUser {

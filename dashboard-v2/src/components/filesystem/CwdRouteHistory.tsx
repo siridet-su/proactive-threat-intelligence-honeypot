@@ -1,84 +1,116 @@
 "use client";
 
 import {
-  AlertTriangle,
-  ChevronLeft,
-  ChevronRight,
-  CornerDownRight,
-  FastForward,
   History,
-  Pause,
-  Play,
-  Plus,
-  RefreshCw,
+  Shield,
+  Terminal,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
+import { ReplayTransport } from "./ReplayTransport";
+import { RouteEventList } from "./RouteEventList";
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
+import {
+  formatTimestamp,
+  isReplayTimelineKeyboardKey,
+  mapReplayTimelineKeyToIndex,
+} from "./filesystemUtils";
+import type { HopResolutionStatus } from "./sessionHopResolver";
+import type { AuditReplayPresentation } from "./useAuditReplay";
 
-interface CwdRouteHistoryProps {
+type SidebarTab = "replay" | "evidence" | "actions";
+
+const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
+  replay: 1,
+  evidence: 2,
+  actions: 3,
+};
+
+const SIDEBAR_CONTENT_VARIANTS = {
+  enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
+  center: { opacity: 1, x: 0 },
+  exit: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * -6 }),
+};
+
+export interface CwdRouteHistoryProps {
   selectedSession: FilesystemTopologySession | null;
   history: SessionCwdHistoryEvent[];
+  anchoredHop?: SessionCwdHistoryEvent | null;
   historyStatus: RegionStatus;
   historyCursor: string | null;
-  selectedHistoryEventId: string | null;
+  historyTotalItems: number;
+  historyTotalSuccessfulItems: number;
+  historyComplete: boolean;
+  replay: AuditReplayPresentation;
   layout?: "card" | "sidebar";
-  onSelectHistoryEventId: (eventId: string | null) => void;
+  activeTab: SidebarTab;
+  onTabChange: (tab: SidebarTab) => void;
+  responsePanel: ReactNode;
+  hopResolutionStatus?: HopResolutionStatus;
+  requestedHop?: string | null;
+  onClearHop: () => void;
+  onShowLatestHop: () => void;
+  onSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
   onLoadEarlier: () => void;
-  isPlaying?: boolean;
-  onTogglePlay?: () => void;
-  onPause?: () => void;
-  playbackSpeed?: number;
-  onToggleSpeed?: () => void;
-  showFailedAttempts?: boolean;
-  onToggleShowFailedAttempts?: (show: boolean) => void;
+  isDragging?: boolean;
 }
 
 export function CwdRouteHistory({
   selectedSession,
   history,
+  anchoredHop = null,
   historyStatus,
   historyCursor,
-  selectedHistoryEventId,
+  historyTotalItems,
+  historyTotalSuccessfulItems,
+  historyComplete,
+  replay,
   layout = "card",
+  activeTab: controlledSidebarTab,
+  onTabChange,
+  responsePanel,
+  hopResolutionStatus = "idle",
+  requestedHop = null,
+  onClearHop,
+  onShowLatestHop,
   onSelectHistoryEventId,
   onLoadEarlier,
-  isPlaying: controlledIsPlaying,
-  onTogglePlay,
-  onPause,
-  playbackSpeed: controlledPlaybackSpeed,
-  onToggleSpeed,
-  showFailedAttempts: controlledShowFailedAttempts,
-  onToggleShowFailedAttempts,
+  isDragging,
 }: CwdRouteHistoryProps) {
-  const chronologicalHistory = useMemo(() => [...history].reverse(), [history]);
-  const [internalIsPlaying, setInternalIsPlaying] = useState(false);
-  const [internalPlaybackSpeed, setInternalPlaybackSpeed] = useState<number>(1400);
-  const [internalShowFailedAttempts, setInternalShowFailedAttempts] = useState(true);
+  const [sidebarTabDirection, setSidebarTabDirection] = useState(1);
+  const shouldReduceMotion = useReducedMotion();
+  const isSidebar = layout === "sidebar";
+  const sidebarTab = controlledSidebarTab;
+  const {
+    isPlaying,
+    playbackSpeed,
+    pacingMode,
+    displayedHistory,
+    selectedHistoryIndex,
+    displayedHistoryMetrics,
+    isAnchoredSelected,
+    hopTimeMetrics,
+    sessionTimeSummary,
+    replayTimeline,
+    onTogglePlay,
+    onPause,
+    onToggleSpeed,
+    onTogglePacingMode,
+    showFailedAttempts,
+    onToggleShowFailedAttempts,
+  } = replay;
+  const failedCount = Math.max(0, historyTotalItems - historyTotalSuccessfulItems);
 
-  const isPlaying = controlledIsPlaying !== undefined ? controlledIsPlaying : internalIsPlaying;
-  const playbackSpeed = controlledPlaybackSpeed !== undefined ? controlledPlaybackSpeed : internalPlaybackSpeed;
-  const showFailedAttempts = controlledShowFailedAttempts !== undefined ? controlledShowFailedAttempts : internalShowFailedAttempts;
+  const selectedHistoryEvent = isAnchoredSelected
+    ? anchoredHop
+    : selectedHistoryIndex >= 0
+      ? displayedHistory[selectedHistoryIndex]
+      : null;
 
-  const failedCount = useMemo(
-    () => chronologicalHistory.filter((e) => e.action === "failed_change").length,
-    [chronologicalHistory],
-  );
+  const timeMetrics = { hopMetrics: hopTimeMetrics, summary: sessionTimeSummary };
 
-  const displayedHistory = useMemo(() => {
-    if (showFailedAttempts) return chronologicalHistory;
-    return chronologicalHistory.filter((e) => e.action !== "failed_change");
-  }, [chronologicalHistory, showFailedAttempts]);
-
-  const selectedHistoryIndex = useMemo(() => {
-    if (!displayedHistory.length) return -1;
-    const index = displayedHistory.findIndex((event) => event.id === selectedHistoryEventId);
-    return index >= 0 ? index : displayedHistory.length - 1;
-  }, [displayedHistory, selectedHistoryEventId]);
-
-  const selectedHistoryEvent = selectedHistoryIndex >= 0 ? displayedHistory[selectedHistoryIndex] : null;
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
 
@@ -103,393 +135,292 @@ export function CwdRouteHistory({
   }, [activeHistoryEventId]);
 
   const handlePause = useCallback(() => {
-    if (onPause) {
-      onPause();
-    } else if (onTogglePlay) {
-      if (isPlaying) onTogglePlay();
-    } else {
-      setInternalIsPlaying(false);
-    }
-  }, [isPlaying, onPause, onTogglePlay]);
+    onPause();
+  }, [onPause]);
+
+  const selectDisplayedHistoryIndex = useCallback((targetIndex: number) => {
+    if (isAnchoredSelected || targetIndex < 0 || targetIndex >= displayedHistory.length || targetIndex === selectedHistoryIndex) return;
+    const targetEvent = displayedHistory[targetIndex];
+    if (!targetEvent) return;
+    handlePause();
+    onSelectHistoryEventId(targetEvent.id);
+  }, [displayedHistory, handlePause, isAnchoredSelected, onSelectHistoryEventId, selectedHistoryIndex]);
+
+  const handleScrubberKeyDown = useCallback((event: KeyboardEvent<HTMLInputElement>) => {
+    if (isAnchoredSelected || !isReplayTimelineKeyboardKey(event.key)) return;
+    event.preventDefault();
+    const targetIndex = mapReplayTimelineKeyToIndex(event.key, selectedHistoryIndex, displayedHistory.length);
+    if (targetIndex !== null) selectDisplayedHistoryIndex(targetIndex);
+  }, [displayedHistory.length, isAnchoredSelected, selectDisplayedHistoryIndex, selectedHistoryIndex]);
 
   const handleTogglePlay = useCallback(() => {
-    if (onTogglePlay) {
-      onTogglePlay();
-    } else {
-      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        onSelectHistoryEventId(displayedHistory[0]?.id ?? null);
-      }
-      setInternalIsPlaying((prev) => !prev);
-    }
-  }, [displayedHistory, onSelectHistoryEventId, onTogglePlay, selectedHistoryIndex]);
+    onTogglePlay();
+  }, [onTogglePlay]);
 
-  // Auto-play timer (only active if not controlled externally by parent)
-  useEffect(() => {
-    if (controlledIsPlaying !== undefined) return;
-    if (!isPlaying) return;
+  const sidebarTabColumn = SIDEBAR_TAB_COLUMN[sidebarTab];
+  const sidebarContentDirection = shouldReduceMotion ? 0 : sidebarTabDirection;
 
-    const timer = setTimeout(() => {
-      if (selectedHistoryIndex >= displayedHistory.length - 1) {
-        setInternalIsPlaying(false);
-        return;
-      }
-
-      const nextIndex = selectedHistoryIndex + 1;
-      const nextEvent = displayedHistory[nextIndex];
-      if (nextEvent) {
-        onSelectHistoryEventId(nextEvent.id);
-      } else {
-        setInternalIsPlaying(false);
-      }
-    }, playbackSpeed);
-
-    return () => clearTimeout(timer);
-  }, [controlledIsPlaying, isPlaying, selectedHistoryIndex, displayedHistory, playbackSpeed, onSelectHistoryEventId]);
-
-  const isSidebar = layout === "sidebar";
+  const handleSidebarTabChange = (nextTab: SidebarTab) => {
+    if (nextTab === sidebarTab) return;
+    setSidebarTabDirection(SIDEBAR_TAB_COLUMN[nextTab] > sidebarTabColumn ? 1 : -1);
+    onTabChange(nextTab);
+  };
 
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
-      {/* Panel Header */}
-      <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-primary shrink-0" aria-hidden="true" />
-            <h2 className="text-sm font-semibold sm:text-base truncate">
-              {isSidebar ? "Session Route & Replay" : "Verified CWD route"}
+      {/* Panel Header with Compact Tabs */}
+      <div
+        className={`flex shrink-0 gap-2 border-b border-border px-3.5 py-2.5 ${
+          isSidebar ? "flex-col" : "flex-col sm:flex-row sm:items-center sm:justify-between"
+        }`}
+      >
+        <div className={`min-w-0 ${isSidebar ? "flex flex-col gap-2" : "flex items-center gap-2"}`}>
+          <div className="flex min-w-0 items-center gap-2">
+            <History className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+            <h2 className="truncate text-xs font-semibold sm:text-sm">
+              {isSidebar ? "Forensic Studio" : "Verified CWD route"}
             </h2>
           </div>
-          <p className="mt-0.5 text-xs text-text-subtle">
-            {isSidebar
-              ? "Synchronized playback: step through confirmed directory transitions."
-              : "Step through Cowrie-confirmed directory transitions. Command text never creates a guessed path."}
-          </p>
+          {isSidebar && (
+            <div
+              className="relative isolate grid w-full grid-cols-3 gap-1 rounded-lg border border-border bg-surface-subtle p-0.5 text-xs"
+              role="tablist"
+              aria-label="Forensic studio views"
+            >
+              <div aria-hidden="true" className="pointer-events-none absolute inset-0.5 grid grid-cols-3 gap-1">
+                <motion.span
+                  layout="position"
+                  data-forensic-tab-highlight
+                  className="rounded-md border border-border bg-surface shadow-2xs"
+                  style={{ gridColumnStart: sidebarTabColumn }}
+                  transition={
+                    shouldReduceMotion || isDragging
+                      ? { duration: 0 }
+                      : { duration: 0.28, ease: [0.4, 0, 0.2, 1] }
+                  }
+                />
+              </div>
+              {([
+                { id: "replay", label: "Route Replay", icon: null },
+                { id: "evidence", label: "Evidence", icon: Terminal },
+                { id: "actions", label: "Response", icon: Shield },
+              ] as const).map((tab) => {
+                const isActive = sidebarTab === tab.id;
+                const Icon = tab.icon;
+
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    id={`tab-${tab.id}`}
+                    aria-selected={isActive}
+                    aria-controls={`tabpanel-${tab.id}`}
+                    onClick={() => handleSidebarTabChange(tab.id)}
+                    className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
+                      isActive ? "text-primary" : "text-text-muted hover:text-text"
+                    }`}
+                  >
+                    {Icon && <Icon className="h-3 w-3" aria-hidden="true" />}
+                    <span>{tab.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
-        {selectedSession && (
-          <span className="ui-badge shrink-0 font-mono text-xs whitespace-nowrap">
-            {selectedSession.sessionId.slice(0, 12)}
+        {selectedSession && !isSidebar && (
+          <span className="ui-badge shrink-0 font-mono text-xs whitespace-nowrap hidden sm:inline-flex py-0.5 px-2">
+            {selectedSession.sessionId.slice(0, 8)}…
           </span>
         )}
       </div>
 
-      <div className={`p-4 ${isSidebar ? "flex flex-1 flex-col min-h-0 overflow-hidden" : ""}`}>
+      <div className={`p-3 ${isSidebar ? "flex flex-1 flex-col min-h-0 overflow-hidden" : ""}`}>
         {!selectedSession ? (
           <RegionState
             kind="empty"
             title="Select a session to inspect its path history"
             description="Choose a session from the topology or inspector."
           />
-        ) : historyStatus === "error" && !history.length ? (
-          <RegionState
-            kind="error"
-            title="Session history unavailable"
-            description="The selected CWD history could not be loaded."
-          />
-        ) : historyStatus === "loading" && !history.length ? (
-          <RegionState kind="loading" title="Loading session history" />
-        ) : !history.length ? (
-          <RegionState
-            kind="empty"
-            title="No verified directory transitions"
-            description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
-          />
         ) : (
           <>
-            {/* Hop Player Deck */}
-            <div className="rounded-xl border border-border bg-surface-subtle p-3" aria-live="polite">
-              <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-stretch gap-2">
-                <button
-                  type="button"
-                  className="ui-button h-auto min-h-0 shrink-0 px-2 sm:px-2.5 flex items-center justify-center gap-1 text-xs"
-                  aria-label="Show previous directory move"
-                  disabled={selectedHistoryIndex <= 0}
-                  onClick={() => {
-                    handlePause();
-                    onSelectHistoryEventId(displayedHistory[selectedHistoryIndex - 1]?.id ?? null);
-                  }}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  <span className="hidden sm:inline">Prev</span>
-                </button>
-
-                <div
-                  className={`min-w-0 rounded-lg border px-3 py-2 text-left transition-colors ${
-                    isFailedHop
-                      ? "border-warning-border bg-warning-subtle text-text"
-                      : "border-primary-border bg-primary-subtle text-text"
-                  }`}
-                  title={selectedHistoryEvent?.sequence !== null ? `Event Sequence: ${selectedHistoryEvent?.sequence}` : undefined}
-                >
-                  <div className="flex items-center justify-between gap-2 text-xs min-w-0">
-                    <div className="flex items-center gap-1.5 font-semibold uppercase tracking-[0.1em] shrink-0 whitespace-nowrap">
-                      {isFailedHop && <AlertTriangle className="h-3.5 w-3.5 text-warning shrink-0" aria-hidden="true" />}
-                      <span className={isFailedHop ? "text-warning" : "text-primary"}>
-                        Hop {selectedHistoryIndex + 1} of {displayedHistory.length}
-                      </span>
-                    </div>
-                    {isFailedHop ? (
-                      <span className="rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-[10px] font-semibold text-warning shrink-0 whitespace-nowrap">
-                        Failed Attempt
-                      </span>
-                    ) : (
-                      <span
-                        className="font-sans text-[11px] font-medium text-text-subtle truncate text-right min-w-0"
-                        title={selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : undefined}
-                      >
-                        {selectedHistoryEvent ? actionLabel(selectedHistoryEvent) : "Loading hop"}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Two-Line Journey Display */}
-                  <div className="mt-1.5 space-y-0.5 font-mono text-xs">
-                    <div className="flex items-center gap-1.5 text-text-subtle text-[11px] min-w-0">
-                      <span className="shrink-0 font-sans text-[10px] uppercase tracking-wider text-text-subtle/70">
-                        from
-                      </span>
-                      {isInitialSshEntry(selectedHistoryEvent) ? (
-                        <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle">
-                          [SSH Login]
-                        </span>
-                      ) : (
-                        <span className="truncate text-text-muted" title={selectedHistoryEvent?.fromPath ?? undefined}>
-                          {formatFromPath(selectedHistoryEvent)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-xs min-w-0">
-                      <CornerDownRight
-                        className={`h-3.5 w-3.5 shrink-0 ${isFailedHop ? "text-warning" : "text-primary"}`}
-                        aria-hidden="true"
-                      />
-                      <span
-                        className={`truncate font-semibold ${
-                          isFailedHop ? "line-through text-text-muted/70" : "text-text"
-                        }`}
-                        title={selectedHistoryEvent?.toPath ?? undefined}
-                      >
-                        {selectedHistoryEvent?.toPath ?? "Unknown"}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="ui-button h-auto min-h-0 shrink-0 px-2 sm:px-2.5 flex items-center justify-center gap-1 text-xs"
-                  aria-label="Show next directory move"
-                  disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
-                  onClick={() => {
-                    handlePause();
-                    onSelectHistoryEventId(displayedHistory[selectedHistoryIndex + 1]?.id ?? null);
-                  }}
-                >
-                  <span className="hidden sm:inline">Next</span>
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Playback Controls & Filters */}
-              <div className="mt-2.5 flex items-center justify-between gap-1.5 border-t border-border/60 pt-2 text-xs">
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={handleTogglePlay}
-                    className={`ui-button h-7 min-h-7 px-2 text-xs flex items-center gap-1 shrink-0 ${
-                      isPlaying ? "border-primary bg-primary text-surface" : ""
-                    }`}
-                    title={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
-                  >
-                    {isPlaying ? (
-                      <>
-                        <Pause className="h-3 w-3" /> Pause
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-3 w-3" /> Play
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (onToggleSpeed) {
-                        onToggleSpeed();
-                      } else {
-                        setInternalPlaybackSpeed((current) => (current === 1400 ? 700 : 1400));
-                      }
-                    }}
-                    className="ui-button h-7 min-h-7 px-1.5 font-mono text-[11px] shrink-0"
-                    title="Toggle playback speed (1x / 2x)"
-                  >
-                    {playbackSpeed === 1400 ? "1x" : "2x"}
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {failedCount > 0 && (
-                    <label className="flex items-center gap-1 text-[11px] text-text-subtle cursor-pointer select-none whitespace-nowrap shrink-0">
-                      <input
-                        type="checkbox"
-                        checked={showFailedAttempts}
-                        onChange={(e) => {
-                          if (onToggleShowFailedAttempts) {
-                            onToggleShowFailedAttempts(e.target.checked);
-                          } else {
-                            setInternalShowFailedAttempts(e.target.checked);
-                          }
-                        }}
-                        className="rounded border-border text-primary focus:ring-primary h-3 w-3"
-                      />
-                      <span>Failures ({failedCount})</span>
-                    </label>
-                  )}
-
-                  <button
-                    type="button"
-                    className="ui-button h-7 min-h-7 px-2 text-[11px] shrink-0 whitespace-nowrap"
-                    disabled={selectedHistoryIndex === displayedHistory.length - 1}
-                    onClick={() => {
-                      handlePause();
-                      onSelectHistoryEventId(displayedHistory.at(-1)?.id ?? null);
-                    }}
-                    title="Jump to latest recorded move"
-                  >
-                    <FastForward className="h-3 w-3" />
-                    Latest
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {historyCursor && (
-              <button
-                type="button"
-                className="ui-button mt-3"
-                onClick={onLoadEarlier}
-                disabled={historyStatus === "refreshing"}
+            {/* Hop resolution feedback alert for unavailable, missing, or cross-session hops */}
+            {(hopResolutionStatus === "not-found" || hopResolutionStatus === "error") && (
+              <div
+                role="alert"
+                className="mb-2.5 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-200"
+                data-testid="hop-resolution-banner"
               >
-                {historyStatus === "refreshing" ? (
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4" />
-                )}
-                Load earlier moves
-              </button>
-            )}
-
-            {/* Scrollable Timeline List */}
-            <div
-              ref={timelineContainerRef}
-              className={`mt-4 ${isSidebar ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1 pb-4" : ""}`}
-            >
-              <ol className="relative space-y-0 border-l border-border pl-5" aria-label="Verified directory route">
-                {displayedHistory.map((event, index) => {
-                  const isCurrent = event.id === activeHistoryEventId;
-                  const isFailed = event.action === "failed_change";
-
-                  return (
-                    <li key={event.id} className="relative pb-4 last:pb-0">
-                      <span
-                        className={`absolute -left-[27px] top-2.5 flex h-2.5 w-2.5 rounded-full border-2 border-surface ${
-                          isFailed
-                            ? "bg-warning ring-2 ring-warning/30"
-                            : isCurrent
-                              ? "bg-primary ring-2 ring-primary/40"
-                              : "bg-border-strong"
-                        }`}
-                        aria-hidden="true"
-                      />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-amber-100">
+                      {hopResolutionStatus === "not-found"
+                        ? "Requested hop unavailable"
+                        : "Error resolving requested hop"}
+                    </p>
+                    <p className="mt-0.5 text-amber-200/80">
+                      {hopResolutionStatus === "not-found"
+                        ? `The requested hop "${requestedHop}" could not be found or has expired.`
+                        : `Could not retrieve hop "${requestedHop}".`}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-1.5">
+                    {history.length > 0 && (
                       <button
                         type="button"
-                        ref={isCurrent ? activeItemRef : undefined}
-                        aria-current={isCurrent ? "step" : undefined}
-                        onClick={() => {
-                          handlePause();
-                          onSelectHistoryEventId(event.id);
-                        }}
-                        className={`w-full rounded-lg border px-2.5 py-2 text-left transition-colors duration-150 ${
-                          isCurrent
-                            ? isFailed
-                              ? "border-warning-border bg-warning-subtle"
-                              : "border-primary-border bg-primary-subtle"
-                            : "border-transparent hover:border-border hover:bg-surface-hover"
-                        }`}
+                        onClick={onShowLatestHop}
+                        className="rounded bg-amber-500/20 px-2.5 py-1 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors"
                       >
-                        <div className="flex items-center justify-between gap-1.5 min-w-0">
-                          <p className="truncate font-medium text-xs text-text min-w-0">
-                            <span className="mr-1.5 font-mono text-[11px] text-text-subtle">
-                              {String(index + 1).padStart(2, "0")}
-                            </span>
-                            {actionLabel(event)}
-                          </p>
-                          <time className="shrink-0 font-mono text-[11px] text-text-subtle whitespace-nowrap ml-1">
-                            {formatTimestamp(event.at)}
-                          </time>
-                        </div>
-                        <div className="mt-1.5 space-y-0.5 font-mono text-xs">
-                          {/* Line 1: Origin */}
-                          <div className="flex items-center gap-1.5 text-text-subtle text-[11px] min-w-0">
-                            <span className="shrink-0 font-sans text-[10px] uppercase tracking-wider text-text-subtle/70">
-                              from
-                            </span>
-                            {isInitialSshEntry(event) ? (
-                              <span className="rounded border border-border bg-surface px-1.5 py-0.5 font-sans text-[10px] font-medium text-text-subtle">
-                                [SSH Login]
-                              </span>
-                            ) : (
-                              <span className="truncate text-text-muted" title={event.fromPath ?? undefined}>
-                                {formatFromPath(event)}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Line 2: Destination */}
-                          <div className="flex items-center gap-1.5 text-xs min-w-0">
-                            <CornerDownRight
-                              className={`h-3.5 w-3.5 shrink-0 ${isFailed ? "text-warning" : "text-primary"}`}
-                              aria-hidden="true"
-                            />
-                            <span
-                              className={`truncate font-semibold ${
-                                isFailed ? "line-through text-text-muted/60" : "text-text"
-                              }`}
-                              title={event.toPath ?? undefined}
-                            >
-                              {event.toPath ?? "Unknown"}
-                            </span>
-                            {isFailed && (
-                              <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-[10px] font-semibold text-warning">
-                                Failed
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <div
-                          className="mt-1.5 flex items-center gap-1.5 text-[11px] text-text-subtle"
-                          title={event.sequence !== null ? `Event Sequence: ${event.sequence}` : undefined}
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${
-                              event.status === "confirmed"
-                                ? "bg-success"
-                                : event.status === "conditional_candidate"
-                                  ? "bg-warning"
-                                  : isFailed
-                                    ? "bg-warning"
-                                    : "bg-info"
-                            }`}
-                            aria-hidden="true"
-                          />
-                          <span>{statusLabel(event.status)}</span>
-                        </div>
+                        Show latest hop
                       </button>
-                    </li>
-                  );
-                })}
-              </ol>
+                    )}
+                    <button
+                        type="button"
+                        onClick={onClearHop}
+                        className="rounded border border-amber-500/40 px-2.5 py-1 font-medium text-amber-200 hover:bg-amber-500/20 transition-colors"
+                      >
+                        Clear hop
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!isSidebar && historyStatus === "error" && !history.length ? (
+              <RegionState
+                kind="error"
+                title="Session history unavailable"
+                description="The selected CWD history could not be loaded."
+              />
+            ) : !isSidebar && historyStatus === "loading" && !history.length ? (
+              <RegionState kind="loading" title="Loading session history" />
+            ) : !isSidebar && !history.length ? (
+              <RegionState
+                kind="empty"
+                title="No verified directory transitions"
+                description="This session has a known observed path, but Cowrie has not recorded a directory move. It may have ended after a non-interactive probe."
+              />
+            ) : (
+              <AnimatePresence initial={false} mode="popLayout" custom={sidebarContentDirection}>
+            <motion.div
+              key={isSidebar ? sidebarTab : "route-history"}
+              data-forensic-tab-panel={sidebarTab}
+              role="tabpanel"
+              id={`tabpanel-${sidebarTab}`}
+              aria-labelledby={`tab-${sidebarTab}`}
+              custom={sidebarContentDirection}
+              variants={SIDEBAR_CONTENT_VARIANTS}
+              initial={isSidebar ? "enter" : false}
+              animate="center"
+              exit={isSidebar ? "exit" : undefined}
+              transition={
+                shouldReduceMotion
+                  ? { duration: 0 }
+                  : { duration: 0.18, ease: [0.4, 0, 0.2, 1] }
+              }
+              className={isSidebar ? "flex min-h-0 flex-1 flex-col" : undefined}
+            >
+              {sidebarTab === "evidence" ? (
+                /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
+                <div className="flex flex-1 flex-col min-h-0 space-y-3">
+            <div className="rounded-xl border border-border bg-surface-subtle p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-text-muted">Selected CWD context</span>
+                <span className="font-mono text-text">
+                  {selectedHistoryEvent?.toPath ?? selectedSession.cwdState.path ?? "Unknown"}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
+                <span>
+                  {selectedHistoryEvent
+                    ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
+                    : "No route hop recorded"}
+                </span>
+                <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
+              </div>
             </div>
+            <RegionState
+              kind="empty"
+              title="Evidence Unavailable"
+              description="No command feed or payload data is currently linked to this CWD hop."
+            />
+                </div>
+              ) : sidebarTab === "actions" ? (
+                <div className="flex flex-1 flex-col min-h-0 space-y-3">
+                  {responsePanel}
+                </div>
+              ) : (
+                /* Tab 1: Route Replay with alert support */
+                <>
+
+                  {historyStatus === "error" && !history.length ? (
+                    <RegionState
+                      kind="error"
+                      title="Session history unavailable"
+                      description="Route Replay is unavailable, but Command data and Response remain independent."
+                    />
+                  ) : historyStatus === "loading" && !history.length ? (
+                    <RegionState kind="loading" title="Loading session history" />
+                  ) : !history.length ? (
+                    <RegionState
+                      kind="empty"
+                      title="No verified directory transitions"
+                      description="This session has a known observed path, but Cowrie has not recorded a directory move. Command data and Response remain available from their tabs."
+                    />
+                  ) : (
+                    <>
+                      <ReplayTransport
+                        isAnchoredSelected={isAnchoredSelected}
+                        historyComplete={historyComplete}
+                        onLoadEarlier={onLoadEarlier}
+                        selectedHistoryIndex={selectedHistoryIndex}
+                        displayedHistoryLength={displayedHistory.length}
+                        selectDisplayedHistoryIndex={selectDisplayedHistoryIndex}
+                        handleTogglePlay={handleTogglePlay}
+                        isPlaying={isPlaying}
+                        onToggleSpeed={onToggleSpeed}
+                        playbackSpeed={playbackSpeed}
+                        onTogglePacingMode={onTogglePacingMode}
+                        pacingMode={pacingMode}
+                        failedCount={failedCount}
+                        showFailedAttempts={showFailedAttempts}
+                        onToggleShowFailedAttempts={onToggleShowFailedAttempts}
+                        displayedHistoryMetrics={displayedHistoryMetrics}
+                        timeMetrics={timeMetrics}
+                        replayTimeline={replayTimeline}
+                        handleScrubberKeyDown={handleScrubberKeyDown}
+                        isFailedHop={isFailedHop}
+                        selectedHistoryEvent={selectedHistoryEvent}
+                      />
+                      <RouteEventList
+                        historyComplete={historyComplete}
+                        historyCursor={historyCursor}
+                        historyStatus={historyStatus}
+                        historyLength={history.length}
+                        historyTotalItems={historyTotalItems}
+                        replayTimeline={replayTimeline}
+                        onLoadEarlier={onLoadEarlier}
+                        timelineContainerRef={timelineContainerRef}
+                        isSidebar={isSidebar}
+                        displayedHistory={displayedHistory}
+                        activeHistoryEventId={activeHistoryEventId}
+                        timeMetrics={timeMetrics}
+                        activeItemRef={activeItemRef}
+                        handlePause={handlePause}
+                        onSelectHistoryEventId={onSelectHistoryEventId}
+                        displayedHistoryMetrics={displayedHistoryMetrics}
+                        anchoredHop={anchoredHop}
+                        isAnchoredSelected={isAnchoredSelected}
+                        showFailedAttempts={showFailedAttempts}
+                      />
+          </>
+        )}
+      </>
+    )}
+  </motion.div>
+          </AnimatePresence>
+        )}
           </>
         )}
       </div>

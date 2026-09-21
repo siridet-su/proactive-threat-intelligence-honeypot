@@ -105,6 +105,12 @@ def logger():
         from cowrie.core.config import CowrieConfig
 
         boundary = boundary_from_environment()
+        # The control plane is opt-in and Unix-socket-only. Installing it here
+        # happens before Cowrie constructs its SSH/Telnet factories, allowing
+        # exact transport IDs to be registered without patching the Cowrie tree.
+        from production.cowrie_control.session_control import install_from_environment
+
+        install_from_environment()
         directory = Path(CowrieConfig.get("honeypot", "log_path", fallback="."))
         logtype = CowrieConfig.get("honeypot", "logtype", fallback="plain")
         if logtype == "rotating":

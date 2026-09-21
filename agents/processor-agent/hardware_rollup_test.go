@@ -12,16 +12,23 @@ func hardwareMessage(id string, timestamp int64, sensorID string, cpu string) re
 	return redis.XMessage{
 		ID: id,
 		Values: map[string]any{
-			"timestamp":          timestamp,
-			"sensor_id":          sensorID,
-			"cpu_percent":        cpu,
-			"mem_percent":        "25.0",
-			"disk_percent":       "40.0",
-			"temperature":        "52.0",
-			"net_wlan0_rx_mbps":  "0.5",
-			"net_wlan0_tx_mbps":  "0.25",
-			"net_bytes_recv":     "1000",
-			"network_interfaces": "wlan0",
+			"timestamp":           timestamp,
+			"sensor_id":           sensorID,
+			"cpu_percent":         cpu,
+			"cpu_core_percent":    "[12.5,25.0]",
+			"mem_percent":         "25.0",
+			"mem_total_bytes":     "8000",
+			"mem_available_bytes": "6000",
+			"mem_used_bytes":      "2000",
+			"disk_percent":        "40.0",
+			"disk_total_bytes":    "10000",
+			"disk_free_bytes":     "6000",
+			"disk_used_bytes":     "4000",
+			"temperature":         "52.0",
+			"net_wlan0_rx_mbps":   "0.5",
+			"net_wlan0_tx_mbps":   "0.25",
+			"net_bytes_recv":      "1000",
+			"network_interfaces":  "wlan0",
 		},
 	}
 }
@@ -117,6 +124,22 @@ func TestBuildHardwareLiveDocumentUsesFixedRingSlot(t *testing.T) {
 	}
 	if document["cpu_percent"] != float64(12.5) {
 		t.Fatalf("cpu_percent = %#v, want 12.5", document["cpu_percent"])
+	}
+	if document["schema_version"] != "hardware_live.v2" {
+		t.Fatalf("schema version = %#v", document["schema_version"])
+	}
+	cores, ok := document["cpu_core_percent"].([]float64)
+	if !ok || len(cores) != 2 || cores[0] != 12.5 || cores[1] != 25 {
+		t.Fatalf("per-core CPU payload = %#v", document["cpu_core_percent"])
+	}
+	if document["mem_total_bytes"] != float64(8000) || document["mem_available_bytes"] != float64(6000) || document["disk_total_bytes"] != float64(10000) || document["disk_free_bytes"] != float64(6000) {
+		t.Fatalf("realtime capacity fields missing: %#v", document)
+	}
+	if _, exists := document["net_bytes_recv"]; exists {
+		t.Fatal("raw network counters must not be copied to hardware_live")
+	}
+	if _, exists := document["network_interfaces"]; exists {
+		t.Fatal("raw interface metadata must not be copied to hardware_live")
 	}
 
 	next, ok := buildHardwareLiveDocument(

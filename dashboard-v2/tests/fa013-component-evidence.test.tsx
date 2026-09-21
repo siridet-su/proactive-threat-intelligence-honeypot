@@ -1,0 +1,258 @@
+// @vitest-environment happy-dom
+import { act, createElement, useState } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { MotionGlobalConfig } from "framer-motion";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type {
+  FilesystemTopologySession,
+  SessionCwdHistoryEvent,
+  FilesystemTopologySnapshot,
+} from "../src/lib/dashboardTypes";
+import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
+import { ResponseActionPanel } from "../src/components/filesystem/ResponseActionPanel";
+import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
+import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
+import { useResponseActionController } from "../src/components/filesystem/ResponseActionController";
+
+// @ts-expect-error React act environment flag
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock("server-only", () => ({}));
+MotionGlobalConfig.skipAnimations = true;
+
+const session: FilesystemTopologySession = {
+  sessionId: "live-session",
+  sourceIp: "192.0.2.10",
+  cwdState: {
+    path: "/var/log",
+    status: "confirmed",
+    observedAt: "2026-09-19T00:00:00.000Z",
+    sourceEventId: null,
+  },
+  auditSummary: { visitedPaths: ["/var/log"], homeOnly: false, eventCount: 3 },
+};
+
+const event = (id: string, at: string, toPath = `/${id}`): SessionCwdHistoryEvent => ({
+  id,
+  sessionId: "audit-session",
+  fromPath: "/",
+  toPath,
+  command: `cd ${toPath}`,
+  action: "change",
+  status: "confirmed",
+  at,
+});
+
+function jsonResponse(payload: unknown, status = 200): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function fireInputChange(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function fireKey(element: HTMLElement, key: string): void {
+  element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
+function ResponseComposition({ enabled }: { enabled: boolean }) {
+  const responseAction = useResponseActionController({
+    selectedSession: session,
+    sessionIsLive: false,
+    enabled,
+  });
+  return createElement(ResponseActionPanel, {
+    selectedSession: session,
+    sessionIsLive: false,
+    visibleTerminateAction: responseAction.visibleTerminateAction,
+    visibleTerminateCapability: responseAction.visibleTerminateCapability,
+    terminateDialogOpen: responseAction.terminateDialogOpen,
+    onTerminateDialogOpenChange: responseAction.setTerminateDialogOpen,
+    terminateProcessing: responseAction.terminateProcessing,
+    terminateError: responseAction.terminateError,
+    onTerminateErrorChange: responseAction.setTerminateError,
+    operationToast: responseAction.operationToast,
+    onOperationToastChange: responseAction.setOperationToast,
+    onTerminateSession: responseAction.handleTerminateSession,
+  });
+}
+
+describe("FA-013 production component evidence", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    act(() => root.unmount());
+    container.remove();
+  });
+
+  it("E: polls the controlled Response tab with bounded cadence and aborts on disable", async () => {
+    vi.useFakeTimers();
+    const requestedAt = new Date(Date.now()).toISOString();
+    const pending = {
+      actionId: "action-1",
+      sessionId: session.sessionId,
+      action: "terminate_session",
+      status: "requested",
+      requestedBy: "operator",
+      requestedAt,
+      deliveredAt: null,
+      verifiedAt: null,
+      failureCategory: null,
+    } as const;
+    const verified = { ...pending, status: "verified", verifiedAt: requestedAt };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ available: true, action: pending }))
+      .mockResolvedValueOnce(jsonResponse({ available: true, action: pending }))
+      .mockResolvedValueOnce(jsonResponse({ available: true, action: verified }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => root.render(createElement(ResponseComposition, { enabled: true })));
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(150));
+    await act(async () => Promise.resolve());
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toContain("Session disconnected");
+
+    const abortingFetch = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((resolve) => {
+      init?.signal?.addEventListener("abort", () => resolve(jsonResponse({ available: true, action: pending })));
+    }));
+    vi.stubGlobal("fetch", abortingFetch);
+    await act(async () => root.render(createElement(ResponseComposition, { enabled: false })));
+    await act(async () => root.render(createElement(ResponseComposition, { enabled: true })));
+    await act(async () => Promise.resolve());
+    const signal = abortingFetch.mock.calls[0][1]?.signal as AbortSignal;
+    await act(async () => root.render(createElement(ResponseComposition, { enabled: false })));
+    expect(signal.aborted).toBe(true);
+  });
+
+  it("F: renders a valid empty topology as live no-activity without creating a freshness owner", async () => {
+    vi.useFakeTimers();
+    const snapshot: FilesystemTopologySnapshot = {
+      nodes: [],
+      sessions: [],
+      recentClosedSessions: [],
+      truncated: false,
+      generatedAt: "2026-09-19T00:00:00.000Z",
+      latestTelemetryAt: null,
+    };
+    const freshnessState = {
+      classification: "fresh" as const,
+      label: "Live · No activity",
+      detail: "No authoritative telemetry activity has been observed yet.",
+      badgeClass: "",
+      dotClass: "",
+      isDegraded: false,
+      isStale: false,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: 0,
+      retrievalAgeMs: 0,
+      telemetryStatus: "none" as const,
+    };
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: null,
+      selectedPath: null,
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+    })));
+    expect(container.textContent).toContain("No observed working directories yet");
+    expect(container.textContent).not.toContain("Offline");
+    expect(container.textContent).not.toContain("Stale");
+    expect(vi.getTimerCount()).toBe(0);
+
+    const degradedFreshness = {
+      ...freshnessState,
+      classification: "degraded" as const,
+      label: "Degraded",
+      detail: "Reconnecting transport — displaying retained snapshot.",
+      isDegraded: true,
+    };
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot,
+      regionStatus: "ready",
+      streamState: "stale",
+      freshnessState: degradedFreshness,
+      selectedSessionId: null,
+      selectedPath: null,
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+    })));
+    expect(container.textContent).toContain("Degraded connection");
+    expect(container.textContent).toContain("Showing retained snapshot");
+    expect(container.textContent).not.toContain("Offline");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("I: drives the production scrubber by elapsed position and hop-key fallback", async () => {
+    const events = [event("event-c", "2026-09-19T00:30:00.000Z", "/c"), event("event-b", "2026-09-19T00:00:05.000Z", "/b"), event("event-a", "2026-09-19T00:00:00.000Z", "/a")];
+    const selected = vi.fn();
+    function ReplayHarness() {
+      const [selectedId, setSelectedId] = useState("event-a");
+      const replay = useAuditReplay({
+        viewMode: "audit",
+        history: events,
+        anchoredHop: null,
+        historyTotalItems: 3,
+        historyTotalSuccessfulItems: 3,
+        historyComplete: true,
+        selectedHistoryEventId: selectedId,
+        onSelectHistoryEventId: (id) => {
+          if (id) setSelectedId(id);
+          selected(id);
+        },
+      });
+      return createElement(CwdRouteHistory, {
+        selectedSession: { ...session, sessionId: "audit-session" },
+        history: events,
+        historyStatus: "ready",
+        historyCursor: null,
+        historyTotalItems: 3,
+        historyTotalSuccessfulItems: 3,
+        historyComplete: true,
+        replay: replay.presentation,
+        activeTab: "replay",
+        responsePanel: null,
+        onClearHop: () => {},
+        onShowLatestHop: () => {},
+        onSelectHistoryEventId: (id) => {
+          if (id) setSelectedId(id);
+          selected(id);
+        },
+        onLoadEarlier: () => {},
+      });
+    }
+    await act(async () => root.render(createElement(ReplayHarness)));
+    const range = container.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(range.max).toBe("1800000");
+    await act(async () => fireInputChange(range, "5000"));
+    expect(selected).toHaveBeenCalledWith("event-b");
+    await act(async () => fireKey(range, "Home"));
+    await act(async () => fireKey(range, "End"));
+    expect(selected).toHaveBeenLastCalledWith("event-c");
+  });
+});

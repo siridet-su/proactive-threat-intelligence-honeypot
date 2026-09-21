@@ -205,7 +205,7 @@
 @layer components {
   .ui-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); transition: background-color 150ms, border-color 150ms, box-shadow 150ms, transform 150ms; }
   .ui-panel-interactive:hover { border-color: var(--border-strong); box-shadow: var(--shadow-raised); transform: translateY(-2px); }
-  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
+  .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; transition: all 150ms ease; }
   .ui-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); box-shadow: var(--shadow-card); transform: translateY(-1px); }
   .ui-button:active:not(:disabled) { background: var(--surface-subtle); transform: translateY(0); }
   .ui-button:disabled { color: var(--text-subtle); background: var(--surface-subtle); border-color: var(--border); }
@@ -621,6 +621,160 @@
 @keyframes pti-preview-stream { to { stroke-dashoffset: -34; } }
 @keyframes pti-preview-marker { 50% { opacity: 0.66; } }
 
+/* Audit hop: repeat travel → impact → rest on one shared clock. The second
+   half of each cycle leaves breathing room before the next energy transfer. */
+.pti-hop-energy {
+  --hop-color: var(--primary);
+  --hop-core: color-mix(in srgb, var(--hop-color) 18%, var(--on-primary));
+}
+
+.pti-hop-route-glow,
+.pti-hop-route {
+  fill: none;
+  stroke: var(--hop-color);
+  stroke-linecap: round;
+}
+
+/* Use the same SVG units as the filesystem edges so the active route keeps
+   its visual weight at every canvas size and zoom level. */
+.pti-hop-route-glow {
+  stroke-width: 2;
+  stroke-opacity: 0.16;
+  filter: blur(0.35px);
+}
+
+.pti-hop-route {
+  stroke: color-mix(in srgb, var(--hop-color) 72%, var(--surface-subtle));
+  stroke-width: 0.72;
+  stroke-opacity: 0.88;
+}
+
+.pti-hop-packet {
+  fill: none;
+  stroke: var(--hop-color);
+  stroke-linecap: round;
+}
+
+.pti-hop-packet-bloom {
+  stroke-width: 3.2;
+  stroke-opacity: 0.36;
+  filter: blur(0.65px);
+  stroke-dasharray: 10 200;
+  animation: pti-hop-transfer-bloom var(--hop-cycle-duration) linear infinite both;
+}
+
+/* Nested segments meet at the same leading edge. The long, thin wake grows
+   into a bright body and hot core, giving the packet a tapered comet shape. */
+.pti-hop-packet-wake {
+  stroke: color-mix(in srgb, var(--hop-color) 65%, var(--on-primary));
+  stroke-width: 0.25;
+  stroke-opacity: 0.55;
+  stroke-dasharray: 26 200;
+  animation: pti-hop-transfer-wake var(--hop-cycle-duration) linear infinite both;
+}
+
+.pti-hop-packet-tail {
+  stroke: color-mix(in srgb, var(--hop-color) 45%, var(--on-primary));
+  stroke-width: 0.55;
+  stroke-opacity: 0.82;
+  stroke-dasharray: 18 200;
+  animation: pti-hop-transfer-tail var(--hop-cycle-duration) linear infinite both;
+}
+
+.pti-hop-packet-halo {
+  stroke-width: 1.7;
+  stroke-opacity: 0.7;
+  filter: blur(0.25px);
+  stroke-dasharray: 7 200;
+  animation: pti-hop-transfer-halo var(--hop-cycle-duration) linear infinite both;
+}
+
+.pti-hop-packet-body {
+  stroke: color-mix(in srgb, var(--hop-color) 65%, var(--on-primary));
+  stroke-width: 1.1;
+  stroke-dasharray: 8 200;
+  animation: pti-hop-transfer-body var(--hop-cycle-duration) linear infinite both;
+}
+
+.pti-hop-packet-core {
+  stroke: var(--hop-core);
+  stroke-width: 0.7;
+  filter: drop-shadow(0 0 0.8px var(--hop-color));
+  stroke-dasharray: 3 200;
+  animation: pti-hop-transfer-core var(--hop-cycle-duration) linear infinite both;
+}
+
+.pti-hop-wave {
+  position: absolute;
+  inset: -3px;
+  border: 1px solid color-mix(in srgb, var(--hop-color) 85%, transparent);
+  border-radius: 9999px;
+  box-shadow: 0 0 14px 1px color-mix(in srgb, var(--hop-color) 45%, transparent),
+              inset 0 0 8px color-mix(in srgb, var(--hop-color) 25%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pti-hop-wave var(--hop-cycle-duration) cubic-bezier(0.1, 0.9, 0.2, 1) infinite both;
+}
+
+/* Light travels across 0% -> 38% of the cycle, impacting precisely at 38%. */
+@keyframes pti-hop-transfer-bloom {
+  0% { stroke-dashoffset: 10; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -90; opacity: 0.85; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+@keyframes pti-hop-transfer-wake {
+  0% { stroke-dashoffset: 26; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -74; opacity: 0.85; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+@keyframes pti-hop-transfer-tail {
+  0% { stroke-dashoffset: 18; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -82; opacity: 0.85; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+@keyframes pti-hop-transfer-halo {
+  0% { stroke-dashoffset: 7; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -93; opacity: 0.85; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+@keyframes pti-hop-transfer-body {
+  0% { stroke-dashoffset: 8; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -92; opacity: 0.85; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+@keyframes pti-hop-transfer-core {
+  0% { stroke-dashoffset: 3; opacity: 0; }
+  4% { opacity: 1; }
+  36% { opacity: 1; }
+  38% { stroke-dashoffset: -97; opacity: 1; }
+  41%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+
+/* Ripple wave triggers INSTANTLY at 38% on impact: bursts fast, then decelerates & fades gradually. */
+@keyframes pti-hop-wave {
+  0%, 37.9% { opacity: 0; transform: scale(1); }
+  38% { opacity: 0.95; transform: scale(1); }
+  44% { opacity: 0.75; transform: scale(1.08, 1.2); }
+  55% { opacity: 0.45; transform: scale(1.14, 1.34); }
+  68% { opacity: 0.2; transform: scale(1.18, 1.44); }
+  84%, 100% { opacity: 0; transform: scale(1.22, 1.52); }
+}
+
 @media (min-width: 1024px) {
   .pti-hive-feature-wrap:nth-child(2), .pti-hive-feature-wrap:nth-child(4) { transform: translateY(2.5rem); }
   .pti-hive-feature-wrap + .pti-hive-feature-wrap { margin-left: -1.9rem; }
@@ -629,6 +783,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pti-hive-grid-spark, .pti-preview-stream, .pti-preview-connector, .pti-preview-marker { animation: none; }
+  .pti-hop-packet, .pti-hop-wave { display: none; animation: none; }
   .pti-hive-feature:hover .pti-hive-icon, .pti-hive-feature:hover .pti-hive-arrow { transform: none; }
   .pti-honeypot-asset-stage:hover .pti-honeypot-device img { scale: 1; }
   .pti-theme-toggle-glyph { transition: none; }

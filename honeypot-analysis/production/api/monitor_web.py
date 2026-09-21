@@ -5759,7 +5759,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
         return False
 
     def _require_local_command_read(self) -> bool:
-        """Require the explicit localhost profile and the normal read token."""
+        """Require the explicit localhost profile and dedicated command token."""
         if os.getenv("LOCAL_DASHBOARD_COMMANDS_ENABLED", "").strip().lower() != "true":
             self._send_json(
                 HTTPStatus.FORBIDDEN,
@@ -5783,7 +5783,7 @@ class MonitorHandler(BaseHTTPRequestHandler):
             return False
         decision = authorize_read(
             single_header_value(self.headers, "Authorization"),
-            _monitor_read_token(self.monitor_config),
+            _monitor_raw_commands_token(self.monitor_config),
             allow_anonymous=False,
         )
         if decision.allowed:
