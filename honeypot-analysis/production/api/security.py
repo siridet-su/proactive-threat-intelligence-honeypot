@@ -626,6 +626,41 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     overview = _redact_public_command_text(dict(detail.get("overview") or {}))
     overview["command_count"] = command_count
     raw_correlations = detail.get("session_ttp_correlations") or detail.get("correlated_ttp_hypotheses") or []
+    authentication = detail.get("authentication_activity")
+    authentication_view: Dict[str, Any] = {}
+    if isinstance(authentication, Mapping):
+        for field in (
+            "schema_version",
+            "authority",
+            "attempt_count",
+            "success_count",
+            "failure_count",
+            "first_attempt_at",
+            "last_attempt_at",
+            "username_visibility",
+        ):
+            value = authentication.get(field)
+            if isinstance(value, (str, int)) and not isinstance(value, bool):
+                authentication_view[field] = value[:160] if isinstance(value, str) else value
+        authentication_attempts = authentication.get("attempts")
+        if isinstance(authentication_attempts, list):
+            safe_attempts: list[Dict[str, Any]] = []
+            for attempt in authentication_attempts[:50]:
+                if not isinstance(attempt, Mapping):
+                    continue
+                outcome = attempt.get("outcome")
+                if not isinstance(outcome, str) or outcome not in {"success", "failed"}:
+                    continue
+                safe_attempt: Dict[str, Any] = {"outcome": outcome}
+                for field in ("timestamp", "username_visibility"):
+                    value = attempt.get(field)
+                    if isinstance(value, str) and value:
+                        safe_attempt[field] = value[:160]
+                attacker_username = attempt.get("attacker_username")
+                if isinstance(attacker_username, str) and attacker_username:
+                    safe_attempt["attacker_username"] = attacker_username[:128]
+                safe_attempts.append(safe_attempt)
+            authentication_view["attempts"] = safe_attempts
     result: Dict[str, Any] = {
         "ok": True,
         "schema_version": detail.get("schema_version") or "monitor.dashboard_session_detail.v1",
@@ -658,6 +693,7 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "tactics": detail.get("tactics") or [],
         "ttps": detail.get("ttps") or [],
         "enrichment_status": detail.get("enrichment_status") or {},
+        "authentication_activity": authentication_view,
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
         "session": {
             "session_id": session_payload.get("session_id"),

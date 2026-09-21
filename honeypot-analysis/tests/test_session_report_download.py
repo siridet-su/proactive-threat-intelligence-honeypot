@@ -4,12 +4,13 @@ import json
 from pathlib import Path
 
 import production.api.monitor_web as monitor_web
-from production.reporting.artifacts import _report_prediction_context
+from production.reporting.artifacts import _latest_ti_lookup_at, _report_prediction_context
 
 
 class ReportStorage:
-    def __init__(self, session_id: str) -> None:
+    def __init__(self, session_id: str, *, event_rows: list[dict] | None = None) -> None:
         self.session_id = session_id
+        self.event_rows = list(event_rows or [])
 
     def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
         assert limit > 0
@@ -45,16 +46,23 @@ class ReportStorage:
                     ),
                 }
             ]
+        if table == "events":
+            return self.event_rows
         return []
 
 
-def _config(tmp_path: Path, session_id: str) -> monitor_web.MonitorConfig:
+def _config(
+    tmp_path: Path,
+    session_id: str,
+    *,
+    event_rows: list[dict] | None = None,
+) -> monitor_web.MonitorConfig:
     config = monitor_web.MonitorConfig(
         db_path="",
         database_url="sqlite:///:memory:",
         reports_dir=str(tmp_path / "reports"),
     )
-    config._storage = ReportStorage(session_id)
+    config._storage = ReportStorage(session_id, event_rows=event_rows)
     return config
 
 
@@ -241,3 +249,91 @@ def test_session_report_pdf_fails_closed_without_exact_session_or_report(tmp_pat
     pdf, error = monitor_web.load_session_report_pdf(config, "session_v1_missing")
     assert pdf is None
     assert error["error_code"] == "session_not_found"
+
+
+def test_session_report_pdf_projects_authentication_metadata_without_passwords(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session_id = "session_v1_report_authentication"
+    password_sentinel = "report-password-must-never-be-rendered"
+    storage = ReportStorage(
+        session_id,
+        event_rows=[
+            {
+                "event_id": "auth-success",
+                "session_id": session_id,
+                "eventid": "cowrie.login.success",
+                "timestamp": "2026-09-17T07:01:00Z",
+                "payload_json": json.dumps(
+                    {
+                        "eventid": "cowrie.login.success",
+                        "session": session_id,
+                        "timestamp": "2026-09-17T07:01:00Z",
+                        "username": "observed-report-account",
+                        "password": password_sentinel,
+                    }
+                ),
+            }
+        ],
+    )
+    config = _config(tmp_path, session_id)
+    config._storage = storage
+    captured = {}
+    monkeypatch.setattr(
+        monitor_web,
+        "build_session_ti_projection",
+        lambda _storage, selected_session_id, config=None: {
+            "ok": True,
+            "status": "TI_PENDING",
+            "session_id": selected_session_id,
+        },
+    )
+    monkeypatch.setattr(
+        monitor_web,
+        "load_ai_advisory_detail",
+        lambda _config, selected_session_id, _storage=None: {
+            "ok": True,
+            "status": "unavailable",
+            "session_id": selected_session_id,
+        },
+    )
+    monkeypatch.setattr(
+        monitor_web,
+        "load_next_distinct_prediction",
+        lambda *_args, **_kwargs: {},
+    )
+
+    def render(_report, session, **_kwargs):
+        captured["session"] = session
+        return b"%PDF-1.7 auth fixture"
+
+    monkeypatch.setattr(monitor_web, "render_pdf_report_bytes", render)
+    pdf, error = monitor_web.load_session_report_pdf(config, session_id)
+
+    assert pdf == b"%PDF-1.7 auth fixture"
+    assert error == {}
+    assert captured["session"]["login_attempts"] == 1
+    assert captured["session"]["login_success"] is True
+    assert captured["session"]["observed_account_identifier"] == "observed-report-account"
+    assert password_sentinel not in json.dumps(captured["session"], sort_keys=True)
+
+
+def test_latest_ti_lookup_uses_newest_provider_or_source_ip_cache_time() -> None:
+    assert _latest_ti_lookup_at(
+        {
+            "freshness": {"latest_retrieved_at": "2026-09-21T11:00:00Z"},
+            "external_ti_summary": {
+                "source_ip_cache_latest_lookup_at": "2026-09-21T11:10:00Z"
+            },
+        }
+    ) == "2026-09-21T11:10:00Z"
+    assert _latest_ti_lookup_at(
+        {
+            "freshness": {"latest_retrieved_at": "2026-09-21T11:20:00Z"},
+            "external_ti_summary": {
+                "source_ip_cache_latest_lookup_at": "2026-09-21T11:10:00Z"
+            },
+        }
+    ) == "2026-09-21T11:20:00Z"
+    assert _latest_ti_lookup_at({"freshness": {}, "external_ti_summary": {}}) is None

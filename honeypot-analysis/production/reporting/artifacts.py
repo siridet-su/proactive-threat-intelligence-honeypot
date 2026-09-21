@@ -58,6 +58,38 @@ def _ti_display_status(value: Any) -> str:
     return TI_DISPLAY_STATUS.get(normalized, normalized)
 
 
+def _latest_ti_lookup_at(external_context: Any) -> Any:
+    """Return the newest recorded provider retrieval or source-IP cache lookup."""
+
+    if not isinstance(external_context, dict):
+        return None
+    freshness = external_context.get("freshness")
+    freshness = freshness if isinstance(freshness, dict) else {}
+    summary = external_context.get("external_ti_summary")
+    summary = summary if isinstance(summary, dict) else external_context
+    candidates = [
+        freshness.get("latest_retrieved_at"),
+        summary.get("source_ip_cache_latest_lookup_at"),
+    ]
+    parsed_candidates = []
+    for value in candidates:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed_candidates.append((parsed.astimezone(timezone.utc), value))
+    if parsed_candidates:
+        return max(parsed_candidates, key=lambda item: item[0])[1]
+    return next(
+        (value for value in candidates if isinstance(value, str) and value.strip()),
+        None,
+    )
+
+
 class _PDFExportUnavailable(RuntimeError):
     """Raised when the optional PDF renderer is not installed."""
 
@@ -1919,7 +1951,7 @@ def write_pdf_report(
         and isinstance(external_context.get("freshness"), dict)
         else {}
     )
-    latest_ti_retrieval = ti_freshness.get("latest_retrieved_at")
+    latest_ti_retrieval = _latest_ti_lookup_at(external_context)
     if technique_ids and ti_status in {"TI_AVAILABLE", "AVAILABLE"}:
         assessment_confidence = "HIGH"
         assessment_confidence_reason = (
@@ -2352,8 +2384,8 @@ def write_pdf_report(
             ["State reason", ti_display_status_reason],
             ["State explanation", ti_status_reason_text],
             ["Freshness", _ti_display_status(freshness.get("state"))],
-            ["Latest provider retrieval", _format_timestamp(freshness.get("latest_retrieved_at"))],
-            ["Provider result age", _freshness_age(freshness.get("latest_retrieved_at"), generated_at)],
+            ["Latest provider/cache lookup", _format_timestamp(latest_ti_retrieval)],
+            ["Provider/cache result age", _freshness_age(latest_ti_retrieval, generated_at)],
             ["Eligible observables", _ti_count("eligible_observable_count", "eligible_observables")],
             ["Eligible types", ", ".join(str(item) for item in eligible_types or []) or None],
             ["Stored records / evidence", (

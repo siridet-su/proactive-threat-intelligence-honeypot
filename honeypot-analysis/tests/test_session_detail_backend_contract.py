@@ -17,9 +17,11 @@ class DetailStorage:
         *,
         present: bool = True,
         prediction_rows: list[dict[str, object]] | None = None,
+        event_rows: list[dict[str, object]] | None = None,
     ) -> None:
         self.present = present
         self.prediction_rows = list(prediction_rows or [])
+        self.event_rows = list(event_rows) if event_rows is not None else None
         self.calls: list[tuple[str, str, int]] = []
         self.global_reads = 0
         self.single_enrichment_reads = 0
@@ -57,6 +59,8 @@ class DetailStorage:
                 }
             ]
         if table == "events":
+            if self.event_rows is not None:
+                return self.event_rows
             return [
                 {
                     "event_id": "event-detail-1",
@@ -194,6 +198,55 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
     compact_serialized = json.dumps(compact, sort_keys=True)
     assert "payload_json" not in compact_serialized
     assert '"input": "id"' not in compact_serialized
+
+
+def test_compact_session_detail_includes_bounded_authentication_without_passwords(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    password_sentinel = "e2e-password-must-never-be-projected"
+    storage = DetailStorage(
+        event_rows=[
+            {
+                "event_id": "auth-success",
+                "session_id": SESSION_ID,
+                "eventid": "cowrie.login.success",
+                "timestamp": "2026-09-01T00:00:01Z",
+                "payload_json": json.dumps(
+                    {
+                        "eventid": "cowrie.login.success",
+                        "session": SESSION_ID,
+                        "timestamp": "2026-09-01T00:00:01Z",
+                        "username": "observed-test-account",
+                        "password": password_sentinel,
+                    }
+                ),
+            }
+        ]
+    )
+    monkeypatch.setattr(monitor_web, "build_ensemble_from_session_payload", lambda *_args, **_kwargs: {})
+
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+    compact = session_detail_view(detail, compact=True)
+
+    authentication = compact["authentication_activity"]
+    assert authentication["attempt_count"] == 1
+    assert authentication["success_count"] == 1
+    assert authentication["failure_count"] == 0
+    assert authentication["attempts"] == [
+        {
+            "outcome": "success",
+            "timestamp": "2026-09-01T00:00:01Z",
+            "username_visibility": "AVAILABLE",
+            "attacker_username": "observed-test-account",
+        }
+    ]
+    serialized = json.dumps(compact, sort_keys=True)
+    assert password_sentinel not in serialized
+    assert "password_values_suppressed" not in serialized
+    assert "payload_json" not in serialized
 
 
 def test_dashboard_detail_projects_bound_prediction_snapshot_and_model2(tmp_path: Path, monkeypatch) -> None:

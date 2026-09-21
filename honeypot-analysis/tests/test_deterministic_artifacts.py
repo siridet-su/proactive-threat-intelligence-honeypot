@@ -156,6 +156,11 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     from pypdf import PdfReader
 
     report, session = _report_and_session()
+    session.update(
+        login_attempts=1,
+        login_success=True,
+        observed_account_identifier="observed-test-account",
+    )
     report["ioc_summary"] = {
         "ips": [
             {"type": "ipv4", "value": "8.8.8.8", "confidence": "high"},
@@ -171,7 +176,9 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
             "eligible_observable_types": ["ip"],
             "records_found": 1,
             "evidence_returned": 1,
-            "source_ip_cache_records_found": 0,
+            "source_ip_cache_records_found": 1,
+            "source_ip_cache_latest_lookup_at": "2026-07-28T10:10:30Z",
+            "source_ip_cache_freshness": "FRESH",
             "shared_entity_count": 0,
             "authority": "CONTEXT_ONLY",
         },
@@ -193,8 +200,23 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
         },
         "freshness": {
             "state": "TI_FRESH",
-            "latest_retrieved_at": "2026-07-28T10:11:00Z",
+            "latest_retrieved_at": "2026-07-28T10:09:00Z",
         },
+        "source_ip_cache": [
+            {
+                "provider": "abuseipdb",
+                "observable_type": "ip",
+                "observable_value": "8.8.8.8",
+                "lookup_status": "OK",
+                "lookup_at": "2026-07-28T10:10:30Z",
+                "policy_binding": "source-ip-policy-v2",
+                "normalized_context": {
+                    "abuse_confidence_score": 0,
+                    "total_reports": 0,
+                    "finding_state": "NO_REPORTS",
+                },
+            }
+        ],
         "evidence": [
             {
                 "provider": "virustotal",
@@ -250,6 +272,9 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     assert "TI_AVAILABLE" in text
     assert "virustotal" in text
     assert "Review the recorded evidence before action." in text
+    assert "Latest provider/cache lookup" in text
+    assert "28 Jul 2026, 17:10:30 ICT" in text
+    assert "observed-test-account" in text
     assert "Internal Infrastructure Context" in text
     assert "10.58.33.42" in text
     assert "Private/reserved network context" in text

@@ -2969,6 +2969,38 @@ def load_session_report_pdf(
             }
         session_payload = _session_payload(session_rows[0])
         session_payload.setdefault("session_id", clean_session_id)
+        event_rows, _event_error = _storage_session_rows(
+            storage,
+            "events",
+            clean_session_id,
+            MAX_SESSION_EVENTS,
+        )
+        authentication_activity = _authentication_activity(session_payload, event_rows)
+        authentication_attempts = authentication_activity.get("attempts") or []
+        if authentication_activity.get("attempt_count", 0):
+            session_payload["login_attempts"] = authentication_activity["attempt_count"]
+            session_payload["login_success"] = authentication_activity.get("success_count", 0) > 0
+            observed_accounts = [
+                str(item.get("attacker_username"))
+                for item in authentication_attempts
+                if isinstance(item, dict)
+                and item.get("username_visibility") == "AVAILABLE"
+                and isinstance(item.get("attacker_username"), str)
+                and item.get("attacker_username")
+            ]
+            successful_accounts = [
+                str(item.get("attacker_username"))
+                for item in authentication_attempts
+                if isinstance(item, dict)
+                and item.get("outcome") == "success"
+                and item.get("username_visibility") == "AVAILABLE"
+                and isinstance(item.get("attacker_username"), str)
+                and item.get("attacker_username")
+            ]
+            if not session_payload.get("observed_account_identifier"):
+                selected_account = (successful_accounts or observed_accounts or [None])[-1]
+                if selected_account:
+                    session_payload["observed_account_identifier"] = selected_account
         try:
             external_ti_projection = build_session_ti_projection(
                 storage,
