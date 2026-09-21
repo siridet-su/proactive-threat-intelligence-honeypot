@@ -228,6 +228,39 @@ export interface SessionTerminateAction {
   failureCategory: string | null;
 }
 
+/** One sampled action for a (session, phase, attacker_type) — see deception-core `session_action`. */
+export interface DeceptionAction {
+  phase: string;
+  attacker_type: string;
+  action: string;
+  at: string;
+}
+
+/** One decoy file served to the attacker and the fake content injected into it. */
+export interface DeceptionLure {
+  door: string;
+  target: string;
+  tier: number;
+  content_type: string;
+  content: string;
+  at: string;
+}
+
+/** One document per attacker IP, synced from Pi SQLite deception-core into `honeypot_db.deception_decisions`. */
+export interface DeceptionDecision {
+  ip: string;
+  session_id: string;
+  attacker_type: string;
+  attacker_type_locked: boolean;
+  phase: string;
+  command_count: number;
+  first_seen: string;
+  last_seen: string;
+  actions: DeceptionAction[];
+  lures: DeceptionLure[];
+  synced_at: string;
+}
+
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -371,4 +404,28 @@ export function isDashboardUser(value: unknown): value is DashboardUser {
   return typeof value.operatorId === "string" && typeof value.fullName === "string" &&
     typeof value.email === "string" && typeof value.position === "string" &&
     typeof value.role === "string" && typeof value.status === "string";
+}
+
+function isDeceptionAction(value: unknown): value is DeceptionAction {
+  if (!isRecord(value)) return false;
+  return typeof value.phase === "string" && typeof value.attacker_type === "string" &&
+    typeof value.action === "string" && typeof value.at === "string";
+}
+
+function isDeceptionLure(value: unknown): value is DeceptionLure {
+  if (!isRecord(value)) return false;
+  return typeof value.door === "string" && typeof value.target === "string" &&
+    typeof value.tier === "number" && typeof value.content_type === "string" &&
+    typeof value.content === "string" && typeof value.at === "string";
+}
+
+export function isDeceptionDecision(value: unknown): value is DeceptionDecision {
+  if (!isRecord(value)) return false;
+  return typeof value.ip === "string" && typeof value.session_id === "string" &&
+    typeof value.attacker_type === "string" && typeof value.attacker_type_locked === "boolean" &&
+    typeof value.phase === "string" && typeof value.command_count === "number" &&
+    typeof value.first_seen === "string" && typeof value.last_seen === "string" &&
+    typeof value.synced_at === "string" &&
+    Array.isArray(value.actions) && value.actions.every(isDeceptionAction) &&
+    Array.isArray(value.lures) && value.lures.every(isDeceptionLure);
 }
