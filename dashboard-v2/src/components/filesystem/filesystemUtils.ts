@@ -1662,6 +1662,9 @@ export interface AuditUrlParams {
   hideHome?: boolean;
   targetPath?: string | null;
   hop?: string | null;
+  timeRange?: string | null;
+  timeFrom?: number | null;
+  timeTo?: number | null;
 }
 
 export function parseAuditUrlParams(search: string): AuditUrlParams {
