@@ -156,12 +156,12 @@ export function useFilesystemStreaming(
     void refresh();
   }, [refresh]);
 
-  // Stable 1-second interval timer that does not re-subscribe or restart when getNow changes
+  // Interval timer for telemetry age updates. Reduced from 1s to 5s to save CPU and reduce React re-renders.
   const [now, setNow] = useState(() => (getNow ? getNow() : Date.now()));
   useEffect(() => {
     const timer = window.setInterval(() => {
       setNow(getNowRef.current ? getNowRef.current() : Date.now());
-    }, 1_000);
+    }, 5_000);
     return () => window.clearInterval(timer);
   }, []);
 

@@ -1662,6 +1662,9 @@ export interface AuditUrlParams {
   hideHome?: boolean;
   targetPath?: string | null;
   hop?: string | null;
+  timeRange?: string | null;
+  timeFrom?: number | null;
+  timeTo?: number | null;
 }
 
 export function parseAuditUrlParams(search: string): AuditUrlParams {
@@ -1673,6 +1676,9 @@ export function parseAuditUrlParams(search: string): AuditUrlParams {
   const hideHome = hideHomeParam === "1" || hideHomeParam === "true";
   const targetPath = params.get("targetPath");
   const hop = params.get("hop");
+  const timeRange = params.get("timeRange");
+  const timeFrom = params.get("timeFrom");
+  const timeTo = params.get("timeTo");
 
   return {
     view,
@@ -1680,6 +1686,9 @@ export function parseAuditUrlParams(search: string): AuditUrlParams {
     hideHome,
     targetPath: targetPath || null,
     hop: hop || null,
+    timeRange: timeRange || null,
+    timeFrom: timeFrom ? parseInt(timeFrom, 10) : null,
+    timeTo: timeTo ? parseInt(timeTo, 10) : null,
   };
 }
 
@@ -1692,6 +1701,9 @@ export function buildAuditUrlSearch(params: AuditUrlParams): string {
   if (params.hideHome) sp.set("hideHome", "1");
   if (params.targetPath) sp.set("targetPath", params.targetPath);
   if (params.hop) sp.set("hop", params.hop);
+  if (params.timeRange && params.timeRange !== "all") sp.set("timeRange", params.timeRange);
+  if (params.timeFrom) sp.set("timeFrom", params.timeFrom.toString());
+  if (params.timeTo) sp.set("timeTo", params.timeTo.toString());
 
   const str = sp.toString();
   return str ? `?${str}` : "";
@@ -1717,7 +1729,10 @@ export function areAuditUrlParamsEqual(
     (a.sessionId ?? null) === (b.sessionId ?? null) &&
     Boolean(a.hideHome) === Boolean(b.hideHome) &&
     (a.targetPath ?? null) === (b.targetPath ?? null) &&
-    (a.hop ?? null) === (b.hop ?? null)
+    (a.hop ?? null) === (b.hop ?? null) &&
+    (a.timeRange ?? "all") === (b.timeRange ?? "all") &&
+    (a.timeFrom ?? null) === (b.timeFrom ?? null) &&
+    (a.timeTo ?? null) === (b.timeTo ?? null)
   );
 }
 

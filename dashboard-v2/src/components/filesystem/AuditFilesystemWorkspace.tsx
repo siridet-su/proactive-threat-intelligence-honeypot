@@ -1,91 +1,20 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { useState } from "react";
 import { AuditNoticeRegion } from "./AuditNoticeRegion";
 import { TopologyCanvas } from "./TopologyCanvas";
 import { TimelineSplitter } from "./TimelineSplitter";
 import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
 import { DEFAULT_STALE_THRESHOLD_MS } from "./filesystemUtils";
-import type { FilesystemClosedSession, FilesystemTopologySession, FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
-import type { ForensicTab } from "./FilesystemActivity";
+
+import { useFilesystemContext } from "./FilesystemContext";
 
 export interface AuditFilesystemWorkspaceProps {
-  directoryHasMore: boolean;
-  directoryIsLoading: boolean;
-  directoryIsComplete: boolean;
-  loadMoreDirectory: () => void;
-  auditSearchItems: any[];
-  auditSearchHasMore: boolean;
-  auditSearchIsLoading: boolean;
-  auditSearchIsComplete: boolean;
-  searchAuditSessions: (q: string) => void;
-  loadMoreAuditSearch: () => void;
-  clearAuditSearch: () => void;
-  auditStatus: any;
-  auditErrorMessage: any;
-  retryInitialDirectory: () => void;
-  handleToggleHideHomeOnly: () => void;
-  handleSelectTargetPath: (path: string | null) => void;
-  distinctPaths: any;
-  homeOnlyCount: number;
-
   isFullscreen: boolean;
-  expiredSessionId: string | null;
-  allSessions: any[];
-  setExpiredSessionId: (id: string | null) => void;
-  handleUserSelectSession: (sessionId: string, sessionObj?: FilesystemTopologySession | FilesystemClosedSession) => void;
-  switchViewMode: (mode: "live" | "audit", sessionId?: string) => void;
-  hasActiveFilters: boolean;
-  isSelectedFilteredOut: boolean;
-  filteredSessionsCount: number;
-  totalSessionsCount: number;
-  targetPathFilter: string | null;
-  hideHomeOnly: boolean;
-  selectedSession: FilesystemClosedSession | FilesystemTopologySession | null;
-  filteredActiveSessions: FilesystemTopologySession[];
-  filteredClosedSessions: FilesystemClosedSession[];
-  handleResetAuditFilters: () => void;
-  handleClearSelection: () => void;
-  auditSnapshot: FilesystemTopologySnapshot | null;
-  snapshot: FilesystemTopologySnapshot | null;
-  regionStatus: any;
-  streamState: any;
-  freshnessState: any;
-  selectedSessionId: string | null;
-  selectedPath: string | null;
-  activeHop: any;
-  playbackSpeed: number;
-  auditCanvasTitle: string;
-  auditCanvasSubtitle: string;
-  selectPath: (path: string | null) => void;
   onToggleFullscreen: () => void;
-  refresh: () => void;
-  handleReconnect: () => void;
-  isDraggingTimeline: boolean;
-  isTimelineCollapsed: boolean;
-  timelineWidth: number;
-  handleSplitterMouseDown: (e: React.MouseEvent) => void;
-  handleResetTimelineWidth: () => void;
-  handleSplitterKeyDown: (e: React.KeyboardEvent) => void;
-  history: any;
-  anchoredHop: any;
-  historyStatus: any;
-  historyCursor: any;
-  historyTotalItems: number;
-  historyTotalSuccessfulItems: number;
-  historyComplete: boolean;
-  replayPresentation: any;
-  activeForensicTab: ForensicTab;
-  setActiveForensicTab: (tab: ForensicTab) => void;
-  responsePanel: React.ReactNode;
-  hopResolutionStatus: any;
-  requestedHop: any;
-  clearRequestedHop: () => void;
-  selectLatestHop: () => void;
-  handleSelectHistoryEventId: (eventId: string | null, source?: "user" | "playback" | "sync") => void;
-  loadHistory: (sessionId: string, cursor: string | null, isLoadMore: boolean) => void;
 }
 
-export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
+export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: AuditFilesystemWorkspaceProps) {
+  const props = useFilesystemContext();
+
   const [mobileTab, setMobileTab] = useState<"map" | "timeline">("map");
 
   return (
@@ -106,14 +35,14 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
       </div>
       <div
         className={
-          props.isFullscreen
+          isFullscreen
             ? "min-h-0 flex-1 flex overflow-hidden"
             : "flex flex-col lg:flex-row items-stretch h-[calc(100dvh-12.5rem)] min-h-[600px] overflow-hidden rounded-b-xl"
         }
       >
         <div
           className={
-            props.isFullscreen
+            isFullscreen
               ? `min-w-0 flex-1 ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
               : `min-w-0 flex-1 ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
           }
@@ -149,8 +78,8 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
           subtitle={props.auditCanvasSubtitle}
           onSelectSession={props.handleUserSelectSession}
           onSelectPath={props.selectPath}
-          isExpanded={props.isFullscreen}
-          onToggleExpand={props.onToggleFullscreen}
+          isExpanded={isFullscreen}
+          onToggleExpand={onToggleFullscreen}
           onRefresh={props.refresh}
           onReconnect={props.handleReconnect}
           staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
@@ -167,7 +96,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
           onMouseDown={props.handleSplitterMouseDown}
           onDoubleClick={props.handleResetTimelineWidth}
           onKeyDown={props.handleSplitterKeyDown}
-          className={props.isFullscreen ? "hidden sm:flex" : "hidden lg:flex"}
+          className={isFullscreen ? "hidden sm:flex" : "hidden lg:flex"}
         />
       )}
 
@@ -176,7 +105,7 @@ export function AuditFilesystemWorkspace(props: AuditFilesystemWorkspaceProps) {
         collapsed={props.isTimelineCollapsed}
         isDragging={props.isDraggingTimeline}
         width={props.timelineWidth}
-        variant={props.isFullscreen ? "fullscreen" : "page"}
+        variant={isFullscreen ? "fullscreen" : "page"}
         selectedSession={props.selectedSession}
         history={props.history}
         anchoredHop={props.anchoredHop}

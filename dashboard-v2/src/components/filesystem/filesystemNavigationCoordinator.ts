@@ -28,6 +28,9 @@ export interface NavigationStateCommitOptions {
   hideHome?: boolean;
   targetPath?: string | null;
   hop?: string | null;
+  timeRange?: string | null;
+  timeFrom?: number | null;
+  timeTo?: number | null;
 }
 
 export interface PopStateTransaction {
@@ -49,6 +52,10 @@ export interface NavigationUrlStateBindings {
   setHideHomeOnly: (hide: boolean) => void;
   getTargetPathFilter: () => string | null;
   setTargetPathFilter: (path: string | null) => void;
+  getTimeRange: () => string;
+  setTimeRange: (range: any) => void;
+  getCustomDateRange: () => any;
+  setCustomDateRange: (range: any) => void;
   getSelectedHistoryEventId: () => string | null;
   setSelectedHistoryEventId: (eventId: string | null) => void;
   getExpiredSessionId: () => string | null;
@@ -118,6 +125,10 @@ export const DEFAULT_COORDINATOR_OPTIONS: FilesystemNavigationCoordinatorOptions
   setViewMode: () => {},
   setHideHomeOnly: () => {},
   setTargetPathFilter: () => {},
+  getTimeRange: () => "all",
+  setTimeRange: () => {},
+  getCustomDateRange: () => undefined,
+  setCustomDateRange: () => {},
   setSelectedHistoryEventId: () => {},
   setExpiredSessionId: () => {},
   setSelectedSessionId: () => {},
@@ -244,6 +255,18 @@ export class FilesystemNavigationCoordinator {
           ? updates.targetPath
           : this.options.getTargetPathFilter(),
       hop: targetHop,
+      timeRange:
+        updates.timeRange !== undefined
+          ? updates.timeRange
+          : this.options.getTimeRange(),
+      timeFrom:
+        updates.timeFrom !== undefined
+          ? updates.timeFrom
+          : this.options.getCustomDateRange()?.from?.getTime() ?? null,
+      timeTo:
+        updates.timeTo !== undefined
+          ? updates.timeTo
+          : this.options.getCustomDateRange()?.to?.getTime() ?? null,
     };
 
     const currentSearch = window.location.search;
@@ -404,6 +427,8 @@ export class FilesystemNavigationCoordinator {
 
     this.options.setHideHomeOnly(false);
     this.options.setTargetPathFilter(null);
+    this.options.setTimeRange("all");
+    this.options.setCustomDateRange(undefined);
   }
 
   /**
@@ -595,6 +620,19 @@ export class FilesystemNavigationCoordinator {
       this.options.setViewMode(nextView);
       this.options.setHideHomeOnly(Boolean(parsed.hideHome));
       this.options.setTargetPathFilter(parsed.targetPath ?? null);
+      if (parsed.timeRange) {
+        this.options.setTimeRange(parsed.timeRange);
+      } else {
+        this.options.setTimeRange("all");
+      }
+      if (parsed.timeFrom || parsed.timeTo) {
+        this.options.setCustomDateRange({
+          from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,
+          to: parsed.timeTo ? new Date(parsed.timeTo) : undefined,
+        });
+      } else {
+        this.options.setCustomDateRange(undefined);
+      }
       this.options.setRequestedHop(effectiveHop);
       this.options.setSelectedHistoryEventId(effectiveHop);
     }
@@ -645,6 +683,19 @@ export class FilesystemNavigationCoordinator {
         this.options.setViewMode(nextView);
         this.options.setHideHomeOnly(Boolean(parsed.hideHome));
         this.options.setTargetPathFilter(parsed.targetPath ?? null);
+        if (parsed.timeRange) {
+          this.options.setTimeRange(parsed.timeRange);
+        } else {
+          this.options.setTimeRange("all");
+        }
+        if (parsed.timeFrom || parsed.timeTo) {
+          this.options.setCustomDateRange({
+            from: parsed.timeFrom ? new Date(parsed.timeFrom) : undefined,
+            to: parsed.timeTo ? new Date(parsed.timeTo) : undefined,
+          });
+        } else {
+          this.options.setCustomDateRange(undefined);
+        }
         this.options.setRequestedHop(effectiveHop);
         this.options.setSelectedHistoryEventId(effectiveHop);
         this.options.setRequestedSessionId(null);
@@ -793,6 +844,9 @@ export class FilesystemNavigationCoordinator {
         this.options.getViewMode() === "live"
           ? null
         : (this.options.getSelectedHistoryEventId() ?? this.options.getRequestedHop()),
+      timeRange: this.options.getTimeRange(),
+      timeFrom: this.options.getCustomDateRange()?.from?.getTime() ?? null,
+      timeTo: this.options.getCustomDateRange()?.to?.getTime() ?? null,
     };
 
     if (this.recoveredTransactionTarget) {

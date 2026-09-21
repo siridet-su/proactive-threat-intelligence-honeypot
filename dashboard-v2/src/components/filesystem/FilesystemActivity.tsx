@@ -1,5 +1,6 @@
 // @refresh reset
 "use client";
+import { FilesystemContext } from "./FilesystemContext";
 
 import {
   AlertTriangle,
@@ -16,7 +17,7 @@ import {
   Route,
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   FilesystemClosedSession,
@@ -34,11 +35,8 @@ import { LiveScopeBar } from "./LiveScopeBar";
 import { FilesystemPageHeader } from "./FilesystemPageHeader";
 import {
   DEFAULT_STALE_THRESHOLD_MS,
-  DEFAULT_TIMELINE_SIDEBAR_WIDTH,
-  TIMELINE_SIDEBAR_STORAGE_KEY,
   buildAuditSnapshot,
   buildAuditUrlSearch,
-  clampTimelineSidebarWidth,
   
   type AuditUrlParams,
 } from "./filesystemUtils";
@@ -66,17 +64,7 @@ interface NavigationApplicationErrorState {
   message: string;
 }
 
-function readStoredTimelineWidth(): number | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const saved = localStorage.getItem(TIMELINE_SIDEBAR_STORAGE_KEY);
-    if (!saved) return null;
-    const parsed = parseInt(saved, 10);
-    return Number.isFinite(parsed) ? clampTimelineSidebarWidth(parsed) : null;
-  } catch {
-    return null;
-  }
-}
+import { useTimelineDrag } from "./useTimelineDrag";
 
 export type ForensicTab = "replay" | "evidence" | "actions";
 
@@ -93,20 +81,7 @@ export function FilesystemActivity() {
   // Fullscreen & Hybrid Replay Studio State
   const [isAuditFullscreen, setIsAuditFullscreen] = useState(false);
   const [isTimelineCollapsed, setIsTimelineCollapsed] = useState(false);
-  const persistedTimelineWidth = useSyncExternalStore(
-    useCallback(() => () => {}, []),
-    readStoredTimelineWidth,
-    () => null,
-  );
-  const [timelineWidthOverride, setTimelineWidthOverride] = useState<number | null>(null);
-  const timelineWidth = timelineWidthOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-  const setTimelineWidth = useCallback((next: number | ((current: number) => number)) => {
-    setTimelineWidthOverride((currentOverride) => {
-      const current = currentOverride ?? persistedTimelineWidth ?? DEFAULT_TIMELINE_SIDEBAR_WIDTH;
-      return typeof next === "function" ? next(current) : next;
-    });
-  }, [persistedTimelineWidth]);
-  const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
+
   const [activeForensicTab, setActiveForensicTab] = useState<ForensicTab>("replay");
 
   // Cross-cutting refs
@@ -141,69 +116,13 @@ export function FilesystemActivity() {
   }, [selectedSessionId]);
 
   // Persist timeline width preference
-  useEffect(() => {
-    if (typeof window !== "undefined" && (persistedTimelineWidth !== null || timelineWidthOverride !== null)) {
-      try {
-        localStorage.setItem(TIMELINE_SIDEBAR_STORAGE_KEY, String(timelineWidth));
-      } catch {
-        // ignore
-      }
-    }
-  }, [persistedTimelineWidth, timelineWidth, timelineWidthOverride]);
-
-  // Prevent text selection and preserve resize cursor during drag
-  useEffect(() => {
-    if (isDraggingTimeline) {
-      document.body.style.userSelect = "none";
-      document.body.style.cursor = "col-resize";
-    } else {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    }
-    return () => {
-      document.body.style.userSelect = "";
-      document.body.style.cursor = "";
-    };
-  }, [isDraggingTimeline]);
-
-  // Draggable splitter mouse handler (relative delta formula)
-  const handleSplitterMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDraggingTimeline(true);
-    const startX = e.clientX;
-    const startWidth = timelineWidth;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const deltaX = startX - moveEvent.clientX;
-      setTimelineWidth(clampTimelineSidebarWidth(startWidth + deltaX, window.innerWidth));
-    };
-
-    const onMouseUp = () => {
-      setIsDraggingTimeline(false);
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    };
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  }, [setTimelineWidth, timelineWidth]);
-
-  const handleResetTimelineWidth = useCallback(() => {
-    setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
-  }, [setTimelineWidth]);
-
-  const handleSplitterKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr + 24, window.innerWidth));
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      setTimelineWidth((curr) => clampTimelineSidebarWidth(curr - 24, window.innerWidth));
-    } else if (e.key === "Enter" || e.key === " " || e.key === "Home") {
-      e.preventDefault();
-      setTimelineWidth(DEFAULT_TIMELINE_SIDEBAR_WIDTH);
-    }
-  }, [setTimelineWidth]);
+  const {
+    timelineWidth,
+    isDraggingTimeline,
+    handleSplitterMouseDown,
+    handleResetTimelineWidth,
+    handleSplitterKeyDown,
+  } = useTimelineDrag();
 
   // Streaming & snapshot management hook
   const {
@@ -245,6 +164,10 @@ export function FilesystemActivity() {
     applyInitialUrlState,
     navigationCoordinator,
   } = useFilesystemUrlState({
+    timeRange,
+    setTimeRange,
+    customDateRange,
+    setCustomDateRange,
     isHydrated,
     snapshot,
     extraAuditSessions,
@@ -687,6 +610,14 @@ export function FilesystemActivity() {
     [navigationCoordinator],
   );
 
+  const handleTimeFilterChange = useCallback((newTimeRange: TimeRangeFilter, newDateRange: DateRange | undefined) => {
+    navigationCoordinator.commit({
+      timeRange: newTimeRange,
+      timeFrom: newDateRange?.from?.getTime() ?? null,
+      timeTo: newDateRange?.to?.getTime() ?? null,
+    }, "push");
+  }, [navigationCoordinator]);
+
   const handleToggleHideHomeOnly = useCallback(() => {
     navigationCoordinator.userToggleHideHome();
   }, [navigationCoordinator]);
@@ -817,8 +748,91 @@ export function FilesystemActivity() {
     };
   }, [isAuditFullscreen]);
 
+
+  const contextValue = {
+    viewMode,
+    mobileTab,
+    setMobileTab,
+    isAuditFullscreen,
+    setIsAuditFullscreen,
+    directoryHasMore,
+    directoryIsLoading,
+    directoryIsComplete,
+    loadMoreDirectory,
+    auditSearchItems,
+    auditSearchHasMore,
+    auditSearchIsLoading,
+    auditSearchIsComplete,
+    searchAuditSessions,
+    loadMoreAuditSearch,
+    clearAuditSearch,
+    auditStatus,
+    auditErrorMessage,
+    retryInitialDirectory,
+    handleToggleHideHomeOnly,
+    handleSelectTargetPath,
+    distinctPaths,
+    homeOnlyCount,
+    expiredSessionId,
+    allSessions,
+    setExpiredSessionId,
+    handleUserSelectSession,
+    switchViewMode,
+    hasActiveFilters,
+    isSelectedFilteredOut,
+    filteredSessionsCount,
+    totalSessionsCount,
+    targetPathFilter,
+    hideHomeOnly,
+    selectedSession,
+    filteredActiveSessions,
+    filteredClosedSessions,
+    handleResetAuditFilters,
+    handleClearSelection,
+    auditSnapshot,
+    snapshot,
+    regionStatus,
+    streamState,
+    freshnessState,
+    selectedSessionId,
+    selectedPath,
+    activeHop,
+    playbackSpeed,
+    auditCanvasTitle,
+    auditCanvasSubtitle,
+    selectPath,
+    refresh,
+    handleReconnect,
+    isDraggingTimeline,
+    isTimelineCollapsed,
+    timelineWidth,
+    handleSplitterMouseDown,
+    handleResetTimelineWidth,
+    handleSplitterKeyDown,
+    history,
+    anchoredHop,
+    historyStatus,
+    historyCursor,
+    historyTotalItems,
+    historyTotalSuccessfulItems,
+    historyComplete,
+    replayPresentation,
+    activeForensicTab,
+    setActiveForensicTab,
+    responsePanel,
+    hopResolutionStatus,
+    requestedHop,
+    clearRequestedHop,
+    selectLatestHop,
+    handleSelectHistoryEventId,
+    loadHistory,
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (
+    <FilesystemContext.Provider value={contextValue as any}>
     <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
+
       {navigationApplicationError ? (
         <div
           role="alert"
@@ -910,9 +924,9 @@ export function FilesystemActivity() {
           className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
         >
           {/* Studio Top Navigation Bar */}
-          <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
+          <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
             <div
-              className="flex min-w-0 flex-wrap items-center gap-2.5"
+              className="flex min-w-0 flex-wrap items-center gap-1.5"
               role="group"
               aria-label="Studio identity and session scope"
             >
@@ -929,7 +943,7 @@ export function FilesystemActivity() {
                   selectedSessionId={selectedSessionId}
                   onSelectSession={handleUserSelectSession}
                   totalCount={totalSessionsCount}
-                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  hasActiveFilters={hasActiveFilters}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
                   directoryHasMore={directoryHasMore}
@@ -958,6 +972,7 @@ export function FilesystemActivity() {
                   onSelectTimeRange={setTimeRange}
                   customDateRange={customDateRange}
                   onSelectCustomDateRange={setCustomDateRange}
+                  onTimeFilterChange={handleTimeFilterChange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1083,95 +1098,21 @@ export function FilesystemActivity() {
           </header>
 
           {/* Main Studio Workspace */}
-          <AuditFilesystemWorkspace
-            isFullscreen={true}
-            expiredSessionId={expiredSessionId}
-            allSessions={allSessions}
-            setExpiredSessionId={setExpiredSessionId}
-            handleUserSelectSession={handleUserSelectSession}
-            switchViewMode={switchViewMode}
-            hasActiveFilters={hasActiveFilters}
-            isSelectedFilteredOut={isSelectedFilteredOut}
-            filteredSessionsCount={filteredSessionsCount}
-            totalSessionsCount={totalSessionsCount}
-            targetPathFilter={targetPathFilter}
-            hideHomeOnly={hideHomeOnly}
-            selectedSession={selectedSession}
-            filteredActiveSessions={filteredActiveSessions}
-            filteredClosedSessions={filteredClosedSessions}
-            handleResetAuditFilters={handleResetAuditFilters}
-            handleClearSelection={handleClearSelection}
-            directoryHasMore={directoryHasMore}
-            directoryIsLoading={directoryIsLoading}
-            directoryIsComplete={directoryIsComplete}
-            loadMoreDirectory={loadMoreDirectory}
-            auditSearchItems={auditSearchItems}
-            auditSearchHasMore={auditSearchHasMore}
-            auditSearchIsLoading={auditSearchIsLoading}
-            auditSearchIsComplete={auditSearchIsComplete}
-            searchAuditSessions={(q) => void searchAuditSessions(q)}
-            loadMoreAuditSearch={loadMoreAuditSearch}
-            clearAuditSearch={clearAuditSearch}
-            auditStatus={auditStatus}
-            auditErrorMessage={auditErrorMessage}
-            retryInitialDirectory={retryInitialDirectory}
-            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
-            handleSelectTargetPath={handleSelectTargetPath}
-            distinctPaths={distinctPaths}
-            homeOnlyCount={homeOnlyCount}
-            auditSnapshot={auditSnapshot}
-            snapshot={snapshot}
-            regionStatus={regionStatus}
-            streamState={streamState}
-            freshnessState={freshnessState}
-            selectedSessionId={selectedSessionId}
-            selectedPath={selectedPath}
-            activeHop={activeHop}
-            playbackSpeed={playbackSpeed}
-            auditCanvasTitle={auditCanvasTitle}
-            auditCanvasSubtitle={auditCanvasSubtitle}
-            selectPath={selectPath}
-            onToggleFullscreen={() => setIsAuditFullscreen(false)}
-            refresh={refresh}
-            handleReconnect={handleReconnect}
-            isDraggingTimeline={isDraggingTimeline}
-            isTimelineCollapsed={isTimelineCollapsed}
-            timelineWidth={timelineWidth}
-            handleSplitterMouseDown={handleSplitterMouseDown}
-            handleResetTimelineWidth={handleResetTimelineWidth}
-            handleSplitterKeyDown={handleSplitterKeyDown}
-            history={history}
-            anchoredHop={anchoredHop}
-            historyStatus={historyStatus}
-            historyCursor={historyCursor}
-            historyTotalItems={historyTotalItems}
-            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-            historyComplete={historyComplete}
-            replayPresentation={replayPresentation}
-            activeForensicTab={activeForensicTab}
-            setActiveForensicTab={setActiveForensicTab}
-            responsePanel={responsePanel}
-            hopResolutionStatus={hopResolutionStatus}
-            requestedHop={requestedHop}
-            clearRequestedHop={clearRequestedHop}
-            selectLatestHop={selectLatestHop}
-            handleSelectHistoryEventId={handleSelectHistoryEventId}
-            loadHistory={loadHistory}
-          />
+          <AuditFilesystemWorkspace isFullscreen={true} onToggleFullscreen={() => setIsAuditFullscreen(false)} />
         </div>
       ) : (
         /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
         <div className="space-y-4">
           {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
           <div
-            className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs"
+            className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
             aria-label="Audit replay toolbar"
           >
             {/* Left side: Selection & Filters */}
-            <div className="flex items-center justify-start gap-4 flex-1 min-w-0">
+            <div className="flex items-center justify-start gap-2 flex-1 min-w-0">
               <div
-                className="flex flex-wrap items-center gap-2 min-w-0"
+                className="flex flex-wrap items-center gap-1.5 min-w-0"
                 role="group"
                 aria-label="Audited session and filter controls"
               >
@@ -1181,7 +1122,7 @@ export function FilesystemActivity() {
                   selectedSessionId={selectedSessionId}
                   onSelectSession={handleUserSelectSession}
                   totalCount={totalSessionsCount}
-                  hasActiveFilters={hideHomeOnly || targetPathFilter !== null}
+                  hasActiveFilters={hasActiveFilters}
                   onResetFilters={handleResetAuditFilters}
                   allSessionsList={allSessions}
                   directoryHasMore={directoryHasMore}
@@ -1210,6 +1151,7 @@ export function FilesystemActivity() {
                   onSelectTimeRange={setTimeRange}
                   customDateRange={customDateRange}
                   onSelectCustomDateRange={setCustomDateRange}
+                  onTimeFilterChange={handleTimeFilterChange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1221,7 +1163,7 @@ export function FilesystemActivity() {
             </div>
 
             <div
-              className="flex items-center gap-2 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
+              className="flex items-center gap-1.5 text-xs shrink-0 flex-wrap sm:flex-nowrap justify-start sm:justify-end"
               role="toolbar"
               aria-label="Replay and workspace actions"
             >
@@ -1305,83 +1247,10 @@ export function FilesystemActivity() {
           </div>
 
           {/* Side-by-Side Audit Layout */}
-          <AuditFilesystemWorkspace
-            isFullscreen={false}
-            expiredSessionId={expiredSessionId}
-            allSessions={allSessions}
-            setExpiredSessionId={setExpiredSessionId}
-            handleUserSelectSession={handleUserSelectSession}
-            switchViewMode={switchViewMode}
-            hasActiveFilters={hasActiveFilters}
-            isSelectedFilteredOut={isSelectedFilteredOut}
-            filteredSessionsCount={filteredSessionsCount}
-            totalSessionsCount={totalSessionsCount}
-            targetPathFilter={targetPathFilter}
-            hideHomeOnly={hideHomeOnly}
-            selectedSession={selectedSession}
-            filteredActiveSessions={filteredActiveSessions}
-            filteredClosedSessions={filteredClosedSessions}
-            handleResetAuditFilters={handleResetAuditFilters}
-            handleClearSelection={handleClearSelection}
-            directoryHasMore={directoryHasMore}
-            directoryIsLoading={directoryIsLoading}
-            directoryIsComplete={directoryIsComplete}
-            loadMoreDirectory={loadMoreDirectory}
-            auditSearchItems={auditSearchItems}
-            auditSearchHasMore={auditSearchHasMore}
-            auditSearchIsLoading={auditSearchIsLoading}
-            auditSearchIsComplete={auditSearchIsComplete}
-            searchAuditSessions={(q) => void searchAuditSessions(q)}
-            loadMoreAuditSearch={loadMoreAuditSearch}
-            clearAuditSearch={clearAuditSearch}
-            auditStatus={auditStatus}
-            auditErrorMessage={auditErrorMessage}
-            retryInitialDirectory={retryInitialDirectory}
-            handleToggleHideHomeOnly={handleToggleHideHomeOnly}
-            handleSelectTargetPath={handleSelectTargetPath}
-            distinctPaths={distinctPaths}
-            homeOnlyCount={homeOnlyCount}
-            auditSnapshot={auditSnapshot}
-            snapshot={snapshot}
-            regionStatus={regionStatus}
-            streamState={streamState}
-            freshnessState={freshnessState}
-            selectedSessionId={selectedSessionId}
-            selectedPath={selectedPath}
-            activeHop={activeHop}
-            playbackSpeed={playbackSpeed}
-            auditCanvasTitle={auditCanvasTitle}
-            auditCanvasSubtitle={auditCanvasSubtitle}
-            selectPath={selectPath}
-            onToggleFullscreen={enterAuditFullscreen}
-            refresh={refresh}
-            handleReconnect={handleReconnect}
-            isDraggingTimeline={isDraggingTimeline}
-            isTimelineCollapsed={isTimelineCollapsed}
-            timelineWidth={timelineWidth}
-            handleSplitterMouseDown={handleSplitterMouseDown}
-            handleResetTimelineWidth={handleResetTimelineWidth}
-            handleSplitterKeyDown={handleSplitterKeyDown}
-            history={history}
-            anchoredHop={anchoredHop}
-            historyStatus={historyStatus}
-            historyCursor={historyCursor}
-            historyTotalItems={historyTotalItems}
-            historyTotalSuccessfulItems={historyTotalSuccessfulItems}
-            historyComplete={historyComplete}
-            replayPresentation={replayPresentation}
-            activeForensicTab={activeForensicTab}
-            setActiveForensicTab={setActiveForensicTab}
-            responsePanel={responsePanel}
-            hopResolutionStatus={hopResolutionStatus}
-            requestedHop={requestedHop}
-            clearRequestedHop={clearRequestedHop}
-            selectLatestHop={selectLatestHop}
-            handleSelectHistoryEventId={handleSelectHistoryEventId}
-            loadHistory={loadHistory}
-          />
+          <AuditFilesystemWorkspace isFullscreen={false} onToggleFullscreen={enterAuditFullscreen} />
         </div>
       )}
     </div>
+    </FilesystemContext.Provider>
   );
 }

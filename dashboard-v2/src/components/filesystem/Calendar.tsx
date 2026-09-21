@@ -68,15 +68,17 @@ function CalendarSelectMenu({ value, options, onChange }: { value: string, optio
   );
 }
 
+import { DropdownProps } from "react-day-picker";
+
 const CalendarIconLeft = () => <ChevronLeft className="h-3.5 w-3.5" />;
 const CalendarIconRight = () => <ChevronRight className="h-3.5 w-3.5" />;
-const CalendarCustomDropdown = ({ value, onChange, children }: any) => {
+const CalendarCustomDropdown = ({ value, onChange, children }: DropdownProps) => {
   const options: { value: string; label: string }[] = [];
-  React.Children.forEach(children, (child: any) => {
-    if (React.isValidElement(child) && child.props.value !== undefined) {
+  React.Children.forEach(children, (child: React.ReactNode) => {
+    if (React.isValidElement<any>(child) && (child as React.ReactElement<any>).props.value !== undefined) {
       options.push({
-        value: String(child.props.value),
-        label: String(child.props.children),
+        value: String((child as React.ReactElement<any>).props.value),
+        label: String((child as React.ReactElement<any>).props.children),
       });
     }
   });
@@ -86,7 +88,7 @@ const CalendarCustomDropdown = ({ value, onChange, children }: any) => {
       value={String(value)}
       options={options}
       onChange={(newVal: string) => {
-        if (onChange) onChange({ target: { value: newVal } } as any);
+        if (onChange) onChange({ target: { value: newVal } } as unknown as React.ChangeEvent<HTMLSelectElement>);
       }}
     />
   );

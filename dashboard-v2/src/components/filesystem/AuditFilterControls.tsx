@@ -122,6 +122,7 @@ export interface AuditFilterControlsProps {
   onSelectTimeRange: (range: TimeRangeFilter) => void;
   customDateRange?: DateRange;
   onSelectCustomDateRange?: (range: DateRange | undefined) => void;
+  onTimeFilterChange?: (range: TimeRangeFilter, customDateRange: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
   filteredCount: number;
@@ -166,6 +167,7 @@ export function AuditFilterControls({
   onSelectTimeRange,
   customDateRange,
   onSelectCustomDateRange,
+  onTimeFilterChange,
   distinctPaths,
   homeOnlyCount,
   filteredCount,
@@ -241,7 +243,7 @@ export function AuditFilterControls({
       }
       setTimeDropdownOpen(true);
     }
-  }, [timeDropdownOpen, timeRange, customDateRange]);
+  }, [timeDropdownOpen, timeRange, customDateRange, handleStepChange]);
 
   const handleSelectPreset = useCallback((preset: TimeRangeFilter) => {
     setIsSelecting(false);
@@ -327,9 +329,10 @@ export function AuditFilterControls({
     setSelectionStart(null);
     onSelectTimeRange(draftTimeRange);
     onSelectCustomDateRange?.(finalRange);
+    onTimeFilterChange?.(draftTimeRange, finalRange);
     setTimeDropdownOpen(false);
     timeTriggerRef.current?.focus();
-  }, [draftTimeRange, draftRange, hasCustomTime, onSelectTimeRange, onSelectCustomDateRange]);
+  }, [draftTimeRange, draftRange, hasCustomTime, onSelectTimeRange, onSelectCustomDateRange, onTimeFilterChange]);
 
   const handleSwitchToTime = useCallback(() => {
     const now = new Date();
@@ -350,16 +353,17 @@ export function AuditFilterControls({
     setIsSelecting(false);
     setSelectionStart(null);
     handleStepChange("time");
-  }, [draftRange]);
+  }, [draftRange, handleStepChange]);
 
   const handleClearTimeFilter = useCallback(() => {
     setIsSelecting(false);
     setSelectionStart(null);
     onSelectTimeRange("all");
     onSelectCustomDateRange?.(undefined);
-  }, [onSelectTimeRange, onSelectCustomDateRange]);
+    onTimeFilterChange?.("all", undefined);
+  }, [onSelectTimeRange, onSelectCustomDateRange, onTimeFilterChange]);
 
-  const hasActiveFilters = hideHomeOnly || targetPath !== null;
+  const hasActiveFilters = hideHomeOnly || targetPath !== null || timeRange !== "all";
 
   // Filter distinct paths based on search input
   const filteredPaths = useMemo(() => {
@@ -484,34 +488,28 @@ export function AuditFilterControls({
             <span className="font-sans font-medium text-xs">
               Time: {formatTimeFilterLabel(timeRange, customDateRange)}
             </span>
-            {timeRange !== "all" ? (
-              <span
-                role="button"
-                tabIndex={0}
-                aria-label="Clear time filter"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleClearTimeFilter();
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.stopPropagation();
-                    handleClearTimeFilter();
-                  }
-                }}
-                className="ml-1 flex h-4 w-4 items-center justify-center rounded-sm hover:bg-primary/20 hover:text-primary-hover focus:outline-none focus:ring-1 focus:ring-primary"
-                title="Clear time filter"
-              >
-                <X className="h-3 w-3" />
-              </span>
-            ) : (
-              <ChevronDown
-                className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
-                  timeDropdownOpen ? "rotate-180 text-primary" : "text-text-subtle"
-                }`}
-              />
-            )}
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
+                timeDropdownOpen ? "rotate-180 text-primary" : "text-text-subtle"
+              }`}
+            />
           </button>
+
+          {/* Quick Clear Time Filter Button */}
+          {timeRange !== "all" && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleClearTimeFilter();
+              }}
+              title="Clear time filter"
+              aria-label="Clear time filter"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-danger hover:bg-danger-subtle hover:border-danger-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         <ComboboxPopover
@@ -831,7 +829,7 @@ export function AuditFilterControls({
               }}
               title="Clear path filter"
               aria-label="Clear path filter"
-              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-text hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              className="ml-1 flex h-9 w-9 items-center justify-center rounded-md border border-border bg-surface text-text-subtle hover:text-danger hover:bg-danger-subtle hover:border-danger-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-danger"
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -1022,7 +1020,7 @@ export function AuditFilterControls({
             onClick={onResetFilters}
             title="Reset all audit filters"
             aria-label="Reset all audit filters"
-            className="flex min-w-14 items-center justify-center gap-1 border-l border-border px-2 font-sans text-xs text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring"
+            className="flex min-w-14 items-center justify-center gap-1 border-l border-border px-2 font-sans text-xs text-text-muted transition-colors hover:bg-danger-subtle hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-danger"
           >
             <RotateCcw className="h-3 w-3" />
             <span>Reset</span>
