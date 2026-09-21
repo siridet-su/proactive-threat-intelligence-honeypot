@@ -569,11 +569,13 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
     it("round-trips createAuditScopeKey and parseAuditScopeKey", () => {
       const scope = { hideHome: true, targetPath: "/etc/nginx", q: "attacker" };
       const key = createAuditScopeKey(scope);
-      expect(key).toBe(JSON.stringify([true, "/etc/nginx", "attacker"]));
+      expect(key).toBe(JSON.stringify([true, "/etc/nginx", "attacker", null, null]));
       expect(parseAuditScopeKey(key)).toEqual({
         hideHome: true,
         targetPath: "/etc/nginx",
         q: "attacker",
+        from: undefined,
+        to: undefined,
       });
     });
 

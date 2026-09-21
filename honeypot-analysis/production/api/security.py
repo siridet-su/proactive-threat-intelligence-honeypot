@@ -658,6 +658,7 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "tactics": detail.get("tactics") or [],
         "ttps": detail.get("ttps") or [],
         "enrichment_status": detail.get("enrichment_status") or {},
+        "ensemble_evidence": detail.get("ensemble_evidence") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),
@@ -768,6 +769,7 @@ def session_detail_view(
             detail.get("ttp_command_map") or {}
         ),
         "enrichment_status": detail.get("enrichment_status") or {},
+        "ensemble_evidence": detail.get("ensemble_evidence") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),

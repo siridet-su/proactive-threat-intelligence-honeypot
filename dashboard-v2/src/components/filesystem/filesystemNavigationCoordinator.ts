@@ -168,8 +168,11 @@ export class FilesystemNavigationCoordinator {
   /** Keeps the failed URL authoritative after explicit recovery releases tx state. */
   private recoveredTransactionTarget: AuditUrlParams | null = null;
 
-  constructor(options: FilesystemNavigationCoordinatorOptions = DEFAULT_COORDINATOR_OPTIONS) {
-    this.options = options;
+  constructor(options: Partial<FilesystemNavigationCoordinatorOptions> = {}) {
+    // Keep newly added URL-state dimensions backward compatible with focused
+    // harnesses and incremental domain adapters. Missing callbacks must retain
+    // their safe defaults instead of becoming an avoidable runtime TypeError.
+    this.options = { ...DEFAULT_COORDINATOR_OPTIONS, ...options };
   }
 
   /**

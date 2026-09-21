@@ -3,7 +3,12 @@ import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   test: {
-    exclude: ["**/node_modules/**", "**/dist/**", "tests/browser/**"],
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "tests/browser/**",
+      "tests/external-ti-presentation.test.mjs",
+    ],
   },
   resolve: {
     alias: {

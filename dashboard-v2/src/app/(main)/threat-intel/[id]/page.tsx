@@ -266,11 +266,7 @@ function SourceLocationPanel({
                     fill="var(--map-land)"
                     stroke="var(--map-border)"
                     strokeWidth={0.5}
-                    style={{
-                      default: { outline: "none" },
-                      hover: { fill: "var(--map-hover)", outline: "none" },
-                      pressed: { fill: "var(--map-hover)", outline: "none" },
-                    }}
+                    className="outline-none transition-[fill] hover:fill-[var(--map-hover)]"
                   />
                 ))}
               </Geographies>

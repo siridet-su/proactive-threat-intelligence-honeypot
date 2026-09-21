@@ -59,10 +59,15 @@ export default function RegionalMap() {
   }
 
   // ใช้ onMoveEnd แทน onMove เพื่อให้ Trackpad สามารถซูมและเลื่อนได้ลื่นไหล
-  const handleMoveEnd = useCallback((newPosition: MapPosition) => {
+  const handleMoveEnd = useCallback((newPosition: {
+    coordinates?: [number, number];
+    zoom?: number;
+  }) => {
     setPosition((currentPosition) => {
       const [currentLongitude, currentLatitude] = currentPosition.coordinates;
-      const [nextLongitude, nextLatitude] = newPosition.coordinates;
+      const nextCoordinates = newPosition.coordinates ?? currentPosition.coordinates;
+      const nextZoom = newPosition.zoom ?? currentPosition.zoom;
+      const [nextLongitude, nextLatitude] = nextCoordinates;
 
       // react-simple-maps can report the controlled position again after a
       // parent render. Returning the existing object prevents that report from
@@ -70,12 +75,12 @@ export default function RegionalMap() {
       if (
         currentLongitude === nextLongitude &&
         currentLatitude === nextLatitude &&
-        currentPosition.zoom === newPosition.zoom
+        currentPosition.zoom === nextZoom
       ) {
         return currentPosition;
       }
 
-      return newPosition;
+      return { coordinates: nextCoordinates, zoom: nextZoom };
     });
   }, []);
 
@@ -99,33 +104,34 @@ export default function RegionalMap() {
         >
           <Geographies geography={geoUrl}>
             {({ geographies }) =>
-              geographies.map((geo) => (
-                <Geography
-                  key={geo.rsmKey}
-                  geography={geo}
-                  tabIndex={-1}
-                  aria-label={geo.properties.name}
-                  fill="var(--map-land)"
-                  stroke="var(--map-border)"
-                  strokeWidth={0.75}
-                  vectorEffect="non-scaling-stroke"
-                  onMouseEnter={(e) => {
-                    const { name } = geo.properties;
-                    setTooltip({ show: true, content: name, x: e.clientX, y: e.clientY });
-                  }}
-                  onMouseMove={(e) => {
-                    setTooltip((prev) => ({ ...prev, x: e.clientX, y: e.clientY }));
-                  }}
-                  onMouseLeave={() => {
-                    setTooltip({ show: false, content: "", x: 0, y: 0 });
-                  }}
-                  style={{
-                    default: { transition: "fill 150ms" },
-                    hover: { fill: "var(--map-hover)", cursor: "crosshair" },
-                    pressed: { fill: "var(--map-hover)" },
-                  }}
-                />
-              ))
+              geographies.map((geo) => {
+                const properties = geo.properties as Record<string, unknown> | null;
+                const geographyName = typeof properties?.name === "string"
+                  ? properties.name
+                  : "Unknown region";
+                return (
+                  <Geography
+                    key={geo.rsmKey}
+                    geography={geo}
+                    tabIndex={-1}
+                    aria-label={geographyName}
+                    fill="var(--map-land)"
+                    stroke="var(--map-border)"
+                    strokeWidth={0.75}
+                    vectorEffect="non-scaling-stroke"
+                    onMouseEnter={(e) => {
+                      setTooltip({ show: true, content: geographyName, x: e.clientX, y: e.clientY });
+                    }}
+                    onMouseMove={(e) => {
+                      setTooltip((prev) => ({ ...prev, x: e.clientX, y: e.clientY }));
+                    }}
+                    onMouseLeave={() => {
+                      setTooltip({ show: false, content: "", x: 0, y: 0 });
+                    }}
+                    className="cursor-crosshair transition-[fill] hover:fill-[var(--map-hover)]"
+                  />
+                );
+              })
             }
           </Geographies>
 
