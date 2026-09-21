@@ -205,6 +205,25 @@ def test_report_next_distinct_context_rejects_cross_session_and_stale_labels() -
     assert stale_context["ranking"] == []
 
 
+def test_report_next_distinct_context_preserves_final_ended_advisory() -> None:
+    session_id = "session_v1_final_ended_0123456789abcdef"
+    final = _next_distinct_projection(
+        session_id,
+        session_ended=True,
+        freshness={
+            "state": "FINAL",
+            "history_manifest_match": True,
+            "age_seconds": 86_400.0,
+        },
+    )
+    projection = monitor_web._dashboard_next_distinct_projection(final, session_id)
+    snapshot = monitor_web._report_next_distinct_snapshot(projection, session_id)
+
+    assert snapshot is not None
+    assert snapshot["prediction_status"] == "HISTORICAL_ADVISORY"
+    assert snapshot["prediction"][0] == projection["stored_next_distinct_tactic"]
+
+
 def test_session_report_pdf_fails_context_closed_without_losing_report(
     tmp_path: Path,
     monkeypatch,

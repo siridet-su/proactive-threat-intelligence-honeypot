@@ -282,17 +282,27 @@ def _validate_record_history(record: Mapping[str, Any], history: list[str], mani
 def _freshness(record: Mapping[str, Any], manifest: Mapping[str, Any], now: float, stale_after: float) -> dict[str, Any]:
     generated_at = _iso_from_epoch(record.get("recorded_at"))
     age = max(0.0, now - float(record.get("recorded_at")))
-    state = "STALE" if age > stale_after else "FRESH"
     expected_manifest = _text(manifest.get("history_manifest_sha256"))
     record_manifest = _text(record.get("history_manifest_sha256"))
-    if expected_manifest and expected_manifest != record_manifest:
+    history_manifest_match = not expected_manifest or expected_manifest == record_manifest
+    session_ended = record.get("session_ended") is True
+    if not history_manifest_match:
         state = "STALE"
+    elif session_ended:
+        # An ended session has no future progression to refresh.  Preserve its
+        # final, manifest-matched result as immutable historical advisory
+        # context instead of letting wall-clock age invalidate it.  Active
+        # sessions continue to use the bounded FRESH/STALE window below.
+        state = "FINAL"
+    else:
+        state = "STALE" if age > stale_after else "FRESH"
     return {
         "state": state,
         "generated_at": generated_at,
         "age_seconds": round(age, 3),
         "stale_after_seconds": stale_after,
-        "history_manifest_match": not expected_manifest or expected_manifest == record_manifest,
+        "history_manifest_match": history_manifest_match,
+        "session_ended": session_ended,
     }
 
 
@@ -388,7 +398,13 @@ def build_dashboard_prediction(
         "generated_at": freshness["generated_at"],
         "freshness": freshness,
         "prediction_status": "STALE" if freshness["state"] == "STALE" else "PREDICTED",
-        "prediction_status_reason": "sidecar output is stale or history has advanced" if freshness["state"] == "STALE" else "latest eligible sidecar progression",
+        "prediction_status_reason": (
+            "sidecar output is stale or history has advanced"
+            if freshness["state"] == "STALE"
+            else "final manifest-matched sidecar progression"
+            if freshness["state"] == "FINAL"
+            else "latest eligible sidecar progression"
+        ),
         "progression_index": int(records.get("progression_index")),
         "sequence_id": clean_id,
         "sidecar_record_schema": EXPECTED_RECORD_SCHEMA,
