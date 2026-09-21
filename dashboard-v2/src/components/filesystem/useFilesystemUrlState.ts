@@ -28,6 +28,10 @@ export {
 };
 
 export interface UseFilesystemUrlStateOptions {
+  timeRange?: string;
+  setTimeRange?: (range: any) => void;
+  customDateRange?: any;
+  setCustomDateRange?: (range: any) => void;
   isHydrated: boolean;
   snapshot: FilesystemTopologySnapshot | null;
   extraAuditSessions: Map<string, FilesystemClosedSession | FilesystemTopologySession>;
@@ -153,6 +157,8 @@ export function useFilesystemUrlState(
       getSelectedSessionId: () => activeSessionIdRef.current,
       getHideHomeOnly: () => hideHomeOnlyRef.current,
       getTargetPathFilter: () => targetPathFilterRef.current,
+      getTimeRange: () => options.timeRange,
+      getCustomDateRange: () => options.customDateRange,
       getSelectedHistoryEventId: () => selectedHistoryEventIdRef.current,
       getRequestedHop: () => requestedHopRef.current,
       getExpiredSessionId: () => expiredSessionIdRef.current,
@@ -172,6 +178,8 @@ export function useFilesystemUrlState(
         targetPathFilterRef.current = next;
         setTargetPathFilter(next);
       },
+      setTimeRange: options.setTimeRange,
+      setCustomDateRange: options.setCustomDateRange,
       setSelectedHistoryEventId: (next) => {
         selectedHistoryEventIdRef.current = next;
         setSelectedHistoryEventId(next);
@@ -261,6 +269,8 @@ export function useFilesystemUrlState(
     expiredSessionId,
     hideHomeOnly,
     targetPathFilter,
+    options.timeRange,
+    options.customDateRange,
     selectedHistoryEventId,
     navigationCoordinator,
   ]);
@@ -274,6 +284,10 @@ export function useFilesystemUrlState(
     setHideHomeOnly,
     targetPathFilter,
     setTargetPathFilter,
+    timeRange: options.timeRange,
+    setTimeRange: options.setTimeRange,
+    customDateRange: options.customDateRange,
+    setCustomDateRange: options.setCustomDateRange,
     selectedHistoryEventId,
     setSelectedHistoryEventId,
     expiredSessionId,

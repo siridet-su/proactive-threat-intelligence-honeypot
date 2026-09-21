@@ -164,6 +164,10 @@ export function FilesystemActivity() {
     applyInitialUrlState,
     navigationCoordinator,
   } = useFilesystemUrlState({
+    timeRange,
+    setTimeRange,
+    customDateRange,
+    setCustomDateRange,
     isHydrated,
     snapshot,
     extraAuditSessions,

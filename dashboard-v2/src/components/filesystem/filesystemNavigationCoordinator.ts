@@ -28,6 +28,9 @@ export interface NavigationStateCommitOptions {
   hideHome?: boolean;
   targetPath?: string | null;
   hop?: string | null;
+  timeRange?: string | null;
+  timeFrom?: number | null;
+  timeTo?: number | null;
 }
 
 export interface PopStateTransaction {
@@ -49,6 +52,10 @@ export interface NavigationUrlStateBindings {
   setHideHomeOnly: (hide: boolean) => void;
   getTargetPathFilter: () => string | null;
   setTargetPathFilter: (path: string | null) => void;
+  getTimeRange: () => string;
+  setTimeRange: (range: any) => void;
+  getCustomDateRange: () => any;
+  setCustomDateRange: (range: any) => void;
   getSelectedHistoryEventId: () => string | null;
   setSelectedHistoryEventId: (eventId: string | null) => void;
   getExpiredSessionId: () => string | null;
