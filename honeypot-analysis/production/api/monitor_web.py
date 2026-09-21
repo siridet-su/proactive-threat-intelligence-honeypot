@@ -2782,7 +2782,7 @@ def _dashboard_next_distinct_projection(
         if session_ended
         and has_data
         and prediction_status == "PREDICTED"
-        and freshness_state == "FRESH"
+        and freshness_state in {"FRESH", "FINAL"}
         and isinstance(freshness, dict)
         and freshness.get("history_manifest_match") is True
         else None
@@ -2859,7 +2859,7 @@ def _report_next_distinct_snapshot(
     report_status = prediction_status
     eligible = (
         prediction_status == "PREDICTED"
-        and freshness_state == "FRESH"
+        and freshness_state in {"FRESH", "FINAL"}
         and history_matches
     )
     if eligible and session_ended and state == "SESSION_ENDED":
