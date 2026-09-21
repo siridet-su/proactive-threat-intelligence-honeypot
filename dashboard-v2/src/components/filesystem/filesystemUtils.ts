@@ -1729,7 +1729,10 @@ export function areAuditUrlParamsEqual(
     (a.sessionId ?? null) === (b.sessionId ?? null) &&
     Boolean(a.hideHome) === Boolean(b.hideHome) &&
     (a.targetPath ?? null) === (b.targetPath ?? null) &&
-    (a.hop ?? null) === (b.hop ?? null)
+    (a.hop ?? null) === (b.hop ?? null) &&
+    (a.timeRange ?? "all") === (b.timeRange ?? "all") &&
+    (a.timeFrom ?? null) === (b.timeFrom ?? null) &&
+    (a.timeTo ?? null) === (b.timeTo ?? null)
   );
 }
 

@@ -804,6 +804,9 @@ export class FilesystemNavigationCoordinator {
         this.options.getViewMode() === "live"
           ? null
         : (this.options.getSelectedHistoryEventId() ?? this.options.getRequestedHop()),
+      timeRange: this.options.getTimeRange(),
+      timeFrom: this.options.getCustomDateRange()?.from?.getTime() ?? null,
+      timeTo: this.options.getCustomDateRange()?.to?.getTime() ?? null,
     };
 
     if (this.recoveredTransactionTarget) {
