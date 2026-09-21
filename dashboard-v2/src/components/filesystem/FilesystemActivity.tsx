@@ -610,23 +610,13 @@ export function FilesystemActivity() {
     [navigationCoordinator],
   );
 
-  const handleSelectTimeRange = useCallback((newTimeRange: TimeRangeFilter) => {
-    setTimeRange(newTimeRange);
+  const handleTimeFilterChange = useCallback((newTimeRange: TimeRangeFilter, newDateRange: DateRange | undefined) => {
     navigationCoordinator.commit({
       timeRange: newTimeRange,
-      timeFrom: customDateRange?.from?.getTime() ?? null,
-      timeTo: customDateRange?.to?.getTime() ?? null,
-    }, "push");
-  }, [navigationCoordinator, customDateRange]);
-
-  const handleSelectCustomDateRange = useCallback((newDateRange: DateRange | undefined) => {
-    setCustomDateRange(newDateRange);
-    navigationCoordinator.commit({
-      timeRange,
       timeFrom: newDateRange?.from?.getTime() ?? null,
       timeTo: newDateRange?.to?.getTime() ?? null,
     }, "push");
-  }, [navigationCoordinator, timeRange]);
+  }, [navigationCoordinator]);
 
   const handleToggleHideHomeOnly = useCallback(() => {
     navigationCoordinator.userToggleHideHome();
@@ -979,9 +969,10 @@ export function FilesystemActivity() {
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
                   timeRange={timeRange}
-                  onSelectTimeRange={handleSelectTimeRange}
+                  onSelectTimeRange={setTimeRange}
                   customDateRange={customDateRange}
-                  onSelectCustomDateRange={handleSelectCustomDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
+                  onTimeFilterChange={handleTimeFilterChange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}
@@ -1157,9 +1148,10 @@ export function FilesystemActivity() {
                   targetPath={targetPathFilter}
                   onSelectTargetPath={handleSelectTargetPath}
                   timeRange={timeRange}
-                  onSelectTimeRange={handleSelectTimeRange}
+                  onSelectTimeRange={setTimeRange}
                   customDateRange={customDateRange}
-                  onSelectCustomDateRange={handleSelectCustomDateRange}
+                  onSelectCustomDateRange={setCustomDateRange}
+                  onTimeFilterChange={handleTimeFilterChange}
                   distinctPaths={distinctPaths}
                   homeOnlyCount={homeOnlyCount}
                   filteredCount={filteredSessionsCount}

@@ -122,6 +122,7 @@ export interface AuditFilterControlsProps {
   onSelectTimeRange: (range: TimeRangeFilter) => void;
   customDateRange?: DateRange;
   onSelectCustomDateRange?: (range: DateRange | undefined) => void;
+  onTimeFilterChange?: (range: TimeRangeFilter, customDateRange: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
   filteredCount: number;
@@ -166,6 +167,7 @@ export function AuditFilterControls({
   onSelectTimeRange,
   customDateRange,
   onSelectCustomDateRange,
+  onTimeFilterChange,
   distinctPaths,
   homeOnlyCount,
   filteredCount,
@@ -327,9 +329,10 @@ export function AuditFilterControls({
     setSelectionStart(null);
     onSelectTimeRange(draftTimeRange);
     onSelectCustomDateRange?.(finalRange);
+    onTimeFilterChange?.(draftTimeRange, finalRange);
     setTimeDropdownOpen(false);
     timeTriggerRef.current?.focus();
-  }, [draftTimeRange, draftRange, hasCustomTime, onSelectTimeRange, onSelectCustomDateRange]);
+  }, [draftTimeRange, draftRange, hasCustomTime, onSelectTimeRange, onSelectCustomDateRange, onTimeFilterChange]);
 
   const handleSwitchToTime = useCallback(() => {
     const now = new Date();
@@ -357,7 +360,8 @@ export function AuditFilterControls({
     setSelectionStart(null);
     onSelectTimeRange("all");
     onSelectCustomDateRange?.(undefined);
-  }, [onSelectTimeRange, onSelectCustomDateRange]);
+    onTimeFilterChange?.("all", undefined);
+  }, [onSelectTimeRange, onSelectCustomDateRange, onTimeFilterChange]);
 
   const hasActiveFilters = hideHomeOnly || targetPath !== null || timeRange !== "all";
 

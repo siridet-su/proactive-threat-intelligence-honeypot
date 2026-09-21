@@ -255,6 +255,18 @@ export class FilesystemNavigationCoordinator {
           ? updates.targetPath
           : this.options.getTargetPathFilter(),
       hop: targetHop,
+      timeRange:
+        updates.timeRange !== undefined
+          ? updates.timeRange
+          : this.options.getTimeRange(),
+      timeFrom:
+        updates.timeFrom !== undefined
+          ? updates.timeFrom
+          : this.options.getCustomDateRange()?.from?.getTime() ?? null,
+      timeTo:
+        updates.timeTo !== undefined
+          ? updates.timeTo
+          : this.options.getCustomDateRange()?.to?.getTime() ?? null,
     };
 
     const currentSearch = window.location.search;
