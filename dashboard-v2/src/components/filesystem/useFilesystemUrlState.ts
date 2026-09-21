@@ -75,6 +75,10 @@ export interface UseFilesystemUrlStateReturn {
   setHideHomeOnly: React.Dispatch<React.SetStateAction<boolean>>;
   targetPathFilter: string | null;
   setTargetPathFilter: React.Dispatch<React.SetStateAction<string | null>>;
+  timeRange?: string;
+  setTimeRange?: (range: any) => void;
+  customDateRange?: any;
+  setCustomDateRange?: (range: any) => void;
   selectedHistoryEventId: string | null;
   setSelectedHistoryEventId: React.Dispatch<React.SetStateAction<string | null>>;
   expiredSessionId: string | null;
