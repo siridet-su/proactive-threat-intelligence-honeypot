@@ -628,6 +628,24 @@ export function FilesystemActivity() {
     [navigationCoordinator],
   );
 
+  const handleSelectTimeRange = useCallback((newTimeRange: TimeRangeFilter) => {
+    setTimeRange(newTimeRange);
+    navigationCoordinator.commit({
+      timeRange: newTimeRange,
+      timeFrom: customDateRange?.from?.getTime() ?? null,
+      timeTo: customDateRange?.to?.getTime() ?? null,
+    }, "push");
+  }, [navigationCoordinator, customDateRange]);
+
+  const handleSelectCustomDateRange = useCallback((newDateRange: DateRange | undefined) => {
+    setCustomDateRange(newDateRange);
+    navigationCoordinator.commit({
+      timeRange,
+      timeFrom: newDateRange?.from?.getTime() ?? null,
+      timeTo: newDateRange?.to?.getTime() ?? null,
+    }, "push");
+  }, [navigationCoordinator, timeRange]);
+
   const handleToggleHideHomeOnly = useCallback(() => {
     navigationCoordinator.userToggleHideHome();
   }, [navigationCoordinator]);
