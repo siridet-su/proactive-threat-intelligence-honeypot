@@ -1179,12 +1179,14 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       expect(fetchedUrls[1]).not.toContain("to=");
     });
 
-    it("retains active from and to time scope across search pagination requests", async () => {
+    it("paginates successfully and preserves scopes across bound variations with exact URL assertions", async () => {
       const requestedUrls: string[] = [];
       const mockFetch: typeof fetch = async (input) => {
         const url = String(input);
         requestedUrls.push(url);
-        if (url.includes("cursor=page-1-search-cursor")) {
+        const parsed = new URL(url, "http://localhost");
+        const cursor = parsed.searchParams.get("cursor");
+        if (cursor) {
           return {
             ok: true,
             json: async () => ({
@@ -1198,7 +1200,7 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
           ok: true,
           json: async () => ({
             items: [createClosedSession("search-sess-p1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
-            nextCursor: "page-1-search-cursor",
+            nextCursor: "cursor-p1",
             totalItems: 2,
           }),
         } as Response;
@@ -1206,52 +1208,134 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
 
       const store = createAuditDirectoryStore({ fetchFn: mockFetch });
 
-      // Initial search page 1 with time scope
+      // 1. loadMoreSearch() without an options argument preserves a bounded stored scope
+      requestedUrls.length = 0;
       await store.searchSessions("payload", null, {
         hideHome: true,
         targetPath: "/tmp",
         from: 1710000000000,
         to: 1710086400000,
       });
-      expect(store.getState().searchCursor).toBe("page-1-search-cursor");
-
-      // Load more without explicit arguments (relies on stored scope retention)
+      expect(store.getState().searchCursor).toBe("cursor-p1");
       await store.loadMoreSearch();
 
       expect(requestedUrls.length).toBe(2);
-      const page2Url = requestedUrls[1];
-      expect(page2Url).toContain("q=payload");
-      expect(page2Url).toContain("cursor=page-1-search-cursor");
-      expect(page2Url).toContain("hideHome=1");
-      expect(page2Url).toContain("targetPath=%2Ftmp");
-      expect(page2Url).toContain("from=1710000000000");
-      expect(page2Url).toContain("to=1710086400000");
+      const p1Url = new URL(requestedUrls[0], "http://localhost");
+      const p2Url = new URL(requestedUrls[1], "http://localhost");
+
+      expect(p1Url.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(p1Url.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(p1Url.searchParams.getAll("cursor")).toEqual([]);
+
+      expect(p2Url.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(p2Url.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(p2Url.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+      expect(p2Url.searchParams.get("from")).toBe(p1Url.searchParams.get("from"));
+      expect(p2Url.searchParams.get("to")).toBe(p1Url.searchParams.get("to"));
+      expect(p2Url.searchParams.get("hideHome")).toBe("1");
+      expect(p2Url.searchParams.get("targetPath")).toBe("/tmp");
       expect(store.getState().searchItems.length).toBe(2);
       expect(store.getState().searchCursor).toBeNull();
       expect(store.getState().searchHasMore).toBe(false);
       expect(store.getState().searchIsComplete).toBe(true);
 
-      // Verify that calling loadMoreSearch with explicit matching options also succeeds and preserves scope
+      // 2. a fully matching explicit options object paginates successfully
+      requestedUrls.length = 0;
       await store.searchSessions("payload", null, {
         hideHome: true,
         targetPath: "/tmp",
         from: 1710000000000,
         to: 1710086400000,
       });
-      expect(store.getState().searchCursor).toBe("page-1-search-cursor");
-
       await store.loadMoreSearch({
         hideHome: true,
         targetPath: "/tmp",
         from: 1710000000000,
         to: 1710086400000,
       });
-      const page2ExplicitUrl = requestedUrls[requestedUrls.length - 1];
-      expect(page2ExplicitUrl).toContain("from=1710000000000");
-      expect(page2ExplicitUrl).toContain("to=1710086400000");
+      expect(requestedUrls.length).toBe(2);
+      const matchingP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(matchingP2.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(matchingP2.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(matchingP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 3. from-only scope remains from-only on page 2 (both no options and matching options)
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 1710000000000,
+      });
+      await store.loadMoreSearch();
+      expect(requestedUrls.length).toBe(2);
+      const fromOnlyP1 = new URL(requestedUrls[0], "http://localhost");
+      const fromOnlyP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(fromOnlyP1.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(fromOnlyP1.searchParams.getAll("to")).toEqual([]);
+      expect(fromOnlyP2.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(fromOnlyP2.searchParams.getAll("to")).toEqual([]);
+      expect(fromOnlyP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 4. to-only scope remains to-only on page 2
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        to: 1710086400000,
+      });
+      await store.loadMoreSearch({
+        hideHome: false,
+        targetPath: null,
+        to: 1710086400000,
+      });
+      expect(requestedUrls.length).toBe(2);
+      const toOnlyP1 = new URL(requestedUrls[0], "http://localhost");
+      const toOnlyP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(toOnlyP1.searchParams.getAll("from")).toEqual([]);
+      expect(toOnlyP1.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(toOnlyP2.searchParams.getAll("from")).toEqual([]);
+      expect(toOnlyP2.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(toOnlyP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 5. unbounded scope remains unbounded
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+      });
+      await store.loadMoreSearch({
+        hideHome: false,
+        targetPath: null,
+      });
+      expect(requestedUrls.length).toBe(2);
+      const unbP1 = new URL(requestedUrls[0], "http://localhost");
+      const unbP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(unbP1.searchParams.getAll("from")).toEqual([]);
+      expect(unbP1.searchParams.getAll("to")).toEqual([]);
+      expect(unbP2.searchParams.getAll("from")).toEqual([]);
+      expect(unbP2.searchParams.getAll("to")).toEqual([]);
+      expect(unbP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 6. numeric zero remains a valid bound
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 0,
+        to: 1000,
+      });
+      await store.loadMoreSearch();
+      expect(requestedUrls.length).toBe(2);
+      const zeroP1 = new URL(requestedUrls[0], "http://localhost");
+      const zeroP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(zeroP1.searchParams.getAll("from")).toEqual(["0"]);
+      expect(zeroP1.searchParams.getAll("to")).toEqual(["1000"]);
+      expect(zeroP2.searchParams.getAll("from")).toEqual(["0"]);
+      expect(zeroP2.searchParams.getAll("to")).toEqual(["1000"]);
+      expect(zeroP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
     });
 
-    it("rejects mismatched from or to time scope on loadMoreSearch and clears search state", async () => {
+    it("rejects all scope mismatch variations on loadMoreSearch, clears search state, and sends no cursor", async () => {
       const requestedUrls: string[] = [];
       const mockFetch: typeof fetch = async (input) => {
         requestedUrls.push(String(input));
@@ -1267,56 +1351,54 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
 
       const store = createAuditDirectoryStore({ fetchFn: mockFetch });
 
-      // Search page 1 under scope with from: 1000, to: 2000
-      await store.searchSessions("exploit", null, {
-        hideHome: false,
-        targetPath: null,
-        from: 1000,
-        to: 2000,
-      });
-      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
-      expect(requestedUrls.length).toBe(1);
+      const setupPage1 = async (scope: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number }) => {
+        requestedUrls.length = 0;
+        await store.searchSessions("exploit", null, scope);
+        expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+        expect(requestedUrls.length).toBe(1);
+      };
 
-      // Attempt to loadMoreSearch with a DIFFERENT 'from' timestamp
-      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 9999, to: 2000 });
+      const assertRejected = () => {
+        const cursorRequests = requestedUrls.slice(1).filter((u) => {
+          const params = new URL(u, "http://localhost").searchParams;
+          return params.has("cursor");
+        });
+        expect(cursorRequests).toEqual([]);
+        expect(store.getState().searchCursor).toBeNull();
+        expect(store.getState().searchQuery).toBe("");
+        expect(store.getState().searchItems).toEqual([]);
+        expect(store.getState().searchScopeKey).toBe("");
+      };
 
-      // Cursor must NOT have been sent with mismatched 'from'
-      const invalidFromUrl = requestedUrls.find((u) => u.includes("cursor=cursor-time-scope-1") && u.includes("from=9999"));
-      expect(invalidFromUrl).toBeUndefined();
-      // Search state must be reset
-      expect(store.getState().searchCursor).toBeNull();
-      expect(store.getState().searchQuery).toBe("");
-      expect(store.getState().searchItems).toEqual([]);
+      // 1. bounded stored scope → explicitly unbounded current scope ({ from: undefined, to: undefined })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: undefined, to: undefined });
+      assertRejected();
 
-      // Now test mismatch with 'to'
-      await store.searchSessions("exploit", null, {
-        hideHome: false,
-        targetPath: null,
-        from: 1000,
-        to: 2000,
-      });
-      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+      // 2. bounded stored scope → removal of only from ({ from: undefined, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: undefined, to: 2000 });
+      assertRejected();
 
-      // Attempt to loadMoreSearch with a DIFFERENT 'to' timestamp
-      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 8888 });
+      // 3. bounded stored scope → removal of only to ({ from: 1000, to: undefined })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: undefined });
+      assertRejected();
 
-      const invalidToUrl = requestedUrls.find((u) => u.includes("cursor=cursor-time-scope-1") && u.includes("to=8888"));
-      expect(invalidToUrl).toBeUndefined();
-      expect(store.getState().searchCursor).toBeNull();
-      expect(store.getState().searchQuery).toBe("");
-      expect(store.getState().searchItems).toEqual([]);
-
-      // Test mismatch when stored search had NO time scope and loadMoreSearch provides from
-      await store.searchSessions("exploit", null, {
-        hideHome: false,
-        targetPath: null,
-      });
-      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
-
+      // 4. unbounded stored scope → bounded current scope ({ from: 1000, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null });
       await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
-      expect(store.getState().searchCursor).toBeNull();
-      expect(store.getState().searchQuery).toBe("");
-      expect(store.getState().searchItems).toEqual([]);
+      assertRejected();
+
+      // 5. different numeric from ({ from: 9999, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 9999, to: 2000 });
+      assertRejected();
+
+      // 6. different numeric to ({ from: 1000, to: 8888 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 8888 });
+      assertRejected();
     });
 
     it("protects against out-of-order search responses across different time ranges for the same query", async () => {

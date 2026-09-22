@@ -329,8 +329,9 @@ Primary files:
 Implementation:
 
 - Canonical search URL propagation: Forwarded `from` and `to` into `buildAuditSessionsUrl` within `searchSessions` in `useAuditDirectory.ts` whenever `filterOptions` provides them (mirroring `fetchInitial`), ensuring initial queries, debounced searches, and pagination calls include canonical `from`/`to` parameters when active.
-- Pagination scope retention: Updated `loadMoreSearch` to extract canonical scope from `parseAuditScopeKey(state.searchScopeKey)` and forward `from` and `to` into `searchSessions`. If explicit `filterOptions` are provided, any omitted or partial parameters gracefully fall back to the stored search scope so pagination requests never drop time bounds.
-- Scope mismatch rejection and state reset: `loadMoreSearch` strictly validates requested filters against the stored scope key (including `from` and `to` timestamps). If any parameter differs from stored scope, it rejects the stale cursor, calls `clearSearch()`, and prevents issuing a corrupted page-2 query.
+- Two explicit pagination modes:
+  - No options argument (`loadMoreSearch()`): Continues using the exact stored canonical page-1 scope (`hideHome`, `targetPath`, `from`, `to`) parsed from `state.searchScopeKey`.
+  - Options object supplied (`loadMoreSearch(options)`): Represents the complete current UI scope. Constructs a full canonical scope key via `createAuditScopeKey({ q: state.searchQuery, hideHome: Boolean(options.hideHome), targetPath: options.targetPath ?? null, from: options.from, to: options.to })` and compares it directly against `state.searchScopeKey`. If any property differs (including bounded ↔ unbounded transitions where `from`/`to` are `undefined`), it rejects the stale cursor, calls `clearSearch()`, and sends no cursor request.
 - Out-of-order response safety: Existing AbortController signals and `searchGeneration` counter guards protect against out-of-order responses across different time ranges for the same query text. Stale responses from prior scopes or ranges are safely discarded before touching store state.
 - Scope change cleanup: Any initial scope change via `fetchInitial` (including time range changes) aborts any in-flight search and resets search state.
 
@@ -339,7 +340,9 @@ Acceptance:
 - URL ของทุก search page มี `from` และ `to` เมื่อ filter active (PASS)
 - เปลี่ยน time range ระหว่าง request แล้ว response เก่าไม่เขียนทับผลใหม่ (PASS)
 - load-more ต่อ cursor ภายใต้ scope เดิมเท่านั้น (PASS)
-- load-more reject mismatched time scopes และ clear search state (PASS)
+- load-more reject mismatched time scopes และ clear search state โดยไม่ส่ง old cursor (PASS)
+- load-more with options object ถือเป็น complete current scope; bounded ↔ unbounded transition ถูก reject และ reset (PASS)
+- load-more without arguments ใช้ exact stored canonical scope อย่างถูกต้อง (PASS)
 - generation guard ป้องกัน out-of-order responses จากต่างช่วงเวลา (PASS)
 
 Verification:
