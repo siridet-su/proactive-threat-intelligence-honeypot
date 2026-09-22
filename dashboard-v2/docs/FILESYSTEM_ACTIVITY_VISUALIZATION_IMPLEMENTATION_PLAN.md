@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-003` — Propagate time scope through search pagination**
+Current focus: **`FSV-004` — Define retained time and count semantics**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -319,23 +319,38 @@ Verification:
 
 #### `FSV-003` Propagate time scope through search pagination
 
+Status: **DONE — 2026-09-22**
+
 Primary files:
 
 - `src/components/filesystem/useAuditDirectory.ts`
-- API/request helper ที่สร้าง audit-directory URL
 - `tests/filesystem-audit-directory.test.ts`
 
 Implementation:
 
-- initial search, debounced search, retry และ load-more ส่ง canonical `from/to` ชุดเดียวกัน
-- generation/abort guards เดิมต้องยังป้องกัน stale response
-- cache/in-flight identity ต้องรวม time scope เพื่อไม่ reuse ผลต่างช่วงเวลา
+- Canonical search URL propagation: Forwarded `from` and `to` into `buildAuditSessionsUrl` within `searchSessions` in `useAuditDirectory.ts` whenever `filterOptions` provides them (mirroring `fetchInitial`), ensuring initial queries, debounced searches, and pagination calls include canonical `from`/`to` parameters when active.
+- Pagination scope retention: Updated `loadMoreSearch` to extract canonical scope from `parseAuditScopeKey(state.searchScopeKey)` and forward `from` and `to` into `searchSessions`. If explicit `filterOptions` are provided, any omitted or partial parameters gracefully fall back to the stored search scope so pagination requests never drop time bounds.
+- Scope mismatch rejection and state reset: `loadMoreSearch` strictly validates requested filters against the stored scope key (including `from` and `to` timestamps). If any parameter differs from stored scope, it rejects the stale cursor, calls `clearSearch()`, and prevents issuing a corrupted page-2 query.
+- Out-of-order response safety: Existing AbortController signals and `searchGeneration` counter guards protect against out-of-order responses across different time ranges for the same query text. Stale responses from prior scopes or ranges are safely discarded before touching store state.
+- Scope change cleanup: Any initial scope change via `fetchInitial` (including time range changes) aborts any in-flight search and resets search state.
 
 Acceptance:
 
-- URL ของทุก search page มี `from` และ `to` เมื่อ filter active
-- เปลี่ยน time range ระหว่าง request แล้ว response เก่าไม่เขียนทับผลใหม่
-- load-more ต่อ cursor ภายใต้ scope เดิมเท่านั้น
+- URL ของทุก search page มี `from` และ `to` เมื่อ filter active (PASS)
+- เปลี่ยน time range ระหว่าง request แล้ว response เก่าไม่เขียนทับผลใหม่ (PASS)
+- load-more ต่อ cursor ภายใต้ scope เดิมเท่านั้น (PASS)
+- load-more reject mismatched time scopes และ clear search state (PASS)
+- generation guard ป้องกัน out-of-order responses จากต่างช่วงเวลา (PASS)
+
+Verification:
+
+- `npx vitest run tests/filesystem-audit-directory.test.ts`: **PASSED** (37/37 tests)
+- `npx vitest run tests/filesystem-phase0-baseline.test.ts tests/filesystem-coverage-expansion.test.ts tests/filesystem-audit-filter.test.ts tests/filesystem-audit-directory.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/filesystem-audit-coverage.test.ts tests/fa013-component-evidence.test.tsx`: **PASSED** (106/106 tests)
+- `npm test`: **PASSED**
+- `npm run lint`: **PASSED**
+- `npm run build -- --webpack`: **PASSED**
+- Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)
+- FSV-004 and later work confirmation: FSV-004 through FSV-013 remain completely untouched. Checkpoint 1 remains `IN_PROGRESS`.
 
 #### `FSV-004` Define retained time and count semantics
 

@@ -717,6 +717,8 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         limit: 25,
         hideHome,
         targetPath,
+        from: filterOptions?.from,
+        to: filterOptions?.to,
       });
 
       const res = await fetcher(url, { cache: "no-store", signal });
@@ -762,21 +764,34 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
 
     // loadMoreSearch must either use the exact stored search scope or reject/reset when the current scope differs.
     if (filterOptions) {
-      const requestedHideHome = Boolean(filterOptions.hideHome);
-      const requestedTargetPath = filterOptions.targetPath ?? null;
+      const requestedHideHome = filterOptions.hideHome !== undefined ? Boolean(filterOptions.hideHome) : undefined;
+      const requestedTargetPath = filterOptions.targetPath !== undefined ? filterOptions.targetPath : undefined;
+      const requestedFrom = filterOptions.from !== undefined ? (filterOptions.from ?? undefined) : undefined;
+      const requestedTo = filterOptions.to !== undefined ? (filterOptions.to ?? undefined) : undefined;
+
       if (
-        requestedHideHome !== parsed.hideHome ||
-        normalizeAuditScopeTargetPath(requestedTargetPath) !== normalizeAuditScopeTargetPath(parsed.targetPath)
+        (requestedHideHome !== undefined && requestedHideHome !== parsed.hideHome) ||
+        (requestedTargetPath !== undefined &&
+          normalizeAuditScopeTargetPath(requestedTargetPath) !== normalizeAuditScopeTargetPath(parsed.targetPath)) ||
+        (requestedFrom !== undefined && requestedFrom !== parsed.from) ||
+        (requestedTo !== undefined && requestedTo !== parsed.to)
       ) {
         clearSearch();
         return;
       }
     }
 
+    const effectiveHideHome = filterOptions?.hideHome !== undefined ? Boolean(filterOptions.hideHome) : parsed.hideHome;
+    const effectiveTargetPath = filterOptions?.targetPath !== undefined ? filterOptions.targetPath : parsed.targetPath;
+    const effectiveFrom = filterOptions?.from !== undefined ? filterOptions.from : parsed.from;
+    const effectiveTo = filterOptions?.to !== undefined ? filterOptions.to : parsed.to;
+
     // Always use the exact stored search scope
     return searchSessions(state.searchQuery, state.searchCursor, {
-      hideHome: parsed.hideHome,
-      targetPath: parsed.targetPath,
+      hideHome: effectiveHideHome,
+      targetPath: effectiveTargetPath,
+      from: effectiveFrom,
+      to: effectiveTo,
     });
   };
 

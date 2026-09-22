@@ -1139,4 +1139,279 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       }
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Suite G: FSV-003 Time Scope Propagation Through Search and Pagination
+  // ---------------------------------------------------------------------------
+  describe("Suite G: FSV-003 Time Scope Propagation Through Search and Pagination", () => {
+    it("includes canonical from and to query parameters in search URL when supplied, and omits them when absent", async () => {
+      const fetchedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        fetchedUrls.push(String(input));
+        return {
+          ok: true,
+          json: async () => ({ items: [], nextCursor: null, totalItems: 0 }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // 1. Search with from and to
+      await store.searchSessions("incident", null, {
+        hideHome: true,
+        targetPath: "/var/log",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+
+      expect(fetchedUrls.length).toBe(1);
+      expect(fetchedUrls[0]).toContain("q=incident");
+      expect(fetchedUrls[0]).toContain("hideHome=1");
+      expect(fetchedUrls[0]).toContain("targetPath=%2Fvar%2Flog");
+      expect(fetchedUrls[0]).toContain("from=1710000000000");
+      expect(fetchedUrls[0]).toContain("to=1710086400000");
+
+      // 2. Search without from and to
+      await store.searchSessions("another", null, { hideHome: false });
+      expect(fetchedUrls.length).toBe(2);
+      expect(fetchedUrls[1]).toContain("q=another");
+      expect(fetchedUrls[1]).not.toContain("from=");
+      expect(fetchedUrls[1]).not.toContain("to=");
+    });
+
+    it("retains active from and to time scope across search pagination requests", async () => {
+      const requestedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.includes("cursor=page-1-search-cursor")) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("search-sess-p2", "2026-09-16T07:00:00.000Z", ["/tmp"], false)],
+              nextCursor: null,
+              totalItems: 2,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("search-sess-p1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+            nextCursor: "page-1-search-cursor",
+            totalItems: 2,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Initial search page 1 with time scope
+      await store.searchSessions("payload", null, {
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      expect(store.getState().searchCursor).toBe("page-1-search-cursor");
+
+      // Load more without explicit arguments (relies on stored scope retention)
+      await store.loadMoreSearch();
+
+      expect(requestedUrls.length).toBe(2);
+      const page2Url = requestedUrls[1];
+      expect(page2Url).toContain("q=payload");
+      expect(page2Url).toContain("cursor=page-1-search-cursor");
+      expect(page2Url).toContain("hideHome=1");
+      expect(page2Url).toContain("targetPath=%2Ftmp");
+      expect(page2Url).toContain("from=1710000000000");
+      expect(page2Url).toContain("to=1710086400000");
+      expect(store.getState().searchItems.length).toBe(2);
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchHasMore).toBe(false);
+      expect(store.getState().searchIsComplete).toBe(true);
+
+      // Verify that calling loadMoreSearch with explicit matching options also succeeds and preserves scope
+      await store.searchSessions("payload", null, {
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      expect(store.getState().searchCursor).toBe("page-1-search-cursor");
+
+      await store.loadMoreSearch({
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      const page2ExplicitUrl = requestedUrls[requestedUrls.length - 1];
+      expect(page2ExplicitUrl).toContain("from=1710000000000");
+      expect(page2ExplicitUrl).toContain("to=1710086400000");
+    });
+
+    it("rejects mismatched from or to time scope on loadMoreSearch and clears search state", async () => {
+      const requestedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        requestedUrls.push(String(input));
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("search-sess-p1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+            nextCursor: "cursor-time-scope-1",
+            totalItems: 5,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Search page 1 under scope with from: 1000, to: 2000
+      await store.searchSessions("exploit", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 1000,
+        to: 2000,
+      });
+      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+      expect(requestedUrls.length).toBe(1);
+
+      // Attempt to loadMoreSearch with a DIFFERENT 'from' timestamp
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 9999, to: 2000 });
+
+      // Cursor must NOT have been sent with mismatched 'from'
+      const invalidFromUrl = requestedUrls.find((u) => u.includes("cursor=cursor-time-scope-1") && u.includes("from=9999"));
+      expect(invalidFromUrl).toBeUndefined();
+      // Search state must be reset
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+
+      // Now test mismatch with 'to'
+      await store.searchSessions("exploit", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 1000,
+        to: 2000,
+      });
+      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+
+      // Attempt to loadMoreSearch with a DIFFERENT 'to' timestamp
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 8888 });
+
+      const invalidToUrl = requestedUrls.find((u) => u.includes("cursor=cursor-time-scope-1") && u.includes("to=8888"));
+      expect(invalidToUrl).toBeUndefined();
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+
+      // Test mismatch when stored search had NO time scope and loadMoreSearch provides from
+      await store.searchSessions("exploit", null, {
+        hideHome: false,
+        targetPath: null,
+      });
+      expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+    });
+
+    it("protects against out-of-order search responses across different time ranges for the same query", async () => {
+      let resolveRangeA!: (value: Response) => void;
+      const rangeAPromise = new Promise<Response>((resolve) => {
+        resolveRangeA = resolve;
+      });
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        const params = new URL(url, "http://localhost").searchParams;
+        if (params.get("from") === "1000" && params.get("to") === "2000") {
+          return rangeAPromise;
+        }
+        if (params.get("from") === "3000" && params.get("to") === "4000") {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("sess-range-b", "2026-09-16T08:00:00.000Z", ["/opt"], false)],
+              nextCursor: null,
+              totalItems: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Trigger search in Range A (from: 1000, to: 2000)
+      const callA = store.searchSessions("target", null, { from: 1000, to: 2000 });
+
+      // Trigger search in Range B (from: 3000, to: 4000) which resolves quickly
+      await store.searchSessions("target", null, { from: 3000, to: 4000 });
+
+      // Verify Range B's results are active
+      expect(store.getState().searchQuery).toBe("target");
+      expect(store.getState().searchScopeKey).toBe(createAuditScopeKey({ q: "target", from: 3000, to: 4000 }));
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-range-b"]);
+
+      // Late resolution of Range A
+      resolveRangeA({
+        ok: true,
+        json: async () => ({
+          items: [createClosedSession("sess-range-a-stale", "2026-09-16T08:00:00.000Z", ["/opt"], false)],
+          nextCursor: null,
+          totalItems: 1,
+        }),
+      } as Response);
+      await callA;
+
+      // Stale Range A response must be discarded by generation guard
+      expect(store.getState().searchQuery).toBe("target");
+      expect(store.getState().searchScopeKey).toBe(createAuditScopeKey({ q: "target", from: 3000, to: 4000 }));
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-range-b"]);
+    });
+
+    it("aborts in-flight search and clears search state when initial directory fetch changes time range", async () => {
+      let searchAborted = false;
+      const mockFetch: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.includes("q=")) {
+          const signal = init?.signal as AbortSignal | undefined;
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              searchAborted = true;
+            });
+          }
+          return new Promise(() => {}); // never resolves
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            items: [],
+            nextCursor: null,
+            totalItems: 0,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Start search under time range A
+      void store.searchSessions("attacker", null, { from: 1000, to: 2000 });
+      expect(store.getState().searchIsLoading).toBe(true);
+
+      // Time range filter changes: fetchInitial for time range B
+      await store.fetchInitial({ from: 3000, to: 4000 });
+
+      // In-flight search must be aborted and cleared
+      expect(searchAborted).toBe(true);
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+      expect(store.getState().searchIsLoading).toBe(false);
+      expect(store.getState().searchCursor).toBeNull();
+    });
+  });
 });
