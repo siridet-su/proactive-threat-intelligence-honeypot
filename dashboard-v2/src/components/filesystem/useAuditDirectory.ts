@@ -287,7 +287,6 @@ export function deriveAuthoritativeAuditMetrics({
   summaryScopeKey,
   currentScopeKey,
   summaryStatus = "success",
-  auditDirectoryTotalCount,
   hideHomeOnly = false,
   targetPathFilter = null,
   selectedSessionId = null,
@@ -427,19 +426,40 @@ export function deriveAuthoritativeAuditMetrics({
     retainedMatchingCount = null;
   } else if (isScopeMatch && summary) {
     // Authoritative server summary matching current scope
-    retainedTotalCount =
-      (typeof summary.totalSessions === "number" ? summary.totalSessions : null) ??
-      (typeof auditDirectoryTotalCount === "number" && auditDirectoryTotalCount > 0
-        ? auditDirectoryTotalCount
-        : null);
+    const rawTotal =
+      typeof summary.totalSessions === "number" &&
+      Number.isFinite(summary.totalSessions) &&
+      summary.totalSessions >= 0
+        ? summary.totalSessions
+        : null;
+
+    if (rawTotal !== null && rawTotal >= retainedLoadedCount) {
+      retainedTotalCount = rawTotal;
+    } else {
+      retainedTotalCount = null;
+    }
 
     let derivedMatching: number | null = null;
     if (targetPathFilter) {
-      derivedMatching = typeof summary.matchingCount === "number" ? summary.matchingCount : null;
+      derivedMatching =
+        typeof summary.matchingCount === "number" &&
+        Number.isFinite(summary.matchingCount) &&
+        summary.matchingCount >= 0
+          ? summary.matchingCount
+          : null;
     } else if (hideHomeOnly) {
-      if (typeof summary.totalSessions === "number" && typeof summary.homeOnlyCount === "number") {
+      if (
+        typeof summary.totalSessions === "number" &&
+        Number.isFinite(summary.totalSessions) &&
+        typeof summary.homeOnlyCount === "number" &&
+        Number.isFinite(summary.homeOnlyCount)
+      ) {
         derivedMatching = Math.max(0, summary.totalSessions - summary.homeOnlyCount);
-      } else if (typeof summary.matchingCount === "number") {
+      } else if (
+        typeof summary.matchingCount === "number" &&
+        Number.isFinite(summary.matchingCount) &&
+        summary.matchingCount >= 0
+      ) {
         derivedMatching = summary.matchingCount;
       } else {
         derivedMatching = null;
@@ -447,12 +467,18 @@ export function deriveAuthoritativeAuditMetrics({
     } else {
       // Neither hideHomeOnly nor targetPathFilter is active (unbounded or time-only scope):
       // summary.totalSessions is the matching count for this time scope!
-      derivedMatching = typeof summary.totalSessions === "number" ? summary.totalSessions : null;
+      derivedMatching = rawTotal;
     }
 
     // Contradiction check: fail closed if server matching count is smaller than loaded matching count
-    if (derivedMatching !== null && derivedMatching < retainedLoadedCount) {
+    // or if totalSessions is smaller than loaded matching count
+    if (
+      derivedMatching === null ||
+      derivedMatching < retainedLoadedCount ||
+      (rawTotal !== null && rawTotal < retainedLoadedCount)
+    ) {
       retainedMatchingCount = null;
+      retainedTotalCount = null;
       retainedCountStatus = "loaded-only";
     } else {
       retainedMatchingCount = derivedMatching;
@@ -461,7 +487,7 @@ export function deriveAuthoritativeAuditMetrics({
   } else if (isDirectoryComplete) {
     // Complete directory loaded for this scope
     retainedMatchingCount = retainedLoadedCount;
-    retainedTotalCount = effectiveClosedSessions.length;
+    retainedTotalCount = (hideHomeOnly || targetPathFilter !== null) ? null : retainedLoadedCount;
     retainedCountStatus = "authoritative";
   } else {
     retainedMatchingCount = null;
@@ -1091,4 +1117,45 @@ export function useAuditDirectory({
         ? storeState.summary?.totalSessions
         : null) ?? storeState.directoryItems.length,
   };
+}
+
+export interface FormatRetainedSubtitleCoverageOptions {
+  retainedMatchingCount: number | null | undefined;
+  retainedLoadedCount: number;
+  retainedCountStatus?: RetainedCountStatus;
+  isSelectedFilteredOut: boolean;
+  hasActiveFilters: boolean;
+  coverageWording: string;
+}
+
+export function formatRetainedSubtitleCoverage({
+  retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus = "loaded-only",
+  isSelectedFilteredOut,
+  hasActiveFilters,
+  coverageWording,
+}: FormatRetainedSubtitleCoverageOptions): string {
+  if (!hasActiveFilters) {
+    return coverageWording;
+  }
+
+  if (retainedMatchingCount === 0 && retainedCountStatus === "authoritative") {
+    return `0 retained sessions match filter. This session is pinned outside the result set. ${coverageWording}`;
+  }
+
+  if (isSelectedFilteredOut) {
+    if (typeof retainedMatchingCount === "number" && retainedCountStatus === "authoritative") {
+      const loadedDisclose =
+        retainedLoadedCount < retainedMatchingCount
+          ? ` (${retainedMatchingCount} matching retained session${retainedMatchingCount === 1 ? "" : "s"} available · ${retainedLoadedCount} loaded)`
+          : ` (${retainedMatchingCount} matching retained session${retainedMatchingCount === 1 ? "" : "s"} available)`;
+      return `This session is pinned outside the active filter criteria${loadedDisclose}. ${coverageWording}`;
+    }
+
+    const statusSuffix = retainedCountStatus === "loading" ? "loading" : "unavailable";
+    return `This session is pinned outside the active filter criteria (${retainedLoadedCount} retained session${retainedLoadedCount === 1 ? "" : "s"} loaded; exact match count ${statusSuffix}). ${coverageWording}`;
+  }
+
+  return coverageWording;
 }

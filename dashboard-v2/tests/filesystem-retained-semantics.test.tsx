@@ -11,6 +11,7 @@ MotionGlobalConfig.skipAnimations = true;
 import {
   deriveAuthoritativeAuditMetrics,
   createAuditScopeKey,
+  formatRetainedSubtitleCoverage,
 } from "../src/components/filesystem/useAuditDirectory";
 import {
   AuditFilterControls,
@@ -561,6 +562,380 @@ describe("FSV-004: Retained time and count semantics", () => {
       const metaActNull = formatSessionMetadata(nullActive);
       expect(metaActNull.timeStr).toBe("Last observed unavailable");
       expect(metaActNull.timeStr).not.toContain("Invalid Date");
+    });
+  });
+
+function fireInputChange(input: HTMLInputElement, value: string) {
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLInputElement.prototype,
+    "value",
+  )?.set;
+  if (nativeInputValueSetter) {
+    nativeInputValueSetter.call(input, value);
+  } else {
+    input.value = value;
+  }
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+  describe("F. Audit correction: Evidence states and scope isolation", () => {
+    let container: HTMLDivElement;
+    let root: Root;
+
+    beforeEach(() => {
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      root = createRoot(container);
+    });
+
+    afterEach(() => {
+      act(() => {
+        root.unmount();
+      });
+      container.remove();
+    });
+
+    it("1. Notice with retainedMatchingCount=null, retainedLoadedCount=0, status=loading must not contain '0 retained sessions match'", () => {
+      const activeSession = createActiveSession("act-1", "2026-09-20T10:00:00.000Z");
+
+      act(() => {
+        root.render(
+          createElement(AuditNoticeRegion, {
+            expiredSessionId: null,
+            allSessions: [activeSession],
+            setExpiredSessionId: vi.fn(),
+            handleUserSelectSession: vi.fn(),
+            switchViewMode: vi.fn(),
+            hasActiveFilters: true,
+            isSelectedFilteredOut: true,
+            filteredSessionsCount: 0,
+            totalSessionsCount: 10,
+            targetPathFilter: "/var/log",
+            hideHomeOnly: false,
+            selectedSession: activeSession,
+            filteredActiveSessions: [activeSession],
+            filteredClosedSessions: [],
+            handleResetAuditFilters: vi.fn(),
+            handleClearSelection: vi.fn(),
+            retainedMatchingCount: null,
+            retainedLoadedCount: 0,
+            retainedCountStatus: "loading",
+          }),
+        );
+      });
+
+      expect(container.textContent).not.toContain("0 retained sessions match");
+      expect(container.textContent).toContain("0 retained sessions loaded; exact match count loading");
+    });
+
+    it("2. Notice with retainedMatchingCount=null, retainedLoadedCount=2, status=error/stale/loaded-only must disclose loaded and exact count unavailable, not '2 match'", () => {
+      const closed1 = createClosedSession("c-1", "2026-09-19T10:00:00.000Z");
+      const closed2 = createClosedSession("c-2", "2026-09-19T11:00:00.000Z");
+      const activeSession = createActiveSession("act-1", "2026-09-20T10:00:00.000Z");
+
+      act(() => {
+        root.render(
+          createElement(AuditNoticeRegion, {
+            expiredSessionId: null,
+            allSessions: [closed1, closed2, activeSession],
+            setExpiredSessionId: vi.fn(),
+            handleUserSelectSession: vi.fn(),
+            switchViewMode: vi.fn(),
+            hasActiveFilters: true,
+            isSelectedFilteredOut: true,
+            filteredSessionsCount: 3,
+            totalSessionsCount: 10,
+            targetPathFilter: "/var/log",
+            hideHomeOnly: false,
+            selectedSession: activeSession,
+            filteredActiveSessions: [activeSession],
+            filteredClosedSessions: [closed1, closed2],
+            handleResetAuditFilters: vi.fn(),
+            handleClearSelection: vi.fn(),
+            retainedMatchingCount: null,
+            retainedLoadedCount: 2,
+            retainedCountStatus: "error",
+          }),
+        );
+      });
+
+      expect(container.textContent).not.toContain("2 match");
+      expect(container.textContent).not.toContain("2 other retained sessions match");
+      expect(container.textContent).toContain("2 retained sessions loaded; exact match count unavailable");
+    });
+
+    it("3. Canvas subtitle under non-authoritative count distinguishes loaded count from exact matching count", () => {
+      // Subtitle under loading state:
+      const loadingSubtitle = formatRetainedSubtitleCoverage({
+        retainedMatchingCount: null,
+        retainedLoadedCount: 2,
+        retainedCountStatus: "loading",
+        isSelectedFilteredOut: true,
+        hasActiveFilters: true,
+        coverageWording: "Loaded 5 of 10 events",
+      });
+      expect(loadingSubtitle).toContain("2 retained sessions loaded; exact match count loading");
+      expect(loadingSubtitle).not.toContain("2 matching");
+
+      // Subtitle under error/stale state:
+      const errorSubtitle = formatRetainedSubtitleCoverage({
+        retainedMatchingCount: null,
+        retainedLoadedCount: 2,
+        retainedCountStatus: "error",
+        isSelectedFilteredOut: true,
+        hasActiveFilters: true,
+        coverageWording: "Loaded 5 of 10 events",
+      });
+      expect(errorSubtitle).toContain("2 retained sessions loaded; exact match count unavailable");
+      expect(errorSubtitle).not.toContain("2 matching");
+
+      // Subtitle under authoritative matching state:
+      const authSubtitle = formatRetainedSubtitleCoverage({
+        retainedMatchingCount: 10,
+        retainedLoadedCount: 2,
+        retainedCountStatus: "authoritative",
+        isSelectedFilteredOut: true,
+        hasActiveFilters: true,
+        coverageWording: "Loaded 5 of 10 events",
+      });
+      expect(authSubtitle).toContain("10 matching retained sessions available · 2 loaded");
+    });
+
+    it("4. Retained selected session with lifecycle object and closedAt: null must be labelled retained and not active", () => {
+      const closedWithNull = createClosedSession("c-null", null, { sourceIp: "10.0.0.1" });
+
+      act(() => {
+        root.render(
+          createElement(AuditNoticeRegion, {
+            expiredSessionId: null,
+            allSessions: [closedWithNull],
+            setExpiredSessionId: vi.fn(),
+            handleUserSelectSession: vi.fn(),
+            switchViewMode: vi.fn(),
+            hasActiveFilters: true,
+            isSelectedFilteredOut: true,
+            filteredSessionsCount: 1,
+            totalSessionsCount: 10,
+            targetPathFilter: "/etc",
+            hideHomeOnly: false,
+            selectedSession: closedWithNull,
+            filteredActiveSessions: [],
+            filteredClosedSessions: [],
+            handleResetAuditFilters: vi.fn(),
+            handleClearSelection: vi.fn(),
+            retainedMatchingCount: 1,
+            retainedLoadedCount: 0,
+            retainedCountStatus: "authoritative",
+          }),
+        );
+      });
+
+      expect(container.textContent).toContain("Retained session 10.0.0.1");
+      expect(container.textContent).not.toContain("Active session 10.0.0.1");
+      expect(formatSessionMetadata(closedWithNull).timeStr).toBe("Closed time unavailable");
+    });
+
+    it("5. Active selected session remains labelled active and never described as retained", () => {
+      const activeSession = createActiveSession("act-1", "2026-09-20T10:00:00.000Z", { sourceIp: "10.0.0.2" });
+
+      act(() => {
+        root.render(
+          createElement(AuditNoticeRegion, {
+            expiredSessionId: null,
+            allSessions: [activeSession],
+            setExpiredSessionId: vi.fn(),
+            handleUserSelectSession: vi.fn(),
+            switchViewMode: vi.fn(),
+            hasActiveFilters: true,
+            isSelectedFilteredOut: true,
+            filteredSessionsCount: 1,
+            totalSessionsCount: 10,
+            targetPathFilter: "/etc",
+            hideHomeOnly: false,
+            selectedSession: activeSession,
+            filteredActiveSessions: [activeSession],
+            filteredClosedSessions: [],
+            handleResetAuditFilters: vi.fn(),
+            handleClearSelection: vi.fn(),
+            retainedMatchingCount: 1,
+            retainedLoadedCount: 0,
+            retainedCountStatus: "authoritative",
+          }),
+        );
+      });
+
+      expect(container.textContent).toContain("Active session 10.0.0.2");
+      expect(container.textContent).not.toContain("Retained session 10.0.0.2");
+    });
+
+    it("6. Search mode with global retainedMatchingCount=120 and 1 search result must not render '1 loaded of 120 matching'", async () => {
+      const searchItem = createClosedSession("search-1", "2026-09-19T10:00:00.000Z");
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [],
+            recentClosedSessions: [],
+            searchResults: [searchItem],
+            selectedSessionId: "search-1",
+            onSelectSession: vi.fn(),
+            retainedMatchingCount: 120,
+            retainedLoadedCount: 1,
+            retainedCountStatus: "authoritative",
+            onSearch: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      await act(async () => {
+        trigger.click();
+      });
+
+      // Type a search query into input
+      const searchInput = container.querySelector('input[type="text"]') as HTMLInputElement;
+      expect(searchInput).not.toBeNull();
+      await act(async () => {
+        fireInputChange(searchInput, "test");
+      });
+
+      expect(container.textContent).not.toContain("1 loaded of 120 matching");
+      expect(container.textContent).toContain("Retained search results (1 loaded)");
+    });
+
+    it("7. Non-search mode with retainedMatchingCount=120 and retainedLoadedCount=25 renders '25 loaded of 120 matching'", async () => {
+      const loaded: FilesystemClosedSession[] = [];
+      for (let i = 0; i < 25; i++) {
+        loaded.push(createClosedSession(`c-${i}`, "2026-09-19T10:00:00.000Z"));
+      }
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [],
+            recentClosedSessions: loaded,
+            selectedSessionId: "c-0",
+            onSelectSession: vi.fn(),
+            retainedMatchingCount: 120,
+            retainedLoadedCount: 25,
+            retainedCountStatus: "authoritative",
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      await act(async () => {
+        trigger.click();
+      });
+
+      expect(container.textContent).toContain("25 loaded of 120 matching");
+    });
+
+    it("8. Exact matchingCount > 0 but filteredClosedSessions=[] and active sessions exist: no Switch to match selects active session", () => {
+      const activeSession = createActiveSession("act-1", "2026-09-20T10:00:00.000Z");
+      const handleUserSelect = vi.fn();
+
+      act(() => {
+        root.render(
+          createElement(AuditNoticeRegion, {
+            expiredSessionId: null,
+            allSessions: [activeSession],
+            setExpiredSessionId: vi.fn(),
+            handleUserSelectSession: handleUserSelect,
+            switchViewMode: vi.fn(),
+            hasActiveFilters: true,
+            isSelectedFilteredOut: true,
+            filteredSessionsCount: 1,
+            totalSessionsCount: 10,
+            targetPathFilter: "/var/log",
+            hideHomeOnly: false,
+            selectedSession: activeSession,
+            filteredActiveSessions: [activeSession],
+            filteredClosedSessions: [],
+            handleResetAuditFilters: vi.fn(),
+            handleClearSelection: vi.fn(),
+            retainedMatchingCount: 10,
+            retainedLoadedCount: 0,
+            retainedCountStatus: "authoritative",
+          }),
+        );
+      });
+
+      // "Switch to match" button must not exist when 0 closed matches are loaded
+      const buttons = Array.from(container.querySelectorAll("button"));
+      const switchBtn = buttons.find((b) => b.textContent?.includes("Switch to match"));
+      expect(switchBtn).toBeUndefined();
+      expect(handleUserSelect).not.toHaveBeenCalled();
+    });
+
+    it("9. Complete directory with a path/home filter and no summary sets matching=loaded and total=null", () => {
+      const c1 = createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] });
+      const c2 = createClosedSession("c-2", "2026-09-19T11:00:00.000Z", { paths: ["/var/log"] });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [c1, c2],
+        snapshotRecentClosedSessions: [],
+        isDirectoryComplete: true,
+        targetPathFilter: "/var/log",
+        summary: null,
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(2);
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("10. Complete unfiltered directory sets matching=loaded and total=loaded", () => {
+      const c1 = createClosedSession("c-1", "2026-09-19T10:00:00.000Z");
+      const c2 = createClosedSession("c-2", "2026-09-19T11:00:00.000Z");
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [c1, c2],
+        snapshotRecentClosedSessions: [],
+        isDirectoryComplete: true,
+        targetPathFilter: null,
+        hideHomeOnly: false,
+        timeRange: "all",
+        summary: null,
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(2);
+      expect(metrics.retainedTotalCount).toBe(2);
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("11. Contradictory totalSessions < retainedLoadedCount sets totalCount to null and status to loaded-only", () => {
+      const loaded: FilesystemClosedSession[] = [];
+      for (let i = 0; i < 5; i++) {
+        loaded.push(createClosedSession(`c-${i}`, "2026-09-19T10:00:00.000Z"));
+      }
+
+      const summary: AuditDirectorySummary = {
+        totalSessions: 2, // Contradiction: 2 < 5 loaded
+        homeOnlyCount: 0,
+      };
+
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
     });
   });
 });

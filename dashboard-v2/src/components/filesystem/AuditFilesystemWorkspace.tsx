@@ -67,6 +67,7 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
             retainedMatchingCount={props.retainedMatchingCount}
             retainedLoadedCount={props.retainedLoadedCount}
             retainedTotalCount={props.retainedTotalCount}
+            retainedCountStatus={props.retainedCountStatus}
           />
           <TopologyCanvas
             snapshot={props.auditSnapshot ?? props.snapshot}

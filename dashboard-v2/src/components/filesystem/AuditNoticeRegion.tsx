@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import type { FilesystemTopologySession, FilesystemClosedSession } from "@/lib/dashboardTypes";
+import type { RetainedCountStatus } from "./useAuditDirectory";
 
 export interface AuditNoticeRegionProps {
   expiredSessionId: string | null;
@@ -23,6 +24,7 @@ export interface AuditNoticeRegionProps {
   retainedMatchingCount?: number | null;
   retainedLoadedCount?: number;
   retainedTotalCount?: number | null;
+  retainedCountStatus?: RetainedCountStatus;
 }
 
 export function AuditNoticeRegion({
@@ -33,15 +35,15 @@ export function AuditNoticeRegion({
   switchViewMode,
   hasActiveFilters,
   isSelectedFilteredOut,
-  filteredSessionsCount,
   targetPathFilter,
   hideHomeOnly,
   selectedSession,
-  filteredActiveSessions,
   filteredClosedSessions,
   handleResetAuditFilters,
   handleClearSelection,
   retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus,
 }: AuditNoticeRegionProps) {
   if (expiredSessionId) {
     return (
@@ -84,27 +86,24 @@ export function AuditNoticeRegion({
     );
   }
 
-  const effectiveMatchingCount =
-    typeof retainedMatchingCount === "number"
-      ? retainedMatchingCount
-      : filteredClosedSessions.length > 0
-        ? filteredClosedSessions.length
-        : filteredSessionsCount;
+  const effectiveStatus = retainedCountStatus ?? (typeof retainedMatchingCount === "number" ? "authoritative" : "loaded-only");
+  const isExactZero = retainedMatchingCount === 0 && effectiveStatus === "authoritative";
+  const loadedCount = retainedLoadedCount ?? filteredClosedSessions.length;
 
-  if (hasActiveFilters && (isSelectedFilteredOut || effectiveMatchingCount === 0)) {
-    const isSelectedActive = Boolean(
+  if (hasActiveFilters && (isSelectedFilteredOut || isExactZero)) {
+    const isSelectedRetained = Boolean(
       selectedSession &&
-        (!("lifecycle" in selectedSession) ||
-          !selectedSession.lifecycle ||
-          !selectedSession.lifecycle.closedAt),
+        "lifecycle" in selectedSession &&
+        Boolean(selectedSession.lifecycle),
     );
+    const isSelectedActive = !isSelectedRetained;
 
     return (
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
           <span>
-            {effectiveMatchingCount === 0 ? (
+            {isExactZero ? (
               <>
                 <strong>0 retained sessions match filter</strong>
                 {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
@@ -117,17 +116,28 @@ export function AuditNoticeRegion({
               </>
             ) : (
               <>
-                <strong>Pinned outside filter:</strong> {isSelectedActive ? "Active session " : "Retained session "}<span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> falls outside the active filter criteria. {effectiveMatchingCount} other {effectiveMatchingCount === 1 ? "retained session matches" : "retained sessions match"}.
+                <strong>Pinned outside filter:</strong> {isSelectedActive ? "Active session " : "Retained session "}<span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> falls outside the active filter criteria.{" "}
+                {typeof retainedMatchingCount === "number" && effectiveStatus === "authoritative" ? (
+                  loadedCount < retainedMatchingCount ? (
+                    `${retainedMatchingCount} other ${retainedMatchingCount === 1 ? "retained session matches" : "retained sessions match"} (${loadedCount} loaded).`
+                  ) : (
+                    `${retainedMatchingCount} other ${retainedMatchingCount === 1 ? "retained session matches" : "retained sessions match"}.`
+                  )
+                ) : effectiveStatus === "loading" ? (
+                  `${loadedCount} retained session${loadedCount === 1 ? "" : "s"} loaded; exact match count loading.`
+                ) : (
+                  `${loadedCount} retained session${loadedCount === 1 ? "" : "s"} loaded; exact match count unavailable.`
+                )}
               </>
             )}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {effectiveMatchingCount > 0 && (
+          {filteredClosedSessions.length > 0 && (
             <button
               type="button"
               onClick={() => {
-                const first = filteredClosedSessions[0] ?? filteredActiveSessions[0];
+                const first = filteredClosedSessions[0];
                 if (first) handleUserSelectSession(first.sessionId);
               }}
               className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
@@ -142,7 +152,7 @@ export function AuditNoticeRegion({
           >
             Reset filters
           </button>
-          {selectedSession && effectiveMatchingCount === 0 && (
+          {selectedSession && isExactZero && (
             <button
               type="button"
               onClick={handleClearSelection}

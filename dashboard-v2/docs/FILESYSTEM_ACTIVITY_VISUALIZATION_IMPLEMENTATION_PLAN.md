@@ -373,31 +373,40 @@ Implementation:
 
 - Retained time filter: strictly filters closed sessions using `lifecycle.closedAt` (inclusive bounds matching server `$gte`/`$lte`). Sessions with missing, null, empty, or invalid `closedAt` never pass an active time filter. No fallback to `startedAt` or `observedAt`.
 - Active session separation: active ephemeral sessions do not have `closedAt` and never pass a retained Closed-at time filter. They contribute 0 to `retainedTotalCount`, `retainedMatchingCount`, and `retainedLoadedCount`. In `AuditSessionSelect`, active sessions remain in a separately labelled active group with `Not filtered by Closed at` / `Outside Closed-at filter` indicator.
-- Authoritative count model: defined typed model `retainedLoadedCount`, `retainedMatchingCount`, `retainedTotalCount`, `activeVisibleCount`, and `retainedCountStatus` (`authoritative | loaded-only | loading | error | stale`).
+- Lifecycle classification: uses authoritative lifecycle shape (`"lifecycle" in session && Boolean(session.lifecycle)`). Sessions with null/empty/invalid `closedAt` remain classified as retained and display `Closed time unavailable`, never misclassified as active.
+- Authoritative count model & evidence states: defined typed model `retainedLoadedCount`, `retainedMatchingCount`, `retainedTotalCount`, `activeVisibleCount`, and `retainedCountStatus` (`authoritative | loaded-only | loading | error | stale`).
+  - Only `retainedMatchingCount !== null` is presented as exact matching evidence. Zero loaded is never inferred as zero matching.
   - When summary matches scope: `retainedTotalCount = summary.totalSessions`; `retainedMatchingCount` derives from `summary.matchingCount` (or derived from `totalSessions - homeOnlyCount` for home-only, or `totalSessions` for time-only/unbounded scopes).
-  - Contradiction check: if server matching count is smaller than locally loaded matching count (`matchingCount < retainedLoadedCount`), fails closed to `loaded-only`.
-  - Stale, error, loading, and scope-mismatched summaries do not provide exact matching counts. Complete directory establishes authoritative exact matching count.
+  - Contradiction check: if server matching count or total count is non-finite, negative, or smaller than loaded matching count (`matchingCount < retainedLoadedCount` or `totalSessions < retainedLoadedCount`), fails closed (`retainedMatchingCount = null`, `retainedTotalCount = null`, `retainedCountStatus = "loaded-only"`).
+  - Complete directory fallback: when `isDirectoryComplete` proves the entire result set, `retainedMatchingCount = retainedLoadedCount`. Total is proven equal to loaded count only when unfiltered (`retainedTotalCount = retainedLoadedCount`); when path or home filters are active without summary, total-before-filter is unproven (`retainedTotalCount = null`).
+  - Search count scope separation: search results maintain separate count scope. While search is active, global directory `retainedMatchingCount` is never used as search denominator; group is truthfully labelled `Retained search results (M loaded)`.
 - UI presentation contracts:
   - `AuditFilterControls`: displays `aria-label="Retained audit result coverage"`, renders `N retained matching · M loaded` (or `N retained matching` when complete, or `M retained loaded · exact count loading/unavailable` when non-authoritative).
   - `AuditSessionSelect`: renamed group to "Retained sessions" (`role="group"` with label `Retained sessions (${filteredClosedSessions.length} loaded of ${retainedMatchingCount} matching)` when incomplete). `formatSessionMetadata` renders `Closed <time>` for closed sessions and `Last observed <time>` for active sessions, never `Invalid Date`, with explicit unavailable fallbacks.
-  - `AuditNoticeRegion`: renders `0 retained sessions match filter` when matching count is 0, and truthfully describes active sessions as `Active session <ip>` when pinned outside filter (never "Retained session").
-  - `auditCanvasSubtitle`: uses `0 retained sessions match the active filter criteria...` and `${effectiveMatchingCount} matching retained sessions available`.
+  - `AuditNoticeRegion`: renders `0 retained sessions match filter` only when matching count is authoritatively 0; under loading/error states renders loaded evidence and `exact match count loading/unavailable`. "Switch to match" is enabled only when loaded closed matches exist, selecting only `filteredClosedSessions[0]`, never selecting active sessions.
+  - `auditCanvasSubtitle`: uses `formatRetainedSubtitleCoverage` to truthfully distinguish loaded count from exact matching count under non-authoritative states.
 
 Acceptance:
 
 - “Yesterday” includes closed session closed yesterday and excludes closed session started yesterday with closedAt today (PASS)
 - Active session observed yesterday does not pass retained time filter and contributes 0 to retained counts (PASS)
 - UI separates `N matching` and `M loaded` when pagination is incomplete (PASS)
+- Non-authoritative states (loading/error/stale/loaded-only) disclose loaded count and never claim exact match counts (PASS)
+- Retained session with `closedAt: null` is classified as retained, never active (PASS)
+- Search result counts do not display global retained matching count as denominator (PASS)
+- "Switch to match" selects only loaded closed sessions and never active sessions (PASS)
+- Complete directory fallback preserves null total when filters are active without summary (PASS)
+- Contradictory server totals fail closed to loaded-only (PASS)
 - Group renamed to "Retained sessions" and active group labelled as separate from Closed-at filter (PASS)
 - Timestamp formatting distinguishes `Closed <time>` from `Last observed <time>` and handles missing/invalid values with explicit unavailable text (PASS)
 - Filter summary, selector, notice region, and canvas subtitle use unified truthful semantics (PASS)
 
 Verification:
 
-- `npx vitest run tests/filesystem-retained-semantics.test.tsx`: **PASSED** (17/17 tests)
-- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/filesystem-audit-filter.test.ts tests/combobox-popover.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/fa013-component-evidence.test.tsx`: **PASSED** (143/143 tests)
-- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (380 tests passed, 14 skipped)
-- `npm test`: **PASSED** (541 passed, 2 expected fail, 14 skipped)
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx`: **PASSED** (28/28 tests)
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/filesystem-audit-filter.test.ts tests/combobox-popover.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/fa013-component-evidence.test.tsx`: **PASSED** (154/154 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (391 tests passed, 14 skipped)
+- `npm test`: **PASSED** (552 passed, 2 expected fail, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)

@@ -24,7 +24,7 @@ import {
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
-import { getPaginationRenderState } from "./useAuditDirectory";
+import { getPaginationRenderState, type RetainedCountStatus } from "./useAuditDirectory";
 
 import type { TimeRangeFilter } from "./AuditFilterControls";
 
@@ -110,6 +110,7 @@ export interface AuditSessionSelectProps {
   // Retained semantics (FSV-004)
   retainedMatchingCount?: number | null;
   retainedLoadedCount?: number;
+  retainedCountStatus?: RetainedCountStatus;
 
   // Error and retry state
   status?: "idle" | "loading" | "success" | "ready" | "stale" | "error";
@@ -131,6 +132,8 @@ export function AuditSessionSelect({
   targetPathFilter = null,
   timeRange,
   retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus = "loaded-only",
   status = "idle",
   onSearch,
   onClearSearch,
@@ -298,8 +301,36 @@ export function AuditSessionSelect({
 
   const isSelectedClosed = useMemo(() => {
     if (!selectedSession) return false;
-    return !sessions.some((s) => s.sessionId === selectedSession.sessionId);
-  }, [selectedSession, sessions]);
+    return "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle);
+  }, [selectedSession]);
+
+  const retainedGroupLabel = useMemo(() => {
+    const loaded = isSearchActive ? filteredClosedSessions.length : (retainedLoadedCount ?? filteredClosedSessions.length);
+    if (isSearchActive) {
+      return `Retained search results (${loaded} loaded)`;
+    }
+
+    if (
+      retainedMatchingCount !== null &&
+      typeof retainedMatchingCount === "number" &&
+      retainedCountStatus === "authoritative"
+    ) {
+      if (loaded < retainedMatchingCount) {
+        return `Retained sessions (${loaded} loaded of ${retainedMatchingCount} matching)`;
+      }
+      return `Retained sessions (${retainedMatchingCount} matching)`;
+    }
+
+    if (retainedCountStatus === "loading") {
+      return `Retained sessions (${loaded} loaded · exact match count loading)`;
+    }
+
+    if (retainedMatchingCount === null && retainedCountStatus !== "authoritative") {
+      return `Retained sessions (${loaded} loaded · exact match count unavailable)`;
+    }
+
+    return `Retained sessions (${loaded})`;
+  }, [isSearchActive, filteredClosedSessions.length, retainedMatchingCount, retainedLoadedCount, retainedCountStatus]);
 
   const isSelectedFilteredOut = useMemo(
     () =>
@@ -599,12 +630,7 @@ export function AuditSessionSelect({
           {filteredClosedSessions.length > 0 && (
             <div
               role="group"
-              aria-label={
-                typeof retainedMatchingCount === "number" &&
-                retainedMatchingCount !== filteredClosedSessions.length
-                  ? `Retained sessions (${filteredClosedSessions.length} loaded of ${retainedMatchingCount} matching)`
-                  : `Retained sessions (${filteredClosedSessions.length})`
-              }
+              aria-label={retainedGroupLabel}
               className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}
             >
               <div
@@ -612,10 +638,7 @@ export function AuditSessionSelect({
                 aria-hidden="true"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
-                {typeof retainedMatchingCount === "number" &&
-                retainedMatchingCount !== filteredClosedSessions.length
-                  ? `Retained sessions (${filteredClosedSessions.length} loaded of ${retainedMatchingCount} matching)`
-                  : `Retained sessions (${filteredClosedSessions.length})`}
+                {retainedGroupLabel}
               </div>
               <div className="space-y-0.5">
                 {filteredClosedSessions.map((s, idx) => {
@@ -726,8 +749,8 @@ export function AuditSessionSelect({
             return (
               <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
                 {isSearchActive
-                  ? `All matching search results loaded (${combinedClosedSessions.length})`
-                  : `All matching directory sessions loaded (${combinedClosedSessions.length})`}
+                  ? `All matching search results loaded (${filteredClosedSessions.length})`
+                  : `All matching directory sessions loaded (${filteredClosedSessions.length})`}
               </div>
             );
           }

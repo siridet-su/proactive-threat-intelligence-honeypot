@@ -48,6 +48,7 @@ import { useFilesystemUrlState } from "./useFilesystemUrlState";
 import { useAuditReplay } from "./useAuditReplay";
 import {
   deriveAuthoritativeAuditMetrics,
+  formatRetainedSubtitleCoverage,
   useAuditDirectory,
 } from "./useAuditDirectory";
 import {
@@ -480,26 +481,21 @@ export function FilesystemActivity() {
     });
     const coverageWording = coverageModel.wording;
 
-    const effectiveMatchingCount =
-      typeof retainedMatchingCount === "number"
-        ? retainedMatchingCount
-        : filteredClosedSessions.length > 0
-          ? filteredClosedSessions.length
-          : filteredSessionsCount;
-
-    if (effectiveMatchingCount === 0) {
-      return `0 retained sessions match the active filter criteria. This session is pinned outside the result set. ${coverageWording}`;
-    }
-    if (isSelectedFilteredOut) {
-      return `This session is pinned outside the active filter criteria (${effectiveMatchingCount} matching retained session${effectiveMatchingCount === 1 ? "" : "s"} available). ${coverageWording}`;
-    }
-    return coverageWording;
+    return formatRetainedSubtitleCoverage({
+      retainedMatchingCount,
+      retainedLoadedCount,
+      retainedCountStatus,
+      isSelectedFilteredOut,
+      hasActiveFilters,
+      coverageWording,
+    });
   }, [
     selectedSession,
     retainedMatchingCount,
-    filteredClosedSessions.length,
-    filteredSessionsCount,
+    retainedLoadedCount,
+    retainedCountStatus,
     isSelectedFilteredOut,
+    hasActiveFilters,
     history.length,
     historyTotalItems,
     historyComplete,
@@ -1001,6 +997,7 @@ export function FilesystemActivity() {
                   timeRange={timeRange}
                   retainedMatchingCount={retainedMatchingCount}
                   retainedLoadedCount={retainedLoadedCount}
+                  retainedCountStatus={retainedCountStatus}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
@@ -1187,6 +1184,7 @@ export function FilesystemActivity() {
                   timeRange={timeRange}
                   retainedMatchingCount={retainedMatchingCount}
                   retainedLoadedCount={retainedLoadedCount}
+                  retainedCountStatus={retainedCountStatus}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
