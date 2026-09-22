@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock, CornerDownRight, FastF
 import type { KeyboardEvent } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatElapsedTime, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
+import { actionLabel, formatElapsedTime, formatFailedChangeMessage, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
 
 export interface ReplayTransportProps {
   isAnchoredSelected: boolean;
@@ -87,12 +87,23 @@ export function ReplayTransport({
           ) : (
             <CornerDownRight className="h-4 w-4 text-primary shrink-0" />
           )}
-          <span className="text-sm font-semibold truncate text-text">
-            <span className="text-text-subtle font-normal mr-1.5">from</span>
-            <span className="text-text-muted" title={fromPathStr || undefined}>{fromPathStr}</span>
-            <span className="text-text-subtle font-normal mx-1.5">to</span>
-            <span className={isFailedHop ? "line-through text-warning" : "text-text"} title={toPathStr}>{toPathStr}</span>
-          </span>
+          {isFailedHop ? (
+            <span
+              role="status"
+              data-testid="failed-change-transport-status"
+              aria-label={formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+              className="text-sm font-semibold text-warning"
+            >
+              {formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+            </span>
+          ) : (
+            <span className="text-sm font-semibold truncate text-text">
+              <span className="text-text-subtle font-normal mr-1.5">from</span>
+              <span className="text-text-muted" title={fromPathStr || undefined}>{fromPathStr}</span>
+              <span className="text-text-subtle font-normal mx-1.5">to</span>
+              <span className="text-text" title={toPathStr}>{toPathStr}</span>
+            </span>
+          )}
         </div>
         <span className={`text-xs px-2 py-1 rounded-md font-medium shrink-0 shadow-2xs ${
           isFailedHop ? 'bg-warning-subtle text-warning border border-warning-border' : 'bg-surface-subtle border border-border text-text'

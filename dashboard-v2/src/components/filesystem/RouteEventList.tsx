@@ -1,7 +1,7 @@
-import { AlertCircle, Clock, CornerDownRight, Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, AlertTriangle, Clock, CornerDownRight, Plus, RefreshCw } from "lucide-react";
 import type { RegionStatus } from "@/components/ui/RegionState";
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
+import { actionLabel, formatFailedChangeMessage, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
 
 export interface RouteEventListProps {
   historyComplete: boolean;
@@ -159,23 +159,29 @@ export function RouteEventList({
                       )}
                     </div>
 
-                    {/* Line 2: Destination */}
-                    <div className="flex items-center gap-1.5 text-xs min-w-0">
-                      <CornerDownRight
-                        className={`h-3.5 w-3.5 shrink-0 ${isFailed ? "text-warning" : "text-primary"}`}
-                        aria-hidden="true"
-                      />
-                      <span
-                        className={`truncate font-semibold ${
-                          isFailed ? "line-through text-text-muted/60" : "text-text"
-                        }`}
-                        title={event.toPath ?? undefined}
-                      >
-                        {event.toPath ?? "Unknown"}
-                      </span>
+                    {/* Line 2: Verified destination or failed-origin warning */}
+                    <div className="flex items-start gap-1.5 text-xs min-w-0">
+                      {isFailed ? (
+                        <div
+                          role="status"
+                          data-testid="failed-change-event-status"
+                          aria-label={formatFailedChangeMessage(event.fromPath)}
+                          className="flex min-w-0 items-start gap-1.5 text-warning"
+                        >
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="font-semibold">{formatFailedChangeMessage(event.fromPath)}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                          <span className="truncate font-semibold text-text" title={event.toPath ?? undefined}>
+                            {event.toPath ?? "Unknown"}
+                          </span>
+                        </>
+                      )}
                       {isFailed && (
                         <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" /> Failed
+                          <AlertCircle className="h-3 w-3" aria-hidden="true" /> Failed
                         </span>
                       )}
                     </div>
@@ -272,11 +278,26 @@ export function RouteEventList({
                       {formatTimestamp(anchoredHop.at)}
                     </time>
                   </div>
-                  <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
-                    <span>{formatFromPath(anchoredHop)}</span>
-                    <span>→</span>
-                    <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
-                  </div>
+                  {anchoredHop.action === "failed_change" ? (
+                    <div
+                      role="status"
+                      data-testid="anchored-failed-change-status"
+                      aria-label={formatFailedChangeMessage(anchoredHop.fromPath)}
+                      className="mt-1.5 flex items-start gap-1.5 text-xs text-warning"
+                    >
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="font-semibold">{formatFailedChangeMessage(anchoredHop.fromPath)}</span>
+                      <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" /> Failed
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
+                      <span>{formatFromPath(anchoredHop)}</span>
+                      <span>→</span>
+                      <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
+                    </div>
+                  )}
                 </button>
               </li>
             </>

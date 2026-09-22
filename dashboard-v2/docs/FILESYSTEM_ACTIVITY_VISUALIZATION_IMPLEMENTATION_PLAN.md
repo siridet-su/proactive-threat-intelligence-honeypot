@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-005` — Correct failed-change visualization**
+Current focus: **`FSV-006` — Separate heuristic from evidence**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -437,30 +437,45 @@ Verification:
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - `git diff --check`: **PASSED** (clean diff formatting)
 - Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)
-- FSV-005 and later work confirmation: FSV-005 through FSV-013 remain completely untouched. Checkpoint 1 remains `IN_PROGRESS`.
+- FSV-005 work confirmation: FSV-005 is complete. FSV-006 through FSV-013 remain completely untouched. Checkpoint 1 remains `IN_PROGRESS`.
 
 #### `FSV-005` Correct failed-change visualization
+
+Status: **DONE — 2026-09-23**
 
 Primary files:
 
 - `src/components/filesystem/useAuditReplay.ts`
+- `src/components/filesystem/filesystemUtils.ts`
 - `src/components/filesystem/TopologyCanvas.tsx`
 - `src/components/filesystem/RouteEventList.tsx`
+- `src/components/filesystem/ReplayTransport.tsx`
 - `src/components/filesystem/CwdRouteHistory.tsx`
 
 Implementation:
 
-- failed event มี verified origin แต่ไม่มี verified target
-- Canvas วาง warning annotation ที่ `fromPath`
+- failed event มี verified origin แต่ไม่มี verified target ใน loaded และ anchored replay
+- ใช้ pure derivation path เดียวกันเพื่อ preserve event identity, hop number, timing และ verified visited paths โดยตัด legacy failed destination ออกจาก presentation state
+- Canvas แยก replay context, verified target, layout focus, camera focus และ failure annotation ออกจากกัน
+- Canvas วาง warning annotation ที่ `fromPath` หรือแสดง truthful canvas status เมื่อ origin ไม่อยู่ใน partial graph
 - Copy ระบุว่า `Directory change failed while at …; attempted destination unavailable or unverified`
-- ไม่สร้าง target node, target connector หรือ target-oriented label
-- Timeline ยังคงนับ event และเลือก hop ได้ตาม contract เดิม
+- ไม่สร้าง target node, target connector, target badge หรือ target-oriented label จาก failed destination
+- Timeline, transport และ Evidence tab ใช้ verified origin และยังคงนับ/เลือก event ตาม contract เดิม
 
 Acceptance:
 
-- event ที่มี attacker-controlled legacy `toPath` ไม่ทำให้ target ปรากฏ
-- graph position ไม่กระโดดเมื่อเลือก failed hop
-- icon/text สื่อ failure โดยไม่พึ่งสีอย่างเดียว
+- event ที่มี attacker-controlled legacy `toPath` ไม่ทำให้ target ปรากฏ (PASS)
+- graph position ไม่กระโดดเมื่อเลือก failed hop (PASS)
+- icon/text สื่อ failure โดยไม่พึ่งสีอย่างเดียว (PASS)
+
+Verification:
+
+- focused regression suite: **PASSED** (17/17 tests)
+- semantic/replay gate: **PASSED** (110/110 tests)
+- all filesystem tests: **PASSED** (427 tests passed, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate status: **`NOT RUN`** (system Chromium is present at `/usr/bin/chromium`, but Playwright's configured webServer probe fails with `EPERM` when connecting to `127.0.0.1:3100`; no browser was installed and no responsive visual verification is claimed)
 
 #### `FSV-006` Separate heuristic from evidence
 

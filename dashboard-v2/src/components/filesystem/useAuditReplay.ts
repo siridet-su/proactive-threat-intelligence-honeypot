@@ -27,25 +27,27 @@ export function filterDisplayedHistory(
   return chronologicalHistory.filter((e) => e.action !== "failed_change");
 }
 
-export function deriveActiveHopRoute(
-  displayedHistory: readonly SessionCwdHistoryEvent[],
-  selectedHistoryIndex: number,
+export function deriveActiveHopRouteFromEvent(
+  currentEvent: SessionCwdHistoryEvent,
+  eventsThroughSelection: readonly SessionCwdHistoryEvent[],
   displayedHistoryMetrics: HistoryWindowMetrics,
-): ActiveHopRoute | null {
-  if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
-  const currentEvent = displayedHistory[selectedHistoryIndex];
+): ActiveHopRoute {
   const isFailed = currentEvent.action === "failed_change";
   const visitedStepMap: Record<string, number> = {};
-  for (let i = 0; i <= selectedHistoryIndex; i++) {
-    const ev = displayedHistory[i];
-    if (ev.action !== "failed_change" && ev.toPath && visitedStepMap[ev.toPath] === undefined) {
-      visitedStepMap[ev.toPath] = displayedHistoryMetrics.indexOffset + i + 1;
+
+  for (let i = 0; i < eventsThroughSelection.length; i++) {
+    const event = eventsThroughSelection[i];
+    if (event.action !== "failed_change" && event.toPath && visitedStepMap[event.toPath] === undefined) {
+      visitedStepMap[event.toPath] = event.id === currentEvent.id
+        ? displayedHistoryMetrics.selectedNumber
+        : displayedHistoryMetrics.indexOffset + i + 1;
     }
   }
+
   return {
     eventId: currentEvent.id,
     fromPath: currentEvent.fromPath,
-    toPath: isFailed ? currentEvent.fromPath : currentEvent.toPath,
+    toPath: isFailed ? null : currentEvent.toPath,
     action: currentEvent.action,
     status: currentEvent.status,
     at: currentEvent.at,
@@ -55,6 +57,20 @@ export function deriveActiveHopRoute(
     visitedStepMap,
     isFailedAttempt: isFailed,
   };
+}
+
+export function deriveActiveHopRoute(
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedHistoryIndex: number,
+  displayedHistoryMetrics: HistoryWindowMetrics,
+): ActiveHopRoute | null {
+  if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
+  const currentEvent = displayedHistory[selectedHistoryIndex];
+  return deriveActiveHopRouteFromEvent(
+    currentEvent,
+    displayedHistory.slice(0, selectedHistoryIndex + 1),
+    displayedHistoryMetrics,
+  );
 }
 
 export function getNextPlaybackSpeed(currentSpeed: number): number {
@@ -240,21 +256,15 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   const activeHop: ActiveHopRoute | null = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
-      const isFailed = anchoredHop.action === "failed_change";
       const hopNum = explicitHopNumber ?? 1;
-      return {
-        eventId: anchoredHop.id,
-        fromPath: anchoredHop.fromPath,
-        toPath: isFailed ? anchoredHop.fromPath : anchoredHop.toPath,
-        action: anchoredHop.action,
-        status: anchoredHop.status,
-        at: anchoredHop.at,
-        stepIndex: hopNum - 1,
-        totalSteps: displayedHistoryMetrics.totalItems,
-        visitedPaths: anchoredHop.toPath ? [anchoredHop.toPath] : [],
-        visitedStepMap: anchoredHop.toPath ? { [anchoredHop.toPath]: hopNum } : {},
-        isFailedAttempt: isFailed,
-      };
+      return deriveActiveHopRouteFromEvent(
+        anchoredHop,
+        [anchoredHop],
+        {
+          ...displayedHistoryMetrics,
+          selectedNumber: hopNum,
+        },
+      );
     }
     return deriveActiveHopRoute(displayedHistory, selectedHistoryIndex, displayedHistoryMetrics);
   }, [

@@ -41,8 +41,10 @@ import {
   clearAutomaticCalloutCollisions,
   compactDirectoryPath,
   DEFAULT_DENSITY_THRESHOLDS,
+  deriveActiveHopCanvasSemantics,
   directorySegment,
   formatUpdateAge,
+  formatFailedChangeMessage,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
   isSensitiveDirectory,
@@ -245,6 +247,11 @@ export function TopologyCanvas({
   className,
 }: TopologyCanvasProps) {
   const isAuditMode = presentationContext.mode === "audit";
+  const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
+  const isFailedHop = activeHop?.isFailedAttempt === true || activeHop?.action === "failed_change";
+  const failedHopMessage = isFailedHop
+    ? formatFailedChangeMessage(activeHop?.fromPath)
+    : null;
   const reducedMotion = useReducedMotion();
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
@@ -370,7 +377,7 @@ export function TopologyCanvas({
     return "aggregated";
   }, [densityPreference, snapshot?.nodes.length, snapshot?.sessions]);
 
-  const focusedGraphPath = selectedPath ?? activeHop?.toPath ?? null;
+  const focusedGraphPath = selectedPath ?? activeHopCanvasSemantics.layoutFocusPath;
 
   const automaticGraphNodes = useMemo(
     () =>
@@ -403,25 +410,28 @@ export function TopologyCanvas({
     [automaticGraphNodes, nodePositions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
+  const failedAnnotationNode = activeHopCanvasSemantics.failedAnnotationPath
+    ? graphNodeByPath.get(activeHopCanvasSemantics.failedAnnotationPath) ?? null
+    : null;
   const graphPlaneHeight = useMemo(
     () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
     [graphNodes],
   );
   const effectiveSessions = useMemo(() => {
-    if (!activeHop?.toPath || !selectedSessionId) return snapshot?.sessions ?? [];
+    if (!activeHopCanvasSemantics.replayContextPath || !selectedSessionId) return snapshot?.sessions ?? [];
     return (snapshot?.sessions ?? []).map((session) => {
       if (session.sessionId === selectedSessionId) {
         return {
           ...session,
           cwdState: {
             ...session.cwdState,
-            path: activeHop.toPath,
+            path: activeHopCanvasSemantics.replayContextPath,
           },
         };
       }
       return session;
     });
-  }, [activeHop, selectedSessionId, snapshot?.sessions]);
+  }, [activeHopCanvasSemantics.replayContextPath, selectedSessionId, snapshot?.sessions]);
 
   const automaticGraphNodeByPath = useMemo(
     () => new Map(automaticGraphNodes.map((node) => [node.path, node])),
@@ -661,17 +671,18 @@ export function TopologyCanvas({
     centerMapOn(positionForCallout(selectedGraphCallout, index));
   }, [centerMapOn, graphCallouts, positionForCallout, selectedGraphCallout]);
 
-  // Keep camera steady; only bring target node into view when hop changes AND it is outside the viewport
+  // Keep camera steady; only bring a verified destination into view when a hop changes.
   const lastCenteredHopEventId = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeHop?.eventId || !activeHop?.toPath) return;
+    const autoCenterPath = activeHopCanvasSemantics.autoCenterPath;
+    if (!activeHop?.eventId || !autoCenterPath) return;
     if (activeHop.eventId === lastCenteredHopEventId.current) return;
     lastCenteredHopEventId.current = activeHop.eventId;
 
     // Never auto-center while user is actively dragging or interacting with the canvas
     if (draggedNodePath || draggedCalloutIp || isDraggingSurface) return;
 
-    const targetNode = graphNodeByPath.get(activeHop.toPath);
+    const targetNode = graphNodeByPath.get(autoCenterPath);
     if (!targetNode) return;
 
     const surface = mapSurfaceRef.current;
@@ -693,7 +704,7 @@ export function TopologyCanvas({
     }
   }, [
     activeHop?.eventId,
-    activeHop?.toPath,
+    activeHopCanvasSemantics.autoCenterPath,
     centerMapOn,
     graphNodeByPath,
     isDraggingSurface,
@@ -782,6 +793,17 @@ export function TopologyCanvas({
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className="p-5">
+          {failedHopMessage && (
+            <div
+              role="status"
+              data-testid="failed-change-canvas-status"
+              aria-label={failedHopMessage}
+              className="mb-4 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{failedHopMessage}</span>
+            </div>
+          )}
           {!isAuditMode && freshnessState.isDegraded && (
             <div role="status" className="mb-4 rounded-lg border border-warning-border bg-surface-raised px-3 py-2 text-xs text-text">
               <strong className="font-semibold text-warning">Degraded connection:</strong>{" "}
@@ -895,7 +917,7 @@ export function TopologyCanvas({
                       <span className="text-text-muted">to finish</span>
                     </motion.div>
                   )}
-                  {activeHop?.toPath && selectedPath && selectedPath !== activeHop.toPath && (
+                  {activeHopCanvasSemantics.verifiedTargetPath && selectedPath && selectedPath !== activeHopCanvasSemantics.verifiedTargetPath && (
                     <motion.div
                       role="status"
                       initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
@@ -909,7 +931,7 @@ export function TopologyCanvas({
                       <span className="text-border" aria-hidden="true">·</span>
                       <button
                         type="button"
-                        onClick={() => onSelectPath(activeHop.toPath)}
+                        onClick={() => onSelectPath(activeHopCanvasSemantics.verifiedTargetPath)}
                         className="pointer-events-auto rounded border border-border bg-surface-subtle px-2 py-0.5 font-semibold text-text hover:bg-surface hover:text-text transition-colors shadow-2xs"
                       >
                         Return to current hop
@@ -917,6 +939,18 @@ export function TopologyCanvas({
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {failedHopMessage && !failedAnnotationNode && (
+                  <div
+                    role="status"
+                    data-testid="failed-change-canvas-status"
+                    aria-label={failedHopMessage}
+                    className="pointer-events-none absolute left-1/2 top-4 z-40 flex max-w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>{failedHopMessage}</span>
+                  </div>
+                )}
 
                 <motion.div
                   ref={graphPlaneRef}
@@ -953,9 +987,9 @@ export function TopologyCanvas({
                         const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${cp1Y}, ${node.x} ${cp2Y}, ${node.x} ${node.y}`;
 
                         const isActiveHopEdge = Boolean(
-                          activeHop && (
-                            (activeHop.fromPath === parent.path && activeHop.toPath === node.path) ||
-                            (activeHop.fromPath === node.path && activeHop.toPath === parent.path)
+                          activeHop && activeHopCanvasSemantics.verifiedTargetPath && (
+                            (activeHop.fromPath === parent.path && activeHopCanvasSemantics.verifiedTargetPath === node.path) ||
+                            (activeHop.fromPath === node.path && activeHopCanvasSemantics.verifiedTargetPath === parent.path)
                           )
                         );
 
@@ -1014,6 +1048,7 @@ export function TopologyCanvas({
                                     : "none"
                               }
                               markerEnd={isTrailEdge ? "url(#arrowhead-primary)" : undefined}
+                              data-active-hop-connector={isActiveHopEdge ? "true" : undefined}
                             />
                           </motion.g>
                         );
@@ -1088,24 +1123,41 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
-                  {activeHop?.toPath && !activeHop.isFailedAttempt && graphNodeByPath.has(activeHop.toPath) && (
+                  {activeHop && activeHopCanvasSemantics.verifiedTargetPath && graphNodeByPath.has(activeHopCanvasSemantics.verifiedTargetPath) && (
                     <HopEnergy
                       key={`${selectedSessionId}:${activeHop.eventId}`}
                       from={activeHop.fromPath ? graphNodeByPath.get(activeHop.fromPath) : undefined}
-                      to={graphNodeByPath.get(activeHop.toPath)!}
+                      to={graphNodeByPath.get(activeHopCanvasSemantics.verifiedTargetPath)!}
                       fromBounds={activeHop.fromPath ? nodeElementBounds[activeHop.fromPath] : undefined}
-                      toBounds={nodeElementBounds[activeHop.toPath]}
+                      toBounds={nodeElementBounds[activeHopCanvasSemantics.verifiedTargetPath]}
                       durationMs={hopDurationMs}
                       reducedMotion={Boolean(reducedMotion)}
                       transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
                     />
+                  )}
+                  {failedHopMessage && failedAnnotationNode && (
+                    <div
+                      role="status"
+                      data-testid="failed-change-annotation"
+                      data-failed-change-origin={activeHopCanvasSemantics.failedAnnotationPath ?? undefined}
+                      aria-label={failedHopMessage}
+                      className="pointer-events-none absolute z-30 flex max-w-[min(32rem,calc(100%-2rem))] items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
+                      style={{
+                        left: `${failedAnnotationNode.x}%`,
+                        top: `${failedAnnotationNode.y}%`,
+                        transform: "translate(-50%, calc(-100% - 0.75rem))",
+                      }}
+                    >
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{failedHopMessage}</span>
+                    </div>
                   )}
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {
                       const isSelected = node.path === selectedPath;
                       const isRoot = node.path === "/";
                       const isSensitive = isSensitiveDirectory(node.path);
-                      const isHopTarget = activeHop?.toPath === node.path;
+                      const isHopTarget = activeHopCanvasSemantics.verifiedTargetPath === node.path;
                       const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
                       const visitedStep = activeHop?.visitedStepMap[node.path];
                       const isOverlapping = overlappingNodePaths.has(node.path);
@@ -1178,9 +1230,7 @@ export function TopologyCanvas({
                           className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
                             isOverlapping
                               ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
-                              : isHopTarget && activeHop?.isFailedAttempt
-                                ? "z-20 border-warning bg-warning-subtle text-text"
-                                : isHopTarget
+                              : isHopTarget
                                   ? "z-20 border-primary bg-primary-subtle text-text"
                                   : isSelected
                                     ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
@@ -1223,17 +1273,12 @@ export function TopologyCanvas({
                           )}
                           {isHopTarget && activeHop ? (
                             <span
-                              className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-xs font-bold shadow-xs ${
-                                activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
-                              }`}
-                              title={
-                                activeHop.isFailedAttempt
-                                  ? `Failed attempt target (attempt ${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
-                                  : `Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
-                              }
+                              data-testid="active-hop-target-badge"
+                              className="flex shrink-0 items-center gap-0.5 rounded bg-primary px-1.5 py-0.5 font-mono text-xs font-bold text-surface shadow-xs"
+                              title={`Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`}
                             >
                               <Route className="h-2.5 w-2.5" aria-hidden="true" />
-                              <span>{activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}</span>
+                              <span>Hop {activeHop.stepIndex + 1}</span>
                             </span>
                           ) : isHopVisited && visitedStep !== undefined ? (
                             <span

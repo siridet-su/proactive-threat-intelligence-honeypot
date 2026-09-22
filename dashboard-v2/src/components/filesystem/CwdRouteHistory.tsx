@@ -2,6 +2,7 @@
 
 import {
   History,
+  AlertTriangle,
   Shield,
   Terminal,
 } from "lucide-react";
@@ -13,6 +14,7 @@ import { RouteEventList } from "./RouteEventList";
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
+  formatFailedChangeMessage,
   formatTimestamp,
   isReplayTimelineKeyboardKey,
   mapReplayTimelineKeyToIndex,
@@ -113,6 +115,9 @@ export function CwdRouteHistory({
 
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
+  const selectedCwdContextPath = isFailedHop
+    ? selectedHistoryEvent?.fromPath ?? "an unknown verified origin"
+    : selectedHistoryEvent?.toPath ?? selectedSession?.cwdState.path ?? "Unknown";
 
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
@@ -324,27 +329,38 @@ export function CwdRouteHistory({
               {sidebarTab === "evidence" ? (
                 /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
-            <div className="rounded-xl border border-border bg-surface-subtle p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-text-muted">Selected CWD context</span>
-                <span className="font-mono text-text">
-                  {selectedHistoryEvent?.toPath ?? selectedSession.cwdState.path ?? "Unknown"}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
-                <span>
-                  {selectedHistoryEvent
-                    ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
-                    : "No route hop recorded"}
-                </span>
-                <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
-              </div>
-            </div>
-            <RegionState
-              kind="empty"
-              title="Evidence Unavailable"
-              description="No command feed or payload data is currently linked to this CWD hop."
-            />
+                  <div className="rounded-xl border border-border bg-surface-subtle p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="text-text-muted">Selected CWD context</span>
+                      <span className="font-mono text-text">
+                        {selectedCwdContextPath}
+                      </span>
+                    </div>
+                    {isFailedHop && (
+                      <div
+                        role="status"
+                        data-testid="failed-change-evidence-status"
+                        aria-label={formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+                        className="mt-2 flex items-start gap-1.5 border-t border-warning-border/50 pt-2 text-xs text-warning"
+                      >
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span>{formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}</span>
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
+                      <span>
+                        {selectedHistoryEvent
+                          ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
+                          : "No route hop recorded"}
+                      </span>
+                      <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
+                    </div>
+                  </div>
+                  <RegionState
+                    kind="empty"
+                    title="Evidence Unavailable"
+                    description="No command feed or payload data is currently linked to this CWD hop."
+                  />
                 </div>
               ) : sidebarTab === "actions" ? (
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">

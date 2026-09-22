@@ -29,6 +29,50 @@ export interface ActiveHopRoute {
   isFailedAttempt?: boolean;
 }
 
+export interface ActiveHopCanvasSemantics {
+  replayContextPath: string | null;
+  verifiedTargetPath: string | null;
+  layoutFocusPath: string | null;
+  autoCenterPath: string | null;
+  failedAnnotationPath: string | null;
+}
+
+/**
+ * Keeps replay context, verified destinations, layout focus, camera focus, and
+ * failed-origin annotations as separate presentation dimensions. A failed
+ * change only confirms the origin where the attempt happened.
+ */
+export function deriveActiveHopCanvasSemantics(activeHop: ActiveHopRoute | null | undefined): ActiveHopCanvasSemantics {
+  if (!activeHop) {
+    return {
+      replayContextPath: null,
+      verifiedTargetPath: null,
+      layoutFocusPath: null,
+      autoCenterPath: null,
+      failedAnnotationPath: null,
+    };
+  }
+
+  const isFailedAttempt = activeHop.isFailedAttempt === true || activeHop.action === "failed_change";
+  if (isFailedAttempt) {
+    return {
+      replayContextPath: activeHop.fromPath,
+      verifiedTargetPath: null,
+      layoutFocusPath: null,
+      autoCenterPath: null,
+      failedAnnotationPath: activeHop.fromPath,
+    };
+  }
+
+  return {
+    replayContextPath: activeHop.toPath,
+    verifiedTargetPath: activeHop.toPath,
+    layoutFocusPath: activeHop.toPath,
+    autoCenterPath: activeHop.toPath,
+    failedAnnotationPath: null,
+  };
+}
+
 export const INSPECTOR_PAGE_SIZE = 12;
 export const GRAPH_CALLOUT_LIMIT = 8;
 export const GRAPH_NODE_LIMIT = 42;
@@ -714,6 +758,11 @@ export function actionLabel(event: SessionCwdHistoryEvent): string {
   if (event.action === "entered") return "Entered directory";
   if (event.action === "failed_change") return "Directory change failed";
   return "Changed directory";
+}
+
+export function formatFailedChangeMessage(fromPath: string | null | undefined): string {
+  const verifiedOrigin = fromPath && fromPath.trim() ? fromPath : "an unknown verified origin";
+  return `Directory change failed while at ${verifiedOrigin}; attempted destination unavailable or unverified`;
 }
 
 
