@@ -238,7 +238,7 @@ Implementation:
 - Replaced optional `isAuditMode?: boolean` with required discriminated `presentationContext: TopologyPresentationContext` across `TopologyCanvas` and `TopologySummaryBar`.
 - Exported pure helper `deriveTopologyPresentationContext(mode, selectedSession)` in `TopologyCanvas.tsx` strictly accepting only authoritative session types (`FilesystemTopologySession | FilesystemClosedSession | null | undefined`), eliminating duck-typed objects, lifecycle string inputs, and top-level timestamp fallbacks.
 - Authoritative derivation uses narrow type guard `isFilesystemClosedSession` to identify retained sessions by their authoritative lifecycle object; sessions without retained lifecycle are classified as active.
-- Made compact audit evidence summary visible at all supported breakpoints with stable accessible label `aria-label="Audit evidence timestamps"`, removing 2xl-only/hidden utilities (`hidden`, `2xl:inline`) on audit text and separator, and enabling responsive wrapping on narrower screens without horizontal overflow.
+- Made compact audit evidence summary visible at all supported breakpoints with stable accessible label `aria-label="Audit evidence timestamps"`, removing 2xl-only/hidden utilities (`hidden`, `2xl:inline`) on audit text and separator. Removed `truncate` to ensure audit evidence is not hidden, truncated, or clipped; enabled natural multi-line text wrapping at constrained widths via `whitespace-normal break-words min-w-0 max-w-full` without horizontal page overflow or ellipsis clipping.
 - Truthful unavailable states: null, blank, or invalid authoritative timestamps display explicit `Observed unavailable` and `Closed unavailable` labels instead of "No timestamp"; active audit investigations show `Observed <timestamp|unavailable> · Active investigation` without closed fields; unselected audit views remain neutral.
 - Restricted live-only properties (`snapshotGeneratedAt`, `freshnessState`, `staleThresholdMs`) to the `{ mode: "live" }` discriminant branch in `TopologySummaryBarProps`, strictly disallowing them in audit mode via TypeScript (`snapshotGeneratedAt?: never`).
 - Live presentation context preserves existing active session count, live telemetry freshness, and snapshot wording.
@@ -248,7 +248,8 @@ Acceptance:
 - ไม่มีคำว่า active สำหรับ selected closed session (PASS)
 - ไม่มี freshness claim หรือ snapshot.generatedAt ใน audit mode (PASS)
 - TypeScript บังคับให้ caller ระบุ context ผ่าน discriminated union (PASS)
-- Audit evidence summary มองเห็นได้ในทุก breakpoint และไม่ถูกซ่อนด้วย hidden utility (PASS)
+- Audit evidence summary มองเห็นได้ในทุก breakpoint ไม่ถูกซ่อน (hidden) หรือถูกตัด (truncate/ellipsis/line-clamp) และ wrap ข้อความได้อย่างเป็นธรรมชาติที่ความกว้างจำกัด (PASS)
+- Automated component tests ยืนยัน class contract และ semantic contracts ว่าไม่มี hidden, truncate, nowrap, overflow-hidden หรือ line-clamp utilities และรองรับ wrapping (PASS)
 - Null และ invalid timestamp แสดง label unavailable อย่างชัดเจน (PASS)
 - Derivation helper รับเฉพาะ authoritative session types (PASS)
 
@@ -259,7 +260,7 @@ Verification:
 - `npm test`: **PASSED** (29 passed, 1 skipped; 501 passed, 2 expected fail, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded)
-- Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; visual verification remains explicitly recorded as `NOT RUN` without false claims)
+- Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)
 
 Targeted gate:
 

@@ -214,7 +214,7 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
           <>
             <span className="shrink-0 text-border" aria-hidden="true">·</span>
             <span
-              className="truncate text-text-subtle font-medium text-primary max-w-full"
+              className="min-w-0 max-w-full whitespace-normal break-words text-text-subtle font-medium text-primary"
               aria-label="Audit evidence timestamps"
             >
               {props.presentationContext.session?.lifecycle === "retained" ? (

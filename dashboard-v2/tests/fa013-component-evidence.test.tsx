@@ -343,6 +343,12 @@ describe("FA-013 production component evidence", () => {
     expect(classList).not.toContain("lg:hidden");
     expect(classList).not.toContain("xl:hidden");
     expect(classList).not.toContain("2xl:inline");
+    expect(classList).not.toContain("truncate");
+    expect(classList).not.toContain("whitespace-nowrap");
+    expect(classList).not.toContain("overflow-hidden");
+    expect(classList.some((c) => c.startsWith("line-clamp"))).toBe(false);
+    expect(classList).toContain("whitespace-normal");
+    expect(classList).toContain("break-words");
 
     // Retained audit session must NEVER be labelled as active session
     expect(container.textContent).not.toContain("1 active session");
