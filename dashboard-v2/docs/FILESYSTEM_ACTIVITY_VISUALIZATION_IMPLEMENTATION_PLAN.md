@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-002` — Truthful history/topology coverage**
+Current focus: **`FSV-003` — Propagate time scope through search pagination**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -272,26 +272,40 @@ npx vitest run tests/filesystem-phase0-baseline.test.ts \
 
 #### `FSV-002` Truthful history/topology coverage
 
+Status: **DONE — 2026-09-22**
+
 Primary files:
 
-- `src/components/filesystem/FilesystemActivity.tsx`
 - `src/components/filesystem/filesystemUtils.ts`
-- `src/components/filesystem/TopologySummaryBar.tsx`
-- `src/components/filesystem/CwdRouteHistory.tsx`
+- `src/components/filesystem/FilesystemActivity.tsx`
+- `tests/filesystem-audit-coverage.test.ts`
 
 Implementation:
 
-- สร้าง typed coverage model เช่น `loadedEvents`, `totalEvents`, `historyComplete`, `pathCoverage`
-- ห้ามใช้คำว่า “all historical directories” เมื่อ `historyComplete !== true`
-- แสดง `Loaded N of M events` และ `Partial topology` เมื่อข้อมูลไม่ครบ
-- ใช้ `auditSummary.visitedPaths` ได้เมื่อ projection ระบุ completeness; ถ้ามี overflow/unknown ให้คง partial state
-- unknown gap ต้องถูกแสดง ไม่ interpolate เส้นทาง
+- Authoritative summary-path union: Updated `buildAuditSnapshot` to register every canonical path in `session.auditSummary.visitedPaths` before loaded history with `observedAt: null`. It then registers current `cwdState.path` with its authoritative `observedAt` and loaded history `fromPath` and `toPath` (for non-failed moves) with `event.at`. Canonical ancestors for every path are materialized without parsing command text, and summary-only paths never invent timestamps or transitions.
+- Truthful event coverage model: Created pure typed helper `deriveAuditCoverage` and formatter `formatAuditCoverageWording` in `filesystemUtils.ts` exposing `loadedEvents`, `totalEvents`, `unloadedEvents`, `eventCoverage` (`loading | partial | complete | error`), `pathCoverage` (`{ source: "auditSummary", status: "authoritative" }`), `historyStatus`, `isRefreshing`, and `wording`.
+- Fail-closed rules: `totalEvents` uses the maximum trustworthy total from `historyTotalItems`, `session.auditSummary.eventCount`, and loaded history length (`getHistoryWindowMetrics`). `complete` is permitted only when `historyComplete === true` and `loadedEvents >= totalEvents`. When `historyComplete === true` but `loadedEvents < totalEvents`, it strictly fails closed to `partial`. Initial/reset states with un-loaded events do not claim complete.
+- Truthful user-facing wording: Removed unconditional "All historical directories touched by this session are preserved on the canvas." claim in `FilesystemActivity.tsx`. Subtitle now derives truthful wording distinguishing authoritative directory coverage from event history coverage across loading, partial, complete (with truthful 0-event representation), error, and refreshing states. When a session is pinned outside active filters, filter messaging is retained and appended with coverage wording.
+- Preserved existing behavior: Excluded `failed_change.toPath` from graph materialization, kept hop/session selection intact across pagination, added zero polling or timers, and left `FSV-001` presentation context and `FSV-003` scope untouched.
 
 Acceptance:
 
-- first page ของ multi-page history ไม่ถูกนำเสนอว่า complete
-- load-more แล้ว count/coverage อัปเดตโดยไม่ reset selected hop
-- ไม่มี path จาก failed destination ปะปนใน visited paths
+- first page ของ multi-page history ไม่ถูกนำเสนอว่า complete (PASS)
+- load-more แล้ว count/coverage อัปเดตโดยไม่ reset selected hop (PASS)
+- ไม่มี path จาก failed destination ปะปนใน nodes (PASS)
+- ข้อความ unconditional "All historical directories..." ถูกแทนที่ด้วย truthful coverage wording (PASS)
+- แยก authoritative directory coverage ออกจาก partial/complete event history ชัดเจน (PASS)
+- summary-only paths ปรากฏบน canvas โดยไม่มี timestamp หรือ transition ปลอม (PASS)
+
+Verification:
+
+- `npx vitest run tests/filesystem-audit-coverage.test.ts`: **PASSED** (11/11 tests)
+- `npx vitest run tests/filesystem-phase0-baseline.test.ts tests/filesystem-coverage-expansion.test.ts tests/filesystem-hooks.test.ts tests/filesystem-hop-resolution.test.ts tests/filesystem-audit-coverage.test.ts`: **PASSED** (98/98 tests)
+- `npm test`: **PASSED** (30 passed, 1 skipped; 512 passed, 2 expected fail, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)
+- FSV-003 and later work confirmation: FSV-003 through FSV-013 remain completely untouched.
 
 #### `FSV-003` Propagate time scope through search pagination
 

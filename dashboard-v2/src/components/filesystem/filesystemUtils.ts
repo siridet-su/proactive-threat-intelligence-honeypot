@@ -6,6 +6,7 @@ import type {
   SessionCwdHistoryEvent,
   SessionCwdHistoryPage,
 } from "@/lib/dashboardTypes";
+import type { RegionStatus } from "@/components/ui/RegionState";
 
 export type StreamState = "connecting" | "live" | "stale";
 export type Pan = { x: number; y: number };
@@ -109,6 +110,140 @@ export function getHistoryWindowMetrics(
     indexOffset,
     selectedNumber,
   };
+}
+
+export type AuditEventCoverageStatus = "loading" | "partial" | "complete" | "error";
+
+export interface AuditPathCoverage {
+  source: "auditSummary" | "none";
+  status: "authoritative" | "unavailable";
+}
+
+export interface AuditCoverageModel {
+  hasSelectedSession: boolean;
+  loadedEvents: number;
+  totalEvents: number;
+  unloadedEvents: number;
+  eventCoverage: AuditEventCoverageStatus;
+  pathCoverage: AuditPathCoverage;
+  historyStatus: RegionStatus;
+  isRefreshing: boolean;
+  wording: string;
+}
+
+export interface DeriveAuditCoverageInput {
+  hasSelectedSession: boolean;
+  loadedEvents?: number | null;
+  historyTotalItems?: number | null;
+  historyComplete?: boolean | null;
+  historyStatus?: RegionStatus | "idle" | null;
+  auditSummaryEventCount?: number | null;
+}
+
+export function formatAuditCoverageWording(model: AuditCoverageModel): string {
+  if (!model.hasSelectedSession) {
+    return "Choose a session from the dropdown to replay its filesystem trajectory.";
+  }
+
+  if (model.historyStatus === "error") {
+    if (model.loadedEvents === 0) {
+      return "Authoritative directory coverage remains available from session audit summary. Retained event history is unavailable.";
+    }
+    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Remaining event history is unavailable.`;
+  }
+
+  if (model.eventCoverage === "loading") {
+    return "Authoritative directory coverage is available from session audit summary. Retained event history is loading...";
+  }
+
+  if (model.isRefreshing && model.loadedEvents > 0) {
+    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage (loading earlier events...).`;
+  }
+
+  if (model.eventCoverage === "complete") {
+    if (model.totalEvents === 0) {
+      return "0 retained events recorded. Authoritative directory coverage is active.";
+    }
+    return model.totalEvents === 1
+      ? "All 1 retained event is loaded across authoritative directory coverage."
+      : `All ${model.totalEvents} retained events are loaded across authoritative directory coverage.`;
+  }
+
+  // Partial event coverage
+  return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Earlier events remain unloaded.`;
+}
+
+export function deriveAuditCoverage(input: DeriveAuditCoverageInput): AuditCoverageModel {
+  const hasSelectedSession = Boolean(input.hasSelectedSession);
+  const rawStatus = input.historyStatus ?? "loading";
+  const status: RegionStatus = rawStatus === "idle" ? "loading" : rawStatus;
+  const isRefreshing = status === "refreshing";
+  const historyComplete = Boolean(input.historyComplete);
+
+  if (!hasSelectedSession) {
+    const emptyModel: AuditCoverageModel = {
+      hasSelectedSession: false,
+      loadedEvents: 0,
+      totalEvents: 0,
+      unloadedEvents: 0,
+      eventCoverage: "partial",
+      pathCoverage: {
+        source: "none",
+        status: "unavailable",
+      },
+      historyStatus: status,
+      isRefreshing: false,
+      wording: "Choose a session from the dropdown to replay its filesystem trajectory.",
+    };
+    return emptyModel;
+  }
+
+  const safeLoaded = Math.max(0, Math.trunc(input.loadedEvents ?? 0));
+  const safeHistoryTotal = typeof input.historyTotalItems === "number" && Number.isFinite(input.historyTotalItems)
+    ? Math.max(0, Math.trunc(input.historyTotalItems))
+    : 0;
+  const safeAuditCount = typeof input.auditSummaryEventCount === "number" && Number.isFinite(input.auditSummaryEventCount)
+    ? Math.max(0, Math.trunc(input.auditSummaryEventCount))
+    : 0;
+
+  // Maximum trustworthy total from historyTotalItems, auditSummary.eventCount and loaded history length
+  const rawTotal = Math.max(safeLoaded, safeHistoryTotal, safeAuditCount);
+  const metrics = getHistoryWindowMetrics(safeLoaded, rawTotal, -1);
+  const loadedEvents = metrics.loadedItems;
+  const totalEvents = metrics.totalItems;
+  const unloadedEvents = metrics.unloadedItems;
+
+  let eventCoverage: AuditEventCoverageStatus;
+
+  if (status === "error") {
+    eventCoverage = "error";
+  } else if (status === "loading" || rawStatus === "idle") {
+    eventCoverage = "loading";
+  } else if (historyComplete && loadedEvents >= totalEvents) {
+    eventCoverage = "complete";
+  } else {
+    // Fails closed to "partial" if historyComplete is true but loadedEvents < totalEvents,
+    // or if historyComplete is false, or if loadedEvents < totalEvents
+    eventCoverage = "partial";
+  }
+
+  const model: AuditCoverageModel = {
+    hasSelectedSession: true,
+    loadedEvents,
+    totalEvents,
+    unloadedEvents,
+    eventCoverage,
+    pathCoverage: {
+      source: "auditSummary",
+      status: "authoritative",
+    },
+    historyStatus: status,
+    isRefreshing,
+    wording: "",
+  };
+
+  model.wording = formatAuditCoverageWording(model);
+  return model;
 }
 
 export function formatTimestamp(value: string | null): string {
@@ -1525,10 +1660,17 @@ export function buildAuditSnapshot(
     }
   };
 
-  // 1. Register session's cwdState path
+  // 1. Register all canonical paths from session auditSummary (with null observedAt)
+  if (session.auditSummary?.visitedPaths && Array.isArray(session.auditSummary.visitedPaths)) {
+    for (const p of session.auditSummary.visitedPaths) {
+      registerPath(p, null);
+    }
+  }
+
+  // 2. Register session's cwdState path with authoritative observedAt
   registerPath(session.cwdState.path, session.cwdState.observedAt);
 
-  // 2. Register all paths from history events (only toPath for non-failed moves to avoid typo nodes)
+  // 3. Register all paths from history events (only toPath for non-failed moves to avoid typo nodes)
   for (const event of history) {
     registerPath(event.fromPath, event.at);
     if (event.action !== "failed_change") {

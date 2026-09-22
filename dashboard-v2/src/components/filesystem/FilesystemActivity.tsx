@@ -37,6 +37,7 @@ import {
   DEFAULT_STALE_THRESHOLD_MS,
   buildAuditSnapshot,
   buildAuditUrlSearch,
+  deriveAuditCoverage,
 
   type AuditUrlParams,
 } from "./filesystemUtils";
@@ -464,14 +465,34 @@ export function FilesystemActivity() {
 
   const auditCanvasSubtitle = useMemo(() => {
     if (!selectedSession) return "Choose a session from the dropdown to replay its filesystem trajectory.";
+
+    const coverageModel = deriveAuditCoverage({
+      hasSelectedSession: true,
+      loadedEvents: history.length,
+      historyTotalItems,
+      historyComplete,
+      historyStatus,
+      auditSummaryEventCount: selectedSession.auditSummary?.eventCount,
+    });
+    const coverageWording = coverageModel.wording;
+
     if (filteredSessionsCount === 0) {
-      return `0 of ${totalSessionsCount} sessions match the active filter criteria. This session is pinned outside the result set.`;
+      return `0 of ${totalSessionsCount} sessions match the active filter criteria. This session is pinned outside the result set. ${coverageWording}`;
     }
     if (isSelectedFilteredOut) {
-      return `This session is pinned outside the active filter criteria (${filteredSessionsCount} matching session${filteredSessionsCount === 1 ? "" : "s"} available).`;
+      return `This session is pinned outside the active filter criteria (${filteredSessionsCount} matching session${filteredSessionsCount === 1 ? "" : "s"} available). ${coverageWording}`;
     }
-    return "All historical directories touched by this session are preserved on the canvas.";
-  }, [selectedSession, filteredSessionsCount, totalSessionsCount, isSelectedFilteredOut]);
+    return coverageWording;
+  }, [
+    selectedSession,
+    filteredSessionsCount,
+    totalSessionsCount,
+    isSelectedFilteredOut,
+    history.length,
+    historyTotalItems,
+    historyComplete,
+    historyStatus,
+  ]);
 
   // Reload CWD route when a new source event arrives for the selected session
   useEffect(() => {
