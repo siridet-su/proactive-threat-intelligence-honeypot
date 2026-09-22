@@ -179,7 +179,8 @@ describe("FA-013 production component evidence", () => {
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
     })));
-    expect(container.textContent).toContain("No observed working directories yet");
+    expect(container.textContent).toContain("No active honeypot sessions");
+    expect(container.textContent).toContain("No attacker is currently connected.");
     expect(container.textContent).not.toContain("Offline");
     expect(container.textContent).not.toContain("Stale");
     expect(vi.getTimerCount()).toBe(0);

@@ -37,7 +37,7 @@ test.describe("FA-013 real-browser evidence", () => {
     expect(writesAfterBack.filter(({ method, url }) => method === "replaceState" && url !== "/filesystem-activity")).toEqual([]);
     await expect(page.getByRole("toolbar", { name: "Global filesystem controls" })).toBeVisible();
     await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toHaveCount(0);
-    await expect(page.getByText("No observed working directories yet", { exact: true })).toBeVisible();
+    await expect(page.getByText("No active honeypot sessions", { exact: true })).toBeVisible();
     await page.goForward();
     await expect(page.getByRole("tab", { name: "Session Audit & Replay", selected: true })).toBeVisible();
     await expect(page).toHaveURL("/filesystem-activity?view=audit&sessionId=live-session");

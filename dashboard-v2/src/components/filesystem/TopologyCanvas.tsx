@@ -80,6 +80,63 @@ function sameElementBounds(
   });
 }
 
+function HoneypotQuietState({
+  closedSessionCount,
+  streamState,
+}: {
+  closedSessionCount: number;
+  streamState: StreamState;
+}) {
+  const isLive = streamState === "live";
+  const retainedLabel = closedSessionCount === 1 ? "1 closed session available" : `${closedSessionCount} closed sessions available`;
+
+  return (
+    <section
+      className="relative isolate flex min-h-[25rem] items-center justify-center overflow-hidden rounded-xl border border-border bg-surface px-5 py-10 sm:px-8"
+      aria-label="Live honeypot activity"
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-50"
+        style={{
+          backgroundImage: "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
+          backgroundSize: "2.5rem 2.5rem",
+          maskImage: "radial-gradient(ellipse at center, black 5%, transparent 72%)",
+        }}
+        aria-hidden="true"
+      />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/10" aria-hidden="true" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/5" aria-hidden="true" />
+      <div className="relative mx-auto flex max-w-lg flex-col items-center rounded-2xl border border-border bg-surface/95 px-6 py-5 text-center shadow-xl backdrop-blur-sm sm:px-8">
+        <div className="relative mb-4 grid h-12 w-12 place-items-center rounded-full border border-success/30 bg-success-subtle text-success shadow-lg">
+          <span className="absolute inset-1.5 rounded-full border border-success/20" aria-hidden="true" />
+          <ScanLine className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
+          <span className="ui-badge border-success/30 bg-success-subtle text-success">Honeypot quiet</span>
+          <span className={`ui-badge ${isLive ? "border-success/30 bg-success-subtle text-success" : "border-warning-border bg-warning-subtle text-warning"}`}>
+            <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${isLive ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
+            {isLive ? "Live monitoring" : "Monitoring reconnecting"}
+          </span>
+        </div>
+        <h3 className="text-base font-semibold text-text">No active honeypot sessions</h3>
+        <p className="mt-2 max-w-md text-sm leading-6 text-text-muted">
+          No attacker is currently connected. Live filesystem activity will appear here as soon as a verified session begins.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2 text-xs">
+          <span className="rounded-full border border-border bg-surface px-3 py-1.5 font-medium text-text">
+            <span className="mr-1.5 font-mono text-success">0</span> active now
+          </span>
+          {closedSessionCount > 0 && (
+            <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 font-medium text-warning">
+              {retainedLabel} in Directory
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
@@ -668,15 +725,22 @@ export function TopologyCanvas({
               Showing retained snapshot.
             </div>
           )}
-          <RegionState
-            kind="empty"
-            title={isAuditMode ? "No session selected for audit" : "No observed working directories yet"}
-            description={
-              isAuditMode
-                ? "Choose a session from the dropdown above or reset active filters."
-                : "The live view will populate after verified CWD telemetry is recorded."
-            }
-          />
+          {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
+            <HoneypotQuietState
+              closedSessionCount={snapshot.recentClosedSessions.length}
+              streamState={streamState}
+            />
+          ) : (
+            <RegionState
+              kind="empty"
+              title={isAuditMode ? "No session selected for audit" : "No verified working directory data yet"}
+              description={
+                isAuditMode
+                  ? "Choose a session from the dropdown above or reset active filters."
+                  : "An attacker is connected, but verified CWD telemetry has not been recorded yet."
+              }
+            />
+          )}
         </div>
       ) : (
         <>
