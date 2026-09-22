@@ -309,6 +309,40 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 "evidence_cutoff": payload.get("evidence_cutoff") or {},
             }
         )
+        # Next Distinct is a read-only advisory sidecar, not a canonical
+        # prediction snapshot. Preserve its bounded provenance fields when
+        # it is projected into the session-detail read model so the detail
+        # endpoint and /api/next-distinct expose the same source semantics.
+        for field in (
+            "prediction_type",
+            "prediction_status",
+            "prediction_status_reason",
+            "source",
+            "prediction_source",
+            "dashboard_source",
+            "state",
+            "status",
+            "availability",
+            "authority",
+            "advisory_only",
+            "read_only",
+            "canonical_write_allowed",
+            "next_distinct_tactic",
+            "stored_next_distinct_tactic",
+            "top1",
+            "top3",
+            "probabilities",
+            "freshness",
+            "history",
+            "model",
+            "sequence_id",
+            "progression_index",
+            "sidecar_record_schema",
+            "snapshot_role",
+            "historical_advisory",
+        ):
+            if field in payload:
+                view[field] = payload[field]
     elif table in {"prediction_backtest_runs", "prediction_calibration_runs"}:
         view.update(
             {
@@ -925,6 +959,169 @@ def _compact_correlations(items: Any) -> list[Dict[str, Any]]:
     return output
 
 
+def _compact_session_hypothesis_assessment(value: Any) -> Dict[str, Any]:
+    """Expose the session-wide evidence ledger without raw command content."""
+
+    source = value if isinstance(value, Mapping) else {}
+    family_rows: list[Dict[str, Any]] = []
+    for raw in source.get("semantic_families") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        family_rows.append({
+            "semantic_family": str(raw.get("semantic_family") or "")[:80],
+            "status": str(raw.get("status") or "")[:80],
+            "observed_fact_count": raw.get("observed_fact_count", 0),
+            "selector_match_count": raw.get("selector_match_count", 0),
+            "selector_abstention_count": raw.get("selector_abstention_count", 0),
+            "evidence_refs": [
+                str(item)[:160]
+                for item in (raw.get("evidence_refs") or [])[:50]
+                if isinstance(item, str) and item
+            ],
+            "finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "trusted_finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("trusted_finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "audit_only_finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("audit_only_finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "missing_evidence": [
+                str(item)[:200]
+                for item in (raw.get("missing_evidence") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "falsifiers": [
+                {
+                    "code": str(item.get("code") or "")[:100],
+                    "semantic_family": str(item.get("semantic_family") or "")[:80],
+                    "evidence_refs": [
+                        str(ref)[:160]
+                        for ref in (item.get("evidence_refs") or [])[:50]
+                        if isinstance(ref, str) and ref
+                    ],
+                    "meaning": str(item.get("meaning") or "")[:240],
+                }
+                for item in (raw.get("falsifiers") or [])[:10]
+                if isinstance(item, Mapping)
+            ],
+        })
+    follow_on = source.get("follow_on_hypothesis")
+    follow_on = follow_on if isinstance(follow_on, Mapping) else {}
+    return {
+        "schema_version": source.get("schema_version") or "session_hypothesis_assessment.v1",
+        "scope": source.get("scope") or "session_wide",
+        "authority": source.get("authority") or "evidence_bounded_non_authoritative",
+        "status": source.get("status") or "unavailable",
+        "semantic_families": family_rows[:20],
+        "canonical_finding_ids": [
+            str(item)[:160]
+            for item in (source.get("canonical_finding_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "audit_only_candidate_ids": [
+            str(item)[:160]
+            for item in (source.get("audit_only_candidate_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "hypothesis_set_ids": [
+            str(item)[:160]
+            for item in (source.get("hypothesis_set_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "follow_on_hypothesis": {
+            "status": follow_on.get("status") or "insufficient_evidence",
+            "reason": str(follow_on.get("reason") or "")[:600],
+            "authority": follow_on.get("authority") or "non_authoritative_forecast_or_bounded_hypothesis",
+            "evidence_gaps": [
+                {
+                    "text": str(item.get("text") or "")[:400],
+                    "evidence_refs": [
+                        str(ref)[:160]
+                        for ref in (item.get("evidence_refs") or [])[:50]
+                        if isinstance(ref, str) and ref
+                    ],
+                    "falsifier_codes": [
+                        str(code)[:100]
+                        for code in (item.get("falsifier_codes") or [])[:20]
+                        if isinstance(code, str) and code
+                    ],
+                }
+                for item in (follow_on.get("evidence_gaps") or [])[:20]
+                if isinstance(item, Mapping)
+            ],
+        },
+        "evidence_graph": dict(source.get("evidence_graph") or {}) if isinstance(source.get("evidence_graph"), Mapping) else {},
+        "classification_summary": dict(source.get("classification_summary") or {}) if isinstance(source.get("classification_summary"), Mapping) else {},
+        "missing_evidence": [
+            str(item)[:200]
+            for item in (source.get("missing_evidence") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "falsifiers": [
+            {
+                "code": str(item.get("code") or "")[:100],
+                "semantic_family": str(item.get("semantic_family") or "")[:80],
+                "evidence_refs": [
+                    str(ref)[:160]
+                    for ref in (item.get("evidence_refs") or [])[:50]
+                    if isinstance(ref, str) and ref
+                ],
+                "meaning": str(item.get("meaning") or "")[:240],
+            }
+            for item in (source.get("falsifiers") or [])[:20]
+            if isinstance(item, Mapping)
+        ],
+        "forecast_is_not_observed_evidence": source.get("forecast_is_not_observed_evidence") is True,
+        "external_context_is_not_observed_evidence": source.get("external_context_is_not_observed_evidence") is True,
+        "assessment_sha256": str(source.get("assessment_sha256") or "")[:64],
+    }
+
+
+def _compact_hypothesis_sets(value: Any) -> list[Dict[str, Any]]:
+    """Expose bounded hypothesis meaning without raw command/event payloads."""
+
+    output: list[Dict[str, Any]] = []
+    for raw_set in value or []:
+        if not isinstance(raw_set, Mapping):
+            continue
+        hypotheses: list[Dict[str, Any]] = []
+        for raw_hypothesis in (raw_set.get("hypotheses") or [])[:8]:
+            if not isinstance(raw_hypothesis, Mapping):
+                continue
+            hypotheses.append({
+                "hypothesis_id": str(raw_hypothesis.get("hypothesis_id") or "")[:160],
+                "statement": str(raw_hypothesis.get("statement") or "")[:1_000],
+                "status": str(raw_hypothesis.get("status") or "")[:80],
+                "artifact_paths": [
+                    str(item)[:512]
+                    for item in (raw_hypothesis.get("artifact_paths") or [])[:20]
+                    if isinstance(item, str) and item
+                ],
+                "falsification_conditions": [
+                    str(item)[:500]
+                    for item in (raw_hypothesis.get("falsification_conditions") or [])[:20]
+                    if isinstance(item, str) and item
+                ],
+            })
+        output.append({
+            "hypothesis_set_id": str(raw_set.get("hypothesis_set_id") or "")[:160],
+            "question": str(raw_set.get("question") or "")[:1_000],
+            "scope": str(raw_set.get("scope") or "")[:160],
+            "hypotheses": hypotheses,
+        })
+        if len(output) >= 10:
+            break
+    return output
+
+
 def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
     """Return the bounded v1 public contract for the new detail endpoint."""
 
@@ -994,6 +1191,12 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
             detail.get("observed_tactic_path") or session_payload.get("observed_tactic_path") or []
         ),
         "correlated_ttp_hypotheses": _compact_correlations(raw_correlations),
+        "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "session_hypothesis_assessment": _compact_session_hypothesis_assessment(
+            detail.get("session_hypothesis_assessment")
+        ),
         "session_ttp_correlation_summary": _pick(
             detail.get("session_ttp_correlation_summary") or {},
             (
@@ -1014,6 +1217,7 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "enrichment_status": detail.get("enrichment_status") or {},
         "authentication_activity": authentication_view,
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),
@@ -1120,6 +1324,12 @@ def session_detail_view(
         ),
         "observed_trusted_ttps": observed_trusted_ttps,
         "correlated_ttp_hypotheses": public_correlations,
+        "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "session_hypothesis_assessment": _compact_session_hypothesis_assessment(
+            detail.get("session_hypothesis_assessment")
+        ),
         "session_ttp_correlations": public_correlations,
         "session_ttp_correlation_summary": public_correlation_summary,
         "tactics": detail.get("tactics") or [],
@@ -1129,6 +1339,7 @@ def session_detail_view(
         ),
         "enrichment_status": detail.get("enrichment_status") or {},
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),

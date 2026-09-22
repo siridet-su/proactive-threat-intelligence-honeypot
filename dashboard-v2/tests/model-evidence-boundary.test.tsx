@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClassificationList,
   Model2EnsembleSummary,
+  hasBoundAvailableModel2,
   hasClassificationEvidence,
 } from "../src/components/threat/SessionAnalysisPanels";
 
@@ -55,6 +56,42 @@ describe("retired command shadow versus session-bound Model2", () => {
     expect(html).toContain("UNIFIED_ONE_MODEL");
     expect(html).toContain("CORROBORATED");
     expect(html).toContain("ADVISORY_ONLY");
+  });
+
+  it("requires an exact-session run binding before treating Model2 as available", () => {
+    const sessionId = "session_v1_bound";
+    expect(hasBoundAvailableModel2({
+      session_id: sessionId,
+      ensemble_evidence: {
+        run_id: "run-1",
+        model2: {
+          available: true,
+          binding: { session_id: sessionId, run_id: "run-1" },
+        },
+      },
+    })).toBe(true);
+
+    expect(hasBoundAvailableModel2({
+      session_id: sessionId,
+      ensemble_evidence: {
+        model2: {
+          available: false,
+          status: "INCONCLUSIVE_EXPERIMENTAL_SHADOW",
+          binding: {},
+        },
+      },
+    })).toBe(false);
+
+    expect(hasBoundAvailableModel2({
+      session_id: sessionId,
+      ensemble_evidence: {
+        run_id: "run-other",
+        model2: {
+          available: true,
+          binding: { session_id: "session_v1_other", run_id: "run-other" },
+        },
+      },
+    })).toBe(false);
   });
 
   it("keeps trusted ATT&CK mappings visible when command classification rows are absent", () => {

@@ -114,6 +114,7 @@ function projectDetail(capability: Capability, payload: JsonRecord): JsonRecord 
       report_summary: payload.report_summary || {},
       correlated_ttp_hypotheses: payload.correlated_ttp_hypotheses || [],
       hypothesis_sets: payload.hypothesis_sets || [],
+      session_hypothesis_assessment: payload.session_hypothesis_assessment || {},
       reports: payload.reports || [],
       non_claims: [
         "does not establish attacker identity or intent",
@@ -218,6 +219,22 @@ export async function GET(
           headers: { "Cache-Control": "private, no-store" },
         });
       }
+    }
+
+    if (capability === "ai-advisory" && response.status === 404 && monitorJson && isRecord(payload)) {
+      // An optional worker that is not deployed is a valid capability state,
+      // not a missing dashboard resource. Preserve the explicit unavailable
+      // payload while preventing routine local sessions from surfacing a
+      // misleading HTTP failure in the browser.
+      return NextResponse.json({
+        ...projectDetail(capability, payload),
+        capability_ready: false,
+        error: "Capability is not deployed for this release",
+        reason: "Capability is not deployed for this release",
+      }, {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+      });
     }
 
     const projected = isRecord(payload)

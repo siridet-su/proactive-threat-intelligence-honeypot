@@ -1322,6 +1322,46 @@ def write_markdown_report(
             )
         if not report.get("behavioral_findings"):
             lines.append("- No policy-supported behavioral finding.")
+        session_assessment = report.get("session_hypothesis_assessment") or {}
+        if isinstance(session_assessment, dict):
+            lines.extend(["", "## Session-wide Evidence Assessment"])
+            lines.append(
+                f"- Status: {session_assessment.get('status', 'unavailable')}"
+            )
+            graph = session_assessment.get("evidence_graph") or {}
+            lines.append(
+                "- Evidence graph: "
+                f"{graph.get('evidence_nodes', 0)} evidence nodes, "
+                f"{graph.get('fact_nodes', 0)} facts, "
+                f"{graph.get('relationship_edges', 0)} relationships, "
+                f"{graph.get('chain_nodes', 0)} chains"
+            )
+            for family in session_assessment.get("semantic_families") or []:
+                if not isinstance(family, dict):
+                    continue
+                lines.append(
+                    f"- {family.get('semantic_family', 'unknown')}: "
+                    f"{family.get('status', 'unavailable')}; "
+                    f"facts={family.get('observed_fact_count', 0)}; "
+                    f"findings={len(family.get('finding_ids') or [])}; "
+                    f"missing={', '.join(family.get('missing_evidence') or []) or 'none recorded'}"
+                )
+            follow_on = session_assessment.get("follow_on_hypothesis") or {}
+            lines.append(
+                f"- Follow-on hypothesis: {follow_on.get('status', 'unavailable')}"
+                + (
+                    f" — {follow_on.get('reason')}"
+                    if follow_on.get("reason")
+                    else ""
+                )
+            )
+            falsifiers = session_assessment.get("falsifiers") or []
+            if falsifiers:
+                lines.append("- Observed falsifiers: " + "; ".join(
+                    str(item.get("meaning"))
+                    for item in falsifiers
+                    if isinstance(item, dict) and item.get("meaning")
+                ))
         lines.extend(["", "## Falsifiable Hypothesis Alternatives"])
         for hypothesis_set in report.get("hypothesis_sets") or []:
             lines.append(f"- {hypothesis_set.get('question', '')} (`{hypothesis_set.get('hypothesis_set_id', '')}`)")
@@ -1633,6 +1673,9 @@ def write_pdf_report(
         return parsed.astimezone(ict).strftime("%d %b %Y, %H:%M:%S ICT")
 
     def _duration_value(value: Any, start_value: Any, end_value: Any) -> str:
+        observed_interval = _duration_text(start_value, end_value)
+        if observed_interval != "Unavailable":
+            return observed_interval
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             seconds = max(float(value), 0.0)
             if seconds < 60:
@@ -2376,6 +2419,50 @@ def write_pdf_report(
                 "No policy-supported behavioral finding was established from the recorded evidence.",
                 body,
             ))
+        session_assessment = report.get("session_hypothesis_assessment") or {}
+        if isinstance(session_assessment, dict):
+            story.append(_p(f"2.{6 + cwd_section_offset} Session-wide Evidence Assessment", h2))
+            graph = session_assessment.get("evidence_graph") or {}
+            story.append(_p(
+                "The following ledger evaluates all activated semantic families in this session. "
+                "It records evidence and policy gates; it does not promote forecasts or external context into observed behavior.",
+                body,
+            ))
+            family_rows = [["Semantic family", "Status", "Facts", "Findings", "Evidence gate"]]
+            for family in session_assessment.get("semantic_families") or []:
+                if not isinstance(family, dict):
+                    continue
+                missing = ", ".join(family.get("missing_evidence") or []) or "none recorded"
+                family_rows.append([
+                    family.get("semantic_family") or "unknown",
+                    family.get("status") or "unavailable",
+                    str(family.get("observed_fact_count", 0)),
+                    str(len(family.get("finding_ids") or [])),
+                    _compact(missing, limit=260),
+                ])
+            if len(family_rows) > 1:
+                story.append(_table(family_rows, [3.1 * cm, 3.2 * cm, 1.4 * cm, 1.5 * cm, 7.0 * cm]))
+            else:
+                story.append(_p("No activated semantic-family assessment was recorded.", body))
+            story.append(_p(
+                "Evidence graph: "
+                f"{graph.get('evidence_nodes', 0)} evidence nodes, "
+                f"{graph.get('fact_nodes', 0)} facts, "
+                f"{graph.get('relationship_edges', 0)} relationships, "
+                f"{graph.get('chain_nodes', 0)} chains.",
+                small,
+            ))
+            follow_on_assessment = session_assessment.get("follow_on_hypothesis") or {}
+            story.append(_p(
+                "Follow-on hypothesis status: "
+                f"{follow_on_assessment.get('status', 'unavailable')}"
+                + (
+                    f" — {follow_on_assessment.get('reason')}"
+                    if follow_on_assessment.get("reason")
+                    else ""
+                ),
+                body,
+            ))
         hypothesis_rows = [["Question / hypothesis set", "Alternative hypotheses"]]
         for hypothesis_set in report.get("hypothesis_sets") or []:
             if not isinstance(hypothesis_set, dict):
@@ -2390,7 +2477,7 @@ def write_pdf_report(
                 f"{hypothesis_set.get('question', '')} [{hypothesis_set.get('hypothesis_set_id', 'unidentified')}]",
                 "\n".join(alternatives) or "No alternatives recorded",
             ])
-        story.append(_p(f"2.{6 + cwd_section_offset} Falsifiable Alternatives", h2))
+        story.append(_p(f"2.{7 + cwd_section_offset} Falsifiable Alternatives", h2))
         if len(hypothesis_rows) > 1:
             story.append(_table(hypothesis_rows, [7.5 * cm, 9.5 * cm]))
         else:

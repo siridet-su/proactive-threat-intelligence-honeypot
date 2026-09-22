@@ -247,6 +247,24 @@ def test_direct_transfer_event_with_sha256_is_the_only_positive_authority(
     assert match["path_resolution_status"] == ""
     assert _specialized(report) == (True, True)
     assert report["hypothesis_sets"] == []
+    session_hypothesis = report["session_hypothesis_assessment"]
+    family_status = {
+        item["semantic_family"]: item["status"]
+        for item in session_hypothesis["semantic_families"]
+    }
+    assert set(family_status) == {
+        "sensitive_read",
+        "transfer",
+        "transfer_attempt",
+        "inspection",
+        "filesystem",
+        "execution",
+    }
+    assert family_status["transfer"] == "canonical_finding"
+    assert session_hypothesis["canonical_finding_ids"]
+    assert session_hypothesis["follow_on_hypothesis"]["status"] == "abstained"
+    assert session_hypothesis["follow_on_hypothesis"]["reason"]
+    assert "wget" not in json.dumps(session_hypothesis)
     assert validate_typed_semantic_fact_set(fact_set) == []
     assert validate_typed_semantic_family_selection(
         selection,
@@ -313,7 +331,7 @@ def test_attck_only_mapping_cannot_create_transfer_authority() -> None:
         ("~/observed.bin", "/var/tmp"),
     ],
 )
-def test_unresolved_transfer_event_paths_abstain(
+def test_unresolved_auxiliary_transfer_paths_do_not_veto_resolved_artifact(
     path: str,
     cwd: str,
 ) -> None:
@@ -328,14 +346,28 @@ def test_unresolved_transfer_event_paths_abstain(
     )
     _observed, _fact_set, selection = _typed_inputs(payload)
     report = _report(payload)
-    reasons = {
-        reason
-        for item in selection["abstentions"]
-        for reason in item["reasons"]
-    }
+    assert selection["status"] == "matched"
+    assert len(selection["matches"]) == 1
+    assert selection["matches"][0]["entity_role"] == "artifact_hashes"
+    assert _specialized(report) == (True, True)
+
+
+def test_unresolved_required_artifact_identity_still_abstains() -> None:
+    session_id = "unresolved-required-artifact"
+    payload = _payload(
+        session_id,
+        transfer_events=[
+            _transfer_event(
+                session_id,
+                path="/var/tmp/observed.bin",
+                digest="",
+            )
+        ],
+    )
+    _observed, _fact_set, selection = _typed_inputs(payload)
+    report = _report(payload)
 
     assert selection["status"] == "abstained"
-    assert "fact_identity_unresolved" in reasons
     assert _specialized(report) == (False, False)
 
 

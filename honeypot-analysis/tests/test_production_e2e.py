@@ -61,6 +61,9 @@ def _config(tmp: str) -> ProductionConfig:
         analysis_max_attempts=1,
         reports_dir=str(root / "reports"),
         enable_feed_loading=False,
+        # Feed refresh is disabled in this deterministic E2E, but tactic
+        # resolution still uses the repository's verified offline ontology.
+        mitre_attack_path=str(ROOT / "data" / "feeds" / "mitre_attack_cache.json"),
         enable_securebert=False,
         enable_actor_attribution=False,
         webhook_url="",
@@ -193,16 +196,21 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert processed == len(events)
         prediction_outbox = storage.list_rows("prediction_outbox")
         prediction_snapshots = storage.list_rows("prediction_snapshots")
-        assert prediction_outbox
-        assert len(prediction_outbox) == len(prediction_snapshots)
-        assert all(row["status"] == "completed" for row in prediction_outbox)
-        assert all(row["snapshot_id"] for row in prediction_outbox)
+        # The canonical next-behavior executor is retired and the production
+        # contract requires this runtime to remain disabled.  A closed
+        # session must therefore not fabricate a prediction/outbox record;
+        # retained Next Distinct sidecars are tested through their read-only
+        # projection contract instead.
+        assert cfg.canonical_next_behavior_runtime == "disabled"
+        assert prediction_outbox == []
+        assert prediction_snapshots == []
 
         sessions = storage.list_rows("sessions")
         assert len(sessions) == 1
         session_payload = json.loads(sessions[0]["payload_json"])
         serialized_session = json.dumps(session_payload)
         assert session_payload["is_ended"] is True
+        assert session_payload["end_time"] == "2026-05-12T00:00:12Z"
         assert session_payload["login_password"] == "[REDACTED]"
         assert session_payload["login_password_hash"] == ""
         assert session_payload["credential_metadata"]["credential_observed"] is True
@@ -212,6 +220,22 @@ def test_forwarder_spool_replay_to_analysis_report() -> None:
         assert session_payload["client_version"] == "SSH-2.0-libssh"
         assert session_payload["ioc_summary"]["total"] >= 1
         assert session_payload["bpg_list"]
+        trusted_tactics = [
+            event.get("tactic")
+            for event in session_payload["classification_events"]
+            if event.get("evidence_tier") == "trusted_observation"
+        ]
+        assert trusted_tactics == [
+            "discovery",
+            "command-and-control",
+            "defense-evasion",
+            "discovery",
+        ]
+        assert session_payload["tactics"] == [
+            "discovery",
+            "command-and-control",
+            "defense-evasion",
+        ]
 
         alerts = storage.list_rows("alerts")
         assert alerts == []

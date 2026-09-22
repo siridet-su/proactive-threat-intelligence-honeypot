@@ -20,11 +20,13 @@ class DetailStorage:
         prediction_rows: list[dict[str, object]] | None = None,
         event_rows: list[dict[str, object]] | None = None,
         session_payload_extra: dict[str, object] | None = None,
+        report_payload_extra: dict[str, object] | None = None,
     ) -> None:
         self.present = present
         self.prediction_rows = list(prediction_rows or [])
         self.event_rows = list(event_rows) if event_rows is not None else None
         self.session_payload_extra = dict(session_payload_extra or {})
+        self.report_payload_extra = dict(report_payload_extra or {})
         self.calls: list[tuple[str, str, int]] = []
         self.global_reads = 0
         self.single_enrichment_reads = 0
@@ -95,7 +97,11 @@ class DetailStorage:
                     "session_id": SESSION_ID,
                     "created_at": "2026-09-01T00:00:04Z",
                     "payload_json": json.dumps(
-                        {"schema_version": "session_assessment.v4", "status": "complete"}
+                        {
+                            "schema_version": "session_assessment.v4",
+                            "status": "complete",
+                            **self.report_payload_extra,
+                        }
                     ),
                 }
             ]
@@ -203,6 +209,106 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
     compact_serialized = json.dumps(compact, sort_keys=True)
     assert "payload_json" not in compact_serialized
     assert '"input": "id"' not in compact_serialized
+
+
+def test_dashboard_detail_merges_hypothesis_sets_from_report_artifact(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    reports_dir = tmp_path / "reports"
+    reports_dir.mkdir()
+    artifact_path = reports_dir / "session-detail-contract_report.json"
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "session_assessment.v4",
+                "canonical_evidence": {"entities": []},
+                "hypothesis_sets": [
+                    {
+                        "hypothesis_set_id": "hypothesis-set-1",
+                        "question": "What explains the observed sequence?",
+                        "scope": "session",
+                        "hypotheses": [
+                            {
+                                "hypothesis_id": "hypothesis-1",
+                                "statement": "The activity may have stopped before execution.",
+                                "status": "bounded_alternative",
+                                "supporting_evidence_refs": ["event-detail-1"],
+                                "falsification_conditions": ["Observe a bound execution event."],
+                            }
+                        ],
+                    }
+                ],
+                "session_hypothesis_assessment": {
+                    "schema_version": "session_hypothesis_assessment.v1",
+                    "status": "findings_available",
+                    "hypothesis_set_ids": ["hypothesis-set-1"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    storage = DetailStorage(
+        report_payload_extra={"artifacts": {"json": str(artifact_path)}}
+    )
+    monkeypatch.setattr(
+        monitor_web,
+        "build_ensemble_from_session_payload",
+        lambda *_args, **_kwargs: {},
+    )
+
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+    compact = session_detail_view(detail, compact=True)
+
+    assert detail["hypothesis_sets"][0]["hypothesis_set_id"] == "hypothesis-set-1"
+    assert compact["hypothesis_sets"][0]["hypotheses"][0]["hypothesis_id"] == "hypothesis-1"
+    assert compact["session_hypothesis_assessment"]["hypothesis_set_ids"] == [
+        "hypothesis-set-1"
+    ]
+
+
+def test_dashboard_detail_end_time_uses_latest_event_not_storage_row_order(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    storage = DetailStorage(
+        event_rows=[
+            {
+                "event_id": "event-latest",
+                "session_id": SESSION_ID,
+                "eventid": "cowrie.session.closed",
+                "timestamp": "2026-09-01T00:00:12Z",
+                "payload_json": json.dumps(
+                    {"eventid": "cowrie.session.closed", "timestamp": "2026-09-01T00:00:12Z"}
+                ),
+            },
+            {
+                "event_id": "event-earliest",
+                "session_id": SESSION_ID,
+                "eventid": "cowrie.session.connect",
+                "timestamp": "2026-09-01T00:00:00Z",
+                "payload_json": json.dumps(
+                    {"eventid": "cowrie.session.connect", "timestamp": "2026-09-01T00:00:00Z"}
+                ),
+            },
+        ],
+        session_payload_extra={"ended": True, "is_ended": True, "duration": 37.5},
+    )
+    monkeypatch.setattr(
+        monitor_web,
+        "build_ensemble_from_session_payload",
+        lambda *_args, **_kwargs: {},
+    )
+
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+
+    assert detail["overview"]["end_time"] == "2026-09-01T00:00:12Z"
+    assert detail["overview"]["duration"] == 12.0
+    assert detail["overview"]["recorded_duration"] == 37.5
 
 
 def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
@@ -573,6 +679,68 @@ def test_dashboard_detail_uses_exact_session_live_model2_when_snapshot_missing(t
     assert detail["ensemble_evidence"] == ensemble
     assert detail["prediction_snapshots"] == []
     assert detail["latest_prediction_snapshot"] == {}
+
+
+def test_dashboard_detail_and_next_distinct_share_the_same_sidecar_projection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    sidecar_projection = {
+        "schema_version": "dashboard_next_distinct_prediction.v1",
+        "prediction_type": "NEXT_DISTINCT_TRUSTED_TACTIC",
+        "dashboard_source": "NEXT_DISTINCT_POC",
+        "source": "NEXT_DISTINCT_POC",
+        "authority": "NON_AUTHORITATIVE_ADVISORY",
+        "canonical_write_allowed": False,
+        "model": {
+            "model_identifier": "finalf_refined_v1_prediction_only",
+            "checkpoint_sha256": "a" * 64,
+        },
+        "history": {"trusted_only": True, "length": 1},
+        "prediction": [{"tactic": "discovery", "score": 0.9}],
+        "top1": "discovery",
+        "top3": ["discovery"],
+        "probabilities": [0.9],
+        "generated_at": "2026-09-01T00:00:05Z",
+        "freshness": {
+            "state": "FRESH",
+            "generated_at": "2026-09-01T00:00:05Z",
+            "history_manifest_match": True,
+        },
+        "prediction_status": "PREDICTED",
+        "prediction_status_reason": "latest eligible sidecar progression",
+        "progression_index": 3,
+        "sequence_id": SESSION_ID,
+    }
+    monkeypatch.setattr(
+        monitor_web,
+        "build_dashboard_prediction",
+        lambda session_id, _row: dict(sidecar_projection, sequence_id=session_id),
+    )
+    storage = DetailStorage()
+    detail = monitor_web.load_dashboard_session_detail(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+    dedicated = monitor_web.load_next_distinct_prediction(
+        _config(tmp_path), SESSION_ID, _storage=storage
+    )
+    dedicated = monitor_web._dashboard_next_distinct_projection(
+        dedicated,
+        SESSION_ID,
+    )
+    row = detail["latest_prediction_snapshot"]
+    payload = row["payload"]
+
+    assert detail["next_distinct_prediction"]["source"] == "NEXT_DISTINCT_POC"
+    assert payload["source"] == dedicated["source"]
+    assert payload["prediction_status"] == dedicated["prediction_status"]
+    assert payload["next_distinct_tactic"] == dedicated["next_distinct_tactic"]
+    assert payload["freshness"] == dedicated["freshness"]
+    assert payload["read_only"] is True
+    assert payload["advisory_only"] is True
+    public = session_detail_view(detail, compact=True)
+    assert public["latest_prediction_snapshot"]["source"] == "NEXT_DISTINCT_POC"
+    assert public["next_distinct_prediction"]["top1"] == dedicated["top1"]
 
 
 def test_dashboard_detail_prefers_bound_terminal_session_model2_over_stale_snapshot(

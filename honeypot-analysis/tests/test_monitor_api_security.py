@@ -24,6 +24,7 @@ from production.utils.sensor_identity import (
     canonical_session_id,
     bind_authenticated_sensor_identity,
 )
+from production.utils.serialization import event_id as canonical_event_id
 
 
 _COMMAND_TEST_SENSOR_ID = "pi-cowrie-01"
@@ -843,6 +844,79 @@ def test_internal_view_preserves_benign_command_after_short_login_credentials() 
     )
     assert public["events"][0]["eventid"] == "cowrie.command.input"
     assert "ls -al" not in json.dumps(public, sort_keys=True)
+
+
+def test_internal_view_accepts_integrity_bound_sqlite_command_row() -> None:
+    bound = bind_authenticated_sensor_identity(
+        {
+            "eventid": "cowrie.command.input",
+            "session": _COMMAND_TEST_SENSOR_SESSION_ID,
+            "timestamp": "2026-08-05T00:00:02Z",
+            "input": "pwd",
+        },
+        _COMMAND_TEST_SENSOR_ID,
+    )
+    durable_event_id = canonical_event_id(_COMMAND_TEST_SENSOR_ID, bound)
+    row = {
+        "event_id": durable_event_id,
+        "session_id": _COMMAND_TEST_SESSION_ID,
+        "sensor_id": _COMMAND_TEST_SENSOR_ID,
+        "eventid": bound["eventid"],
+        "timestamp": bound["timestamp"],
+        "payload_json": json.dumps(bound),
+    }
+
+    class SQLiteStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
+            if table == "events":
+                return [row]
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        _COMMAND_TEST_SESSION_ID,
+        _storage=SQLiteStorage(),
+    )
+    assert internal["ok"] is True
+    assert [command["input"] for command in internal["commands"]] == ["pwd"]
+
+
+def test_internal_view_rejects_tampered_sqlite_command_row() -> None:
+    bound = bind_authenticated_sensor_identity(
+        {
+            "eventid": "cowrie.command.input",
+            "session": _COMMAND_TEST_SENSOR_SESSION_ID,
+            "timestamp": "2026-08-05T00:00:03Z",
+            "input": "pwd",
+        },
+        _COMMAND_TEST_SENSOR_ID,
+    )
+    row = {
+        "event_id": canonical_event_id(_COMMAND_TEST_SENSOR_ID, bound),
+        "session_id": _COMMAND_TEST_SESSION_ID,
+        "sensor_id": _COMMAND_TEST_SENSOR_ID,
+        "eventid": bound["eventid"],
+        "timestamp": bound["timestamp"],
+        "payload_json": json.dumps(bound | {"input": "cat /tampered"}),
+    }
+
+    class SQLiteStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
+            if table == "events":
+                return [row]
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        _COMMAND_TEST_SESSION_ID,
+        _storage=SQLiteStorage(),
+    )
+    assert internal["ok"] is True
+    assert internal["commands"] == []
 
 
 def test_monitor_session_detail_uses_canonical_events_and_event_command_count() -> None:

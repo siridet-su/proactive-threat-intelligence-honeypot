@@ -267,6 +267,12 @@ class SessionWorker:
                 sigma_cache_path=config.sigma_cache_path or None,
                 allow_network_refresh=False,
             )
+        # ATT&CK tactic resolution is part of the trusted classification
+        # projection, not optional external-feed enrichment.  Keep the other
+        # feeds disabled when requested, but load an explicitly configured
+        # offline MITRE cache so classification records do not degrade to
+        # ``tactic=unknown`` and make the observed tactic chain disappear.
+        if config.enable_feed_loading or config.mitre_attack_path:
             self.mitre_db = load_mitre_attack_db(
                 cache_path=config.mitre_attack_path or None,
                 silent=True,
@@ -824,6 +830,8 @@ class SessionWorker:
                 "schema_version",
                 "session_id",
                 "through_event_id",
+                "through_received_at",
+                "event_entries",
                 "event_count",
                 "manifest_sha256",
             )

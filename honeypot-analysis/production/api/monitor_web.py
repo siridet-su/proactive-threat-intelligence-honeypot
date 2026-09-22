@@ -13,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -66,7 +67,12 @@ from production.utils.http_security import (
     single_header_value,
     validate_bind_auth,
 )
-from production.utils.serialization import html_script_json, stable_id, utc_now
+from production.utils.serialization import (
+    event_id as canonical_event_id,
+    html_script_json,
+    stable_id,
+    utc_now,
+)
 from production.utils.service_lifecycle import serve_http_until_stopped
 from production.storage.mongodb_backend import MONGODB_EVENT_SCHEMA
 from production.utils.sensor_identity import (
@@ -361,8 +367,7 @@ def _is_canonical_command_event_for_session(
 ) -> bool:
     """Require the stored event's authenticated sensor/session binding."""
     if (
-        row.get("schema_version") != MONGODB_EVENT_SCHEMA
-        or row.get("session_id") != session_id
+        row.get("session_id") != session_id
         or payload.get("session") != session_id
     ):
         return False
@@ -390,13 +395,31 @@ def _is_canonical_command_event_for_session(
     if expected_session_id != session_id:
         return False
 
+    durable_event_id = row.get("event_id")
+    storage_schema = row.get("schema_version")
+    if storage_schema == MONGODB_EVENT_SCHEMA:
+        storage_binding_valid = True
+    elif storage_schema in (None, ""):
+        # SQLite deliberately has no per-row schema_version column.  Bind its
+        # command view to the backend-neutral canonical event identity instead
+        # of incorrectly requiring the MongoDB storage envelope.
+        storage_binding_valid = (
+            isinstance(durable_event_id, str)
+            and bool(durable_event_id)
+            and durable_event_id == canonical_event_id(sensor_id, payload)
+        )
+    else:
+        storage_binding_valid = False
+
     row_event_id = row.get("eventid")
     return (
+        storage_binding_valid
+        and
         isinstance(row_event_id, str)
         and bool(row_event_id)
         and row_event_id == payload.get("eventid")
-        and isinstance(row.get("event_id"), str)
-        and bool(row.get("event_id"))
+        and isinstance(durable_event_id, str)
+        and bool(durable_event_id)
     )
 
 
@@ -1052,6 +1075,62 @@ def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
     payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
+
+
+def _complete_report_payload(
+    report_payload: Dict[str, Any],
+    reports_dir: str,
+) -> Dict[str, Any]:
+    """Merge the bounded stored report row with its canonical JSON artifact.
+
+    Report rows intentionally retain a compact projection, while hypothesis
+    sets and their falsifiers live in the immutable report artifact. Session
+    detail must use the same merged source as PDF rendering or the dashboard
+    can contradict the downloadable report.
+    """
+
+    artifact_paths = _artifact_paths(report_payload, reports_dir)
+    artifact_payload = _load_report_json_from_artifact(
+        artifact_paths,
+        reports_dir,
+    )
+    return _merged_report_payload(report_payload, artifact_payload)
+
+
+def _latest_iso_timestamp(values: Iterable[Any]) -> str:
+    """Return the latest valid ISO-8601 timestamp without trusting row order."""
+
+    latest: tuple[datetime, str] | None = None
+    for value in values:
+        text = _text(value).strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+        if latest is None or parsed > latest[0]:
+            latest = (parsed, text)
+    return latest[1] if latest is not None else ""
+
+
+def _elapsed_seconds(start_value: Any, end_value: Any) -> float | None:
+    """Return the non-negative elapsed interval between two ISO timestamps."""
+
+    try:
+        start = datetime.fromisoformat(str(start_value or "").replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(end_value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if start.tzinfo is None or start.utcoffset() is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None or end.utcoffset() is None:
+        end = end.replace(tzinfo=timezone.utc)
+    elapsed = (end.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()
+    return elapsed if elapsed >= 0 else None
 
 
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -1908,6 +1987,8 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
         canonical_evidence = merged.get("canonical_evidence") or {}
         coverage = canonical_evidence.get("semantic_coverage") or {}
         graph = canonical_evidence.get("semantic_graph") or {}
+        session_hypothesis = merged.get("session_hypothesis_assessment") or {}
+        session_families = session_hypothesis.get("semantic_families") or []
         return {
             "schema_version": "session_assessment.v4",
             "campaign_name": "",
@@ -1931,6 +2012,18 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
                 f"{len(graph.get('fact_nodes') or [])} facts / "
                 f"{len(graph.get('relationship_edges') or [])} relationships / "
                 f"{len(graph.get('chain_nodes') or [])} chains"
+            ),
+            "session_hypothesis_status": _text(
+                session_hypothesis.get("status") or "unavailable"
+            ),
+            "session_hypothesis_family_count": _text(len(session_families)),
+            "session_hypothesis_canonical_finding_count": _text(
+                len(session_hypothesis.get("canonical_finding_ids") or [])
+            ),
+            "session_hypothesis_missing_evidence": "; ".join(
+                _text(item)
+                for item in session_hypothesis.get("missing_evidence") or []
+                if _text(item)
             ),
             "post_session_follow_on_hypothesis": "; ".join(
                 _text(hypothesis.get("statement"))
@@ -2752,6 +2845,20 @@ def load_dashboard_session_detail(
         for row in related["prediction_snapshots"]
         if _row_session_id(row) == clean_session_id
     ]
+    next_distinct_projection = _next_distinct_projection_for_session_row(
+        clean_session_id,
+        session_rows[0],
+    )
+    if not prediction_rows:
+        sidecar_snapshot = _next_distinct_snapshot_row(
+            next_distinct_projection,
+            clean_session_id,
+        )
+        if sidecar_snapshot:
+            # The sidecar is append-only and remains the dedicated Next
+            # Distinct source of truth. This row is a bounded read-model
+            # projection only; it is never written to MongoDB.
+            prediction_rows = [sidecar_snapshot]
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
@@ -2785,7 +2892,11 @@ def load_dashboard_session_detail(
         elif not _session_ensemble_projection(ensemble_evidence, clean_session_id):
             ensemble_evidence = {}
     authentication_activity = _authentication_activity(payload, event_rows)
-    report_payload = _report_payload(selected.get("report_row"))
+    stored_report_payload = _report_payload(selected.get("report_row"))
+    report_payload = _complete_report_payload(
+        stored_report_payload,
+        config.reports_dir,
+    )
     historical_guidance = _historical_response_guidance_payload(
         report_payload,
         configured_policy_path=config.response_guidance_policy_path,
@@ -2805,10 +2916,18 @@ def load_dashboard_session_detail(
         payload.get("is_ended") or session_rows[0].get("ended")
     )
     overview["end_time"] = (
-        event_timestamps[-1]
-        if overview["is_ended"] and event_timestamps
+        _latest_iso_timestamp(event_timestamps)
+        if overview["is_ended"]
         else ""
     )
+    if overview["is_ended"]:
+        projected_duration = _elapsed_seconds(
+            overview.get("start_time"),
+            overview.get("end_time"),
+        )
+        if projected_duration is not None:
+            overview["recorded_duration"] = overview.get("duration") or ""
+            overview["duration"] = projected_duration
     detail = {
         "ok": True,
         "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
@@ -2833,6 +2952,11 @@ def load_dashboard_session_detail(
             report_payload.get("hypothesis_sets") or [],
             report_payload.get("canonical_evidence") or {},
         ),
+        "session_hypothesis_assessment": copy.deepcopy(
+            report_payload.get("session_hypothesis_assessment")
+            if isinstance(report_payload.get("session_hypothesis_assessment"), dict)
+            else {}
+        ),
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
         "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
         "tactics": payload.get("tactics") or [],
@@ -2840,6 +2964,7 @@ def load_dashboard_session_detail(
         "ttp_command_map": payload.get("ttp_command_map") or {},
         "enrichment_status": payload.get("enrichment_status") or {},
         "ensemble_evidence": ensemble_evidence,
+        "next_distinct_prediction": next_distinct_projection,
         "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
         "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
@@ -2999,16 +3124,7 @@ def load_next_distinct_prediction(
             "session_id": clean_session_id,
             "timestamp": utc_now(),
         }
-    projection = build_dashboard_prediction(clean_session_id, rows[0])
-    session_payload = _session_payload(rows[0])
-    projection["session_ended"] = bool(
-        session_payload.get("is_ended") or rows[0].get("ended")
-    )
-    projection["ok"] = projection.get("prediction_status") not in {
-        "UNAVAILABLE",
-    }
-    projection["timestamp"] = utc_now()
-    return projection
+    return _next_distinct_projection_for_session_row(clean_session_id, rows[0])
 
 
 def _dashboard_next_distinct_projection(
@@ -3090,6 +3206,91 @@ def _dashboard_next_distinct_projection(
                 "no session-end prediction is emitted"
             )
     return result
+
+
+def _next_distinct_projection_for_session_row(
+    session_id: str,
+    session_row: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build the exact read-only Next Distinct projection for one session.
+
+    Both the dedicated endpoint and the session-detail endpoint must pass
+    through this adapter.  The helper only reads the retained sidecar; it
+    never emits a session-end prediction and never persists a snapshot.
+    """
+
+    projection = build_dashboard_prediction(session_id, session_row)
+    session_payload = _session_payload(session_row)
+    projection["session_ended"] = bool(
+        session_payload.get("is_ended") or session_row.get("ended")
+    )
+    projection["ok"] = projection.get("prediction_status") not in {
+        "UNAVAILABLE",
+    }
+    projection["timestamp"] = utc_now()
+    return _dashboard_next_distinct_projection(projection, session_id)
+
+
+def _next_distinct_snapshot_row(
+    projection: Any,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Adapt eligible sidecar data into an in-memory detail read-model row."""
+
+    if not isinstance(projection, dict):
+        return {}
+    if (
+        _text(projection.get("session_id")) != session_id
+        or _text(projection.get("sequence_id")) != session_id
+        or _text(projection.get("source")).upper() != "NEXT_DISTINCT_POC"
+    ):
+        return {}
+    prediction_status = _text(projection.get("prediction_status")).upper()
+    state = _text(projection.get("state")).upper()
+    if prediction_status != "PREDICTED":
+        return {}
+    top1 = projection.get("next_distinct_tactic")
+    if state == "SESSION_ENDED":
+        top1 = projection.get("stored_next_distinct_tactic")
+    if not isinstance(top1, str) or not top1.strip():
+        return {}
+    freshness = projection.get("freshness")
+    freshness = freshness if isinstance(freshness, dict) else {}
+    generated_at = _text(
+        freshness.get("generated_at") or projection.get("generated_at")
+    )
+    snapshot_role = (
+        "historical_advisory"
+        if state == "SESSION_ENDED"
+        else "active_advisory"
+    )
+    payload = copy.deepcopy(projection)
+    payload.update(
+        {
+            "session_id": session_id,
+            "snapshot_role": snapshot_role,
+            "prediction_source": "NEXT_DISTINCT_POC",
+            "historical_advisory": snapshot_role == "historical_advisory",
+            "read_only": True,
+            "advisory_only": True,
+        }
+    )
+    return {
+        "snapshot_id": stable_id(
+            "next_distinct_detail_snapshot",
+            {
+                "session_id": session_id,
+                "generated_at": generated_at,
+                "progression_index": projection.get("progression_index"),
+                "top1": top1,
+            },
+        ),
+        "session_id": session_id,
+        "created_at": generated_at or utc_now(),
+        "source": "NEXT_DISTINCT_POC",
+        "snapshot_role": snapshot_role,
+        "payload": payload,
+    }
 
 
 def _report_next_distinct_snapshot(
@@ -6833,6 +7034,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.db_path:
         config.db_path = args.db_path
         config.database_url = f"sqlite:///{args.db_path}"
+        # ``_open_monitor_storage`` uses the process-owned ProductionConfig.
+        # Keep the deprecated explicit SQLite override internally consistent;
+        # otherwise the CLI descriptor says SQLite while the adapter opens the
+        # default or environment-selected backend.
+        if config.production_config is not None:
+            config.production_config.database_backend = "sqlite"
+            config.production_config.sqlite_database_path = args.db_path
+            config.production_config.database_url = f"sqlite:///{args.db_path}"
     if args.reports_dir:
         config.reports_dir = args.reports_dir
         if config.production_config:

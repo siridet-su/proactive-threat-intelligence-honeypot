@@ -197,14 +197,12 @@ def _match_or_reasons(
             }
         ):
             reasons.append("direct_transfer_outcome_required")
-        if any(
-            entity.get("uncertain") is True
-            or entity.get("linkable") is not True
-            for values in (fact.get("entities") or {}).values()
-            for entity in values or []
-            if isinstance(entity, dict)
-        ):
-            reasons.append("fact_identity_unresolved")
+        # The transfer family is authoritative on the resolved artifact hash.
+        # Cowrie may also record auxiliary entities (for example a relative or
+        # otherwise unresolved destination path). Those entities remain
+        # available as limitations, but must not veto a direct transfer event
+        # whose required artifact identity is valid. The required-role entity
+        # is checked below by the shared-entity matcher.
 
     role = requirement["required_entity_role"]
     entity_type = requirement["required_entity_type"]

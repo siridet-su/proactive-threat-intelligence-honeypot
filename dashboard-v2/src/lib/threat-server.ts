@@ -20,6 +20,7 @@ export const MAX_DIRECTORY_EXPORT = 10_000;
 const SUMMARY_WINDOW_HOURS = 24;
 const SNAPSHOT_TTL_MS = 5_000;
 const STREAM_RETRY_MS = 5_000;
+const CHANGE_STREAM_OPEN_TIMEOUT_MS = 2_000;
 
 type ThreatUpdate = { type: "threat.upsert"; data: DashboardThreatEvent };
 type ThreatSubscriber = (update: ThreatUpdate) => void;
@@ -347,7 +348,15 @@ async function ensureThreatChangeStream(): Promise<void> {
   if (runtime.opening) return runtime.opening;
 
   runtime.opening = (async () => {
-    const client = await getMongoClient();
+    const client = await Promise.race([
+      getMongoClient(),
+      new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error("MongoDB change stream open timed out")),
+          CHANGE_STREAM_OPEN_TIMEOUT_MS,
+        );
+      }),
+    ]);
     if (!runtime.subscribers.size || runtime.stream) return;
 
     const stream = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME).watch(
@@ -372,14 +381,16 @@ async function ensureThreatChangeStream(): Promise<void> {
   }
 }
 
-export async function subscribeThreatUpdates(subscriber: ThreatSubscriber): Promise<() => void> {
+export function subscribeThreatUpdates(subscriber: ThreatSubscriber): () => void {
   runtime.subscribers.add(subscriber);
-  try {
-    await ensureThreatChangeStream();
-  } catch (error) {
-    runtime.subscribers.delete(subscriber);
-    throw error;
-  }
+  // Change-stream setup is deliberately best-effort.  The SSE route must be
+  // able to send its initial snapshot and heartbeat even when MongoDB's
+  // watch/connection negotiation is unavailable or slow.  The stream will be
+  // retried in the background while the route's snapshot polling remains the
+  // authoritative fallback for dashboard liveness.
+  void ensureThreatChangeStream().catch(() => {
+    scheduleReconnect();
+  });
 
   return () => {
     runtime.subscribers.delete(subscriber);

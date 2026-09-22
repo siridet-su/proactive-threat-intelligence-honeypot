@@ -49,6 +49,7 @@ from production.reporting.typed_semantic_facts import (
     validate_typed_semantic_fact_set,
 )
 from production.reporting.typed_semantic_family_selection import (
+    select_activated_semantic_family,
     validate_policy_output_trace,
 )
 from production.utils.serialization import stable_id, stable_json, utc_now
@@ -130,6 +131,11 @@ def canonical_assessment_id(value: Dict[str, Any]) -> str:
                 or {}
             ).get("sha256"),
         })
+    session_hypothesis = value.get("session_hypothesis_assessment")
+    if isinstance(session_hypothesis, dict):
+        identity["session_hypothesis_assessment_sha256"] = _clean(
+            session_hypothesis.get("assessment_sha256")
+        )
     return stable_id("session_assessment", identity)
 
 
@@ -708,6 +714,341 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
     return sorted(output, key=lambda item: item["hypothesis_set_id"])
 
 
+def _session_hypothesis_assessment(
+    *,
+    observed: Dict[str, Any],
+    typed_fact_set: Dict[str, Any],
+    typed_status: str,
+    findings: List[Dict[str, Any]],
+    hypothesis_sets: List[Dict[str, Any]],
+    follow_on: Dict[str, Any],
+    graph: Dict[str, Any],
+    authority_decisions: List[Dict[str, Any]],
+    activated_families: Iterable[str],
+) -> Dict[str, Any]:
+    """Build a session-wide, evidence-bounded hypothesis assessment.
+
+    ``hypothesis_sets`` intentionally remains the narrower follow-on
+    hypothesis contract.  This projection answers the broader analyst
+    question—what did the whole session contain and what happened at each
+    evidence gate—without promoting a contextual correlation or a forecast
+    into an observed finding.
+    """
+
+    families = [
+        _clean(family)
+        for family in activated_families
+        if _clean(family)
+    ]
+    fact_list = [
+        item for item in (typed_fact_set.get("facts") or [])
+        if isinstance(item, dict)
+    ]
+    finding_list = [
+        item for item in findings
+        if isinstance(item, dict)
+    ]
+    decision_by_candidate = {
+        _clean(item.get("candidate_id")): item
+        for item in authority_decisions
+        if isinstance(item, dict) and _clean(item.get("candidate_id"))
+    }
+
+    def facts_for_family(family: str) -> List[Dict[str, Any]]:
+        return [
+            fact
+            for fact in fact_list
+            if any(
+                _clean(operation.get("family")) == family
+                for operation in fact.get("operations") or []
+                if isinstance(operation, dict)
+            )
+        ]
+
+    def refs_for_fact(fact: Dict[str, Any]) -> List[str]:
+        refs = {
+            _clean(item.get("evidence_ref"))
+            for item in fact.get("evidence_references") or []
+            if isinstance(item, dict) and _clean(item.get("evidence_ref"))
+        }
+        source_ref = _clean(fact.get("source_observation_ref"))
+        if source_ref:
+            refs.add(source_ref)
+        return sorted(refs)
+
+    def unique(values: Iterable[Any]) -> List[str]:
+        return sorted({
+            _clean(value)
+            for value in values
+            if _clean(value)
+        })
+
+    family_records: List[Dict[str, Any]] = []
+    aggregate_missing: set[str] = set()
+    aggregate_falsifiers: List[Dict[str, Any]] = []
+    matched_families: set[str] = set()
+
+    for family in families:
+        family_facts = facts_for_family(family)
+        fact_refs = unique(
+            ref
+            for fact in family_facts
+            for ref in refs_for_fact(fact)
+        )
+        selections: Dict[str, Any] = {}
+        selection_error = ""
+        if typed_status == "valid":
+            try:
+                selections = select_activated_semantic_family(
+                    typed_fact_set,
+                    family=family,
+                )
+            except Exception as exc:
+                selection_error = exc.__class__.__name__
+
+        matches = [
+            item for item in selections.get("matches") or []
+            if isinstance(item, dict)
+        ]
+        abstentions = [
+            item for item in selections.get("abstentions") or []
+            if isinstance(item, dict)
+        ]
+        matched_refs = unique(
+            ref
+            for item in matches
+            for ref in item.get("supporting_evidence_refs") or []
+        )
+        abstention_reasons = unique(
+            reason
+            for item in abstentions
+            for reason in item.get("reasons") or []
+        )
+        family_findings = [
+            item for item in finding_list
+            if _clean(item.get("semantic_family")) == family
+        ]
+        finding_ids = unique(item.get("finding_id") for item in family_findings)
+        trusted_finding_ids = []
+        audit_finding_ids = []
+        authority_reasons: set[str] = set()
+        for finding_id in finding_ids:
+            decision = decision_by_candidate.get(finding_id) or {}
+            if decision.get("decision") == "trusted":
+                trusted_finding_ids.append(finding_id)
+            else:
+                audit_finding_ids.append(finding_id)
+                authority_reasons.update(
+                    _clean(reason)
+                    for reason in decision.get("reason_codes") or []
+                    if _clean(reason)
+                )
+
+        if trusted_finding_ids:
+            status = "canonical_finding"
+            matched_families.add(family)
+        elif audit_finding_ids:
+            status = "rejected_by_policy"
+            aggregate_missing.update(authority_reasons)
+        elif selection_error:
+            status = "insufficient_evidence"
+            aggregate_missing.add("semantic_selector_error")
+        elif typed_status != "valid":
+            status = "insufficient_evidence"
+            aggregate_missing.add("typed_semantic_evaluation_unavailable")
+        elif matches:
+            # A selector match without a finding is deliberately visible as a
+            # defect/gate result; it is never silently treated as a finding.
+            status = "insufficient_evidence"
+            aggregate_missing.add("canonical_finding_not_emitted_after_match")
+        elif family_facts:
+            status = "insufficient_evidence"
+        else:
+            status = "not_observed"
+
+        missing_evidence = unique(
+            list(abstention_reasons)
+            + list(authority_reasons)
+            + (["no_fact_for_activated_family"] if not family_facts else [])
+            + (["canonical_finding_not_emitted_after_match"] if matches and not finding_ids else [])
+        )
+        aggregate_missing.update(missing_evidence)
+        failure_refs: List[str] = []
+        for fact in family_facts:
+            outcome = fact.get("outcome") or {}
+            outcome_status = _clean(outcome.get("status")).lower()
+            if "fail" in outcome_status or "error" in outcome_status:
+                failure_refs.extend(refs_for_fact(fact))
+        if failure_refs:
+            aggregate_falsifiers.append({
+                "code": "cowrie_reported_failure",
+                "semantic_family": family,
+                "evidence_refs": unique(failure_refs),
+                "meaning": "Cowrie reported a failed or errored outcome for this observed family.",
+            })
+
+        family_records.append({
+            "semantic_family": family,
+            "status": status,
+            "observed_fact_count": len(family_facts),
+            "selector_match_count": len(matches),
+            "selector_abstention_count": len(abstentions),
+            "evidence_refs": unique(fact_refs + matched_refs),
+            "finding_ids": finding_ids,
+            "trusted_finding_ids": sorted(trusted_finding_ids),
+            "audit_only_finding_ids": sorted(audit_finding_ids),
+            "missing_evidence": missing_evidence,
+            "falsifiers": [
+                item for item in aggregate_falsifiers
+                if item.get("semantic_family") == family
+            ],
+            "selection_error": selection_error,
+        })
+
+    graph_summary = {
+        "evidence_nodes": len(graph.get("evidence_nodes") or []),
+        "fact_nodes": len(graph.get("fact_nodes") or []),
+        "entity_nodes": len(graph.get("entity_nodes") or []),
+        "relationship_edges": len(graph.get("relationship_edges") or []),
+        "chain_nodes": len(graph.get("chain_nodes") or []),
+        "authority_decisions": len(graph.get("authority_decisions") or []),
+        "audit_only_candidates": len(graph.get("audit_only_candidates") or []),
+    }
+    trusted_ttps = [
+        item for item in observed.get("trusted_attck_candidates") or []
+        if isinstance(item, dict)
+    ]
+    follow_on_status = (
+        "selected"
+        if hypothesis_sets
+        else "abstained"
+        if follow_on.get("abstained")
+        else "insufficient_evidence"
+    )
+    follow_on_gaps = [
+        {
+            "text": _clean(item.get("text")),
+            "evidence_refs": unique(item.get("evidence_refs") or []),
+            "falsifier_codes": unique(item.get("falsifier_codes") or []),
+        }
+        for item in follow_on.get("evidence_gaps") or []
+        if isinstance(item, dict) and _clean(item.get("text"))
+    ]
+    result = {
+        "schema_version": "session_hypothesis_assessment.v1",
+        "scope": "session_wide",
+        "authority": "evidence_bounded_non_authoritative",
+        "status": (
+            "unavailable"
+            if typed_status != "valid"
+            else "findings_available"
+            if matched_families
+            else "observed_behavior_only"
+        ),
+        "semantic_families": family_records,
+        "canonical_finding_ids": unique(
+            item.get("finding_id")
+            for item in finding_list
+            if (decision_by_candidate.get(_clean(item.get("finding_id"))) or {}).get("decision") == "trusted"
+        ),
+        "audit_only_candidate_ids": unique(
+            item.get("finding_id")
+            for item in finding_list
+            if (decision_by_candidate.get(_clean(item.get("finding_id"))) or {}).get("decision") != "trusted"
+        ),
+        "hypothesis_set_ids": unique(
+            item.get("hypothesis_set_id") for item in hypothesis_sets
+        ),
+        "follow_on_hypothesis": {
+            "status": follow_on_status,
+            "reason": _clean(follow_on.get("abstention_reason")),
+            "evidence_gaps": follow_on_gaps,
+            "authority": "non_authoritative_forecast_or_bounded_hypothesis",
+        },
+        "evidence_graph": graph_summary,
+        "classification_summary": {
+            "trusted_mapping_count": len(trusted_ttps),
+            "trusted_technique_ids": unique(
+                item.get("technique_id") for item in trusted_ttps
+            ),
+            "observed_behavior_chain_count": len(
+                observed.get("ordered_behavior_chain") or []
+            ),
+            "connected_behavior_chain_count": len(
+                observed.get("connected_behavior_chains") or []
+            ),
+        },
+        "missing_evidence": sorted(aggregate_missing),
+        "falsifiers": aggregate_falsifiers,
+        "forecast_is_not_observed_evidence": True,
+        "external_context_is_not_observed_evidence": True,
+    }
+    result["assessment_sha256"] = _sha256_json(result)
+    return result
+
+
+def _validate_session_hypothesis_assessment(value: Any) -> List[str]:
+    if not isinstance(value, dict):
+        return ["session_hypothesis_assessment must be an object"]
+    errors: List[str] = []
+    if value.get("schema_version") != "session_hypothesis_assessment.v1":
+        errors.append("session hypothesis assessment schema is invalid")
+    if value.get("scope") != "session_wide":
+        errors.append("session hypothesis assessment scope is invalid")
+    if value.get("authority") != "evidence_bounded_non_authoritative":
+        errors.append("session hypothesis assessment authority is invalid")
+    if value.get("status") not in {
+        "unavailable",
+        "findings_available",
+        "observed_behavior_only",
+    }:
+        errors.append("session hypothesis assessment status is invalid")
+    digest = _clean(value.get("assessment_sha256")).lower()
+    copied = deepcopy(value)
+    copied.pop("assessment_sha256", None)
+    if not SHA256_RE.fullmatch(digest) or _sha256_json(copied) != digest:
+        errors.append("session hypothesis assessment hash mismatch")
+    if not isinstance(value.get("semantic_families"), list):
+        errors.append("session hypothesis semantic families must be a list")
+    for item in value.get("semantic_families") or []:
+        if not isinstance(item, dict):
+            errors.append("session hypothesis family record must be an object")
+            continue
+        if not _clean(item.get("semantic_family")):
+            errors.append("session hypothesis family requires a semantic family")
+        if item.get("status") not in {
+            "canonical_finding",
+            "rejected_by_policy",
+            "insufficient_evidence",
+            "not_observed",
+        }:
+            errors.append("session hypothesis family status is invalid")
+        for key in (
+            "finding_ids",
+            "trusted_finding_ids",
+            "audit_only_finding_ids",
+            "evidence_refs",
+            "missing_evidence",
+            "falsifiers",
+        ):
+            if not isinstance(item.get(key), list):
+                errors.append(f"session hypothesis family {key} must be a list")
+    follow_on = value.get("follow_on_hypothesis") or {}
+    if follow_on.get("status") not in {
+        "selected",
+        "abstained",
+        "insufficient_evidence",
+    }:
+        errors.append("session hypothesis follow-on status is invalid")
+    if not isinstance(value.get("evidence_graph"), dict):
+        errors.append("session hypothesis evidence graph summary is invalid")
+    if value.get("forecast_is_not_observed_evidence") is not True:
+        errors.append("session hypothesis forecast boundary is invalid")
+    if value.get("external_context_is_not_observed_evidence") is not True:
+        errors.append("session hypothesis external-context boundary is invalid")
+    return errors
+
+
 def _strip_context(value: Any) -> Any:
     if isinstance(value, dict):
         return {
@@ -872,6 +1213,7 @@ def build_session_assessment_v4(
         )
     findings: List[Dict[str, Any]] = []
     hypothesis_sets: List[Dict[str, Any]] = []
+    follow_on: Dict[str, Any] = {}
     typed_chain_selection: Dict[str, Any] = {}
     semantic_graph_input = build_canonical_semantic_graph(
         base_snapshot,
@@ -950,6 +1292,17 @@ def build_session_assessment_v4(
     )
     if validate_canonical_semantic_graph(graph):
         raise SessionAssessmentV4Error("canonical semantic graph failed validation")
+    session_hypothesis_assessment = _session_hypothesis_assessment(
+        observed=observed,
+        typed_fact_set=typed_fact_set,
+        typed_status=typed_status,
+        findings=findings,
+        hypothesis_sets=hypothesis_sets,
+        follow_on=follow_on,
+        graph=graph,
+        authority_decisions=authority_decisions,
+        activated_families=CURRENT_ACTIVATED_SEMANTIC_FAMILIES,
+    )
     snapshot = deepcopy(base_snapshot)
     snapshot["schema_version"] = "canonical_evidence_snapshot.v3"
     snapshot["observed_evidence_sha256"] = _clean(
@@ -1049,6 +1402,7 @@ def build_session_assessment_v4(
         "canonical_evidence": snapshot,
         "behavioral_findings": findings,
         "hypothesis_sets": hypothesis_sets,
+        "session_hypothesis_assessment": session_hypothesis_assessment,
         "provenance": provenance,
         "authority": authority,
         "non_authoritative_context": {
@@ -1366,6 +1720,14 @@ def validate_session_assessment_v4(
         "context_cannot_change_findings_hypotheses_statuses_or_ids"
     ):
         errors.append("non-authoritative context separation semantics are invalid")
+    session_hypothesis_assessment = value.get("session_hypothesis_assessment")
+    if session_hypothesis_assessment is not None:
+        errors.extend(
+            f"session_hypothesis_assessment: {error}"
+            for error in _validate_session_hypothesis_assessment(
+                session_hypothesis_assessment
+            )
+        )
     for collection, id_key in (("behavioral_findings", "finding_id"), ("hypothesis_sets", "hypothesis_set_id")):
         values = value.get(collection)
         if not isinstance(values, list):
