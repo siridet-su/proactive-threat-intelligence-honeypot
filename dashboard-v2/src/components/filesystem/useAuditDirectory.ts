@@ -277,6 +277,90 @@ export function isSummaryCountEvidenceValid(
   return true;
 }
 
+export interface ScopeAwareSummaryResult {
+  isValid: boolean;
+  derivedMatching: number | null;
+}
+
+export interface EvaluateScopeAwareSummaryCountsOptions {
+  summary: AuditDirectorySummary | null | undefined;
+  hideHomeOnly: boolean;
+  targetPathFilter: string | null;
+  hasExplicitScopeKey?: boolean;
+  retainedLoadedCount?: number;
+}
+
+/**
+ * Pure scope-aware validation and matching derivation helper.
+ * Enforces scope-specific invariants and fail-closed guarantees across totalSessions,
+ * homeOnlyCount, matchingCount, and loaded retained evidence.
+ */
+export function evaluateScopeAwareSummaryCounts({
+  summary,
+  hideHomeOnly,
+  targetPathFilter,
+  hasExplicitScopeKey = true,
+  retainedLoadedCount = 0,
+}: EvaluateScopeAwareSummaryCountsOptions): ScopeAwareSummaryResult {
+  if (!isSummaryCountEvidenceValid(summary)) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  const hasPathFilter = Boolean(targetPathFilter);
+
+  // Invariant for every scope: totalSessions >= retainedLoadedCount
+  if (summary.totalSessions < retainedLoadedCount) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  let effectiveMatching: number;
+
+  if (!hideHomeOnly && !hasPathFilter) {
+    // 1. No hide-home and no target path
+    if (summary.matchingCount !== undefined && hasExplicitScopeKey) {
+      if (summary.matchingCount !== summary.totalSessions) {
+        return { isValid: false, derivedMatching: null };
+      }
+    }
+    effectiveMatching = summary.totalSessions;
+  } else if (hideHomeOnly && !hasPathFilter) {
+    // 2. Hide-home only
+    const nonHomeTotal = summary.totalSessions - summary.homeOnlyCount;
+    if (summary.matchingCount !== undefined && hasExplicitScopeKey) {
+      if (summary.matchingCount !== nonHomeTotal) {
+        return { isValid: false, derivedMatching: null };
+      }
+    }
+    effectiveMatching = nonHomeTotal;
+  } else if (!hideHomeOnly && hasPathFilter) {
+    // 3. Target path only
+    if (summary.matchingCount === undefined) {
+      return { isValid: false, derivedMatching: null };
+    }
+    if (summary.matchingCount > summary.totalSessions) {
+      return { isValid: false, derivedMatching: null };
+    }
+    effectiveMatching = summary.matchingCount;
+  } else {
+    // 4. Target path plus hide-home
+    const nonHomeTotal = summary.totalSessions - summary.homeOnlyCount;
+    if (summary.matchingCount === undefined) {
+      return { isValid: false, derivedMatching: null };
+    }
+    if (summary.matchingCount > nonHomeTotal) {
+      return { isValid: false, derivedMatching: null };
+    }
+    effectiveMatching = summary.matchingCount;
+  }
+
+  // Invariant for every scope: effective matching >= retainedLoadedCount
+  if (effectiveMatching < retainedLoadedCount) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  return { isValid: true, derivedMatching: effectiveMatching };
+}
+
 export interface AuthoritativeAuditMetrics {
   effectiveClosedSessions: FilesystemClosedSession[];
   allSessions: (FilesystemTopologySession | FilesystemClosedSession)[];
@@ -372,22 +456,6 @@ export function deriveAuthoritativeAuditMetrics({
     distinctPaths = getDistinctSessionPaths(activeSessions, effectiveClosedSessions);
   }
 
-  // Home-only count across all effective sessions
-  // Only use summary.homeOnlyCount when summaryStatus is success, summaryScopeKey matches currentScopeKey,
-  // and summary count evidence is strictly valid.
-  let homeOnlyCount = 0;
-  if (isAudit && isScopeMatch && isSummaryCountEvidenceValid(summary)) {
-    let activeHomeOnly = 0;
-    for (const s of activeSessions) {
-      if (isHomeOnlySession(s)) activeHomeOnly++;
-    }
-    homeOnlyCount = activeHomeOnly + summary.homeOnlyCount;
-  } else {
-    for (const s of allSessions) {
-      if (isHomeOnlySession(s)) homeOnlyCount++;
-    }
-  }
-
   const hasTimeFilter = Boolean(timeRange && timeRange !== "all");
   let filterFrom: number | undefined;
   let filterTo: number | undefined;
@@ -430,6 +498,33 @@ export function deriveAuthoritativeAuditMetrics({
   const retainedLoadedCount = filteredClosedSessions.length;
   const activeVisibleCount = filteredActiveSessions.length;
 
+  const countEvaluation =
+    isAudit && isScopeMatch
+      ? evaluateScopeAwareSummaryCounts({
+          summary,
+          hideHomeOnly,
+          targetPathFilter,
+          hasExplicitScopeKey: summaryScopeKey !== undefined,
+          retainedLoadedCount,
+        })
+      : { isValid: false, derivedMatching: null };
+
+  // Home-only count across all effective sessions
+  // Only use summary.homeOnlyCount when summaryStatus is success, summaryScopeKey matches currentScopeKey,
+  // and summary count evidence passes pure scope-aware validation.
+  let homeOnlyCount = 0;
+  if (isAudit && isScopeMatch && countEvaluation.isValid && summary) {
+    let activeHomeOnly = 0;
+    for (const s of activeSessions) {
+      if (isHomeOnlySession(s)) activeHomeOnly++;
+    }
+    homeOnlyCount = activeHomeOnly + summary.homeOnlyCount;
+  } else {
+    for (const s of allSessions) {
+      if (isHomeOnlySession(s)) homeOnlyCount++;
+    }
+  }
+
   let retainedTotalCount: number | null = null;
   let retainedMatchingCount: number | null = null;
   let retainedCountStatus: RetainedCountStatus = "loaded-only";
@@ -452,44 +547,19 @@ export function deriveAuthoritativeAuditMetrics({
     retainedTotalCount = null;
     retainedMatchingCount = null;
   } else if (isScopeMatch && summary) {
-    if (!isSummaryCountEvidenceValid(summary)) {
+    if (!countEvaluation.isValid || countEvaluation.derivedMatching === null) {
       retainedMatchingCount = null;
       retainedTotalCount = null;
       retainedCountStatus = "loaded-only";
     } else {
-      let derivedMatching: number | null = null;
-      if (targetPathFilter) {
-        if (summary.matchingCount !== undefined) {
-          derivedMatching = summary.matchingCount;
-        }
-      } else if (hideHomeOnly) {
-        derivedMatching = summary.totalSessions - summary.homeOnlyCount;
-      } else {
-        // Neither hideHomeOnly nor targetPathFilter is active (unbounded or time-only scope):
-        // summary.totalSessions is the matching count for this time scope!
-        derivedMatching = summary.totalSessions;
-      }
-
-      // Contradiction check: fail closed if server matching count is smaller than loaded matching count
-      // or if totalSessions is smaller than loaded matching count
-      if (
-        derivedMatching === null ||
-        derivedMatching < retainedLoadedCount ||
-        summary.totalSessions < retainedLoadedCount
-      ) {
-        retainedMatchingCount = null;
-        retainedTotalCount = null;
-        retainedCountStatus = "loaded-only";
-      } else {
-        retainedMatchingCount = derivedMatching;
-        retainedTotalCount = summary.totalSessions;
-        retainedCountStatus = "authoritative";
-      }
+      retainedMatchingCount = countEvaluation.derivedMatching;
+      retainedTotalCount = summary.totalSessions;
+      retainedCountStatus = "authoritative";
     }
   } else if (isDirectoryComplete) {
     // Complete directory loaded for this scope
     retainedMatchingCount = retainedLoadedCount;
-    retainedTotalCount = (hideHomeOnly || targetPathFilter !== null) ? null : retainedLoadedCount;
+    retainedTotalCount = hideHomeOnly || targetPathFilter !== null ? null : retainedLoadedCount;
     retainedCountStatus = "authoritative";
   } else {
     retainedMatchingCount = null;

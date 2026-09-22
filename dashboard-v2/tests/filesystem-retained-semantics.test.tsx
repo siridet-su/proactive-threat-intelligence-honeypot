@@ -1218,4 +1218,239 @@ function fireInputChange(input: HTMLInputElement, value: string) {
       expect(metrics.homeOnlyCount).toBe(1);
     });
   });
+
+  describe("H. Scope-specific count coherence and cross-field invariants", () => {
+    it("1. Hide-home-only contradiction: total=10, homeOnly=2, matching=3 fails closed", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"], homeOnly: false }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 3, // Contradiction: 10 - 2 = 8, not 3
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("2. Valid hide-home-only agreement: total=10, homeOnly=2, matching=8 reports authoritative", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"], homeOnly: false }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 8, // Exact agreement with 10 - 2
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(8);
+      expect(metrics.retainedTotalCount).toBe(10);
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("3. Hide-home-only with matchingCount omitted: total=10, homeOnly=2 derives authoritative matching=8", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"], homeOnly: false }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(8);
+      expect(metrics.retainedTotalCount).toBe(10);
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("4. Combined hide-home and target-path contradiction: total=10, homeOnly=8, matching=5 fails closed", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"], homeOnly: false }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 8,
+        matchingCount: 5, // Contradiction: max non-home is 10 - 8 = 2, 5 > 2 is impossible
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: "/var/log" });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+        targetPathFilter: "/var/log",
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("5. Valid combined hide-home and target-path: total=10, homeOnly=8, matching=2 reports authoritative", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"], homeOnly: false }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 8,
+        matchingCount: 2, // Valid: 2 <= 10 - 8
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: "/var/log" });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+        targetPathFilter: "/var/log",
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(2);
+      expect(metrics.retainedTotalCount).toBe(10);
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("6. Unfiltered/time-only contradiction: total=10, matchingCount=3 fails closed", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 3, // Contradiction: unfiltered scope must equal totalSessions (10)
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: false,
+        targetPathFilter: null,
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("7. Valid unfiltered redundancy: total=10, matchingCount=10 reports authoritative", () => {
+      const loaded = [
+        createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] }),
+      ];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 10, // Exact agreement with totalSessions
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: false,
+        targetPathFilter: null,
+      });
+
+      expect(metrics.retainedMatchingCount).toBe(10);
+      expect(metrics.retainedTotalCount).toBe(10);
+      expect(metrics.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("8. Malformed scope-specific evidence causes homeOnlyCount to fall back to locally loaded evidence", () => {
+      const homeSession = createClosedSession("c-home", "2026-09-19T10:00:00.000Z", {
+        paths: ["/home", "/home/user"],
+        homeOnly: true,
+      });
+      const outsideSession = createClosedSession("c-outside", "2026-09-19T11:00:00.000Z", {
+        paths: ["/var/log"],
+        homeOnly: false,
+      });
+
+      const contradictorySummary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 3, // Contradiction for hideHomeOnly scope (10 - 2 = 8 !== 3)
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [homeSession, outsideSession],
+        snapshotRecentClosedSessions: [],
+        summary: contradictorySummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+        targetPathFilter: null,
+      });
+
+      // Must not use contaminated server homeOnlyCount (2); must fall back to the 1 loaded home-only session
+      expect(metrics.homeOnlyCount).toBe(1);
+    });
+  });
 });
