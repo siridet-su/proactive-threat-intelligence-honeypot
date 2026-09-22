@@ -285,7 +285,14 @@ Implementation:
 - Authoritative summary-path union: Updated `buildAuditSnapshot` to register every canonical path in `session.auditSummary.visitedPaths` before loaded history with `observedAt: null`. It then registers current `cwdState.path` with its authoritative `observedAt` and loaded history `fromPath` and `toPath` (for non-failed moves) with `event.at`. Canonical ancestors for every path are materialized without parsing command text, and summary-only paths never invent timestamps or transitions.
 - Truthful event coverage model: Created pure typed helper `deriveAuditCoverage` and formatter `formatAuditCoverageWording` in `filesystemUtils.ts` exposing `loadedEvents`, `totalEvents`, `unloadedEvents`, `eventCoverage` (`loading | partial | complete | error`), `pathCoverage` (`{ source: "auditSummary", status: "authoritative" }`), `historyStatus`, `isRefreshing`, and `wording`.
 - Fail-closed rules: `totalEvents` uses the maximum trustworthy total from `historyTotalItems`, `session.auditSummary.eventCount`, and loaded history length (`getHistoryWindowMetrics`). `complete` is permitted only when `historyComplete === true` and `loadedEvents >= totalEvents`. When `historyComplete === true` but `loadedEvents < totalEvents`, it strictly fails closed to `partial`. Initial/reset states with un-loaded events do not claim complete.
-- Truthful user-facing wording: Removed unconditional "All historical directories touched by this session are preserved on the canvas." claim in `FilesystemActivity.tsx`. Subtitle now derives truthful wording distinguishing authoritative directory coverage from event history coverage across loading, partial, complete (with truthful 0-event representation), error, and refreshing states. When a session is pinned outside active filters, filter messaging is retained and appended with coverage wording.
+- Refreshing and error boundary semantics:
+  - Refreshing with partial data preserves exact N/M facts (`Loaded 15 of 40 retained events`) and states that retained event history is refreshing along with unloaded count (`25 earlier events remain unloaded`) without claiming complete.
+  - Refreshing with complete data preserves `complete` status, states that all events remain loaded (`All 40 retained events remain loaded`), and notes that history is refreshing without claiming that earlier events are loading or remain unloaded.
+  - Refreshing with zero loaded data and non-zero total truthfully states `Loaded 0 of 25 retained events across authoritative directory coverage. Retained event history is refreshing...`.
+  - Error after complete data preserves already-loaded evidence (`All 30 retained events remain loaded across authoritative directory coverage. Latest history refresh failed.`) without falsely claiming remaining history is unavailable.
+  - Error with partial data retains exact loaded facts and notes remaining history is unavailable.
+  - Zero-event and singular boundaries: 0-event cases truthfully state `0 retained events recorded`, and singular 1-event complete cases use grammatical phrasing (`The retained event is loaded...`).
+- Truthful user-facing wording: Removed unconditional "All historical directories touched by this session are preserved on the canvas." claim in `FilesystemActivity.tsx`. Subtitle now derives truthful wording distinguishing authoritative directory coverage from event history coverage. When a session is pinned outside active filters, filter messaging is retained and appended with coverage wording.
 - Preserved existing behavior: Excluded `failed_change.toPath` from graph materialization, kept hop/session selection intact across pagination, added zero polling or timers, and left `FSV-001` presentation context and `FSV-003` scope untouched.
 
 Acceptance:
@@ -296,12 +303,15 @@ Acceptance:
 - ข้อความ unconditional "All historical directories..." ถูกแทนที่ด้วย truthful coverage wording (PASS)
 - แยก authoritative directory coverage ออกจาก partial/complete event history ชัดเจน (PASS)
 - summary-only paths ปรากฏบน canvas โดยไม่มี timestamp หรือ transition ปลอม (PASS)
+- refreshing complete data ไม่พูดว่า loading earlier events หรือ remain unloaded (PASS)
+- error หลังโหลดครบแล้ว preserve evidence เดิมไว้ ไม่บอกว่า remaining history unavailable (PASS)
+- zero-event และ singular count (1 event) ใช้ไวยากรณ์ที่ถูกต้องและสะท้อนความจริง (PASS)
 
 Verification:
 
-- `npx vitest run tests/filesystem-audit-coverage.test.ts`: **PASSED** (11/11 tests)
-- `npx vitest run tests/filesystem-phase0-baseline.test.ts tests/filesystem-coverage-expansion.test.ts tests/filesystem-hooks.test.ts tests/filesystem-hop-resolution.test.ts tests/filesystem-audit-coverage.test.ts`: **PASSED** (98/98 tests)
-- `npm test`: **PASSED** (30 passed, 1 skipped; 512 passed, 2 expected fail, 14 skipped)
+- `npx vitest run tests/filesystem-audit-coverage.test.ts`: **PASSED** (18/18 tests)
+- `npx vitest run tests/filesystem-phase0-baseline.test.ts tests/filesystem-coverage-expansion.test.ts tests/filesystem-hooks.test.ts tests/filesystem-hop-resolution.test.ts tests/filesystem-audit-coverage.test.ts`: **PASSED** (105/105 tests)
+- `npm test`: **PASSED** (30 passed, 1 skipped; 519 passed, 2 expected fail, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)

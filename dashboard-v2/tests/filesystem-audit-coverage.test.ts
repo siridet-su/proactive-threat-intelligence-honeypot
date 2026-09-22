@@ -187,7 +187,8 @@ describe("FSV-002: Truthful history and topology coverage", () => {
     expect(refreshing.totalEvents).toBe(40);
     expect(refreshing.unloadedEvents).toBe(25);
     expect(refreshing.wording).toContain("Loaded 15 of 40 retained events");
-    expect(refreshing.wording).toMatch(/loading earlier events|earlier events are loading/i);
+    expect(refreshing.wording).toContain("Retained event history is refreshing");
+    expect(refreshing.wording).toContain("25 earlier events remain unloaded");
 
     const errorNoData = deriveAuditCoverage({
       hasSelectedSession: true,
@@ -246,5 +247,131 @@ describe("FSV-002: Truthful history and topology coverage", () => {
     for (const state of states) {
       expect(state.wording).not.toContain("All historical directories touched by this session are preserved on the canvas.");
     }
+  });
+
+  describe("Audit correction: refresh and error boundaries with complete/partial/zero/singular data", () => {
+    it("1. complete 40/40 + refreshing: states all events remain loaded and refreshing, not loading earlier events", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 40,
+        historyTotalItems: 40,
+        historyComplete: true,
+        historyStatus: "refreshing",
+        auditSummaryEventCount: 40,
+      });
+      expect(model.eventCoverage).toBe("complete");
+      expect(model.loadedEvents).toBe(40);
+      expect(model.totalEvents).toBe(40);
+      expect(model.unloadedEvents).toBe(0);
+      expect(model.wording).toContain("All 40 retained events remain loaded");
+      expect(model.wording).toContain("refreshing");
+      expect(model.wording).not.toContain("loading earlier events");
+      expect(model.wording).not.toContain("remain unloaded");
+    });
+
+    it("2. partial 15/40 + refreshing: preserves N/M facts and states refreshing without claiming complete", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 15,
+        historyTotalItems: 40,
+        historyComplete: false,
+        historyStatus: "refreshing",
+        auditSummaryEventCount: 40,
+      });
+      expect(model.eventCoverage).toBe("partial");
+      expect(model.loadedEvents).toBe(15);
+      expect(model.totalEvents).toBe(40);
+      expect(model.unloadedEvents).toBe(25);
+      expect(model.wording).toContain("Loaded 15 of 40 retained events");
+      expect(model.wording).toContain("refreshing");
+      expect(model.wording).not.toContain("complete");
+      expect(model.wording).not.toContain("all events");
+    });
+
+    it("3. zero loaded of non-zero total + refreshing: states loaded 0 of total and refreshing", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 0,
+        historyTotalItems: 0,
+        historyComplete: false,
+        historyStatus: "refreshing",
+        auditSummaryEventCount: 25,
+      });
+      expect(model.loadedEvents).toBe(0);
+      expect(model.totalEvents).toBe(25);
+      expect(model.unloadedEvents).toBe(25);
+      expect(model.wording).toContain("Loaded 0 of 25 retained events");
+      expect(model.wording).toContain("refreshing");
+    });
+
+    it("4. complete 30/30 + error: states all events remain loaded and latest refresh failed, not remaining history unavailable", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 30,
+        historyTotalItems: 30,
+        historyComplete: true,
+        historyStatus: "error",
+        auditSummaryEventCount: 30,
+      });
+      expect(model.eventCoverage).toBe("error");
+      expect(model.loadedEvents).toBe(30);
+      expect(model.totalEvents).toBe(30);
+      expect(model.unloadedEvents).toBe(0);
+      expect(model.wording).toContain("All 30 retained events remain loaded");
+      expect(model.wording).toMatch(/refresh failed|refresh is unavailable|refresh.*failed/i);
+      expect(model.wording).not.toContain("Remaining event history is unavailable");
+    });
+
+    it("5. partial 12/30 + error: preserves Loaded 12 of 30 and states remaining history is unavailable", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 12,
+        historyTotalItems: 30,
+        historyComplete: false,
+        historyStatus: "error",
+        auditSummaryEventCount: 30,
+      });
+      expect(model.eventCoverage).toBe("error");
+      expect(model.loadedEvents).toBe(12);
+      expect(model.totalEvents).toBe(30);
+      expect(model.unloadedEvents).toBe(18);
+      expect(model.wording).toContain("Loaded 12 of 30 retained events");
+      expect(model.wording).toContain("Remaining event history is unavailable");
+    });
+
+    it("6. zero total + error: truthfully represents 0 retained events recorded and retrieval failed", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 0,
+        historyTotalItems: 0,
+        historyComplete: true,
+        historyStatus: "error",
+        auditSummaryEventCount: 0,
+      });
+      expect(model.eventCoverage).toBe("error");
+      expect(model.loadedEvents).toBe(0);
+      expect(model.totalEvents).toBe(0);
+      expect(model.unloadedEvents).toBe(0);
+      expect(model.wording).toContain("0 retained events recorded");
+      expect(model.wording).toMatch(/failed|unavailable/i);
+      expect(model.wording).not.toContain("Loaded 0 of 0");
+    });
+
+    it("7. singular complete 1/1 wording: uses grammatically truthful singular form", () => {
+      const model = deriveAuditCoverage({
+        hasSelectedSession: true,
+        loadedEvents: 1,
+        historyTotalItems: 1,
+        historyComplete: true,
+        historyStatus: "ready",
+        auditSummaryEventCount: 1,
+      });
+      expect(model.eventCoverage).toBe("complete");
+      expect(model.loadedEvents).toBe(1);
+      expect(model.totalEvents).toBe(1);
+      expect(model.unloadedEvents).toBe(0);
+      expect(model.wording).toContain("The retained event is loaded");
+      expect(model.wording).not.toContain("All 1 retained event");
+    });
   });
 });

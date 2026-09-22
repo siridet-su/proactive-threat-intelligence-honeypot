@@ -145,31 +145,56 @@ export function formatAuditCoverageWording(model: AuditCoverageModel): string {
     return "Choose a session from the dropdown to replay its filesystem trajectory.";
   }
 
+  // 1. Error state handling
   if (model.historyStatus === "error") {
+    if (model.totalEvents === 0) {
+      return "0 retained events recorded according to authoritative summary. Retained event history retrieval failed.";
+    }
+    if (model.unloadedEvents === 0 && model.loadedEvents >= model.totalEvents) {
+      const countPrefix = model.totalEvents === 1
+        ? "The retained event remains loaded"
+        : `All ${model.totalEvents} retained events remain loaded`;
+      return `${countPrefix} across authoritative directory coverage. Latest history refresh failed.`;
+    }
     if (model.loadedEvents === 0) {
       return "Authoritative directory coverage remains available from session audit summary. Retained event history is unavailable.";
     }
     return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Remaining event history is unavailable.`;
   }
 
-  if (model.eventCoverage === "loading") {
+  // 2. Initial loading state (not refreshing)
+  if (model.eventCoverage === "loading" && !model.isRefreshing) {
     return "Authoritative directory coverage is available from session audit summary. Retained event history is loading...";
   }
 
-  if (model.isRefreshing && model.loadedEvents > 0) {
-    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage (loading earlier events...).`;
+  // 3. Refreshing state handling
+  if (model.isRefreshing) {
+    if (model.unloadedEvents === 0 && model.loadedEvents >= model.totalEvents) {
+      if (model.totalEvents === 0) {
+        return "0 retained events recorded. Retained event history is refreshing...";
+      }
+      const countPrefix = model.totalEvents === 1
+        ? "The retained event remains loaded"
+        : `All ${model.totalEvents} retained events remain loaded`;
+      return `${countPrefix} across authoritative directory coverage. Retained event history is refreshing...`;
+    }
+    if (model.loadedEvents === 0) {
+      return `Loaded 0 of ${model.totalEvents} retained events across authoritative directory coverage. Retained event history is refreshing...`;
+    }
+    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Retained event history is refreshing (${model.unloadedEvents} earlier events remain unloaded).`;
   }
 
+  // 4. Complete history (not error, not refreshing)
   if (model.eventCoverage === "complete") {
     if (model.totalEvents === 0) {
       return "0 retained events recorded. Authoritative directory coverage is active.";
     }
     return model.totalEvents === 1
-      ? "All 1 retained event is loaded across authoritative directory coverage."
+      ? "The retained event is loaded across authoritative directory coverage."
       : `All ${model.totalEvents} retained events are loaded across authoritative directory coverage.`;
   }
 
-  // Partial event coverage
+  // 5. Partial event coverage (ready, not refreshing, not error)
   return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Earlier events remain unloaded.`;
 }
 
