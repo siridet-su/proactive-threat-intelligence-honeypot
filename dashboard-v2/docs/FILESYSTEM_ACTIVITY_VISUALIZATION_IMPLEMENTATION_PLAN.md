@@ -29,12 +29,12 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-001` — Explicit live/audit presentation context**
+Current focus: **`FSV-002` — Truthful history/topology coverage**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
 | 0 | Baseline and characterization | `DONE` |
-| 1 | Evidence semantics | `READY` |
+| 1 | Evidence semantics | `IN_PROGRESS` |
 | 2 | Verified transition model/rendering | `BLOCKED_BY_1` |
 | 3 | Workspace structure | `BLOCKED_BY_2` |
 | 4 | Accessibility/responsive interaction | `BLOCKED_BY_3` |
@@ -222,31 +222,47 @@ Expected checkpoint state: characterization tests ของ contracts ที่�
 
 #### `FSV-001` Explicit live/audit presentation context
 
+Status: **DONE — 2026-09-22**
+
 Primary files:
 
 - `src/components/filesystem/TopologyCanvas.tsx`
 - `src/components/filesystem/TopologySummaryBar.tsx`
+- `src/components/filesystem/AuditFilesystemWorkspace.tsx`
 - `src/components/filesystem/FilesystemActivity.tsx`
-- `src/components/filesystem/filesystemUtils.ts`
+- `tests/fa013-component-evidence.test.tsx`
+- `tests/filesystem-ownership-boundaries.test.tsx`
 
 Implementation:
 
-- ใช้ discriminated context เช่น `mode: "live" | "audit"` แทน optional boolean ที่ default ไปทาง live
-- Audit footer แสดง `Retained session`, lifecycle status, observed/closed timestamps และไม่คำนวณ freshness จาก `new Date()`
-- หากยังต้องมี snapshot materialization timestamp ให้ตั้งชื่อ `viewGeneratedAt` และไม่วางใน evidence status
-- Live footer คง active session/source/freshness semantics เดิม
+- Replaced optional `isAuditMode?: boolean` with required discriminated `presentationContext: TopologyPresentationContext` across `TopologyCanvas` and `TopologySummaryBar`.
+- Exported pure helper `deriveTopologyPresentationContext(mode, selectedSession)` in `TopologyCanvas.tsx` to safely extract authoritative lifecycle (`active` vs `retained`) and timestamps (`observedAt`, `startedAt`, `closedAt`).
+- Restricted live-only properties (`snapshotGeneratedAt`, `freshnessState`, `staleThresholdMs`) to the `{ mode: "live" }` discriminant branch in `TopologySummaryBarProps`, strictly disallowing them in audit mode via TypeScript (`snapshotGeneratedAt?: never`).
+- Retained audit sessions now present `retained session(s)` and authoritative `Observed ... · Closed ...` times; never labelled active; client view-materialization timestamp (`generatedAt`) and live freshness indicators are completely excluded from audit presentation.
+- Active sessions under audit investigation present `session(s) (active session investigation)` and authoritative `Observed ... · Active investigation`.
+- Unselected audit mode presents neutral session count without active or retained lifecycle claims.
+- Live presentation context preserves existing active session count, live telemetry freshness, and snapshot wording.
 
 Acceptance:
 
-- ไม่มีคำว่า active สำหรับ selected closed session
-- ไม่มี freshness claim จาก client audit snapshot time
-- TypeScript บังคับให้ caller ระบุ context
+- ไม่มีคำว่า active สำหรับ selected closed session (PASS)
+- ไม่มี freshness claim หรือ snapshot.generatedAt ใน audit mode (PASS)
+- TypeScript บังคับให้ caller ระบุ context ผ่าน discriminated union (PASS)
+
+Verification:
+
+- `npx vitest run tests/fa013-component-evidence.test.tsx tests/filesystem-ownership-boundaries.test.tsx tests/filesystem-phase0-baseline.test.ts`: **PASSED** (14/14 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (15 passed, 1 skipped; 340 passed, 14 skipped)
+- `npm test`: **PASSED** (29 passed, 1 skipped; 501 passed, 2 expected fail, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded)
 
 Targeted gate:
 
 ```bash
 npx vitest run tests/filesystem-phase0-baseline.test.ts \
-  tests/filesystem-ownership-boundaries.test.tsx
+  tests/filesystem-ownership-boundaries.test.tsx \
+  tests/fa013-component-evidence.test.tsx
 ```
 
 #### `FSV-002` Truthful history/topology coverage

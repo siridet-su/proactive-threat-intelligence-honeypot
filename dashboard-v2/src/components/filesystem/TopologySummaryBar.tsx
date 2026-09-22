@@ -2,8 +2,9 @@ import { AlertTriangle } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { formatTimestamp, formatUpdateAge, GRAPH_CALLOUT_LIMIT } from "./filesystemUtils";
 import type { FreshnessState, TopologyDensityPreference } from "./filesystemUtils";
+import type { TopologyPresentationContext } from "./TopologyCanvas";
 
-interface TopologySummaryBarProps {
+interface BaseTopologySummaryBarProps {
   densityAnalysisHiddenNodes: number;
   densityAnalysisRenderedNodes: number;
   densityAnalysisTotalNodes: number;
@@ -16,36 +17,56 @@ interface TopologySummaryBarProps {
   totalLiveSources: number;
   isSourcesExpanded: boolean;
   setIsSourcesExpanded: (val: boolean | ((prev: boolean) => boolean)) => void;
-  snapshotGeneratedAt: string;
-  freshnessState: FreshnessState;
-  staleThresholdMs: number;
   totalOverlaps: number;
   autoArrangeTopology: () => void;
   reducedMotion: boolean | null;
-  isAuditMode?: boolean;
 }
 
-export function TopologySummaryBar({
-  densityAnalysisHiddenNodes,
-  densityAnalysisRenderedNodes,
-  densityAnalysisTotalNodes,
-  densityPreference,
-  setDensityPreference,
-  setIsPathsExpanded,
-  effectiveSessionsLength,
-  isSourcesTruncated,
-  renderedSourcesCount,
-  totalLiveSources,
-  isSourcesExpanded,
-  setIsSourcesExpanded,
-  snapshotGeneratedAt,
-  freshnessState,
-  staleThresholdMs,
-  totalOverlaps,
-  autoArrangeTopology,
-  reducedMotion,
-  isAuditMode = false,
-}: TopologySummaryBarProps) {
+export type TopologySummaryBarProps = BaseTopologySummaryBarProps & (
+  | {
+      presentationContext: Extract<TopologyPresentationContext, { mode: "live" }>;
+      snapshotGeneratedAt: string;
+      freshnessState: FreshnessState;
+      staleThresholdMs: number;
+    }
+  | {
+      presentationContext: Extract<TopologyPresentationContext, { mode: "audit" }>;
+      snapshotGeneratedAt?: never;
+      freshnessState?: never;
+      staleThresholdMs?: never;
+    }
+);
+
+function isLiveSummaryBarProps(
+  props: TopologySummaryBarProps,
+): props is BaseTopologySummaryBarProps & {
+  presentationContext: Extract<TopologyPresentationContext, { mode: "live" }>;
+  snapshotGeneratedAt: string;
+  freshnessState: FreshnessState;
+  staleThresholdMs: number;
+} {
+  return props.presentationContext.mode === "live";
+}
+
+export function TopologySummaryBar(props: TopologySummaryBarProps) {
+  const {
+    densityAnalysisHiddenNodes,
+    densityAnalysisRenderedNodes,
+    densityAnalysisTotalNodes,
+    densityPreference,
+    setDensityPreference,
+    setIsPathsExpanded,
+    effectiveSessionsLength,
+    isSourcesTruncated,
+    renderedSourcesCount,
+    totalLiveSources,
+    isSourcesExpanded,
+    setIsSourcesExpanded,
+    totalOverlaps,
+    autoArrangeTopology,
+    reducedMotion,
+    presentationContext,
+  } = props;
   return (
     <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:flex-nowrap sm:gap-3">
@@ -109,7 +130,14 @@ export function TopologySummaryBar({
         )}
         <span className="shrink-0 text-border" aria-hidden="true">·</span>
         <span className="shrink-0">
-          <strong className="font-medium text-text">{effectiveSessionsLength}</strong> {isAuditMode ? "retained" : "active"} {effectiveSessionsLength === 1 ? "session" : "sessions"}
+          <strong className="font-medium text-text">{effectiveSessionsLength}</strong>{" "}
+          {presentationContext.mode === "live"
+            ? `active ${effectiveSessionsLength === 1 ? "session" : "sessions"}`
+            : presentationContext.session?.lifecycle === "retained"
+              ? `retained ${effectiveSessionsLength === 1 ? "session" : "sessions"}`
+              : presentationContext.session?.lifecycle === "active"
+                ? `${effectiveSessionsLength === 1 ? "session" : "sessions"} (active session investigation)`
+                : `${effectiveSessionsLength === 1 ? "session" : "sessions"}`}
           <span className="hidden xl:inline"> with a known CWD</span>
         </span>
         <span className="shrink-0 text-border" aria-hidden="true">·</span>
@@ -148,33 +176,50 @@ export function TopologySummaryBar({
           </span>
         )}
         <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
-        {isAuditMode ? (
-          <span className="hidden 2xl:inline truncate text-text-subtle font-medium text-primary">
-            Historical audit data
-          </span>
-        ) : (
+        {isLiveSummaryBarProps(props) ? (
           <span
             className="hidden 2xl:inline truncate text-text-subtle"
-            title={`Snapshot generated at ${formatTimestamp(snapshotGeneratedAt)}, received ${formatUpdateAge(freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(staleThresholdMs / 1000)}s)`}
+            title={`Snapshot generated at ${formatTimestamp(props.snapshotGeneratedAt)}, received ${formatUpdateAge(props.freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(props.staleThresholdMs / 1000)}s)`}
           >
-            {freshnessState.isStale ? (
+            {props.freshnessState.isStale ? (
               <span className="font-medium text-warning">
-                {freshnessState.telemetryStatus === "valid" && freshnessState.telemetryAgeMs !== null ? (
-                  <>Stale (telemetry {formatUpdateAge(freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
-                ) : freshnessState.telemetryStatus === "future_skew" ? (
-                  <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
+                {props.freshnessState.telemetryStatus === "valid" && props.freshnessState.telemetryAgeMs !== null ? (
+                  <>Stale (telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
+                ) : props.freshnessState.telemetryStatus === "future_skew" ? (
+                  <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
                 ) : (
-                  <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(snapshotGeneratedAt)}</>
+                  <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
                 )}
               </span>
-            ) : freshnessState.label === "Live · No activity" ? (
+            ) : props.freshnessState.label === "Live · No activity" ? (
               <span>
-                Live (no activity) · Snapshot {formatTimestamp(snapshotGeneratedAt)}
+                Live (no activity) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
               </span>
             ) : (
               <span>
-                Telemetry {formatUpdateAge(freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(snapshotGeneratedAt)}
+                Telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
               </span>
+            )}
+          </span>
+        ) : (
+          <span className="hidden 2xl:inline truncate text-text-subtle font-medium text-primary">
+            {props.presentationContext.session?.lifecycle === "retained" ? (
+              <>
+                {props.presentationContext.session.observedAt ? `Observed ${formatTimestamp(props.presentationContext.session.observedAt)}` : null}
+                {props.presentationContext.session.observedAt && props.presentationContext.session.closedAt ? " · " : null}
+                {props.presentationContext.session.closedAt ? `Closed ${formatTimestamp(props.presentationContext.session.closedAt)}` : null}
+                {!props.presentationContext.session.observedAt && !props.presentationContext.session.closedAt ? "Historical audit data" : null}
+              </>
+            ) : props.presentationContext.session?.lifecycle === "active" ? (
+              <>
+                {props.presentationContext.session.observedAt ? (
+                  <>Observed {formatTimestamp(props.presentationContext.session.observedAt)} · Active investigation</>
+                ) : (
+                  <>Active investigation</>
+                )}
+              </>
+            ) : (
+              "Historical audit data"
             )}
           </span>
         )}

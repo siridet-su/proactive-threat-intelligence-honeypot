@@ -255,6 +255,7 @@ describe("FA-012 ownership boundaries", () => {
         onSelectSession: () => {},
         onSelectPath: () => {},
         staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
       }));
       await Promise.resolve();
     });

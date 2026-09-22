@@ -26,7 +26,11 @@ import {
 } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
-import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
+import type {
+  FilesystemClosedSession,
+  FilesystemTopologySession,
+  FilesystemTopologySnapshot,
+} from "@/lib/dashboardTypes";
 import { TopologyToolbar } from "./TopologyToolbar";
 import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
@@ -137,7 +141,90 @@ function HoneypotQuietState({
   );
 }
 
-interface TopologyCanvasProps {
+export type TopologyPresentationContext =
+  | {
+      mode: "live";
+    }
+  | {
+      mode: "audit";
+      session: {
+        lifecycle: "active" | "retained";
+        observedAt: string | null;
+        startedAt: string | null;
+        closedAt: string | null;
+      } | null;
+    };
+
+export function deriveTopologyPresentationContext(
+  mode: "live" | "audit",
+  selectedSession?:
+    | FilesystemTopologySession
+    | FilesystemClosedSession
+    | {
+        lifecycle?: "active" | "retained" | { startedAt?: string | null; closedAt?: string | null } | null;
+        cwdState?: { observedAt?: string | null } | null;
+        observedAt?: string | null;
+        startedAt?: string | null;
+        closedAt?: string | null;
+      }
+    | null,
+): TopologyPresentationContext {
+  if (mode === "live") {
+    return { mode: "live" };
+  }
+
+  if (!selectedSession) {
+    return {
+      mode: "audit",
+      session: null,
+    };
+  }
+
+  const rawLifecycle = (selectedSession as { lifecycle?: unknown }).lifecycle;
+  let lifecycle: "active" | "retained" = "active";
+  if (rawLifecycle === "retained") {
+    lifecycle = "retained";
+  } else if (rawLifecycle === "active") {
+    lifecycle = "active";
+  } else if (rawLifecycle && typeof rawLifecycle === "object") {
+    if ("closedAt" in rawLifecycle || "startedAt" in rawLifecycle) {
+      lifecycle = "retained";
+    }
+  }
+
+  const observedAt =
+    selectedSession.cwdState?.observedAt ??
+    (selectedSession as { observedAt?: string | null }).observedAt ??
+    null;
+
+  const startedAt =
+    (typeof rawLifecycle === "object" && rawLifecycle !== null && "startedAt" in rawLifecycle
+      ? (rawLifecycle as { startedAt?: string | null }).startedAt
+      : null) ??
+    (selectedSession as { startedAt?: string | null }).startedAt ??
+    null;
+
+  const closedAt =
+    lifecycle === "retained"
+      ? ((typeof rawLifecycle === "object" && rawLifecycle !== null && "closedAt" in rawLifecycle
+          ? (rawLifecycle as { closedAt?: string | null }).closedAt
+          : null) ??
+        (selectedSession as { closedAt?: string | null }).closedAt ??
+        null)
+      : null;
+
+  return {
+    mode: "audit",
+    session: {
+      lifecycle,
+      observedAt,
+      startedAt,
+      closedAt,
+    },
+  };
+}
+
+export interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
   streamState: StreamState;
@@ -155,7 +242,7 @@ interface TopologyCanvasProps {
   onRefresh?: () => void;
   onReconnect?: () => void;
   staleThresholdMs: number;
-  isAuditMode?: boolean;
+  presentationContext: TopologyPresentationContext;
   isResizingContainer?: boolean;
   className?: string;
 }
@@ -178,10 +265,11 @@ export function TopologyCanvas({
   onRefresh,
   onReconnect,
   staleThresholdMs,
-  isAuditMode = false,
+  presentationContext,
   isResizingContainer = false,
   className,
 }: TopologyCanvasProps) {
+  const isAuditMode = presentationContext.mode === "audit";
   const reducedMotion = useReducedMotion();
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
@@ -1460,12 +1548,19 @@ export function TopologyCanvas({
                 totalLiveSources={totalLiveSources}
                 isSourcesExpanded={isSourcesExpanded}
                 setIsSourcesExpanded={setIsSourcesExpanded}
-                snapshotGeneratedAt={snapshot.generatedAt}
-                freshnessState={freshnessState}
-                staleThresholdMs={staleThresholdMs}
                 totalOverlaps={totalOverlaps}
                 autoArrangeTopology={autoArrangeTopology}
                 reducedMotion={reducedMotion}
+                {...(presentationContext.mode === "live"
+                  ? {
+                      presentationContext,
+                      snapshotGeneratedAt: snapshot.generatedAt,
+                      freshnessState,
+                      staleThresholdMs,
+                    }
+                  : {
+                      presentationContext,
+                    })}
               />
               {snapshot.truncated && (
                 <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">

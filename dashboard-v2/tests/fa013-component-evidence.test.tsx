@@ -178,6 +178,7 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
+      presentationContext: { mode: "live" },
     })));
     expect(container.textContent).toContain("No active honeypot sessions");
     expect(container.textContent).toContain("No attacker is currently connected.");
@@ -202,6 +203,7 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
+      presentationContext: { mode: "live" },
     })));
     expect(container.textContent).toContain("Degraded connection");
     expect(container.textContent).toContain("Showing retained snapshot");
@@ -255,5 +257,143 @@ describe("FA-013 production component evidence", () => {
     await act(async () => fireKey(range, "Home"));
     await act(async () => fireKey(range, "End"));
     expect(selected).toHaveBeenLastCalledWith("event-c");
+  });
+
+  it("FSV-001: enforces explicit presentation context and distinguishes retained audit evidence from live telemetry", async () => {
+    const auditSnapshot: FilesystemTopologySnapshot = {
+      nodes: [
+        { path: "/", parentPath: null, depth: 0, sessionIds: ["closed-session-1"], observedAt: "2026-09-17T11:45:00.000Z" },
+        { path: "/etc", parentPath: "/", depth: 1, sessionIds: ["closed-session-1"], observedAt: "2026-09-17T11:45:00.000Z" },
+      ],
+      sessions: [
+        {
+          sessionId: "closed-session-1",
+          sourceIp: "192.0.2.44",
+          cwdState: { path: "/etc", status: "confirmed", observedAt: "2026-09-17T11:45:00.000Z", sourceEventId: "ev-1" },
+          auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+        },
+      ],
+      recentClosedSessions: [],
+      truncated: false,
+      generatedAt: "2026-09-22T20:00:00.000Z",
+      latestTelemetryAt: null,
+    };
+
+    const freshnessState = {
+      classification: "fresh" as const,
+      label: "Live",
+      detail: "Authoritative telemetry is current.",
+      badgeClass: "",
+      dotClass: "",
+      isDegraded: false,
+      isStale: false,
+      telemetryAgeMs: 0,
+      snapshotReceiptAgeMs: 0,
+      retrievalAgeMs: 0,
+      telemetryStatus: "valid" as const,
+    };
+
+    // 1. Audit mode with retained closed session
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "closed-session-1",
+      selectedPath: "/etc",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: {
+        mode: "audit",
+        session: {
+          lifecycle: "retained",
+          observedAt: "2026-09-17T11:45:00.000Z",
+          startedAt: "2026-09-17T11:39:55.000Z",
+          closedAt: "2026-09-17T11:46:00.000Z",
+        },
+      },
+    })));
+
+    // Retained audit session must NEVER be labelled as active session
+    expect(container.textContent).not.toContain("1 active session");
+    expect(container.textContent).toContain("1 retained session");
+
+    // Authoritative evidence timestamps must be labelled
+    expect(container.textContent).toContain("Observed 17 Sept 2026");
+    expect(container.textContent).toContain("Closed 17 Sept 2026");
+
+    // Client view-materialization timestamp (generatedAt) must not be exposed as telemetry freshness
+    expect(container.textContent).not.toContain("Snapshot 23 Sept 2026");
+    expect(container.textContent).not.toContain("Snapshot generated at");
+    expect(container.textContent).not.toContain("Telemetry Just now");
+
+    // 2. Audit mode with active session investigation
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "active-session-1",
+      selectedPath: "/etc",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: {
+        mode: "audit",
+        session: {
+          lifecycle: "active",
+          observedAt: "2026-09-17T11:45:00.000Z",
+          startedAt: "2026-09-17T11:39:55.000Z",
+          closedAt: null,
+        },
+      },
+    })));
+
+    expect(container.textContent).toContain("active session investigation");
+    expect(container.textContent).not.toContain("retained");
+    expect(container.textContent).not.toContain("Closed");
+    expect(container.textContent).toContain("Observed 17 Sept 2026");
+
+    // 3. Audit mode without selected session
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: null,
+      selectedPath: null,
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: {
+        mode: "audit",
+        session: null,
+      },
+    })));
+
+    expect(container.textContent).not.toContain("retained session");
+    expect(container.textContent).not.toContain("active session");
+    expect(container.textContent).not.toContain("Closed");
+
+    // 4. Live mode preserves active session count and live freshness semantics
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "live-session-1",
+      selectedPath: "/etc",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: {
+        mode: "live",
+      },
+    })));
+
+    expect(container.textContent).toContain("1 active session");
+    expect(container.textContent).toContain("Telemetry");
+    expect(container.textContent).toContain("Snapshot");
   });
 });

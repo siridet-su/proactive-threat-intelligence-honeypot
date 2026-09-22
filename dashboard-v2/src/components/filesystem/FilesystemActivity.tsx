@@ -896,6 +896,7 @@ export function FilesystemActivity() {
               onRefresh={refresh}
               onReconnect={handleReconnect}
               staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
+              presentationContext={{ mode: "live" }}
               className="flex-1"
             />
           </div>

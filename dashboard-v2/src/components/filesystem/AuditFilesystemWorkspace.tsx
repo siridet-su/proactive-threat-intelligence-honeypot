@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { AuditNoticeRegion } from "./AuditNoticeRegion";
-import { TopologyCanvas } from "./TopologyCanvas";
+import { TopologyCanvas, deriveTopologyPresentationContext } from "./TopologyCanvas";
 import { TimelineSplitter } from "./TimelineSplitter";
 import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
 import { DEFAULT_STALE_THRESHOLD_MS } from "./filesystemUtils";
@@ -83,7 +83,7 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
           onRefresh={props.refresh}
           onReconnect={props.handleReconnect}
           staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-          isAuditMode={true}
+          presentationContext={deriveTopologyPresentationContext("audit", props.selectedSession)}
           isResizingContainer={props.isDraggingTimeline}
           className="flex-1 min-h-0"
         />
