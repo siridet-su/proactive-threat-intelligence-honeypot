@@ -313,6 +313,7 @@ interface DeceptionResult {
 }
 
 const DECEPTION_TIMEOUT_MS = 7_000;
+const DECEPTION_POLL_MS = 15_000;
 
 async function fetchDeceptionDecision(ip: string): Promise<DeceptionResult> {
   const controller = new AbortController();
@@ -358,11 +359,21 @@ function DeceptionStateFetcher({ ip }: { ip: string }) {
 
   useEffect(() => {
     let cancelled = false;
-    void fetchDeceptionDecision(ip).then((value) => {
-      if (!cancelled) setResult(value);
-    });
+
+    const load = () => {
+      void fetchDeceptionDecision(ip).then((value) => {
+        if (!cancelled) setResult(value);
+      });
+    };
+
+    load();
+    // Pi syncs Track B decisions into Mongo on its own cron (currently every 1 minute);
+    // poll faster than that so the panel picks up a new sync within one interval without
+    // a full page reload.
+    const intervalId = window.setInterval(load, DECEPTION_POLL_MS);
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [ip]);
 
@@ -409,7 +420,7 @@ function LureDetailModal({ lure, onClose }: { lure: DeceptionLure | null; onClos
         <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle p-5">
           <div className="min-w-0">
             <h3 id="lure-detail-title" className="truncate text-sm font-semibold text-text">{lure.target}</h3>
-            <p className="mt-1 text-xs text-text-muted" title={`door=${lure.door}, tier=${lure.tier}, content_type=${lure.content_type}`}>Shown to attacker at {lure.at}</p>
+            <p className="mt-1 text-xs text-text-muted" title={`door=${lure.door}, tier=${lure.tier}, content_type=${lure.content_type}`}>Prepared at {lure.at}</p>
           </div>
           <button
             type="button"
@@ -457,7 +468,11 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
   const [selectedLure, setSelectedLure] = useState<DeceptionLure | null>(null);
   // Each lure is pre-generated in both "deceive" and "normal" variants ahead of the
   // decision; only the one matching the latest recorded action was actually served.
-  const servedContentType = data && data.actions.length > 0 ? data.actions[data.actions.length - 1].action : null;
+  // Mirrors get_content_mode() in colab_upload/3_serve/session_prompt_builder.py:
+  // action "deceive" -> content_type "deceive"; any other action (e.g. "lure", "delay")
+  // -> content_type "normal". The action string itself is NOT a content_type.
+  const latestAction = data && data.actions.length > 0 ? data.actions[data.actions.length - 1].action : null;
+  const servedContentType = latestAction === null ? null : latestAction === "deceive" ? "deceive" : "normal";
   const servedLures = data ? data.lures.filter((lure) => !servedContentType || lure.content_type === servedContentType) : [];
 
   return (
@@ -483,7 +498,6 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
             <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-sm text-text-muted">
               <span>Phase <span className="font-mono text-text">{data.phase}</span></span>
               <span>Commands <span className="font-mono text-text">{data.command_count}</span></span>
-              <span>Last seen <span className="font-mono text-text">{data.last_seen}</span></span>
             </div>
 
             <div className="grid items-start gap-4 sm:grid-cols-2">
@@ -505,7 +519,7 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
               </div>
 
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Decoy files shown to attacker ({servedLures.length})</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Decoy content prepared for this attacker ({servedLures.length})</p>
                 {servedLures.length > 0 ? (
                   <ol className="ui-scroll-region mt-2 max-h-52 divide-y divide-border overflow-y-auto rounded-lg border border-border">
                     {servedLures.map((lure, index) => (
@@ -521,7 +535,12 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
                       </li>
                     ))}
                   </ol>
-                ) : <p className="mt-2 text-sm text-text-muted">None served yet.</p>}
+                ) : !data.attacker_type_locked ? (
+                  <p className="mt-2 text-sm text-text-muted">
+                    Still in Part 1 (attacker type not locked yet) — Part 2 decoy files will start
+                    preparing automatically once classification locks.
+                  </p>
+                ) : <p className="mt-2 text-sm text-text-muted">None prepared yet.</p>}
               </div>
             </div>
           </div>
