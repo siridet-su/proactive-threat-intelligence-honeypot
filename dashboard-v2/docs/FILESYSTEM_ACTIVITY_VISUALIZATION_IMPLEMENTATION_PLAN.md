@@ -185,8 +185,9 @@ Expected checkpoint state: characterization tests ของ contracts ที่�
     - `tests/filesystem-phase0-baseline.test.ts` (`keeps transport connection and telemetry age as independent input dimensions`)
     - `tests/filesystem-freshness.test.ts`
   - `d. client-generated audit snapshot time is not authoritative evidence time`:
-    - `tests/filesystem-phase0-baseline.test.ts` (`distinguishes client-generated audit snapshot time from authoritative evidence time`)
+    - `tests/filesystem-phase0-baseline.test.ts` (`preserves authoritative evidence timestamps on session models and materialized nodes`)
     - `tests/filesystem-freshness.test.ts` (`derives snapshot receipt age from snapshotReceivedAtMs, never generatedAt`)
+    - *Note*: The Phase 0 baseline deliberately does not freeze the audit snapshot `generatedAt` implementation or encode client view-materialization time as accepted presentation semantics; `FSV-001` remains unconstrained to rename, remove, or stop exposing that field. Telemetry freshness independence is proven via `tests/filesystem-freshness.test.ts`.
   - `e. partial history/completeness metadata remains explicit and is not silently converted to complete`:
     - `tests/filesystem-phase0-baseline.test.ts` (`keeps partial history completeness metadata explicit and prevents silent conversion to complete`)
     - `tests/filesystem-audit-filter.test.ts` (`rejects history payloads that omit completeness metadata`, `keeps an event's absolute hop number stable as older pages are loaded`)

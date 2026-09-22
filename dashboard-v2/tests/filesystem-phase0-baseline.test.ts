@@ -151,29 +151,26 @@ describe("Filesystem Activity Phase 0 semantic baseline", () => {
     });
   });
 
-  it("distinguishes client-generated audit snapshot time from authoritative evidence time", () => {
-    const beforeMs = Date.now();
+  it("preserves authoritative evidence timestamps on session models and materialized nodes", () => {
     const snapshot = buildAuditSnapshot(null, closedSession, completeHistory);
-    const afterMs = Date.now();
 
-    const generatedAtMs = Date.parse(snapshot.generatedAt);
-    expect(generatedAtMs).toBeGreaterThanOrEqual(beforeMs);
-    expect(generatedAtMs).toBeLessThanOrEqual(afterMs);
-
-    // View materialization time (generatedAt) must not overwrite authoritative evidence time
+    // Authoritative session and lifecycle timestamps remain unchanged across audit materialization
     expect(closedSession.cwdState.observedAt).toBe("2026-09-17T11:45:00.000Z");
+    expect(closedSession.lifecycle.startedAt).toBe("2026-09-17T11:39:55.000Z");
     expect(closedSession.lifecycle.closedAt).toBe("2026-09-17T11:46:00.000Z");
-    expect(snapshot.generatedAt).not.toBe(closedSession.cwdState.observedAt);
-    expect(snapshot.generatedAt).not.toBe(closedSession.lifecycle.closedAt);
 
-    // Node-level evidence timestamps reflect authoritative telemetry, not snapshot generation time
+    // Materialized node observedAt values come strictly from authoritative session/history events
     const toolsNode = snapshot.nodes.find((node) => node.path === "/home/root/tools");
     expect(toolsNode?.observedAt).toBe("2026-09-17T11:45:00.000Z");
-    expect(toolsNode?.observedAt).not.toBe(snapshot.generatedAt);
 
     const etcNode = snapshot.nodes.find((node) => node.path === "/etc/nginx");
     expect(etcNode?.observedAt).toBe("2026-09-17T11:42:00.000Z");
-    expect(etcNode?.observedAt).not.toBe(snapshot.generatedAt);
+
+    const varLogNode = snapshot.nodes.find((node) => node.path === "/var/log");
+    expect(varLogNode?.observedAt).toBe("2026-09-17T11:42:00.000Z");
+
+    const rootNode = snapshot.nodes.find((node) => node.path === "/");
+    expect(rootNode?.observedAt).toBe("2026-09-17T11:45:00.000Z");
   });
 
   it("keeps partial history completeness metadata explicit and prevents silent conversion to complete", () => {
