@@ -468,11 +468,26 @@ Acceptance:
 - graph position ไม่กระโดดเมื่อเลือก failed hop (PASS)
 - icon/text สื่อ failure โดยไม่พึ่งสีอย่างเดียว (PASS)
 
+Correction audit follow-up:
+
+- Canvas regression coverage uses the production selectors `[data-testid="active-hop-target-badge"]` and `[data-active-hop-connector="true"]`. Failed hops prove both selectors, `.pti-hop-energy`, and target-oriented accessible text/attributes are absent; a successful adjacent parent/child hop proves the badge and connector selectors are live.
+- The camera deduplication ref stores the last processed/presented hop event ID. It is updated before failed-path, missing-target, drag-safeguard, and cleared-active-hop exits, so the transition contract is:
+
+  | Last processed | Current hop | Auto-center result | Next stored event |
+  | --- | --- | --- | --- |
+  | `null` | successful `A` | eligible for verified destination `A` | `A` |
+  | `A` | failed `B` | no centering | `B` |
+  | `B` | successful `A` | eligible for verified destination `A` | `A` |
+  | `A` | successful `A` | deduplicated | `A` |
+
+- A successful event whose verified target node is absent is still recorded before the node guard, and failed events never request target auto-centering.
+
 Verification:
 
-- focused regression suite: **PASSED** (17/17 tests)
+- focused regression suite: **PASSED** (19/19 tests)
 - semantic/replay gate: **PASSED** (110/110 tests)
-- all filesystem tests: **PASSED** (427 tests passed, 14 skipped)
+- all filesystem tests: **PASSED** (429 tests passed, 14 skipped)
+- `npm test`: **PASSED** (590 tests passed, 2 expected fail, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - Browser gate status: **`NOT RUN`** (system Chromium is present at `/usr/bin/chromium`, but Playwright's configured webServer probe fails with `EPERM` when connecting to `127.0.0.1:3100`; no browser was installed and no responsive visual verification is claimed)

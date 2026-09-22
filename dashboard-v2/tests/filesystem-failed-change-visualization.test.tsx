@@ -13,6 +13,7 @@ import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
 import { ReplayTransport } from "../src/components/filesystem/ReplayTransport";
 import { RouteEventList } from "../src/components/filesystem/RouteEventList";
 import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
+import * as topologyViewportModule from "../src/components/filesystem/useTopologyViewport";
 import {
   buildAuditSnapshot,
   buildReplayTimeline,
@@ -62,6 +63,7 @@ function event(
 
 const failedEvent = event("failed-hop", "failed_change", VERIFIED_ORIGIN, HOSTILE_DESTINATION);
 const successfulChangedEvent = event("changed-hop", "changed", VERIFIED_ORIGIN, VERIFIED_DESTINATION);
+const successfulAdjacentEvent = event("adjacent-changed-hop", "changed", "/etc", VERIFIED_ORIGIN);
 const successfulEnteredEvent = event("entered-hop", "entered", null, "/home/cowrie");
 
 const session: FilesystemTopologySession = {
@@ -115,6 +117,21 @@ function assertHostileDestinationAbsent(container: HTMLElement): void {
   for (const element of Array.from(container.querySelectorAll("*"))) {
     for (const attribute of Array.from(element.attributes)) {
       expect(attribute.value).not.toContain(HOSTILE_DESTINATION);
+    }
+  }
+}
+
+function assertNoFailedTargetPresentation(container: HTMLElement): void {
+  expect(container.querySelector('[data-testid="active-hop-target-badge"]')).toBeNull();
+  expect(container.querySelector('[data-active-hop-connector="true"]')).toBeNull();
+  expect(container.querySelector(".pti-hop-energy")).toBeNull();
+  expect(container.textContent?.toLowerCase()).not.toMatch(/(?:active|current|failed attempt) hop target/);
+
+  for (const element of Array.from(container.querySelectorAll("*"))) {
+    for (const attribute of Array.from(element.attributes)) {
+      if (attribute.name === "aria-label" || attribute.name === "aria-description" || attribute.name === "title") {
+        expect(attribute.value).not.toMatch(/(?:active|current|failed attempt) hop target/i);
+      }
     }
   }
 }
@@ -305,6 +322,99 @@ describe("FSV-005 failed-change visualization", () => {
     expect(formatFailedChangeMessage("  ")).toBe(
       "Directory change failed while at an unknown verified origin; attempted destination unavailable or unverified",
     );
+  });
+
+  it("reprocesses a successful hop after a failed hop transition", async () => {
+    const originalUseTopologyViewport = topologyViewportModule.useTopologyViewport;
+    const centerMapOn = vi.fn();
+    vi.spyOn(topologyViewportModule, "useTopologyViewport").mockImplementation((options) => ({
+      ...originalUseTopologyViewport(options),
+      centerMapOn,
+    }));
+
+    const successRoute = deriveActiveHopRoute(
+      [successfulChangedEvent],
+      0,
+      getHistoryWindowMetrics(1, 1, 0),
+    );
+    const failedRoute = deriveActiveHopRoute(
+      [failedEvent],
+      0,
+      getHistoryWindowMetrics(1, 1, 0),
+    );
+
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot,
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState,
+        selectedSessionId: session.sessionId,
+        selectedPath: null,
+        activeHop: successRoute,
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+    const centeredForInitialSuccess = centerMapOn.mock.calls.length;
+    expect(centeredForInitialSuccess).toBeGreaterThan(0);
+
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot,
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState,
+        selectedSessionId: session.sessionId,
+        selectedPath: null,
+        activeHop: failedRoute,
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+    expect(centerMapOn).toHaveBeenCalledTimes(centeredForInitialSuccess);
+
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot,
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState,
+        selectedSessionId: session.sessionId,
+        selectedPath: null,
+        activeHop: successRoute,
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+    expect(centerMapOn).toHaveBeenCalledTimes(centeredForInitialSuccess + 1);
+
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot,
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState,
+        selectedSessionId: session.sessionId,
+        selectedPath: null,
+        activeHop: successRoute,
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+    expect(centerMapOn).toHaveBeenCalledTimes(centeredForInitialSuccess + 1);
   });
 
   it("keeps failed events displayed and selectable by event ID", async () => {
@@ -501,11 +611,36 @@ describe("FSV-005 failed-change visualization", () => {
       `Directory change failed while at ${VERIFIED_ORIGIN}; attempted destination unavailable or unverified`,
     );
     expect(annotation?.querySelector("svg")).not.toBeNull();
-    expect(container.querySelector(".pti-hop-energy")).toBeNull();
-    expect(container.querySelector('[data-testid="failed-target-badge"]')).toBeNull();
-    expect(container.textContent).not.toContain("active hop target");
-    expect(container.textContent).not.toContain("Failed attempt target");
+    expect(annotation?.getAttribute("aria-label")).toContain("attempted destination unavailable or unverified");
+    assertNoFailedTargetPresentation(container);
     assertHostileDestinationAbsent(container);
+  });
+
+  it("keeps the real target badge and adjacent connector for a successful hop", async () => {
+    const successfulRoute = deriveActiveHopRoute(
+      [successfulAdjacentEvent],
+      0,
+      getHistoryWindowMetrics(1, 1, 0),
+    );
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot,
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState,
+        selectedSessionId: session.sessionId,
+        selectedPath: null,
+        activeHop: successfulRoute,
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(container.querySelector('[data-testid="active-hop-target-badge"]')).not.toBeNull();
+    expect(container.querySelector('[data-active-hop-connector="true"]')).not.toBeNull();
   });
 
   it("keeps a truthful canvas-level warning when the failed origin is outside a partial graph", async () => {

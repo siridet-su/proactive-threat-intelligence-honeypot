@@ -672,12 +672,14 @@ export function TopologyCanvas({
   }, [centerMapOn, graphCallouts, positionForCallout, selectedGraphCallout]);
 
   // Keep camera steady; only bring a verified destination into view when a hop changes.
-  const lastCenteredHopEventId = useRef<string | null>(null);
+  const lastProcessedHopEventId = useRef<string | null>(null);
   useEffect(() => {
+    const currentHopEventId = activeHop?.eventId ?? null;
+    const isNewHopEvent = currentHopEventId !== lastProcessedHopEventId.current;
+    lastProcessedHopEventId.current = currentHopEventId;
+
     const autoCenterPath = activeHopCanvasSemantics.autoCenterPath;
-    if (!activeHop?.eventId || !autoCenterPath) return;
-    if (activeHop.eventId === lastCenteredHopEventId.current) return;
-    lastCenteredHopEventId.current = activeHop.eventId;
+    if (!isNewHopEvent || !autoCenterPath) return;
 
     // Never auto-center while user is actively dragging or interacting with the canvas
     if (draggedNodePath || draggedCalloutIp || isDraggingSurface) return;
