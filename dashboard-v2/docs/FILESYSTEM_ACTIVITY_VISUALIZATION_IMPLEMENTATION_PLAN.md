@@ -29,12 +29,12 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-000B` — Add semantic characterization tests**
+Current focus: **`FSV-001` — Explicit live/audit presentation context**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
-| 0 | Baseline and characterization | `IN_PROGRESS` |
-| 1 | Evidence semantics | `BLOCKED_BY_0` |
+| 0 | Baseline and characterization | `DONE` |
+| 1 | Evidence semantics | `READY` |
 | 2 | Verified transition model/rendering | `BLOCKED_BY_1` |
 | 3 | Workspace structure | `BLOCKED_BY_2` |
 | 4 | Accessibility/responsive interaction | `BLOCKED_BY_3` |
@@ -138,11 +138,15 @@ Acceptance:
 
 #### `FSV-000B` Add semantic characterization tests
 
+Status: **DONE — 2026-09-22**
+
 Preferred test scopes:
 
 - `tests/filesystem-phase0-baseline.test.ts`
+- `tests/filesystem-coverage-expansion.test.ts`
 - `tests/filesystem-audit-filter.test.ts`
 - `tests/filesystem-audit-directory.test.ts`
+- `tests/filesystem-ownership-boundaries.test.tsx`
 - component test ใหม่เฉพาะ footer/failed state หาก test เดิมไม่เหมาะ
 
 Required cases:
@@ -167,6 +171,47 @@ npx eslint tests
 ```
 
 Expected checkpoint state: characterization tests ของ contracts ที่ถูกต้องต้องผ่านทั้งหมด ส่วน defect regression test ให้เพิ่มแบบ test-first ภายใน work item ที่เกี่ยวข้อง โดยยืนยันว่า test fail ด้วยเหตุผลที่คาดไว้ แล้วแก้ production code และทำให้ test ผ่านก่อน commit ห้าม commit intentionally failing test ไว้เป็น baseline
+
+##### Phase 0 Baseline Evidence Record
+
+- **Contract-to-test mapping**:
+  - `a. failed_change contributes only verified fromPath and never unverified destination`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`materializes every verified historical branch and excludes failed destination typo nodes`)
+    - `tests/filesystem-coverage-expansion.test.ts` (`derives active hop route accurately for transitions and failures`)
+  - `b. closed/retained session lifecycle remains distinct from live topology state`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`preserves the retained lifecycle on the source model while characterizing the canvas adapter lane`)
+    - `tests/filesystem-audit-directory.test.ts` (`strictly bounds effective closed sessions to the snapshot buffer (12 items) in live mode`, `verifies buildAuditSessionsQuery enforces closed lifecycle`)
+  - `c. connection state and telemetry freshness remain independent dimensions`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`keeps transport connection and telemetry age as independent input dimensions`)
+    - `tests/filesystem-freshness.test.ts`
+  - `d. client-generated audit snapshot time is not authoritative evidence time`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`distinguishes client-generated audit snapshot time from authoritative evidence time`)
+    - `tests/filesystem-freshness.test.ts` (`derives snapshot receipt age from snapshotReceivedAtMs, never generatedAt`)
+  - `e. partial history/completeness metadata remains explicit and is not silently converted to complete`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`keeps partial history completeness metadata explicit and prevents silent conversion to complete`)
+    - `tests/filesystem-audit-filter.test.ts` (`rejects history payloads that omit completeness metadata`, `keeps an event's absolute hop number stable as older pages are loaded`)
+    - `tests/filesystem-history-pagination.test.ts`
+  - `f. URL/deep-link state ownership and replay/history owners remain single-owner`:
+    - `tests/filesystem-ownership-boundaries.test.tsx` (`renders the production timeline composition with one required replay presentation model`, `keeps response capability request, abort, and reopen lifecycles on the controlled production tab`, `advances exactly one autoplay hop after presentational width and rerender changes`, `renders TopologyCanvas with authoritative freshness and creates no fallback freshness interval`)
+    - `tests/filesystem-coverage-expansion.test.ts` (`round-trips URL search params without loss or corruption`, `safely falls back to live defaults on malformed or malicious query parameters`)
+    - `tests/filesystem-audit-filter.test.ts` (`audit URL state synchronization and session expiration`)
+  - `g. current authoritative path and ancestors are preserved without parsing command text`:
+    - `tests/filesystem-phase0-baseline.test.ts` (`preserves authoritative current path and ancestors without parsing command text`, `materializes every verified historical branch and excludes failed destination typo nodes`)
+- **Exact validation commands and results**:
+  - `npx vitest run tests/filesystem-phase0-baseline.test.ts tests/filesystem-coverage-expansion.test.ts tests/filesystem-audit-filter.test.ts tests/filesystem-audit-directory.test.ts tests/filesystem-ownership-boundaries.test.tsx`:
+    **PASSED** (5 test files, 79 tests passed, 0 failures)
+  - `npm test`:
+    **PASSED** (29 test files passed, 1 skipped; 500 tests passed, 2 expected fail, 14 skipped)
+  - `npm run lint`:
+    **PASSED** (ESLint exited 0 with zero warnings/errors)
+  - `npm run build -- --webpack`:
+    **PASSED** (Next.js production build compiled and generated static/dynamic routes successfully with webpack fallback)
+- **Browser gate status**:
+  - **`NOT RUN`**: Phase 0 is test/documentation-only and managed Chromium executable is unavailable in this environment; visual gate will be verified during later checkpoints when browser runtime is configured.
+- **Known environment limitations**:
+  - Default Turbopack build is blocked by environment local port bind refusal (`EPERM`/`EACCES`); Webpack fallback (`npm run build -- --webpack`) is the verified build path.
+- **Production source confirmation**:
+  - Zero files modified under `dashboard-v2/src/`. No production source code changed during Phase 0.
 
 ---
 
