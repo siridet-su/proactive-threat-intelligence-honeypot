@@ -11,6 +11,7 @@ MotionGlobalConfig.skipAnimations = true;
 import {
   deriveAuthoritativeAuditMetrics,
   createAuditScopeKey,
+  evaluateScopeAwareSummaryCounts,
   formatRetainedSubtitleCoverage,
 } from "../src/components/filesystem/useAuditDirectory";
 import {
@@ -1451,6 +1452,113 @@ function fireInputChange(input: HTMLInputElement, value: string) {
 
       // Must not use contaminated server homeOnlyCount (2); must fall back to the 1 loaded home-only session
       expect(metrics.homeOnlyCount).toBe(1);
+    });
+  });
+
+  describe("I. Explicit summary scope attribution", () => {
+    const contradictorySummary: AuditDirectorySummary = {
+      totalSessions: 120,
+      homeOnlyCount: 40,
+      matchingCount: 1,
+    };
+
+    it("1. never disables scope coherence through the legacy explicit-scope flag", () => {
+      const legacyOptions = {
+        summary: contradictorySummary,
+        hideHomeOnly: true,
+        targetPathFilter: null,
+        hasExplicitScopeKey: false,
+        retainedLoadedCount: 1,
+      };
+
+      expect(evaluateScopeAwareSummaryCounts(legacyOptions)).toEqual({
+        isValid: false,
+        derivedMatching: null,
+      });
+    });
+
+    it("2. rejects coherent exact summary evidence when summaryScopeKey is omitted", () => {
+      const homeSession = createClosedSession("home", "2026-09-19T10:00:00.000Z", {
+        paths: ["/home/user"],
+        homeOnly: true,
+      });
+      const outsideSession = createClosedSession("outside", "2026-09-19T11:00:00.000Z", {
+        paths: ["/var/log"],
+      });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [homeSession, outsideSession],
+        snapshotRecentClosedSessions: [],
+        summary: {
+          totalSessions: 10,
+          homeOnlyCount: 2,
+          matchingCount: 8,
+        },
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+      expect(metrics.homeOnlyCount).toBe(1);
+    });
+
+    it.each([
+      { label: "unfiltered", hideHomeOnly: false },
+      { label: "hide-home", hideHomeOnly: true },
+    ])(
+      "3. rejects omitted-scope contradictory evidence for $label scope",
+      ({ hideHomeOnly }) => {
+        const metrics = deriveAuthoritativeAuditMetrics({
+          viewMode: "audit",
+          activeSessions: [],
+          authoritativeClosedSessions: [
+            createClosedSession("outside", "2026-09-19T11:00:00.000Z", {
+              paths: ["/var/log"],
+            }),
+          ],
+          snapshotRecentClosedSessions: [],
+          summary: contradictorySummary,
+          summaryStatus: "success",
+          hideHomeOnly,
+          targetPathFilter: null,
+        });
+
+        expect(metrics.retainedMatchingCount).toBeNull();
+        expect(metrics.retainedTotalCount).toBeNull();
+        expect(metrics.retainedCountStatus).toBe("loaded-only");
+      },
+    );
+
+    it("4. does not promote missing or mismatched scope evidence through directory completion", () => {
+      const loaded = [createClosedSession("outside", "2026-09-19T11:00:00.000Z")];
+      const currentScopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+      const staleScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/etc" });
+
+      for (const summaryScopeKey of [undefined, staleScopeKey]) {
+        const metrics = deriveAuthoritativeAuditMetrics({
+          viewMode: "audit",
+          activeSessions: [],
+          authoritativeClosedSessions: loaded,
+          snapshotRecentClosedSessions: [],
+          summary: {
+            totalSessions: 1,
+            homeOnlyCount: 0,
+            matchingCount: 1,
+          },
+          summaryScopeKey,
+          currentScopeKey,
+          summaryStatus: "success",
+          isDirectoryComplete: true,
+        });
+
+        expect(metrics.retainedMatchingCount).toBeNull();
+        expect(metrics.retainedTotalCount).toBeNull();
+        expect(metrics.retainedCountStatus).toBe("loaded-only");
+      }
     });
   });
 });

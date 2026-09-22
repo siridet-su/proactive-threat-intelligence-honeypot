@@ -144,6 +144,20 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         { path: "/opt/secret/backdoor", sessionCount: 1 },
       ],
     };
+    const unfiltered120Summary: AuditDirectorySummary = {
+      ...server120Summary,
+      matchingCount: undefined,
+    };
+    const hideHome120Summary: AuditDirectorySummary = {
+      ...server120Summary,
+      matchingCount: 80,
+    };
+    const targetPathScopeKey = createAuditScopeKey({
+      hideHome: false,
+      targetPath: "/opt/secret/backdoor",
+    });
+    const unfilteredScopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+    const hideHomeScopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
 
     // Client only has page 1 (50 items) loaded into memory, NONE of which touch /opt/secret/backdoor
     const clientPage1Sessions: FilesystemClosedSession[] = Array.from({ length: 50 }, (_, i) => {
@@ -157,6 +171,8 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
         summary: server120Summary,
+        summaryScopeKey: targetPathScopeKey,
+        currentScopeKey: targetPathScopeKey,
         hideHomeOnly: false,
         targetPathFilter: "/opt/secret/backdoor",
         selectedSessionId: null,
@@ -179,7 +195,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         activeSessions: [activeSession],
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
-        summary: server120Summary,
+        summary: unfiltered120Summary,
+        summaryScopeKey: unfilteredScopeKey,
+        currentScopeKey: unfilteredScopeKey,
         hideHomeOnly: false,
         targetPathFilter: null,
         selectedSessionId: null,
@@ -197,7 +215,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         activeSessions: [activeSession], // active session is not home-only
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
-        summary: server120Summary,
+        summary: hideHome120Summary,
+        summaryScopeKey: hideHomeScopeKey,
+        currentScopeKey: hideHomeScopeKey,
         hideHomeOnly: true,
         targetPathFilter: null,
         selectedSessionId: null,

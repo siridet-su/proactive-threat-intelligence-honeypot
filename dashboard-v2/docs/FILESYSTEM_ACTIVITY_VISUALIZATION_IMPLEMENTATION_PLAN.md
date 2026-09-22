@@ -389,10 +389,11 @@ Implementation:
       - For every scope: `effective matching >= retainedLoadedCount` and `totalSessions >= retainedLoadedCount`.
       - Contradiction handling: any scope contradiction invalidates the entire exact summary, failing closed to `retainedMatchingCount = null`, `retainedTotalCount = null`, `retainedCountStatus = "loaded-only"`.
       - Unified trust: `countEvaluation.isValid` controls both retained exact counts and public `homeOnlyCount` trust (falling back to locally loaded evidence if invalid).
+      - Scope attribution is mandatory: exact summary counts are trusted only when a non-null `summaryScopeKey` is explicitly present and equals the canonical current scope key. Missing, stale, or mismatched attribution fails closed; there is no compatibility flag that disables coherence validation.
     - Fails closed on target-path contradictions (`matchingCount > totalSessions`), negative totals (`totalSessions=-1, matchingCount=5`), and invalid home summaries (`homeOnlyCount < 0` or `homeOnlyCount > totalSessions`), eliminating silent `Math.max(0, ...)` clamping that previously masked server contradictions.
     - Public `homeOnlyCount` fallback: `summary.homeOnlyCount` is used only if `countEvaluation.isValid` passes; if summary count evidence is malformed or scope-incoherent, it falls back to counting locally loaded sessions across `allSessions`, preventing corrupt server counts from contaminating filter badges.
   - Contradiction check: if server matching count or total count is smaller than loaded matching count (`matchingCount < retainedLoadedCount` or `totalSessions < retainedLoadedCount`), fails closed (`retainedMatchingCount = null`, `retainedTotalCount = null`, `retainedCountStatus = "loaded-only"`).
-  - Complete directory fallback: when `isDirectoryComplete` proves the entire result set, `retainedMatchingCount = retainedLoadedCount`. Total is proven equal to loaded count only when unfiltered (`retainedTotalCount = retainedLoadedCount`); when path or home filters are active without summary, total-before-filter is unproven (`retainedTotalCount = null`).
+  - Complete directory fallback: when no summary payload exists and `isDirectoryComplete` proves the entire result set, `retainedMatchingCount = retainedLoadedCount`. Total is proven equal to loaded count only when unfiltered (`retainedTotalCount = retainedLoadedCount`); when path or home filters are active without summary, total-before-filter is unproven (`retainedTotalCount = null`). A present but missing-scope, stale, or mismatched summary never falls through to this promotion path.
   - Search count scope separation: search results maintain separate count scope. While search is active, global directory `retainedMatchingCount` is never used as search denominator; group is truthfully labelled `Retained search results (M loaded)`.
 - UI presentation contracts:
   - `AuditFilterControls`: displays `aria-label="Retained audit result coverage"`, renders `N retained matching · M loaded` (or `N retained matching` when complete, or `M retained loaded · exact count loading/unavailable` when non-authoritative).
@@ -420,16 +421,18 @@ Acceptance:
   - Unfiltered/time-only contradiction fails closed (`total=10, matchingCount=3` -> loaded-only) (PASS)
   - Valid unfiltered redundancy reports authoritative (`total=10, matchingCount=10` -> matching=10, total=10) (PASS)
 - Corrupted or scope-contradictory summary `homeOnlyCount` safely falls back to local loaded evidence without contaminating public badge (PASS)
+- Exact summary evidence without an explicit matching `summaryScopeKey` fails closed and cannot use directory completion as an implicit promotion path (PASS)
+- Legacy multi-page fixtures use separate target-path, unfiltered, and hide-home summaries with their own canonical scope keys instead of reusing one summary across scopes (PASS)
 - Group renamed to "Retained sessions" and active group labelled as separate from Closed-at filter (PASS)
 - Timestamp formatting distinguishes `Closed <time>` from `Last observed <time>` and handles missing/invalid values with explicit unavailable text (PASS)
 - Filter summary, selector, notice region, and canvas subtitle use unified truthful semantics (PASS)
 
 Verification:
 
-- `npx vitest run tests/filesystem-retained-semantics.test.tsx`: **PASSED** (42/42 tests)
-- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/filesystem-audit-filter.test.ts tests/combobox-popover.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/fa013-component-evidence.test.tsx`: **PASSED** (168/168 tests)
-- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (405 tests passed, 14 skipped)
-- `npm test`: **PASSED** (566 passed, 2 expected fail, 14 skipped)
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx`: **PASSED** (47/47 tests)
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/filesystem-audit-filter.test.ts tests/combobox-popover.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/fa013-component-evidence.test.tsx`: **PASSED** (173/173 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (410 tests passed, 14 skipped)
+- `npm test`: **PASSED** (571 passed, 2 expected fail, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - `git diff --check`: **PASSED** (clean diff formatting)

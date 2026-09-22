@@ -286,7 +286,6 @@ export interface EvaluateScopeAwareSummaryCountsOptions {
   summary: AuditDirectorySummary | null | undefined;
   hideHomeOnly: boolean;
   targetPathFilter: string | null;
-  hasExplicitScopeKey?: boolean;
   retainedLoadedCount?: number;
 }
 
@@ -299,7 +298,6 @@ export function evaluateScopeAwareSummaryCounts({
   summary,
   hideHomeOnly,
   targetPathFilter,
-  hasExplicitScopeKey = true,
   retainedLoadedCount = 0,
 }: EvaluateScopeAwareSummaryCountsOptions): ScopeAwareSummaryResult {
   if (!isSummaryCountEvidenceValid(summary)) {
@@ -317,7 +315,7 @@ export function evaluateScopeAwareSummaryCounts({
 
   if (!hideHomeOnly && !hasPathFilter) {
     // 1. No hide-home and no target path
-    if (summary.matchingCount !== undefined && hasExplicitScopeKey) {
+    if (summary.matchingCount !== undefined) {
       if (summary.matchingCount !== summary.totalSessions) {
         return { isValid: false, derivedMatching: null };
       }
@@ -326,7 +324,7 @@ export function evaluateScopeAwareSummaryCounts({
   } else if (hideHomeOnly && !hasPathFilter) {
     // 2. Hide-home only
     const nonHomeTotal = summary.totalSessions - summary.homeOnlyCount;
-    if (summary.matchingCount !== undefined && hasExplicitScopeKey) {
+    if (summary.matchingCount !== undefined) {
       if (summary.matchingCount !== nonHomeTotal) {
         return { isValid: false, derivedMatching: null };
       }
@@ -436,15 +434,12 @@ export function deriveAuthoritativeAuditMetrics({
       if (timeRange === "custom") return customDateRange?.to?.getTime();
       return getPresetDateRange(timeRange)?.to?.getTime();
     })() });
-  const resolvedSummaryScopeKey =
-    summaryScopeKey !== undefined ? summaryScopeKey : summary ? resolvedCurrentScopeKey : null;
-
   // Check if summary matches current scope
   const isScopeMatch =
     Boolean(summary) &&
     summaryStatus === "success" &&
-    resolvedSummaryScopeKey !== null &&
-    resolvedSummaryScopeKey === resolvedCurrentScopeKey;
+    summaryScopeKey != null &&
+    summaryScopeKey === resolvedCurrentScopeKey;
 
   // Distinct paths: merge active session paths with server-side closed distinct paths
   // Only use summary.distinctPaths when summaryStatus is success and summaryScopeKey matches currentScopeKey
@@ -504,7 +499,6 @@ export function deriveAuthoritativeAuditMetrics({
           summary,
           hideHomeOnly,
           targetPathFilter,
-          hasExplicitScopeKey: summaryScopeKey !== undefined,
           retainedLoadedCount,
         })
       : { isValid: false, derivedMatching: null };
@@ -556,7 +550,7 @@ export function deriveAuthoritativeAuditMetrics({
       retainedTotalCount = summary.totalSessions;
       retainedCountStatus = "authoritative";
     }
-  } else if (isDirectoryComplete) {
+  } else if (!summary && isDirectoryComplete) {
     // Complete directory loaded for this scope
     retainedMatchingCount = retainedLoadedCount;
     retainedTotalCount = hideHomeOnly || targetPathFilter !== null ? null : retainedLoadedCount;
