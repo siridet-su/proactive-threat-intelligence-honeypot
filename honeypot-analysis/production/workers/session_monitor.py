@@ -1305,7 +1305,7 @@ class SessionMonitor:
                 return finalize(self._securebert_classify(text))
 
             if not self.bert_fn:
-                return None, "unknown", "securebert_unavailable", 0.0
+                return None, "unknown", "unclassified", 0.0
 
             try:
                 ttp, confidence = self.bert_fn(text)
@@ -1388,7 +1388,7 @@ class SessionMonitor:
             (ttp, tactic, source, confidence)
         """
         if not self.bert_fn:
-            return None, "unknown", "securebert_unavailable", 0.0
+            return None, "unknown", "unclassified", 0.0
 
         try:
             result = self.bert_fn(cmd)

@@ -62,6 +62,7 @@ const RECENT_CLOSED_BUFFER_LIMIT = 12;
 // smaller bound reduces memory but causes more cwd_events aggregation refetches.
 export const CLOSED_AUDIT_PATHS_CACHE_MAX_ENTRIES = RECENT_CLOSED_BUFFER_LIMIT * 2;
 const HISTORY_PAGE_SIZE = 80;
+const REMOTE_CWD_TIMEOUT_MS = 15_000;
 const TOPOLOGY_BROADCAST_DEBOUNCE_MS = 250;
 
 function historySessionScope(sessionIds: readonly string[]): Document {
@@ -542,6 +543,85 @@ export async function getSessionCwdHistoryHop(
     hopNumber,
     successfulHopNumber,
     totalItems,
+  };
+}
+
+function monitorBaseUrl(): string {
+  return (process.env.DASHBOARD_MONITOR_BASE_URL?.trim() || "http://127.0.0.1:8090").replace(/\/$/, "");
+}
+
+async function fetchRemoteCwdProjection(
+  sessionId: string,
+  query: Record<string, string>,
+): Promise<Document | null> {
+  const upstream = new URL("/api/session-cwd-history", monitorBaseUrl());
+  upstream.searchParams.set("session_id", sessionId);
+  for (const [key, value] of Object.entries(query)) {
+    if (value) upstream.searchParams.set(key, value);
+  }
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const token = process.env.DASHBOARD_MONITOR_READ_TOKEN?.trim();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REMOTE_CWD_TIMEOUT_MS);
+  try {
+    const response = await fetch(upstream, {
+      method: "GET",
+      cache: "no-store",
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    const payload: unknown = await response.json();
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    return payload as Document;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Read CWD from the monitor's canonical event projection when the local
+ * filesystem Mongo connection is a different database/epoch than the
+ * production monitor. This is a bounded, exact-session fallback; it never
+ * performs a global session scan.
+ */
+export async function getRemoteSessionCwdHistory(
+  sessionId: string,
+  cursor: string | null,
+): Promise<SessionCwdHistoryPage | null> {
+  const payload = await fetchRemoteCwdProjection(
+    sessionId,
+    cursor ? { cursor } : {},
+  );
+  if (!payload || payload.ok !== true || !Array.isArray(payload.items)) return null;
+  const items = payload.items
+    .map((item) => normalizeHistoryEvent(item))
+    .filter((item): item is SessionCwdHistoryEvent => item !== null);
+  return {
+    items,
+    nextCursor: typeof payload.nextCursor === "string" ? payload.nextCursor : null,
+    totalItems: typeof payload.totalItems === "number" ? payload.totalItems : items.length,
+    totalSuccessfulItems: typeof payload.totalSuccessfulItems === "number" ? payload.totalSuccessfulItems : 0,
+    complete: payload.complete !== false,
+  };
+}
+
+export async function getRemoteSessionCwdHistoryHop(
+  sessionId: string,
+  eventId: string,
+): Promise<SessionCwdHopResolution | null> {
+  const payload = await fetchRemoteCwdProjection(sessionId, { hop: eventId });
+  if (!payload || payload.ok !== true || !payload.item) return null;
+  const item = normalizeHistoryEvent(payload.item);
+  if (!item) return null;
+  return {
+    item,
+    hopNumber: typeof payload.hopNumber === "number" ? payload.hopNumber : undefined,
+    successfulHopNumber: typeof payload.successfulHopNumber === "number" ? payload.successfulHopNumber : undefined,
+    totalItems: typeof payload.totalItems === "number" ? payload.totalItems : undefined,
   };
 }
 

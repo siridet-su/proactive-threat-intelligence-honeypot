@@ -82,8 +82,11 @@ function display(value: unknown, fallback = "Unavailable"): string {
   return fallback;
 }
 
-const CLIENT_TIMEOUT_MS = 2_500;
-const DETAIL_CLIENT_TIMEOUT_MS = 7_000;
+// Allow the bounded server projection to finish over the local SSH tunnel.
+// The previous 2.5/7-second client cutoffs hid healthy session evidence.
+const CLIENT_TIMEOUT_MS = 45_000;
+const DETAIL_CLIENT_TIMEOUT_MS = 75_000;
+const SESSION_TI_CLIENT_TIMEOUT_MS = 75_000;
 
 async function fetchCapability(
   capability: string,
@@ -94,7 +97,11 @@ async function fetchCapability(
   const controller = new AbortController();
   const timeout = window.setTimeout(
     () => controller.abort(),
-    capability === "detail" || capability === "commands" ? DETAIL_CLIENT_TIMEOUT_MS : CLIENT_TIMEOUT_MS,
+    capability === "detail" || capability === "commands"
+      ? DETAIL_CLIENT_TIMEOUT_MS
+      : capability === "session-ti"
+        ? SESSION_TI_CLIENT_TIMEOUT_MS
+        : CLIENT_TIMEOUT_MS,
   );
   try {
     const endpoint = capability === "commands"
@@ -179,6 +186,13 @@ function hasMeaningfulValue(value: unknown): boolean {
 
 function hasMeaningfulRecord(value: unknown): boolean {
   return isRecord(value) && hasMeaningfulValue(value);
+}
+
+export function hasClassificationEvidence(
+  classificationEvents: unknown[],
+  trustedMappings: unknown[],
+): boolean {
+  return classificationEvents.length > 0 || trustedMappings.length > 0;
 }
 
 function countOf(value: unknown, fallback = 0): string {
@@ -514,10 +528,10 @@ function TimelineList({ items }: { items: unknown[] }) {
 }
 
 export function ClassificationList({ items, trustedMappings }: { items: unknown[]; trustedMappings: unknown[] }) {
-  if (!items.length) {
+  const classificationRecords = items.map(record);
+  if (!classificationRecords.length && !trustedMappings.length) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No classification evidence is available for this exact session.</p>;
   }
-  const classificationRecords = items.map(record);
   const classifiedCommandKeys = new Set(
     classificationRecords
       .map((mapping) => {
@@ -550,8 +564,8 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
         ["Classified command events", String(classifiedCommandKeys.size)],
         ["Trusted ATT&CK mappings", `${trustedMappings.length} records · ${uniqueAttackTechniques.size} techniques`],
       ]} />
-      <p className="text-xs text-text-muted">These command-level records contain reviewed classifier and Model1 advisory evidence. Model2 is shown only in the exact-session ensemble panel; it is not inferred from legacy command-level shadow fields. Scores are not combined and neither model authorizes response.</p>
-      <ol className="space-y-2">
+      {classificationRecords.length > 0 && <p className="text-xs text-text-muted">These command-level records contain reviewed classifier and Model1 advisory evidence. Model2 is shown only in the exact-session ensemble panel; it is not inferred from legacy command-level shadow fields. Scores are not combined and neither model authorizes response.</p>}
+      {classificationRecords.length > 0 && <ol className="space-y-2">
         {classificationRecords.slice(0, 50).map((mapping, index) => {
           const authority = record(mapping.authority_decision);
           const advisory = record(mapping.s1_advisory);
@@ -579,7 +593,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
             </li>
           );
         })}
-      </ol>
+      </ol>}
       <div className="rounded-lg border border-primary-border bg-primary-subtle p-3">
         <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary">Trusted ATT&amp;CK mappings</p>
         {trustedMappings.length ? (
@@ -1099,6 +1113,8 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
   const cache = [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)].map(record);
   const providerStatus = { ...record(sessionData.provider_status), ...record(observableData.provider_status) };
+  const jobSummary = record(sessionData.enrichment_job_summary);
+  const jobStatusCounts = record(jobSummary.status_counts);
   const freshness = record(sessionData.freshness);
   const observable = record(observableData.observable);
   const [asOf, setAsOf] = useState<number | null>(null);
@@ -1127,11 +1143,22 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
         ["Freshness", tiState.state],
         ["Latest provider/cache lookup", tiTimestampLabel(tiState.latestRetrievedAt)],
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Stored provider evidence", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Stored normalized provider evidence", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
         ["Source-IP cache rows", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
+        ["Enrichment queue", jobSummary.pending === true
+          ? `Pending (${countOf(jobSummary.total)} job${Number(jobSummary.total) === 1 ? "" : "s"})`
+          : Number(jobSummary.total || 0) > 0
+            ? `${countOf(jobSummary.total)} processed`
+            : "No job recorded"],
         ["Provider calls", sessionData.provider_calls === false || observableData.provider_calls === false ? "0 (stored-only read)" : "Not reported"],
       ]} />
+      {jobSummary.pending === true && (
+        <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
+          {summaryValue(sessionData.status_reason_text, "An eligible provider lookup is awaiting the enrichment worker.")}
+          {Object.keys(jobStatusCounts).length > 0 && ` Queue state: ${Object.entries(jobStatusCounts).map(([state, count]) => `${state}=${count}`).join(", ")}.`}
+        </p>
+      )}
       {tiState.state === "MIXED" && (
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
           Fresh source-IP cache data is available ({tiState.freshCacheCount} provider result{tiState.freshCacheCount === 1 ? "" : "s"}); older stored provider evidence is stale ({tiState.staleEvidenceCount} record{tiState.staleEvidenceCount === 1 ? "" : "s"}). Freshness is shown per record below.
@@ -1139,7 +1166,7 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
       )}
       {entities.length > 0 && <ObservableList items={entities} empty="No shared entities are recorded." />}
       <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
-      {entities.length === 0 && evidence.length === 0 && (
+      {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this exact session. The read model is {summaryValue(summary.uncertainty, "context-only")}; unavailable evidence is not inferred.</p>
       )}
       <p className="mt-3 text-xs font-medium text-text-subtle">NON_AUTHORITATIVE_CONTEXT_ONLY · provider claims remain attributed and never authorize classification or response.</p>
@@ -1639,7 +1666,11 @@ export function SessionAnalysisPanels({
     Number(authentication.attempt_count || 0) > 0,
     "No Cowrie authentication attempts were recorded.",
   );
-  const classificationResult = detailPanelResult(detailResult, classificationEvents.length > 0, "No classification evidence was established.");
+  const classificationResult = detailPanelResult(
+    detailResult,
+    hasClassificationEvidence(classificationEvents, trustedTtps),
+    "No classification evidence was established.",
+  );
   const ensembleResult = detailPanelResult(detailResult, hasMeaningfulRecord(detail.ensemble_evidence), "No stored Model1 + Model2 ensemble evidence is available.");
   const filesResult = detailPanelResult(detailResult, analystObservables.length > 0, "No file or observable evidence is available.");
   const provenanceResult = detailPanelResult(detailResult, Object.values(provenance).some(hasMeaningfulValue), "No provenance record is available.");

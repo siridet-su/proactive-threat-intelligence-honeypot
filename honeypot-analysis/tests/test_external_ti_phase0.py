@@ -21,6 +21,7 @@ from production.enrichment.enrichment_providers import (
     build_default_providers,
     merge_provider_results,
 )
+from production.enrichment.enrichment_cache import enqueue_session_observables
 from production.enrichment.external_ti_contract import (
     EXTERNAL_TI_EVIDENCE_SCHEMA,
     SOURCE_IP_AMENDMENT_SHA256,
@@ -867,6 +868,48 @@ def test_enrichment_job_upgrades_session_close_to_event_provenance(tmp_path) -> 
     assert len(claimed) == 1
     assert claimed[0]["payload"]["source"] == "cowrie_event"
     assert claimed[0]["payload"]["event_id"] == "event-provenance-reverse"
+
+
+def test_closed_source_ip_enqueue_uses_current_terminal_event_binding(tmp_path) -> None:
+    storage = SQLiteStorage(f"sqlite:///{tmp_path / 'session-source-provenance.db'}")
+    storage.initialize()
+    session_payload = {
+        "session_id": "session-current-source-provenance",
+        "src_ip": "8.8.8.79",
+        "sensor": "sensor-provenance",
+        "last_applied_event_id": "event-terminal-current",
+        "canonical_event_manifest": {
+            "through_event_id": "event-terminal-current",
+        },
+        "raw_events": [
+            {
+                "eventid": "cowrie.session.closed",
+                "timestamp": "2026-09-21T00:00:02Z",
+            }
+        ],
+    }
+
+    assert (
+        enqueue_session_observables(
+            storage,
+            session_payload,
+            force_source_ip=True,
+        )
+        == 1
+    )
+    claimed = storage.claim_enrichment_jobs("provenance-test", 1, 30, 3)
+    assert len(claimed) == 1
+    assert claimed[0]["payload"] == {
+        "source": "cowrie_event",
+        "role": "source_ip",
+        "event_id": "event-terminal-current",
+        "eventid": "cowrie.session.closed",
+        "sensor_id": "sensor-provenance",
+        "timestamp": "2026-09-21T00:00:02Z",
+        "session_id": "session-current-source-provenance",
+        "observable_type": "ip",
+        "observable_value": "8.8.8.79",
+    }
 
 
 def test_source_ip_config_requires_durable_cutoff(tmp_path) -> None:

@@ -17,6 +17,7 @@ import {
 } from "@/lib/session-analysis-semantics";
 import { analystCommandText } from "@/lib/session-intelligence";
 import { hasValidHistoricalNextDistinct } from "@/lib/next-distinct-projection";
+import { buildNextTacticChain } from "@/lib/next-tactic-chain";
 import { cn } from "@/lib/utils";
 
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
@@ -153,6 +154,11 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
     ? detail.observed_tactic_path.map(recordValue).filter((item) => textValue(item.tactic, ""))
     : [];
   const ended = sessionLifecycleStatus(detail) === "Closed" || view.label === "SESSION_ENDED";
+  const hasForecast = view.label === "PREDICTION" || view.historical;
+  const tacticChain = buildNextTacticChain(
+    observedPath,
+    hasForecast ? { tactic: view.tactic, historical: view.historical } : null,
+  );
   const stateClass = view.label === "PREDICTION"
     ? "border-success-border bg-success-subtle text-success"
     : view.label === "STALE"
@@ -177,19 +183,24 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
         <div>
           <div className="mb-4 rounded-lg border border-border bg-surface-subtle p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-subtle">{ended ? "Final observed tactic path" : "Observed tactic path"}</p>
-              <span className="ui-badge text-[11px]">{ended ? "SESSION ENDED" : "TRUSTED OBSERVATIONS"}</span>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Tactic chain</p>
+              <span className="ui-badge text-[11px]">{ended ? "SESSION ENDED" : "OBSERVED → NEXT"}</span>
             </div>
-            {observedPath.length > 0 ? (
-              <ol className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                {observedPath.map((phase, index) => (
-                  <li key={`${index}-${textValue(phase.tactic, "phase")}`} className="flex items-center gap-2">
+            {tacticChain.length > 0 ? (
+              <ol aria-label="Observed tactic chain and next tactic" className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                {tacticChain.map((step, index) => (
+                  <li key={`${index}-${step.kind}-${step.tactic}`} className="flex items-center gap-2">
                     {index > 0 && <span className="text-text-subtle" aria-hidden="true">→</span>}
-                    <span className="rounded border border-primary-border bg-primary-subtle px-2 py-1 font-medium text-text">{textValue(phase.tactic)}</span>
+                    <span className={`rounded border px-2 py-1 font-medium ${step.kind === "observed" ? "border-primary-border bg-primary-subtle text-text" : "border-success-border bg-success-subtle text-success"}`}>
+                      {step.tactic}
+                      <span className="ml-1.5 text-[10px] font-normal uppercase tracking-[0.08em]">({step.kind})</span>
+                    </span>
                   </li>
                 ))}
               </ol>
             ) : <p className="mt-2 text-xs font-medium text-text-muted">WAITING_FOR_EVIDENCE</p>}
+            {tacticChain.length > 0 && !hasForecast && <p className="mt-2 text-xs text-text-muted">Observed chain only; no valid next-tactic prediction is stored.</p>}
+            {hasForecast && observedPath.length === 0 && <p className="mt-2 text-xs text-text-muted">No trusted preceding tactic is recorded; the final node is advisory only.</p>}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-text-subtle">

@@ -34,6 +34,48 @@ COMMAND_EVENTIDS = {
 }
 
 
+def normalize_inactive_classifier_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Replace the legacy disabled-model marker at the runtime boundary.
+
+    The frozen classifier receipt remains byte-bound to the historical
+    implementation. Production has SecureBERT disabled, so the worker and
+    durable replay normalize only its no-model audit marker after inference;
+    reviewed rule evidence is left untouched.
+    """
+
+    normalized = dict(event)
+    if str(normalized.get("source") or "").strip().lower() != "securebert_unavailable":
+        return normalized
+    normalized.update(
+        {
+            "source": "unclassified",
+            "name": "No active classifier",
+            "evidence_type": "unclassified",
+            "agreement_status": "not_applicable",
+            "confidence_semantics": "no_active_model_or_reviewed_rule",
+        }
+    )
+    for field in ("bert_ttp", "bert_tactic", "bert_confidence", "model_inference"):
+        normalized.pop(field, None)
+    authority = normalized.get("authority_decision")
+    if isinstance(authority, dict):
+        normalized["authority_decision"] = {
+            **authority,
+            "decision": "audit_only",
+            "trusted_eligible": False,
+            "reasons": ["no_active_model_or_reviewed_rule"],
+        }
+    return normalized
+
+
+def normalize_inactive_classifier_events(events: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        normalize_inactive_classifier_event(dict(event))
+        for event in events
+        if isinstance(event, dict)
+    ]
+
+
 class ClassificationReplayError(ValueError):
     """Raised when a canonical prefix cannot be replayed under its binding."""
 
@@ -155,7 +197,7 @@ def reclassify_durable_prefix(
             "event_index": index,
         }
         try:
-            outputs = classifier.classify(command)
+            outputs = normalize_inactive_classifier_events(classifier.classify(command))
         except Exception as exc:
             raise ClassificationReplayError("durable prefix classification failed") from exc
         for classification_index, candidate in enumerate(outputs or []):

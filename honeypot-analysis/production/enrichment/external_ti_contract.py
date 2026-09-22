@@ -656,8 +656,13 @@ def _sighting_metadata(sighting: Mapping[str, Any]) -> Dict[str, Any]:
 def _base_decision(sighting: Mapping[str, Any]) -> Tuple[str, str, str, str, str]:
     observable_type = str(sighting.get("observable_type") or "").strip().lower()
     value = str(sighting.get("observable_value") or "").strip()
-    role = str(sighting.get("role") or "").strip().lower()
-    source = str(sighting.get("source") or "").strip().lower()
+    # Mongo observable_sightings keep the policy metadata in the bounded
+    # payload projection.  Read it through the same safe field accessor used
+    # by the provenance checks; otherwise a persisted source-IP sighting is
+    # incorrectly treated as role/source-less and is fail-closed as
+    # ``role_prohibited`` even though its canonical payload is complete.
+    role = _sighting_field(sighting, "role", "observable_role").lower()
+    source = _sighting_field(sighting, "source", "observable_source").lower()
     algorithm = str(_sighting_metadata(sighting).get("algorithm") or _sighting_metadata(sighting).get("hash_algorithm") or _sighting_metadata(sighting).get("hash_type") or "").strip().lower().replace("-", "")
     return observable_type, value, role, source, algorithm
 

@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
 const SESSION_ID_PATTERN = /^[\x20-\x7e]{1,256}$/;
+const SESSION_TI_UPSTREAM_TIMEOUT_MS = 60_000;
 
 function monitorBaseUrl(): string {
   const configured = process.env.DASHBOARD_MONITOR_BASE_URL?.trim();
@@ -30,7 +31,7 @@ export async function GET(request: Request) {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6_000);
+  const timeout = setTimeout(() => controller.abort(), SESSION_TI_UPSTREAM_TIMEOUT_MS);
   try {
     const response = await fetch(upstream, {
       method: "GET",

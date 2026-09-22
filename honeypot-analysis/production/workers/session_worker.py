@@ -16,6 +16,7 @@ from production.workers.session_monitor import SessionMonitor, SessionState
 from production.enrichment.threat_feed_loader import load_threat_feeds
 
 from production.classification.classification_pipeline import NotebookParityClassifier
+from production.classification.durable_replay import normalize_inactive_classifier_events
 from production.classification.environment import load_classifier_environment, environment_identity
 from production.utils.config import ProductionConfig
 from production.policies.data_lifecycle_policy import load_data_lifecycle_policy
@@ -313,7 +314,7 @@ class SessionWorker:
 
         if self.classifier is None:
             return []
-        events = self.classifier.classify(command)
+        events = normalize_inactive_classifier_events(self.classifier.classify(command))
         advisory = self.s1_advisory_classifier
         if advisory is None:
             return events
@@ -840,14 +841,33 @@ class SessionWorker:
             "observable_sightings_recorded",
             record_sightings(self.storage, extract_session_observable_sightings(payload)),
         )
+        enrichment_jobs_enqueued = enqueue_session_observables(
+            self.storage,
+            payload,
+            enabled=self.config.enable_enrichment_jobs,
+            # Source-IP results are held in the governed provider cache rather
+            # than the canonical enrichment_records collection.  Re-submit a
+            # closed session's eligible source IP so a prior terminal queue
+            # row cannot hide a missing/expired cache entry.  The enrichment
+            # worker still serves a fresh cache hit without provider I/O.
+            force_source_ip=True,
+        )
         self._record_event_effect(
             "enrichment_jobs_enqueued",
-            enqueue_session_observables(
-                self.storage,
-                payload,
-                enabled=self.config.enable_enrichment_jobs,
-            ),
+            enrichment_jobs_enqueued,
         )
+        payload["enrichment_status"] = {
+            "source": "enrichment_queue",
+            "status": (
+                "queued"
+                if self.config.enable_enrichment_jobs and enrichment_jobs_enqueued
+                else "disabled"
+                if not self.config.enable_enrichment_jobs
+                else "no_eligible_observable"
+            ),
+            "jobs_submitted": enrichment_jobs_enqueued,
+            "updated_at": utc_now(),
+        }
         skip_reason = ""
         if self.config.analysis_skip_empty_sessions:
             skip_reason = session_analysis_skip_reason(payload)

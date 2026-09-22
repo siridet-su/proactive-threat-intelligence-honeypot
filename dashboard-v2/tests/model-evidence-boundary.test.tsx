@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ClassificationList,
   Model2EnsembleSummary,
+  hasClassificationEvidence,
 } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("retired command shadow versus session-bound Model2", () => {
@@ -54,5 +55,24 @@ describe("retired command shadow versus session-bound Model2", () => {
     expect(html).toContain("UNIFIED_ONE_MODEL");
     expect(html).toContain("CORROBORATED");
     expect(html).toContain("ADVISORY_ONLY");
+  });
+
+  it("keeps trusted ATT&CK mappings visible when command classification rows are absent", () => {
+    const trustedMapping = {
+      technique_id: "T1033",
+      tactics: ["discovery"],
+      trust_tier: "trusted_observation",
+      mapping_semantics: "trusted_command_event_observation",
+    };
+    const html = renderToStaticMarkup(createElement(ClassificationList, {
+      items: [],
+      trustedMappings: [trustedMapping],
+    }));
+
+    expect(hasClassificationEvidence([], [trustedMapping])).toBe(true);
+    expect(hasClassificationEvidence([], [])).toBe(false);
+    expect(html).toContain("Trusted ATT&amp;CK mappings");
+    expect(html).toContain("T1033");
+    expect(html).not.toContain("No classification evidence is available");
   });
 });

@@ -87,6 +87,7 @@ DEFAULT_SESSION_LIMIT = 500
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
+SESSION_CWD_HISTORY_SCHEMA = "monitor.session_cwd_history.v1"
 MAX_ADMIN_COMMAND_EVENTS = 100
 MAX_ADMIN_COMMAND_INPUT_BYTES = 4096
 MONITOR_SUMMARY_SCAN_LIMIT = 100_000
@@ -1056,6 +1057,153 @@ def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
+
+
+def load_session_cwd_history(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    hop: str = "",
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Project observed Cowrie CWD transitions from canonical event rows.
+
+    The filesystem page historically read the processor-owned ``cwd_events``
+    collections directly.  Production session identity is canonicalized in
+    the monitor storage, so that read can legitimately return an empty page
+    even when ``cowrie.session.cwd`` is present in the authoritative event
+    ledger.  This bounded projection reads only the exact session's canonical
+    events and exposes paths, timestamps, and event IDs—never command text or
+    the original event payload.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "missing_session_id",
+            "error": "session_id is required",
+            "session_id": "",
+            "timestamp": utc_now(),
+        }
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in clean_session_id
+    ):
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "malformed_session_id",
+            "error": "session_id is malformed",
+            "session_id": clean_session_id[:256],
+            "timestamp": utc_now(),
+        }
+    if hop and (len(hop) > 300 or any(ord(character) < 0x20 or ord(character) == 0x7F for character in hop)):
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "malformed_hop",
+            "error": "hop is malformed",
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        session_rows, session_error = _storage_session_rows(storage, "sessions", clean_session_id, 1)
+        if not session_rows:
+            return {
+                "ok": False,
+                "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+                "error_code": "session_not_found",
+                "error": session_error or "session was not found",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        event_rows, event_error = _storage_session_rows(
+            storage,
+            "events",
+            clean_session_id,
+            MAX_SESSION_EVENTS,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("CWD event query", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    projected_events = event_views(event_rows)
+    projected_events = [
+        item
+        for item in projected_events
+        if item.get("eventid") == "cowrie.session.cwd" and item.get("cwd_path")
+    ]
+    projected_events.sort(
+        key=lambda item: (
+            str(item.get("timestamp") or item.get("received_at") or ""),
+            str(item.get("event_id") or ""),
+        )
+    )
+    items: List[Dict[str, Any]] = []
+    previous_path = ""
+    for sequence, event in enumerate(projected_events, start=1):
+        event_id = str(event.get("event_id") or "")
+        target_path = str(event.get("cwd_path") or "")
+        from_path = str(event.get("cwd_from_path") or previous_path or "")
+        action = "changed" if from_path and from_path != target_path else "entered"
+        item = {
+            "sessionId": clean_session_id,
+            "at": str(event.get("timestamp") or event.get("received_at") or ""),
+            "eventId": event_id,
+            "sequence": sequence,
+            "fromPath": from_path or None,
+            "toPath": target_path,
+            "action": action,
+            "status": "observed",
+            "sourceEventId": event_id,
+        }
+        items.append(item)
+        previous_path = target_path
+
+    if hop:
+        selected = next((item for item in items if item.get("eventId") == hop), None)
+        if selected is None:
+            return {
+                "ok": True,
+                "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+                "session_id": clean_session_id,
+                "item": None,
+                "timestamp": utc_now(),
+            }
+        return {
+            "ok": True,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "session_id": clean_session_id,
+            "item": selected,
+            "hopNumber": selected.get("sequence"),
+            "successfulHopNumber": selected.get("sequence"),
+            "totalItems": len(items),
+            "timestamp": utc_now(),
+        }
+    return {
+        "ok": True,
+        "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+        "session_id": clean_session_id,
+        "items": items,
+        "nextCursor": None,
+        "totalItems": len(items),
+        "totalSuccessfulItems": sum(
+            1 for item in items if item.get("action") != "failed_change"
+        ),
+        "complete": True,
+        "source": "canonical_events",
+        "errors": {"events": event_error} if event_error else {},
+        "timestamp": utc_now(),
+    }
 
 
 def _authentication_activity(
@@ -2475,6 +2623,45 @@ def _model2_result_bound_to_session(model2: Any, session_id: str) -> bool:
     )
 
 
+def _session_ensemble_projection(
+    value: Any,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a session-bound ensemble projection, if it is safe to expose.
+
+    A closed session stores its final ensemble in the canonical session row.
+    The prediction snapshot is a secondary read model and can legitimately
+    lag the terminal session write.  Prefer a candidate with a bound Model2
+    result; otherwise retain a candidate that is explicitly for this session
+    when it only carries Model1/unavailable Model2 evidence.
+    """
+
+    if not isinstance(value, dict) or _text(value.get("session_id")) != session_id:
+        return None
+    model2 = value.get("model2")
+    if isinstance(model2, dict) and model2.get("available") is True:
+        if not _model2_result_bound_to_session(model2, session_id):
+            return None
+    return value
+
+
+def _select_session_ensemble(
+    session_id: str,
+    *candidates: Any,
+) -> Dict[str, Any]:
+    """Select exact-session ensemble evidence, preferring bound Model2."""
+
+    safe_candidates = [
+        selected
+        for candidate in candidates
+        if (selected := _session_ensemble_projection(candidate, session_id)) is not None
+    ]
+    for candidate in safe_candidates:
+        if _model2_result_bound_to_session(candidate.get("model2"), session_id):
+            return candidate
+    return safe_candidates[0] if safe_candidates else {}
+
+
 def load_dashboard_session_detail(
     config: MonitorConfig,
     session_id: str,
@@ -2575,15 +2762,14 @@ def load_dashboard_session_detail(
     if latest_prediction and _row_session_id(latest_prediction) != clean_session_id:
         latest_prediction = {}
         latest_prediction_payload = {}
-    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
-    if not isinstance(ensemble_evidence, dict):
-        ensemble_evidence = {}
-    stored_model2 = ensemble_evidence.get("model2")
-    stored_model2_available = (
-        isinstance(stored_model2, dict)
-        and stored_model2.get("available") is True
+    ensemble_evidence = _select_session_ensemble(
+        clean_session_id,
+        latest_prediction_payload.get("ensemble_evidence"),
+        payload.get("ensemble_evidence"),
     )
-    if not _model2_result_bound_to_session(stored_model2, clean_session_id):
+    if not _model2_result_bound_to_session(
+        ensemble_evidence.get("model2"), clean_session_id
+    ):
         try:
             live_ensemble = build_ensemble_from_session_payload(
                 payload,
@@ -2591,19 +2777,12 @@ def load_dashboard_session_detail(
             )
         except Exception:
             live_ensemble = {}
-        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
-        if (
-            isinstance(live_ensemble, dict)
-            and (
-                not isinstance(live_model2, dict)
-                or live_model2.get("available") is not True
-                or _model2_result_bound_to_session(live_model2, clean_session_id)
-            )
-        ):
-            ensemble_evidence = live_ensemble
-        elif stored_model2_available:
-            # A stored, available result with a missing or mismatched binding
-            # cannot be exposed as evidence for the requested session.
+        selected_live = _select_session_ensemble(clean_session_id, live_ensemble)
+        if _model2_result_bound_to_session(
+            selected_live.get("model2"), clean_session_id
+        ) or not ensemble_evidence:
+            ensemble_evidence = selected_live
+        elif not _session_ensemble_projection(ensemble_evidence, clean_session_id):
             ensemble_evidence = {}
     authentication_activity = _authentication_activity(payload, event_rows)
     report_payload = _report_payload(selected.get("report_row"))
@@ -3064,6 +3243,10 @@ def load_session_report_pdf(
             clean_session_id,
             MAX_SESSION_EVENTS,
         )
+        # Reuse the bounded public event projection for the on-demand PDF.
+        # This supplies lifecycle/authentication/CWD metadata to the renderer
+        # without forwarding storage documents or raw command text.
+        session_payload["raw_events"] = event_views(event_rows)
         authentication_activity = _authentication_activity(session_payload, event_rows)
         authentication_attempts = authentication_activity.get("attempts") or []
         if authentication_activity.get("attempt_count", 0):
@@ -3251,11 +3434,14 @@ def load_session_detail(
     payload = selected["payload"]
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     latest_prediction_payload = _payload_from_row(latest_prediction)
-    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
-    if not isinstance(ensemble_evidence, dict):
-        ensemble_evidence = {}
-    stored_model2 = ensemble_evidence.get("model2")
-    if not isinstance(stored_model2, dict) or stored_model2.get("available") is not True:
+    ensemble_evidence = _select_session_ensemble(
+        session_id,
+        latest_prediction_payload.get("ensemble_evidence"),
+        payload.get("ensemble_evidence"),
+    )
+    if not _model2_result_bound_to_session(
+        ensemble_evidence.get("model2"), session_id
+    ):
         try:
             live_ensemble = build_ensemble_from_session_payload(
                 payload,
@@ -3263,9 +3449,11 @@ def load_session_detail(
             )
         except Exception:
             live_ensemble = {}
-        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
-        if isinstance(live_model2, dict) and live_model2.get("available") is True:
-            ensemble_evidence = live_ensemble
+        selected_live = _select_session_ensemble(session_id, live_ensemble)
+        if _model2_result_bound_to_session(
+            selected_live.get("model2"), session_id
+        ) or not ensemble_evidence:
+            ensemble_evidence = selected_live
     decoded_enrichment_records = [_row_with_payload(row) for row in enrichment_record_rows]
     src_ip = payload.get("src_ip") or selected.get("src_ip")
     enrichment_contexts = [
@@ -6293,6 +6481,25 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if not self._require_read():
+            return
+        if parsed.path == "/api/session-cwd-history":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            hop = query.get("hop", [""])[0]
+            detail = load_session_cwd_history(
+                self.monitor_config,
+                session_id=session_id,
+                hop=hop,
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id", "malformed_hop"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, detail)
             return
         if parsed.path == "/api/ai-advisory":
             query = parse_qs(parsed.query)

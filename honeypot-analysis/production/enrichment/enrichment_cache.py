@@ -684,18 +684,81 @@ def enqueue_session_observables(
     *,
     force_source_ip: bool = False,
 ) -> int:
-    """Queue all observables extracted from a closed session."""
+    """Queue all observables extracted from a closed session.
+
+    The queue is keyed by observable identity, so a source IP can have an old
+    terminal job from a previous session.  A generic ``session_close`` payload
+    is not sufficient for the source-IP outbound gate: it must carry the
+    current canonical terminal-event binding and timestamp.  Build that
+    binding only for the session's own source IP; other session observables
+    remain session-close context and stay ineligible for source-IP provider
+    traffic.
+    """
     if not enabled:
         return 0
     count = 0
     session_id = str(session_payload.get("session_id", ""))
+    source_ip = str(session_payload.get("src_ip") or "").strip()
+    manifest = session_payload.get("canonical_event_manifest")
+    manifest = manifest if isinstance(manifest, dict) else {}
+    terminal_event_id = str(
+        session_payload.get("last_applied_event_id")
+        or manifest.get("through_event_id")
+        or ""
+    ).strip()
+    sensor_id = str(
+        session_payload.get("sensor_id")
+        or session_payload.get("sensor")
+        or ""
+    ).strip()
+    terminal_timestamp = ""
+    raw_events = session_payload.get("raw_events")
+    if isinstance(raw_events, list):
+        for event in reversed(raw_events):
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get("eventid") or "").strip().lower()
+            timestamp = str(event.get("timestamp") or "").strip()
+            if event_id == "cowrie.session.closed" and timestamp:
+                terminal_timestamp = timestamp
+                break
+            if not terminal_timestamp and timestamp:
+                terminal_timestamp = timestamp
+    if not terminal_timestamp:
+        terminal_timestamp = str(
+            session_payload.get("updated_at")
+            or session_payload.get("end_timestamp")
+            or ""
+        ).strip()
+
+    source_ip_payload = {
+        "source": "cowrie_event",
+        "role": "source_ip",
+        "event_id": terminal_event_id,
+        "eventid": "cowrie.session.closed",
+        "sensor_id": sensor_id,
+        "timestamp": terminal_timestamp,
+        "session_id": session_id,
+    }
     for kind, value in iter_session_observables(session_payload):
+        is_session_source_ip = (
+            kind == "ip"
+            and source_ip
+            and str(value or "").strip() == source_ip
+            and terminal_event_id
+            and sensor_id
+            and terminal_timestamp
+        )
         storage.enqueue_enrichment_job(
             kind,
             value,
             session_id=session_id,
             force=bool(force_source_ip and kind == "ip"),
-            payload={"source": "session_close", "session_id": session_id},
+            payload=(
+                source_ip_payload
+                if is_session_source_ip
+                else {"source": "session_close", "session_id": session_id}
+            ),
         )
         count += 1
     return count

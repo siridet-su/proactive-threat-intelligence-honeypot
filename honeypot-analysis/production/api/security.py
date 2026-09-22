@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import posixpath
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Dict, Iterable, Mapping
@@ -19,6 +20,7 @@ from production.utils.sensitive_data import (
 from production.correlation.semantics import (
     resolve_confidence_semantics,
 )
+from production.correlation.session_ttp_knowledge import TTP_ID_RE, main_ttp_id
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,61 @@ def _row_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _safe_cwd_path(value: Any) -> str:
+    """Return only an absolute, bounded working-directory path.
+
+    Cowrie's ``cowrie.session.cwd`` event is useful filesystem telemetry, but
+    the event payload may also contain command-shaped fields.  Project the
+    path as a dedicated derived field instead of forwarding that payload.
+    """
+
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip()
+    if not candidate or len(candidate) > 2_048 or "\x00" in candidate:
+        return ""
+    if not candidate.startswith("/"):
+        return ""
+    normalized = posixpath.normpath(candidate)
+    if not normalized.startswith("/") or normalized == ".":
+        return ""
+    return normalized
+
+
+def _cwd_event_fields(row: Mapping[str, Any], payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project safe CWD metadata from one canonical Cowrie event row."""
+
+    eventid = str(row.get("eventid") or payload.get("eventid") or "").strip().lower()
+    if eventid != "cowrie.session.cwd":
+        return {}
+    to_path = _safe_cwd_path(
+        row.get("cwd_path")
+        or payload.get("cwd_path")
+        or payload.get("cwd")
+        or payload.get("cwd_after")
+        or payload.get("to_cwd")
+        or payload.get("to_path")
+        or payload.get("path")
+    )
+    from_path = _safe_cwd_path(
+        row.get("cwd_from_path")
+        or payload.get("cwd_from_path")
+        or payload.get("oldcwd")
+        or payload.get("cwd_before")
+        or payload.get("from_cwd")
+        or payload.get("from_path")
+        or payload.get("previous_cwd")
+    )
+    if not to_path:
+        return {}
+    return {
+        "cwd_path": to_path,
+        **({"cwd_from_path": from_path} if from_path else {}),
+        "cwd_action": "changed" if from_path and from_path != to_path else "entered",
+        "cwd_status": "observed",
+    }
+
+
 def _is_command_event_row(row: Mapping[str, Any]) -> bool:
     """Identify Cowrie command-input rows before privacy projection."""
     payload = _row_payload(row)
@@ -196,6 +253,7 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 ),
             )
         )
+        view.update(_cwd_event_fields(item, payload))
     elif table == "sessions":
         view.update(
             _pick(
@@ -472,10 +530,240 @@ def _redact_public_command_text(value: Any, key: str = "") -> Any:
 _COMPACT_SESSION_DETAIL_EVENT_LIMIT = 100
 _COMPACT_SESSION_DETAIL_TRUSTED_LIMIT = 50
 _COMPACT_SESSION_DETAIL_CORRELATION_LIMIT = 20
+_COMPACT_SESSION_DETAIL_CLASSIFICATION_LIMIT = 100
+_COMPACT_SESSION_DETAIL_TACTIC_PATH_LIMIT = 50
+_COMPACT_SESSION_DETAIL_TEXT_LIMIT = 160
+_COMPACT_SESSION_DETAIL_GUIDANCE_LIMIT = 20
+_COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT = 8
+
+
+def _compact_scalar_fields(source: Mapping[str, Any], names: Iterable[str]) -> Dict[str, Any]:
+    """Pick bounded scalar metadata without forwarding free-form evidence text."""
+    projected: Dict[str, Any] = {}
+    for name in names:
+        value = source.get(name)
+        if isinstance(value, str) and value:
+            projected[name] = value[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT]
+        elif isinstance(value, bool):
+            projected[name] = value
+        elif isinstance(value, int):
+            projected[name] = value
+        elif isinstance(value, float) and value == value and abs(value) != float("inf"):
+            projected[name] = value
+    return projected
+
+
+def _compact_classification_traceability(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    projected = _compact_scalar_fields(
+        value,
+        (
+            "event_id",
+            "policy_or_rule_identifier",
+            "model_source",
+            "authority_state",
+            "evidence_tier",
+        ),
+    )
+    source_event = value.get("source_event")
+    if isinstance(source_event, Mapping):
+        safe_source_event = _compact_scalar_fields(
+            source_event,
+            ("cowrie_eventid", "event_type", "event_id"),
+        )
+        if safe_source_event:
+            projected["source_event"] = safe_source_event
+    for field, count_field in (
+        ("evidence_references", "evidence_reference_count"),
+        ("source_event_ids", "source_event_count"),
+    ):
+        values = value.get(field)
+        if isinstance(values, list):
+            projected[count_field] = len(values)
+    return projected
+
+
+def _compact_classification_events(items: Any) -> list[Dict[str, Any]]:
+    """Project classifier provenance while excluding command/source text."""
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        item = _normalize_inactive_classifier_event_for_public(item)
+        projected = _compact_scalar_fields(
+            item,
+            (
+                "evidence_id",
+                "event_id",
+                "command_event_id",
+                "event_timestamp",
+                "timestamp",
+                "eventid",
+                "cowrie_eventid",
+                "ttp",
+                "technique_id",
+                "name",
+                "tactic",
+                "evidence_tier",
+                "evidence_type",
+                "authority",
+                "source",
+                "rule_id",
+                "confidence_semantics",
+            ),
+        )
+        for field in ("ttp", "technique_id"):
+            identifier = projected.get(field)
+            if isinstance(identifier, str) and TTP_ID_RE.fullmatch(identifier.strip()):
+                projected[field] = main_ttp_id(identifier)
+        tactics = item.get("tactics")
+        if isinstance(tactics, list):
+            projected["tactics"] = [
+                value[:80]
+                for value in tactics[:20]
+                if isinstance(value, str) and value
+            ]
+        for source_key, safe_fields in (
+            ("authority_decision", ("decision", "authority", "evidence_tier", "status")),
+            ("s1_advisory", ("predicted_technique", "decision_score", "confidence_semantics")),
+            ("durable_evidence_order", ("event_id", "event_index")),
+        ):
+            nested = item.get(source_key)
+            if isinstance(nested, Mapping):
+                safe_nested = _compact_scalar_fields(nested, safe_fields)
+                if safe_nested:
+                    projected[source_key] = safe_nested
+        traceability = _compact_classification_traceability(item.get("traceability"))
+        if traceability:
+            projected["traceability"] = traceability
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_CLASSIFICATION_LIMIT:
+            break
+    return output
+
+
+def _normalize_inactive_classifier_event_for_public(
+    item: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Hide the historical disabled-model marker without rewriting storage."""
+
+    normalized = dict(item)
+    if str(normalized.get("source") or "").strip().lower() != "securebert_unavailable":
+        return normalized
+    normalized.update(
+        {
+            "source": "unclassified",
+            "name": "No active classifier",
+            "evidence_type": "unclassified",
+            "agreement_status": "not_applicable",
+            "confidence_semantics": "no_active_model_or_reviewed_rule",
+        }
+    )
+    for field in ("bert_ttp", "bert_tactic", "bert_confidence", "model_inference"):
+        normalized.pop(field, None)
+    authority = normalized.get("authority_decision")
+    if isinstance(authority, Mapping):
+        normalized["authority_decision"] = {
+            **dict(authority),
+            "decision": "audit_only",
+            "trusted_eligible": False,
+            "reasons": ["no_active_model_or_reviewed_rule"],
+        }
+    return normalized
+
+
+def _compact_observed_tactic_path(items: Any) -> list[Dict[str, Any]]:
+    """Keep only ordered tactic labels and bounded counts, never command text."""
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        tactic = item.get("tactic")
+        if not isinstance(tactic, str) or not tactic.strip():
+            continue
+        projected = {"tactic": tactic.strip()[:80]}
+        for source_field, count_field in (
+            ("techniques", "technique_count"),
+            ("evidence_refs", "evidence_ref_count"),
+            ("event_ids", "event_count"),
+        ):
+            values = item.get(source_field)
+            if isinstance(values, list):
+                projected[count_field] = len(values)
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_TACTIC_PATH_LIMIT:
+            break
+    return output
+
+
+def _bounded_guidance_text_list(value: Any) -> list[str]:
+    """Keep policy-authored guidance text bounded and free of raw evidence."""
+
+    output: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if not text:
+            continue
+        output.append(text[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT])
+        if len(output) >= _COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT:
+            break
+    return output
+
+
+def _compact_guidance_records(items: Any, *, kind: str) -> list[Dict[str, Any]]:
+    """Expose useful policy guidance without forwarding evidence or commands."""
+
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        if kind == "finding":
+            projected = _compact_scalar_fields(
+                item,
+                (
+                    "finding_id",
+                    "finding_type",
+                    "severity",
+                    "statement",
+                    "rule_id",
+                    "evidence_status",
+                    "authority",
+                ),
+            )
+        else:
+            projected = _compact_scalar_fields(
+                item,
+                (
+                    "action_id",
+                    "description",
+                    "rationale",
+                    "rule_id",
+                    "priority",
+                ),
+            )
+            for field in (
+                "requires_manual_approval",
+                "safe_to_auto_execute",
+            ):
+                value = item.get(field)
+                if isinstance(value, bool):
+                    projected[field] = value
+            for field in ("preconditions", "verification_steps"):
+                values = _bounded_guidance_text_list(item.get(field))
+                if values:
+                    projected[field] = values
+        if projected:
+            output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_GUIDANCE_LIMIT:
+            break
+    return output
 
 
 def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
-    """Project safety/authority metadata without shipping historical evidence."""
+    """Project safety plus bounded policy content without shipping evidence."""
 
     source = dict(guidance) if isinstance(guidance, Mapping) else {}
     safety = source.get("safety") if isinstance(source.get("safety"), Mapping) else {}
@@ -532,6 +820,8 @@ def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
         },
         "finding_count": len(source.get("findings") or []) if isinstance(source.get("findings"), list) else 0,
         "advisory_action_count": len(source.get("advisory_actions") or []) if isinstance(source.get("advisory_actions"), list) else 0,
+        "findings": _compact_guidance_records(source.get("findings"), kind="finding"),
+        "advisory_actions": _compact_guidance_records(source.get("advisory_actions"), kind="action"),
     }
     return public_payload(result)
 
@@ -539,6 +829,21 @@ def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
 def _compact_trusted_observations(items: Any) -> list[Dict[str, Any]]:
     output: list[Dict[str, Any]] = []
     for item in items if isinstance(items, list) else []:
+        if isinstance(item, str):
+            identifier = item.strip().upper()
+            if TTP_ID_RE.fullmatch(identifier):
+                parent_identifier = main_ttp_id(identifier)
+                if parent_identifier != "T0000":
+                    output.append(
+                        {
+                            "technique_id": parent_identifier,
+                            "trust_tier": "trusted_observation",
+                            "mapping_semantics": "stored trusted identifier; supporting metadata unavailable",
+                        }
+                    )
+            if len(output) >= _COMPACT_SESSION_DETAIL_TRUSTED_LIMIT:
+                break
+            continue
         if not isinstance(item, Mapping):
             continue
         projected = _pick(
@@ -558,6 +863,14 @@ def _compact_trusted_observations(items: Any) -> list[Dict[str, Any]]:
                 "evidence_tier",
             ),
         )
+        identifier = item.get("technique_id") or item.get("ttp")
+        if isinstance(identifier, str) and TTP_ID_RE.fullmatch(identifier.strip()):
+            parent_identifier = main_ttp_id(identifier)
+            if parent_identifier != "T0000":
+                projected["technique_id"] = parent_identifier
+            else:
+                projected.pop("technique_id", None)
+                projected.pop("ttp", None)
         if isinstance(item.get("commands"), list):
             projected["command_count"] = len(item["commands"])
         if isinstance(item.get("evidence_refs"), list):
@@ -673,6 +986,12 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "commands": _redact_public_command_text({"commands": detail.get("commands") or []})["commands"],
         "observed_trusted_ttps": _compact_trusted_observations(
             detail.get("observed_trusted_ttps") or session_payload.get("observed_trusted_ttps") or []
+        ),
+        "classification_events": _compact_classification_events(
+            detail.get("classification_events") or session_payload.get("classification_events") or []
+        ),
+        "observed_tactic_path": _compact_observed_tactic_path(
+            detail.get("observed_tactic_path") or session_payload.get("observed_tactic_path") or []
         ),
         "correlated_ttp_hypotheses": _compact_correlations(raw_correlations),
         "session_ttp_correlation_summary": _pick(
@@ -793,7 +1112,11 @@ def session_detail_view(
         "observables": detail.get("observables") or [],
         "commands": public_commands,
         "classification_events": _redact_public_command_text(
-            detail.get("classification_events") or []
+            [
+                _normalize_inactive_classifier_event_for_public(item)
+                for item in (detail.get("classification_events") or [])
+                if isinstance(item, Mapping)
+            ]
         ),
         "observed_trusted_ttps": observed_trusted_ttps,
         "correlated_ttp_hypotheses": public_correlations,
