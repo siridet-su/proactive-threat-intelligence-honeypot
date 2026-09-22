@@ -912,6 +912,47 @@ def test_closed_source_ip_enqueue_uses_current_terminal_event_binding(tmp_path) 
     }
 
 
+def test_closed_session_reopens_terminal_hash_job_for_current_policy(tmp_path) -> None:
+    storage = SQLiteStorage(f"sqlite:///{tmp_path / 'session-hash-refresh.db'}")
+    storage.initialize()
+    digest = "a" * 64
+    job_id, inserted = storage.enqueue_enrichment_job(
+        "hash",
+        digest,
+        session_id="session-old-policy",
+        payload={"source": "session_close", "session_id": "session-old-policy"},
+    )
+    assert inserted
+    claimed = storage.claim_enrichment_jobs("hash-refresh-test", 1, 30, 1)
+    assert len(claimed) == 1
+    assert (
+        storage.fail_job(
+            "enrichment",
+            job_id,
+            claimed[0]["claim_owner"],
+            claimed[0]["claim_token"],
+            "enrichment_failed",
+            "RuntimeError",
+            False,
+            1,
+            0,
+        )
+        == "failed"
+    )
+
+    session_payload = {
+        "session_id": "session-current-policy",
+        "ioc_summary": {
+            "hashes": [{"type": "sha256", "value": digest}],
+        },
+    }
+    assert enqueue_session_observables(storage, session_payload) == 1
+    refreshed = storage.claim_enrichment_jobs("hash-refresh-test", 1, 30, 1)
+    assert len(refreshed) == 1
+    assert refreshed[0]["job_id"] == job_id
+    assert refreshed[0]["payload"]["session_id"] == "session-current-policy"
+
+
 def test_source_ip_config_requires_durable_cutoff(tmp_path) -> None:
     providers = default_external_ti_provider_configs()
     providers["abuseipdb"].update({"enabled": True, "minute_limit": 1, "daily_budget": 1})

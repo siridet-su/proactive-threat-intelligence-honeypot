@@ -562,6 +562,24 @@ def test_existing_outbox_row_remains_idempotent(tmp_path: Path) -> None:
     assert len(storage.list_rows("ai_advisory_outbox")) == 1
 
 
+def test_analysis_enqueue_can_be_enabled_without_provider_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_ADVISORY_ENQUEUE_ENABLED", "true")
+    monkeypatch.setenv(
+        "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON",
+        json.dumps(CUTOFF),
+    )
+    monkeypatch.setenv("ENABLE_AI_ADVISORY", "false")
+
+    config = ProductionConfig.from_env()
+
+    assert config.ai_advisory_enqueue_enabled is True
+    assert config.enable_ai_advisory is False
+    assert config.ai_advisory_provider == "disabled"
+    assert config.ai_advisory_reconciliation_cutoff == CUTOFF
+
+
 def test_reconciliation_preserves_active_queue_count_bound(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     for index in range(2):

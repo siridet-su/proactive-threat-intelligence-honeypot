@@ -749,11 +749,19 @@ def enqueue_session_observables(
             and sensor_id
             and terminal_timestamp
         )
+        # A hash may already have a terminal queue row from an older policy
+        # generation.  Re-open that row at session close so the worker can
+        # serve a fresh cache hit or apply the current provider/policy gates.
+        # This does not force provider I/O: provider caches and proof guards
+        # remain authoritative inside the enrichment worker.
+        force_terminal_job = bool(
+            (force_source_ip and kind == "ip") or kind == "hash"
+        )
         storage.enqueue_enrichment_job(
             kind,
             value,
             session_id=session_id,
-            force=bool(force_source_ip and kind == "ip"),
+            force=force_terminal_job,
             payload=(
                 source_ip_payload
                 if is_session_source_ip

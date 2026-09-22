@@ -905,7 +905,8 @@ class AnalysisWorker:
                                 job["claim_token"],
                                 fallback,
                                 enqueue_ai_advisory=(
-                                    self.config.enable_ai_advisory
+                                    self.config.ai_advisory_enqueue_enabled
+                                    or self.config.enable_ai_advisory
                                 ),
                                 ai_advisory_max_queue_records=(
                                     self.config.ai_advisory_max_queue_records
@@ -963,7 +964,8 @@ class AnalysisWorker:
                         job["claim_token"],
                         report,
                         enqueue_ai_advisory=(
-                            self.config.enable_ai_advisory
+                            self.config.ai_advisory_enqueue_enabled
+                            or self.config.enable_ai_advisory
                         ),
                         ai_advisory_max_queue_records=(
                             self.config.ai_advisory_max_queue_records
