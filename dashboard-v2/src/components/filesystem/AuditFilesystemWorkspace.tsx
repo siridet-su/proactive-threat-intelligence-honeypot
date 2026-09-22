@@ -64,6 +64,9 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
             filteredClosedSessions={props.filteredClosedSessions}
             handleResetAuditFilters={props.handleResetAuditFilters}
             handleClearSelection={props.handleClearSelection}
+            retainedMatchingCount={props.retainedMatchingCount}
+            retainedLoadedCount={props.retainedLoadedCount}
+            retainedTotalCount={props.retainedTotalCount}
           />
           <TopologyCanvas
             snapshot={props.auditSnapshot ?? props.snapshot}

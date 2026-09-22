@@ -18,6 +18,11 @@ export interface AuditNoticeRegionProps {
   filteredClosedSessions: FilesystemClosedSession[];
   handleResetAuditFilters: () => void;
   handleClearSelection: () => void;
+
+  // Retained semantics (FSV-004)
+  retainedMatchingCount?: number | null;
+  retainedLoadedCount?: number;
+  retainedTotalCount?: number | null;
 }
 
 export function AuditNoticeRegion({
@@ -29,7 +34,6 @@ export function AuditNoticeRegion({
   hasActiveFilters,
   isSelectedFilteredOut,
   filteredSessionsCount,
-  totalSessionsCount,
   targetPathFilter,
   hideHomeOnly,
   selectedSession,
@@ -37,6 +41,7 @@ export function AuditNoticeRegion({
   filteredClosedSessions,
   handleResetAuditFilters,
   handleClearSelection,
+  retainedMatchingCount,
 }: AuditNoticeRegionProps) {
   if (expiredSessionId) {
     return (
@@ -79,36 +84,50 @@ export function AuditNoticeRegion({
     );
   }
 
-  if (hasActiveFilters && (isSelectedFilteredOut || filteredSessionsCount === 0)) {
+  const effectiveMatchingCount =
+    typeof retainedMatchingCount === "number"
+      ? retainedMatchingCount
+      : filteredClosedSessions.length > 0
+        ? filteredClosedSessions.length
+        : filteredSessionsCount;
+
+  if (hasActiveFilters && (isSelectedFilteredOut || effectiveMatchingCount === 0)) {
+    const isSelectedActive = Boolean(
+      selectedSession &&
+        (!("lifecycle" in selectedSession) ||
+          !selectedSession.lifecycle ||
+          !selectedSession.lifecycle.closedAt),
+    );
+
     return (
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-warning-border bg-warning-subtle px-3 py-2 text-xs text-text">
         <div className="flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
           <span>
-            {filteredSessionsCount === 0 ? (
+            {effectiveMatchingCount === 0 ? (
               <>
-                <strong>0 of {totalSessionsCount} sessions match filter</strong>
+                <strong>0 retained sessions match filter</strong>
                 {targetPathFilter ? ` ("${targetPathFilter}")` : ""}
                 {hideHomeOnly ? " [excluding /home]" : ""}.
                 {selectedSession ? (
                   <span className="text-text-muted ml-1">
-                    Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> which is retained but falls outside the active filters.
+                    Showing previously selected session <span className="font-mono font-semibold text-text">{selectedSession.sourceIp}</span> which {isSelectedActive ? "is active" : "is retained"} but falls outside the active filters.
                   </span>
                 ) : null}
               </>
             ) : (
               <>
-                <strong>Pinned outside filter:</strong> Retained session <span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> falls outside the active filter criteria. {filteredSessionsCount} other {filteredSessionsCount === 1 ? "session matches" : "sessions match"}.
+                <strong>Pinned outside filter:</strong> {isSelectedActive ? "Active session " : "Retained session "}<span className="font-mono font-semibold text-text">{selectedSession?.sourceIp}</span> falls outside the active filter criteria. {effectiveMatchingCount} other {effectiveMatchingCount === 1 ? "retained session matches" : "retained sessions match"}.
               </>
             )}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {filteredSessionsCount > 0 && (
+          {effectiveMatchingCount > 0 && (
             <button
               type="button"
               onClick={() => {
-                const first = filteredActiveSessions[0] ?? filteredClosedSessions[0];
+                const first = filteredClosedSessions[0] ?? filteredActiveSessions[0];
                 if (first) handleUserSelectSession(first.sessionId);
               }}
               className="rounded border border-primary-border bg-primary-subtle px-2 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
@@ -123,7 +142,7 @@ export function AuditNoticeRegion({
           >
             Reset filters
           </button>
-          {selectedSession && filteredSessionsCount === 0 && (
+          {selectedSession && effectiveMatchingCount === 0 && (
             <button
               type="button"
               onClick={handleClearSelection}

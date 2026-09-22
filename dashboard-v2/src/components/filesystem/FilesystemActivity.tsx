@@ -365,6 +365,10 @@ export function FilesystemActivity() {
     totalSessionsCount,
     filteredSessionsCount,
     isSelectedFilteredOut,
+    retainedLoadedCount,
+    retainedMatchingCount,
+    retainedTotalCount,
+    retainedCountStatus,
   } = useMemo(() => {
     return deriveAuthoritativeAuditMetrics({
       viewMode,
@@ -476,17 +480,25 @@ export function FilesystemActivity() {
     });
     const coverageWording = coverageModel.wording;
 
-    if (filteredSessionsCount === 0) {
-      return `0 of ${totalSessionsCount} sessions match the active filter criteria. This session is pinned outside the result set. ${coverageWording}`;
+    const effectiveMatchingCount =
+      typeof retainedMatchingCount === "number"
+        ? retainedMatchingCount
+        : filteredClosedSessions.length > 0
+          ? filteredClosedSessions.length
+          : filteredSessionsCount;
+
+    if (effectiveMatchingCount === 0) {
+      return `0 retained sessions match the active filter criteria. This session is pinned outside the result set. ${coverageWording}`;
     }
     if (isSelectedFilteredOut) {
-      return `This session is pinned outside the active filter criteria (${filteredSessionsCount} matching session${filteredSessionsCount === 1 ? "" : "s"} available). ${coverageWording}`;
+      return `This session is pinned outside the active filter criteria (${effectiveMatchingCount} matching retained session${effectiveMatchingCount === 1 ? "" : "s"} available). ${coverageWording}`;
     }
     return coverageWording;
   }, [
     selectedSession,
+    retainedMatchingCount,
+    filteredClosedSessions.length,
     filteredSessionsCount,
-    totalSessionsCount,
     isSelectedFilteredOut,
     history.length,
     historyTotalItems,
@@ -812,6 +824,10 @@ export function FilesystemActivity() {
     filteredClosedSessions,
     handleResetAuditFilters,
     handleClearSelection,
+    retainedLoadedCount,
+    retainedMatchingCount,
+    retainedTotalCount,
+    retainedCountStatus,
     auditSnapshot,
     snapshot,
     regionStatus,
@@ -982,6 +998,9 @@ export function FilesystemActivity() {
                   onClearSearch={clearAuditSearch}
                   hideHomeOnly={hideHomeOnly}
                   targetPathFilter={targetPathFilter}
+                  timeRange={timeRange}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
@@ -1002,6 +1021,10 @@ export function FilesystemActivity() {
                   totalCount={totalSessionsCount}
                   onResetFilters={handleResetAuditFilters}
                   selectedCanvasPath={selectedPath}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedTotalCount={retainedTotalCount}
+                  retainedCountStatus={retainedCountStatus}
                 />
               </div>
               {selectedSession && (
@@ -1161,6 +1184,9 @@ export function FilesystemActivity() {
                   onClearSearch={clearAuditSearch}
                   hideHomeOnly={hideHomeOnly}
                   targetPathFilter={targetPathFilter}
+                  timeRange={timeRange}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
@@ -1181,6 +1207,10 @@ export function FilesystemActivity() {
                   totalCount={totalSessionsCount}
                   onResetFilters={handleResetAuditFilters}
                   selectedCanvasPath={selectedPath}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedTotalCount={retainedTotalCount}
+                  retainedCountStatus={retainedCountStatus}
                 />
               </div>
             </div>

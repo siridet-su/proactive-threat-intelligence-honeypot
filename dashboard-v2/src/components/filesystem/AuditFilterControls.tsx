@@ -125,11 +125,17 @@ export interface AuditFilterControlsProps {
   onTimeFilterChange?: (range: TimeRangeFilter, customDateRange: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
-  filteredCount: number;
-  totalCount: number;
+  filteredCount?: number;
+  totalCount?: number;
   onResetFilters: () => void;
   selectedCanvasPath?: string | null;
   className?: string;
+
+  // Retained semantics (FSV-004)
+  retainedMatchingCount?: number | null;
+  retainedLoadedCount?: number;
+  retainedTotalCount?: number | null;
+  retainedCountStatus?: "authoritative" | "loaded-only" | "loading" | "error" | "stale";
 }
 
 export type PathOptionItem = {
@@ -175,6 +181,9 @@ export function AuditFilterControls({
   onResetFilters,
   selectedCanvasPath,
   className,
+  retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus,
 }: AuditFilterControlsProps) {
   const [pathDropdownOpen, setPathDropdownOpen] = useState(false);
   const [pathSearchQuery, setPathSearchQuery] = useState("");
@@ -1001,19 +1010,66 @@ export function AuditFilterControls({
 
       {/* 3. Filter Result Summary & Quick Reset */}
       {hasActiveFilters && (
-        <div className="flex h-9 min-h-9 items-stretch overflow-hidden rounded-lg border border-border bg-surface text-xs">
+        <div
+          className="flex h-9 min-h-9 items-stretch overflow-hidden rounded-lg border border-border bg-surface text-xs"
+          aria-label="Retained audit result coverage"
+        >
           <span className="flex items-center px-2 font-mono text-xs text-text-muted">
-            Filtered:{" "}
-            <strong
-              className={
-                filteredCount === 0
-                  ? "text-danger font-semibold"
-                  : "text-primary font-semibold"
+            {(() => {
+              if (
+                retainedLoadedCount !== undefined ||
+                retainedMatchingCount !== undefined ||
+                retainedCountStatus !== undefined
+              ) {
+                const loaded = retainedLoadedCount ?? filteredCount ?? 0;
+                if (
+                  retainedMatchingCount !== null &&
+                  typeof retainedMatchingCount === "number" &&
+                  retainedCountStatus === "authoritative"
+                ) {
+                  const isZero = retainedMatchingCount === 0;
+                  return (
+                    <>
+                      <strong className={isZero ? "text-danger font-semibold" : "text-primary font-semibold"}>
+                        {retainedMatchingCount}
+                      </strong>{" "}
+                      <span>retained matching</span>
+                      {loaded < retainedMatchingCount && (
+                        <>
+                          <span> · </span>
+                          <span>{loaded} loaded</span>
+                        </>
+                      )}
+                    </>
+                  );
+                }
+
+                // Unavailable / loading / stale / error / loaded-only
+                const statusSuffix = retainedCountStatus === "loading" ? "loading" : "unavailable";
+                return (
+                  <>
+                    <strong className="text-primary font-semibold">{loaded}</strong>{" "}
+                    <span>retained loaded · exact count {statusSuffix}</span>
+                  </>
+                );
               }
-            >
-              {filteredCount}
-            </strong>
-            /{totalCount}
+
+              return (
+                <>
+                  Filtered:{" "}
+                  <strong
+                    className={
+                      filteredCount === 0
+                        ? "text-danger font-semibold"
+                        : "text-primary font-semibold"
+                    }
+                  >
+                    {filteredCount}
+                  </strong>
+                  /{totalCount}
+                </>
+              );
+            })()}
           </span>
           <button
             type="button"

@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-004` — Define retained time and count semantics**
+Current focus: **`FSV-005` — Correct failed-change visualization**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -357,25 +357,51 @@ Verification:
 
 #### `FSV-004` Define retained time and count semantics
 
+Status: **DONE — 2026-09-23**
+
 Primary files:
 
-- `src/components/filesystem/filesystemUtils.ts`
+- `src/components/filesystem/useAuditDirectory.ts`
 - `src/components/filesystem/AuditFilterControls.tsx`
 - `src/components/filesystem/AuditSessionSelect.tsx`
+- `src/components/filesystem/AuditNoticeRegion.tsx`
+- `src/components/filesystem/FilesystemActivity.tsx`
+- `src/components/filesystem/AuditFilesystemWorkspace.tsx`
+- `tests/filesystem-retained-semantics.test.tsx`
 
 Implementation:
 
-- Retained time filter ใช้ `lifecycle.closedAt` และระบุ label ว่า `Closed at`
-- Active sessions ไม่เข้า retained-time denominator โดยอัตโนมัติ
-- ถ้าจำเป็นต้องแสดง active selection ให้แยก badge/group และใช้ `Last observed at` อย่าง explicit
-- ใช้ server `matchingCount` เป็น exact result count; แยก `loadedCount` ออกจาก `matchingCount`
-- เวลาใน session option ต้องเขียนว่า `Started` หรือ `Closed`
+- Retained time filter: strictly filters closed sessions using `lifecycle.closedAt` (inclusive bounds matching server `$gte`/`$lte`). Sessions with missing, null, empty, or invalid `closedAt` never pass an active time filter. No fallback to `startedAt` or `observedAt`.
+- Active session separation: active ephemeral sessions do not have `closedAt` and never pass a retained Closed-at time filter. They contribute 0 to `retainedTotalCount`, `retainedMatchingCount`, and `retainedLoadedCount`. In `AuditSessionSelect`, active sessions remain in a separately labelled active group with `Not filtered by Closed at` / `Outside Closed-at filter` indicator.
+- Authoritative count model: defined typed model `retainedLoadedCount`, `retainedMatchingCount`, `retainedTotalCount`, `activeVisibleCount`, and `retainedCountStatus` (`authoritative | loaded-only | loading | error | stale`).
+  - When summary matches scope: `retainedTotalCount = summary.totalSessions`; `retainedMatchingCount` derives from `summary.matchingCount` (or derived from `totalSessions - homeOnlyCount` for home-only, or `totalSessions` for time-only/unbounded scopes).
+  - Contradiction check: if server matching count is smaller than locally loaded matching count (`matchingCount < retainedLoadedCount`), fails closed to `loaded-only`.
+  - Stale, error, loading, and scope-mismatched summaries do not provide exact matching counts. Complete directory establishes authoritative exact matching count.
+- UI presentation contracts:
+  - `AuditFilterControls`: displays `aria-label="Retained audit result coverage"`, renders `N retained matching · M loaded` (or `N retained matching` when complete, or `M retained loaded · exact count loading/unavailable` when non-authoritative).
+  - `AuditSessionSelect`: renamed group to "Retained sessions" (`role="group"` with label `Retained sessions (${filteredClosedSessions.length} loaded of ${retainedMatchingCount} matching)` when incomplete). `formatSessionMetadata` renders `Closed <time>` for closed sessions and `Last observed <time>` for active sessions, never `Invalid Date`, with explicit unavailable fallbacks.
+  - `AuditNoticeRegion`: renders `0 retained sessions match filter` when matching count is 0, and truthfully describes active sessions as `Active session <ip>` when pinned outside filter (never "Retained session").
+  - `auditCanvasSubtitle`: uses `0 retained sessions match the active filter criteria...` and `${effectiveMatchingCount} matching retained sessions available`.
 
 Acceptance:
 
-- “Yesterday” ไม่รวม active session เพียงเพราะไม่มี `closedAt`
-- UI แยก `N matching` และ `M loaded` เมื่อ pagination ยังไม่ครบ
-- filter summary, result list และ empty state ใช้นิยามเดียวกัน
+- “Yesterday” includes closed session closed yesterday and excludes closed session started yesterday with closedAt today (PASS)
+- Active session observed yesterday does not pass retained time filter and contributes 0 to retained counts (PASS)
+- UI separates `N matching` and `M loaded` when pagination is incomplete (PASS)
+- Group renamed to "Retained sessions" and active group labelled as separate from Closed-at filter (PASS)
+- Timestamp formatting distinguishes `Closed <time>` from `Last observed <time>` and handles missing/invalid values with explicit unavailable text (PASS)
+- Filter summary, selector, notice region, and canvas subtitle use unified truthful semantics (PASS)
+
+Verification:
+
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx`: **PASSED** (17/17 tests)
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/filesystem-audit-filter.test.ts tests/combobox-popover.test.ts tests/filesystem-ownership-boundaries.test.tsx tests/fa013-component-evidence.test.tsx`: **PASSED** (143/143 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (380 tests passed, 14 skipped)
+- `npm test`: **PASSED** (541 passed, 2 expected fail, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate status: **`NOT RUN`** (Playwright managed Chromium runtime is not configured in this CLI environment; responsive visual verification remains explicitly documented as `NOT RUN` pending a configured browser gate)
+- FSV-005 and later work confirmation: FSV-005 through FSV-013 remain completely untouched. Checkpoint 1 remains `IN_PROGRESS`.
 
 #### `FSV-005` Correct failed-change visualization
 
