@@ -5,13 +5,17 @@ import { MotionGlobalConfig } from "framer-motion";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  FilesystemClosedSession,
   FilesystemTopologySession,
   SessionCwdHistoryEvent,
   FilesystemTopologySnapshot,
 } from "../src/lib/dashboardTypes";
 import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
 import { ResponseActionPanel } from "../src/components/filesystem/ResponseActionPanel";
-import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
+import {
+  TopologyCanvas,
+  deriveTopologyPresentationContext,
+} from "../src/components/filesystem/TopologyCanvas";
 import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
 import { useResponseActionController } from "../src/components/filesystem/ResponseActionController";
 
@@ -293,7 +297,29 @@ describe("FA-013 production component evidence", () => {
       telemetryStatus: "valid" as const,
     };
 
-    // 1. Audit mode with retained closed session
+    // 1. Audit mode with retained closed session (valid timestamps)
+    const closedSession: FilesystemClosedSession = {
+      sessionId: "closed-session-1",
+      sourceIp: "192.0.2.44",
+      cwdState: { path: "/etc", status: "confirmed", observedAt: "2026-09-17T11:45:00.000Z", sourceEventId: "ev-1" },
+      auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+      lifecycle: {
+        startedAt: "2026-09-17T11:39:55.000Z",
+        closedAt: "2026-09-17T11:46:00.000Z",
+      },
+    };
+
+    const derivedRetained = deriveTopologyPresentationContext("audit", closedSession);
+    expect(derivedRetained).toEqual({
+      mode: "audit",
+      session: {
+        lifecycle: "retained",
+        observedAt: "2026-09-17T11:45:00.000Z",
+        startedAt: "2026-09-17T11:39:55.000Z",
+        closedAt: "2026-09-17T11:46:00.000Z",
+      },
+    });
+
     await act(async () => root.render(createElement(TopologyCanvas, {
       snapshot: auditSnapshot,
       regionStatus: "ready",
@@ -304,31 +330,160 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
-      presentationContext: {
-        mode: "audit",
-        session: {
-          lifecycle: "retained",
-          observedAt: "2026-09-17T11:45:00.000Z",
-          startedAt: "2026-09-17T11:39:55.000Z",
-          closedAt: "2026-09-17T11:46:00.000Z",
-        },
-      },
+      presentationContext: derivedRetained,
     })));
+
+    // Audit evidence region must exist through its accessible label and remain visible at all breakpoints
+    const evidenceEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(evidenceEl).not.toBeNull();
+    const classList = evidenceEl?.className.split(/\s+/) ?? [];
+    expect(classList).not.toContain("hidden");
+    expect(classList).not.toContain("sm:hidden");
+    expect(classList).not.toContain("md:hidden");
+    expect(classList).not.toContain("lg:hidden");
+    expect(classList).not.toContain("xl:hidden");
+    expect(classList).not.toContain("2xl:inline");
 
     // Retained audit session must NEVER be labelled as active session
     expect(container.textContent).not.toContain("1 active session");
     expect(container.textContent).toContain("1 retained session");
 
     // Authoritative evidence timestamps must be labelled
-    expect(container.textContent).toContain("Observed 17 Sept 2026");
-    expect(container.textContent).toContain("Closed 17 Sept 2026");
+    expect(evidenceEl?.textContent).toContain("Observed 17 Sept 2026");
+    expect(evidenceEl?.textContent).toContain("Closed 17 Sept 2026");
 
     // Client view-materialization timestamp (generatedAt) must not be exposed as telemetry freshness
     expect(container.textContent).not.toContain("Snapshot 23 Sept 2026");
     expect(container.textContent).not.toContain("Snapshot generated at");
     expect(container.textContent).not.toContain("Telemetry Just now");
 
-    // 2. Audit mode with active session investigation
+    // 2. Retained closed session with null timestamps -> shows unavailable
+    const retainedNullSession: FilesystemClosedSession = {
+      sessionId: "closed-session-null",
+      sourceIp: "192.0.2.45",
+      cwdState: { path: "/var", status: "confirmed", observedAt: null, sourceEventId: "ev-2" },
+      auditSummary: { visitedPaths: ["/var"], homeOnly: false, eventCount: 1 },
+      lifecycle: {
+        startedAt: null,
+        closedAt: null,
+      },
+    };
+
+    const derivedNullRetained = deriveTopologyPresentationContext("audit", retainedNullSession);
+    expect(derivedNullRetained).toEqual({
+      mode: "audit",
+      session: {
+        lifecycle: "retained",
+        observedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    });
+
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "closed-session-null",
+      selectedPath: "/var",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: derivedNullRetained,
+    })));
+
+    const nullEvidenceEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(nullEvidenceEl).not.toBeNull();
+    expect(nullEvidenceEl?.textContent).toContain("Observed unavailable");
+    expect(nullEvidenceEl?.textContent).toContain("Closed unavailable");
+    expect(nullEvidenceEl?.textContent).not.toContain("No timestamp");
+
+    // 3. Retained closed session with invalid timestamps -> shows unavailable rather than "No timestamp"
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "closed-session-invalid",
+      selectedPath: "/var",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: {
+        mode: "audit",
+        session: {
+          lifecycle: "retained",
+          observedAt: "invalid-date",
+          startedAt: null,
+          closedAt: "bad-timestamp",
+        },
+      },
+    })));
+
+    const invalidEvidenceEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(invalidEvidenceEl?.textContent).toContain("Observed unavailable");
+    expect(invalidEvidenceEl?.textContent).toContain("Closed unavailable");
+    expect(invalidEvidenceEl?.textContent).not.toContain("No timestamp");
+
+    // 4. Active audit investigation with missing observedAt -> shows unavailable and Active investigation, no Closed label
+    const activeSessionMissing: FilesystemTopologySession = {
+      sessionId: "active-session-missing",
+      sourceIp: "192.0.2.46",
+      cwdState: { path: "/etc", status: "confirmed", observedAt: null, sourceEventId: "ev-3" },
+      auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+    };
+
+    const derivedActiveMissing = deriveTopologyPresentationContext("audit", activeSessionMissing);
+    expect(derivedActiveMissing).toEqual({
+      mode: "audit",
+      session: {
+        lifecycle: "active",
+        observedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    });
+
+    await act(async () => root.render(createElement(TopologyCanvas, {
+      snapshot: auditSnapshot,
+      regionStatus: "ready",
+      streamState: "live",
+      freshnessState,
+      selectedSessionId: "active-session-missing",
+      selectedPath: "/etc",
+      onSelectSession: () => {},
+      onSelectPath: () => {},
+      staleThresholdMs: 30_000,
+      presentationContext: derivedActiveMissing,
+    })));
+
+    const activeMissingEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(activeMissingEl?.textContent).toContain("Observed unavailable");
+    expect(activeMissingEl?.textContent).toContain("Active investigation");
+    expect(activeMissingEl?.textContent).not.toContain("Closed");
+    expect(container.textContent).toContain("active session investigation");
+    expect(container.textContent).not.toContain("retained");
+
+    // 5. Active audit investigation with valid observedAt
+    const activeSessionValid: FilesystemTopologySession = {
+      sessionId: "active-session-1",
+      sourceIp: "192.0.2.46",
+      cwdState: { path: "/etc", status: "confirmed", observedAt: "2026-09-17T11:45:00.000Z", sourceEventId: "ev-4" },
+      auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+    };
+
+    const derivedActiveValid = deriveTopologyPresentationContext("audit", activeSessionValid);
+    expect(derivedActiveValid).toEqual({
+      mode: "audit",
+      session: {
+        lifecycle: "active",
+        observedAt: "2026-09-17T11:45:00.000Z",
+        startedAt: null,
+        closedAt: null,
+      },
+    });
+
     await act(async () => root.render(createElement(TopologyCanvas, {
       snapshot: auditSnapshot,
       regionStatus: "ready",
@@ -339,23 +494,21 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
-      presentationContext: {
-        mode: "audit",
-        session: {
-          lifecycle: "active",
-          observedAt: "2026-09-17T11:45:00.000Z",
-          startedAt: "2026-09-17T11:39:55.000Z",
-          closedAt: null,
-        },
-      },
+      presentationContext: derivedActiveValid,
     })));
 
-    expect(container.textContent).toContain("active session investigation");
-    expect(container.textContent).not.toContain("retained");
-    expect(container.textContent).not.toContain("Closed");
-    expect(container.textContent).toContain("Observed 17 Sept 2026");
+    const activeValidEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(activeValidEl?.textContent).toContain("Observed 17 Sept 2026");
+    expect(activeValidEl?.textContent).toContain("Active investigation");
+    expect(activeValidEl?.textContent).not.toContain("Closed");
 
-    // 3. Audit mode without selected session
+    // 6. Audit mode without selected session -> neutral wording
+    const derivedNoSession = deriveTopologyPresentationContext("audit", null);
+    expect(derivedNoSession).toEqual({
+      mode: "audit",
+      session: null,
+    });
+
     await act(async () => root.render(createElement(TopologyCanvas, {
       snapshot: auditSnapshot,
       regionStatus: "ready",
@@ -366,17 +519,20 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
-      presentationContext: {
-        mode: "audit",
-        session: null,
-      },
+      presentationContext: derivedNoSession,
     })));
 
+    const noSessionEvidenceEl = container.querySelector<HTMLElement>('[aria-label="Audit evidence timestamps"]');
+    expect(noSessionEvidenceEl?.textContent).toContain("Historical audit data");
+    expect(noSessionEvidenceEl?.textContent).not.toContain("Observed");
+    expect(noSessionEvidenceEl?.textContent).not.toContain("Closed");
     expect(container.textContent).not.toContain("retained session");
     expect(container.textContent).not.toContain("active session");
-    expect(container.textContent).not.toContain("Closed");
 
-    // 4. Live mode preserves active session count and live freshness semantics
+    // 7. Live mode preserves active session count and live freshness semantics
+    const derivedLive = deriveTopologyPresentationContext("live");
+    expect(derivedLive).toEqual({ mode: "live" });
+
     await act(async () => root.render(createElement(TopologyCanvas, {
       snapshot: auditSnapshot,
       regionStatus: "ready",
@@ -387,13 +543,12 @@ describe("FA-013 production component evidence", () => {
       onSelectSession: () => {},
       onSelectPath: () => {},
       staleThresholdMs: 30_000,
-      presentationContext: {
-        mode: "live",
-      },
+      presentationContext: derivedLive,
     })));
 
     expect(container.textContent).toContain("1 active session");
     expect(container.textContent).toContain("Telemetry");
     expect(container.textContent).toContain("Snapshot");
+    expect(container.querySelector('[aria-label="Audit evidence timestamps"]')).toBeNull();
   });
 });

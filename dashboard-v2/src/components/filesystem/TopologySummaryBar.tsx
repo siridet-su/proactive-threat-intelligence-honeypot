@@ -48,6 +48,13 @@ function isLiveSummaryBarProps(
   return props.presentationContext.mode === "live";
 }
 
+function formatEvidenceTimestamp(value: string | null | undefined): string {
+  if (!value || typeof value !== "string" || !value.trim()) return "unavailable";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unavailable";
+  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+}
+
 export function TopologySummaryBar(props: TopologySummaryBarProps) {
   const {
     densityAnalysisHiddenNodes,
@@ -68,8 +75,8 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
     presentationContext,
   } = props;
   return (
-    <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-0">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs sm:flex-nowrap sm:gap-3">
+    <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:min-h-11 sm:h-auto 2xl:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-2 2xl:py-0">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs 2xl:flex-nowrap sm:gap-3">
         {densityAnalysisHiddenNodes > 0 ? (
           <span className="shrink-0 flex items-center gap-1.5">
             <span>
@@ -175,53 +182,54 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
             <strong className="font-medium text-text">{totalLiveSources}</strong> unique {totalLiveSources === 1 ? "source" : "sources"}
           </span>
         )}
-        <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
         {isLiveSummaryBarProps(props) ? (
-          <span
-            className="hidden 2xl:inline truncate text-text-subtle"
-            title={`Snapshot generated at ${formatTimestamp(props.snapshotGeneratedAt)}, received ${formatUpdateAge(props.freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(props.staleThresholdMs / 1000)}s)`}
-          >
-            {props.freshnessState.isStale ? (
-              <span className="font-medium text-warning">
-                {props.freshnessState.telemetryStatus === "valid" && props.freshnessState.telemetryAgeMs !== null ? (
-                  <>Stale (telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
-                ) : props.freshnessState.telemetryStatus === "future_skew" ? (
-                  <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
-                ) : (
-                  <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
-                )}
-              </span>
-            ) : props.freshnessState.label === "Live · No activity" ? (
-              <span>
-                Live (no activity) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
-              </span>
-            ) : (
-              <span>
-                Telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
-              </span>
-            )}
-          </span>
+          <>
+            <span className="hidden 2xl:inline shrink-0 text-border" aria-hidden="true">·</span>
+            <span
+              className="hidden 2xl:inline truncate text-text-subtle"
+              title={`Snapshot generated at ${formatTimestamp(props.snapshotGeneratedAt)}, received ${formatUpdateAge(props.freshnessState.snapshotReceiptAgeMs)} (stale threshold: ${Math.round(props.staleThresholdMs / 1000)}s)`}
+            >
+              {props.freshnessState.isStale ? (
+                <span className="font-medium text-warning">
+                  {props.freshnessState.telemetryStatus === "valid" && props.freshnessState.telemetryAgeMs !== null ? (
+                    <>Stale (telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs)}) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
+                  ) : props.freshnessState.telemetryStatus === "future_skew" ? (
+                    <>Stale (telemetry clock skew) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
+                  ) : (
+                    <>Stale (telemetry unavailable) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}</>
+                  )}
+                </span>
+              ) : props.freshnessState.label === "Live · No activity" ? (
+                <span>
+                  Live (no activity) · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
+                </span>
+              ) : (
+                <span>
+                  Telemetry {formatUpdateAge(props.freshnessState.telemetryAgeMs ?? 0)} · Snapshot {formatTimestamp(props.snapshotGeneratedAt)}
+                </span>
+              )}
+            </span>
+          </>
         ) : (
-          <span className="hidden 2xl:inline truncate text-text-subtle font-medium text-primary">
-            {props.presentationContext.session?.lifecycle === "retained" ? (
-              <>
-                {props.presentationContext.session.observedAt ? `Observed ${formatTimestamp(props.presentationContext.session.observedAt)}` : null}
-                {props.presentationContext.session.observedAt && props.presentationContext.session.closedAt ? " · " : null}
-                {props.presentationContext.session.closedAt ? `Closed ${formatTimestamp(props.presentationContext.session.closedAt)}` : null}
-                {!props.presentationContext.session.observedAt && !props.presentationContext.session.closedAt ? "Historical audit data" : null}
-              </>
-            ) : props.presentationContext.session?.lifecycle === "active" ? (
-              <>
-                {props.presentationContext.session.observedAt ? (
-                  <>Observed {formatTimestamp(props.presentationContext.session.observedAt)} · Active investigation</>
-                ) : (
-                  <>Active investigation</>
-                )}
-              </>
-            ) : (
-              "Historical audit data"
-            )}
-          </span>
+          <>
+            <span className="shrink-0 text-border" aria-hidden="true">·</span>
+            <span
+              className="truncate text-text-subtle font-medium text-primary max-w-full"
+              aria-label="Audit evidence timestamps"
+            >
+              {props.presentationContext.session?.lifecycle === "retained" ? (
+                <>
+                  Observed {formatEvidenceTimestamp(props.presentationContext.session.observedAt)} · Closed {formatEvidenceTimestamp(props.presentationContext.session.closedAt)}
+                </>
+              ) : props.presentationContext.session?.lifecycle === "active" ? (
+                <>
+                  Observed {formatEvidenceTimestamp(props.presentationContext.session.observedAt)} · Active investigation
+                </>
+              ) : (
+                "Historical audit data"
+              )}
+            </span>
+          </>
         )}
       </div>
 

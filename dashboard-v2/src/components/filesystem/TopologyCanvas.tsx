@@ -155,19 +155,15 @@ export type TopologyPresentationContext =
       } | null;
     };
 
+function isFilesystemClosedSession(
+  session: FilesystemTopologySession | FilesystemClosedSession,
+): session is FilesystemClosedSession {
+  return "lifecycle" in session && Boolean(session.lifecycle);
+}
+
 export function deriveTopologyPresentationContext(
   mode: "live" | "audit",
-  selectedSession?:
-    | FilesystemTopologySession
-    | FilesystemClosedSession
-    | {
-        lifecycle?: "active" | "retained" | { startedAt?: string | null; closedAt?: string | null } | null;
-        cwdState?: { observedAt?: string | null } | null;
-        observedAt?: string | null;
-        startedAt?: string | null;
-        closedAt?: string | null;
-      }
-    | null,
+  selectedSession?: FilesystemTopologySession | FilesystemClosedSession | null,
 ): TopologyPresentationContext {
   if (mode === "live") {
     return { mode: "live" };
@@ -180,46 +176,25 @@ export function deriveTopologyPresentationContext(
     };
   }
 
-  const rawLifecycle = (selectedSession as { lifecycle?: unknown }).lifecycle;
-  let lifecycle: "active" | "retained" = "active";
-  if (rawLifecycle === "retained") {
-    lifecycle = "retained";
-  } else if (rawLifecycle === "active") {
-    lifecycle = "active";
-  } else if (rawLifecycle && typeof rawLifecycle === "object") {
-    if ("closedAt" in rawLifecycle || "startedAt" in rawLifecycle) {
-      lifecycle = "retained";
-    }
+  if (isFilesystemClosedSession(selectedSession)) {
+    return {
+      mode: "audit",
+      session: {
+        lifecycle: "retained",
+        observedAt: selectedSession.cwdState?.observedAt ?? null,
+        startedAt: selectedSession.lifecycle.startedAt ?? null,
+        closedAt: selectedSession.lifecycle.closedAt ?? null,
+      },
+    };
   }
-
-  const observedAt =
-    selectedSession.cwdState?.observedAt ??
-    (selectedSession as { observedAt?: string | null }).observedAt ??
-    null;
-
-  const startedAt =
-    (typeof rawLifecycle === "object" && rawLifecycle !== null && "startedAt" in rawLifecycle
-      ? (rawLifecycle as { startedAt?: string | null }).startedAt
-      : null) ??
-    (selectedSession as { startedAt?: string | null }).startedAt ??
-    null;
-
-  const closedAt =
-    lifecycle === "retained"
-      ? ((typeof rawLifecycle === "object" && rawLifecycle !== null && "closedAt" in rawLifecycle
-          ? (rawLifecycle as { closedAt?: string | null }).closedAt
-          : null) ??
-        (selectedSession as { closedAt?: string | null }).closedAt ??
-        null)
-      : null;
 
   return {
     mode: "audit",
     session: {
-      lifecycle,
-      observedAt,
-      startedAt,
-      closedAt,
+      lifecycle: "active",
+      observedAt: selectedSession.cwdState?.observedAt ?? null,
+      startedAt: null,
+      closedAt: null,
     },
   };
 }
