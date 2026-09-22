@@ -938,4 +938,284 @@ function fireInputChange(input: HTMLInputElement, value: string) {
       expect(metrics.retainedCountStatus).toBe("loaded-only");
     });
   });
+
+  describe("G. Retained count fail-closed invariants and cross-field validation", () => {
+    it("A. target-path summary: matchingCount > totalSessions fails closed to loaded-only", () => {
+      const loaded = [createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] })];
+      const summary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 2,
+        matchingCount: 20, // Contradiction: 20 > 10
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/var/log" });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        targetPathFilter: "/var/log",
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("B. invalid home-only summaries: homeOnlyCount < 0 or > totalSessions fails closed without Math.max clamping", () => {
+      const loaded = [createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] })];
+      const scopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+
+      // Case 1: homeOnlyCount < 0
+      const summaryNegHome: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: -2,
+      };
+
+      const metricsNeg = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: summaryNegHome,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metricsNeg.retainedMatchingCount).toBeNull();
+      expect(metricsNeg.retainedTotalCount).toBeNull();
+      expect(metricsNeg.retainedCountStatus).toBe("loaded-only");
+
+      // Case 2: homeOnlyCount > totalSessions (must not clamp with Math.max(0, total - home))
+      const summaryExcessHome: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: 12,
+      };
+
+      const metricsExcess = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: summaryExcessHome,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metricsExcess.retainedMatchingCount).toBeNull();
+      expect(metricsExcess.retainedTotalCount).toBeNull();
+      expect(metricsExcess.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("C. invalid required counts: negative, fractional, non-finite, and unsafe integers fail closed", () => {
+      const loaded = [createClosedSession("c-1", "2026-09-19T10:00:00.000Z")];
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      // Fractional totalSessions
+      const fractionalSummary = {
+        totalSessions: 10.5,
+        homeOnlyCount: 2,
+      } as unknown as AuditDirectorySummary;
+
+      const metricsFrac = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: fractionalSummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      expect(metricsFrac.retainedMatchingCount).toBeNull();
+      expect(metricsFrac.retainedTotalCount).toBeNull();
+      expect(metricsFrac.retainedCountStatus).toBe("loaded-only");
+
+      // Non-finite totalSessions (NaN)
+      const nanSummary = {
+        totalSessions: Number.NaN,
+        homeOnlyCount: 0,
+      } as unknown as AuditDirectorySummary;
+
+      const metricsNaN = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: nanSummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      expect(metricsNaN.retainedMatchingCount).toBeNull();
+      expect(metricsNaN.retainedTotalCount).toBeNull();
+      expect(metricsNaN.retainedCountStatus).toBe("loaded-only");
+
+      // Unsafe integer
+      const unsafeSummary = {
+        totalSessions: Number.MAX_SAFE_INTEGER + 1000,
+        homeOnlyCount: 0,
+      } as unknown as AuditDirectorySummary;
+
+      const metricsUnsafe = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: unsafeSummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      expect(metricsUnsafe.retainedMatchingCount).toBeNull();
+      expect(metricsUnsafe.retainedTotalCount).toBeNull();
+      expect(metricsUnsafe.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("D. invalid total with otherwise valid matchingCount must not trust matchingCount alone", () => {
+      const loaded = [createClosedSession("c-1", "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] })];
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/var/log" });
+
+      const invalidTotalSummary: AuditDirectorySummary = {
+        totalSessions: -1, // invalid
+        homeOnlyCount: 0,
+        matchingCount: 5,  // seemingly valid, but cannot be trusted from a corrupt summary
+      };
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loaded,
+        snapshotRecentClosedSessions: [],
+        summary: invalidTotalSummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+        targetPathFilter: "/var/log",
+      });
+
+      expect(metrics.retainedMatchingCount).toBeNull();
+      expect(metrics.retainedTotalCount).toBeNull();
+      expect(metrics.retainedCountStatus).toBe("loaded-only");
+    });
+
+    it("E. valid boundaries remain accepted", () => {
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      // Boundary 1: totalSessions=0, homeOnlyCount=0
+      const summaryZero: AuditDirectorySummary = {
+        totalSessions: 0,
+        homeOnlyCount: 0,
+        matchingCount: 0,
+      };
+
+      const metricsZero = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [],
+        snapshotRecentClosedSessions: [],
+        summary: summaryZero,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      expect(metricsZero.retainedMatchingCount).toBe(0);
+      expect(metricsZero.retainedTotalCount).toBe(0);
+      expect(metricsZero.retainedCountStatus).toBe("authoritative");
+
+      // Boundary 2: matchingCount === totalSessions
+      const loadedFive: FilesystemClosedSession[] = [];
+      for (let i = 0; i < 5; i++) {
+        loadedFive.push(createClosedSession(`c-${i}`, "2026-09-19T10:00:00.000Z", { paths: ["/var/log"] }));
+      }
+      const pathScopeKey = createAuditScopeKey({ hideHome: false, targetPath: "/var/log" });
+      const summaryAllMatch: AuditDirectorySummary = {
+        totalSessions: 5,
+        homeOnlyCount: 0,
+        matchingCount: 5,
+      };
+
+      const metricsAllMatch = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: loadedFive,
+        snapshotRecentClosedSessions: [],
+        summary: summaryAllMatch,
+        summaryScopeKey: pathScopeKey,
+        currentScopeKey: pathScopeKey,
+        summaryStatus: "success",
+        targetPathFilter: "/var/log",
+      });
+
+      expect(metricsAllMatch.retainedMatchingCount).toBe(5);
+      expect(metricsAllMatch.retainedTotalCount).toBe(5);
+      expect(metricsAllMatch.retainedCountStatus).toBe("authoritative");
+
+      // Boundary 3: homeOnlyCount === totalSessions on hideHomeOnly scope (matching count is exactly 0)
+      const hideScopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
+      const summaryAllHome: AuditDirectorySummary = {
+        totalSessions: 8,
+        homeOnlyCount: 8,
+      };
+
+      const metricsAllHome = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [],
+        snapshotRecentClosedSessions: [],
+        summary: summaryAllHome,
+        summaryScopeKey: hideScopeKey,
+        currentScopeKey: hideScopeKey,
+        summaryStatus: "success",
+        hideHomeOnly: true,
+      });
+
+      expect(metricsAllHome.retainedMatchingCount).toBe(0);
+      expect(metricsAllHome.retainedTotalCount).toBe(8);
+      expect(metricsAllHome.retainedCountStatus).toBe("authoritative");
+    });
+
+    it("F. public homeOnlyCount falls back to locally loaded evidence when summary count evidence is invalid", () => {
+      const homeSession = createClosedSession("c-home", "2026-09-19T10:00:00.000Z", {
+        paths: ["/home", "/home/user"],
+        homeOnly: true,
+      });
+      const outsideSession = createClosedSession("c-outside", "2026-09-19T11:00:00.000Z", {
+        paths: ["/var/log"],
+        homeOnly: false,
+      });
+
+      const malformedSummary: AuditDirectorySummary = {
+        totalSessions: 10,
+        homeOnlyCount: -5, // invalid negative homeOnlyCount
+      };
+      const scopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+
+      const metrics = deriveAuthoritativeAuditMetrics({
+        viewMode: "audit",
+        activeSessions: [],
+        authoritativeClosedSessions: [homeSession, outsideSession],
+        snapshotRecentClosedSessions: [],
+        summary: malformedSummary,
+        summaryScopeKey: scopeKey,
+        currentScopeKey: scopeKey,
+        summaryStatus: "success",
+      });
+
+      // Must not be negative or contaminated by -5; must fall back to the 1 loaded home-only session
+      expect(metrics.homeOnlyCount).toBe(1);
+    });
+  });
 });

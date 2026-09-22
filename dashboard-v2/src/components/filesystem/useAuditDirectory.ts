@@ -251,6 +251,32 @@ export function getSessionTimestamp(s: FilesystemTopologySession | FilesystemClo
 
 export type RetainedCountStatus = "authoritative" | "loaded-only" | "loading" | "error" | "stale";
 
+/**
+ * Strict validator for session counts: must be non-negative safe integers.
+ */
+export function isValidSessionCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Validates cross-field structural invariants for server summary counts.
+ * Fails closed if totalSessions or homeOnlyCount are invalid, if homeOnlyCount > totalSessions,
+ * or if matchingCount is present and invalid or > totalSessions.
+ */
+export function isSummaryCountEvidenceValid(
+  summary: AuditDirectorySummary | null | undefined,
+): summary is AuditDirectorySummary {
+  if (!summary) return false;
+  if (!isValidSessionCount(summary.totalSessions)) return false;
+  if (!isValidSessionCount(summary.homeOnlyCount)) return false;
+  if (summary.homeOnlyCount > summary.totalSessions) return false;
+  if (summary.matchingCount !== undefined) {
+    if (!isValidSessionCount(summary.matchingCount)) return false;
+    if (summary.matchingCount > summary.totalSessions) return false;
+  }
+  return true;
+}
+
 export interface AuthoritativeAuditMetrics {
   effectiveClosedSessions: FilesystemClosedSession[];
   allSessions: (FilesystemTopologySession | FilesystemClosedSession)[];
@@ -347,9 +373,10 @@ export function deriveAuthoritativeAuditMetrics({
   }
 
   // Home-only count across all effective sessions
-  // Only use summary.homeOnlyCount when summaryStatus is success and summaryScopeKey matches currentScopeKey
+  // Only use summary.homeOnlyCount when summaryStatus is success, summaryScopeKey matches currentScopeKey,
+  // and summary count evidence is strictly valid.
   let homeOnlyCount = 0;
-  if (isAudit && isScopeMatch && summary && typeof summary.homeOnlyCount === "number") {
+  if (isAudit && isScopeMatch && isSummaryCountEvidenceValid(summary)) {
     let activeHomeOnly = 0;
     for (const s of activeSessions) {
       if (isHomeOnlySession(s)) activeHomeOnly++;
@@ -425,64 +452,39 @@ export function deriveAuthoritativeAuditMetrics({
     retainedTotalCount = null;
     retainedMatchingCount = null;
   } else if (isScopeMatch && summary) {
-    // Authoritative server summary matching current scope
-    const rawTotal =
-      typeof summary.totalSessions === "number" &&
-      Number.isFinite(summary.totalSessions) &&
-      summary.totalSessions >= 0
-        ? summary.totalSessions
-        : null;
-
-    if (rawTotal !== null && rawTotal >= retainedLoadedCount) {
-      retainedTotalCount = rawTotal;
-    } else {
-      retainedTotalCount = null;
-    }
-
-    let derivedMatching: number | null = null;
-    if (targetPathFilter) {
-      derivedMatching =
-        typeof summary.matchingCount === "number" &&
-        Number.isFinite(summary.matchingCount) &&
-        summary.matchingCount >= 0
-          ? summary.matchingCount
-          : null;
-    } else if (hideHomeOnly) {
-      if (
-        typeof summary.totalSessions === "number" &&
-        Number.isFinite(summary.totalSessions) &&
-        typeof summary.homeOnlyCount === "number" &&
-        Number.isFinite(summary.homeOnlyCount)
-      ) {
-        derivedMatching = Math.max(0, summary.totalSessions - summary.homeOnlyCount);
-      } else if (
-        typeof summary.matchingCount === "number" &&
-        Number.isFinite(summary.matchingCount) &&
-        summary.matchingCount >= 0
-      ) {
-        derivedMatching = summary.matchingCount;
-      } else {
-        derivedMatching = null;
-      }
-    } else {
-      // Neither hideHomeOnly nor targetPathFilter is active (unbounded or time-only scope):
-      // summary.totalSessions is the matching count for this time scope!
-      derivedMatching = rawTotal;
-    }
-
-    // Contradiction check: fail closed if server matching count is smaller than loaded matching count
-    // or if totalSessions is smaller than loaded matching count
-    if (
-      derivedMatching === null ||
-      derivedMatching < retainedLoadedCount ||
-      (rawTotal !== null && rawTotal < retainedLoadedCount)
-    ) {
+    if (!isSummaryCountEvidenceValid(summary)) {
       retainedMatchingCount = null;
       retainedTotalCount = null;
       retainedCountStatus = "loaded-only";
     } else {
-      retainedMatchingCount = derivedMatching;
-      retainedCountStatus = "authoritative";
+      let derivedMatching: number | null = null;
+      if (targetPathFilter) {
+        if (summary.matchingCount !== undefined) {
+          derivedMatching = summary.matchingCount;
+        }
+      } else if (hideHomeOnly) {
+        derivedMatching = summary.totalSessions - summary.homeOnlyCount;
+      } else {
+        // Neither hideHomeOnly nor targetPathFilter is active (unbounded or time-only scope):
+        // summary.totalSessions is the matching count for this time scope!
+        derivedMatching = summary.totalSessions;
+      }
+
+      // Contradiction check: fail closed if server matching count is smaller than loaded matching count
+      // or if totalSessions is smaller than loaded matching count
+      if (
+        derivedMatching === null ||
+        derivedMatching < retainedLoadedCount ||
+        summary.totalSessions < retainedLoadedCount
+      ) {
+        retainedMatchingCount = null;
+        retainedTotalCount = null;
+        retainedCountStatus = "loaded-only";
+      } else {
+        retainedMatchingCount = derivedMatching;
+        retainedTotalCount = summary.totalSessions;
+        retainedCountStatus = "authoritative";
+      }
     }
   } else if (isDirectoryComplete) {
     // Complete directory loaded for this scope
