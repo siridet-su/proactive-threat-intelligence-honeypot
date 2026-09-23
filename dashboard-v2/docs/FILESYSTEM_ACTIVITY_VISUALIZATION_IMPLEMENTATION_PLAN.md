@@ -1,6 +1,6 @@
 # Filesystem Activity — Semantic Visualization Implementation Plan
 
-Status: **Ready for sequential implementation**
+Status: **COMPLETE — 2026-09-23**
 
 Prepared: 2026-09-22
 
@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **Checkpoint 5 — Final verification and documentation**
+Current focus: **COMPLETE**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -38,7 +38,7 @@ Current focus: **Checkpoint 5 — Final verification and documentation**
 | 2 | Verified transition model/rendering | `DONE` |
 | 3 | Workspace structure | `DONE` |
 | 4 | Accessibility/responsive interaction | `DONE` |
-| 5 | Final verification/documentation | `IN_PROGRESS` |
+| 5 | Final verification/documentation | `DONE` |
 
 ## 2. Non-negotiable data contracts
 
@@ -1107,6 +1107,8 @@ Checkpoint 4 gate:
 
 ### Checkpoint 5 — Final verification and documentation
 
+Status: **DONE — 2026-09-23**
+
 #### Functional matrix
 
 - Live → Audit → Back → Live → Forward → Audit
@@ -1165,6 +1167,80 @@ Final report must record:
 - remaining known limitations
 - confirmation that unrelated user changes were preserved
 
+#### Final verification evidence
+
+Functional verification is covered by the real-browser suite plus focused unit/component suites:
+
+- live/audit browser history, direct retained-session URLs, deep-hop resolution, filter state,
+  remote search pagination, stale response rejection, and partial-to-complete history all pass.
+- replay selection/navigation, entered/changed/failed/revisit transitions, fullscreen state
+  preservation, pinned-outside-filter semantics, freshness/retained states, and reduced motion pass.
+- exact final viewport coverage is automated at `1920×1080`, `1440×900`, `1280×800`,
+  `768×1024`, and `390×844`; both light and dark palettes keep the audit workspace visible and
+  free of page-level horizontal overflow. The browser suite separately verifies 200% zoom,
+  coarse-pointer targets, tab relationships, and desktop/mobile transition rendering.
+- sparse, medium, and dense/aggregated graph behavior; empty, partial, complete, failed, and revisit
+  history; and fresh, stale, disconnected, and retained states are covered by the focused semantic,
+  density, replay, and component suites.
+
+Final automated gates (run from `dashboard-v2` unless noted):
+
+- `npm test`: **PASSED** — 57 files passed, 1 skipped; 760 tests passed, 2 expected failures,
+  14 skipped (776 total).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`: **PASSED** —
+  12/12 real-browser tests.
+- `npm run lint`: **PASSED** — 0 errors; 4 unrelated upstream warnings remain in Dashboard and
+  Threat Intelligence files outside this plan.
+- `npm run build`: **PASSED** with Turbopack — 18/18 static pages generated.
+- `npm run build -- --webpack`: **PASSED** — 18/18 static pages generated.
+- `npm run test:filesystem-history-integration`: **PASSED** — 15/15 tests.
+- `npm run test:filesystem-audit-integration`: **PASSED** — Dashboard Mongo integration 12/12 and
+  processor-agent Go integration `ok`.
+- `git diff --check`: **PASSED**.
+
+The final audit integration gate exposed two pre-existing failures from the synchronized upstream
+branch and both were corrected in isolated commits before closure: the projection summary now binds
+the hide-home regex to the Mongo `$map` iterator (`$$path`), and the one-second-TTL integration
+fixture now derives retained evidence times safely ahead of the wall clock instead of expiring on
+23 September 2026. No production evidence contract changed.
+
+Commit chain by work item:
+
+- baseline: `aa82662`, `972f609`, `57a82df`
+- FSV-001: `0beae44`, `f954913`, `b095f36`
+- FSV-002: `7a60a26`, `c7e917e`
+- FSV-003: `872ba19`, `9e1fe8e`
+- FSV-004: `93edc03`, `5960020`, `26c57ac`, `7719245`, `13a1646`
+- FSV-005: `88aaa36`, `98c22a4`
+- FSV-006: `2f161ef`
+- FSV-007A/B/C: `eaef6db`, `ddac8f8`, `1b83658`, `3c62665`, `e0a65c4`
+- FSV-010A: `67d21ff`
+- FSV-008/009: `0b354c5`, `379d71c`
+- FSV-011: `0a7bacb`
+- FSV-012A/B: `17db456`, `fe8a7da`
+- FSV-013: `c019f48`
+- final integration and visual gates: `3f042de`, `aeca4cc`, `1c4e5d0`
+
+Files changed by checkpoint remained within their ownership lanes:
+
+- Checkpoint 0: plan/baseline documentation and characterization suites.
+- Checkpoint 1: audit presentation, directory/filter/count/replay utilities, and focused filesystem
+  semantic suites.
+- Checkpoint 2: pure transition model, replay integration, transition overlay, topology density,
+  minimap behavior, and their focused/browser suites.
+- Checkpoint 3: the single workspace/fullscreen owner, search wording, responsive controls, and
+  browser ownership evidence.
+- Checkpoint 4: pointer splitter, tabs, touch/readability styles, forensic timestamp presentation,
+  and accessibility/browser suites.
+- Checkpoint 5: final browser matrix, audit summary iterator correction, TTL-safe isolated
+  integration fixture, and this completion record.
+
+Required final gates have no `NOT RUN` items. Earlier browser and default-build environment
+limitations were resolved in this workspace by using `/usr/bin/chromium`; both Turbopack and webpack
+production builds now pass. The two Vitest expected failures and four lint warnings are documented
+pre-existing items outside filesystem visualization scope. The branch was synchronized with remote
+`main` by merge, and unrelated upstream/user changes were preserved rather than rewritten.
+
 ## 6. File ownership map for implementation
 
 | Concern | Primary source files | Primary regression suites |
@@ -1183,17 +1259,14 @@ Large files such as `FilesystemActivity.tsx`, `TopologyCanvas.tsx` และ `fi
 
 ## 7. Current readiness and known constraints
 
-พร้อมเริ่มที่ `Checkpoint 0` โดยมีข้อควรระวังดังนี้:
+Implementation และ final verification เสร็จแล้วบน branch
+`feat/filesystem-visualization-semantics` โดยคง baseline `15806b2`, merge ประวัติจาก remote
+`main`, และ focused commit chain ทั้งหมดไว้โดยไม่ rebase หรือ rewrite ประวัติ
 
-- baseline quiet-state work ถูก validate และ commit บน `main` ที่ `15806b2` (`feat(filesystem): clarify quiet live topology state`)
-- implementation branch คือ `feat/filesystem-visualization-semantics` ซึ่งสร้างจาก clean `main` หลัง commit ดังกล่าว
-- work agent ต้องเริ่มจาก clean working tree และห้ามย้อนแก้ baseline commit โดยไม่มี audit finding ที่เจาะจง
-- full Vitest suite ณ วันที่จัดทำเอกสารผ่าน 29 test files โดยมี 497 tests passed, 2 expected failures และ 14 skipped
-- `git diff --check` ผ่าน
-- targeted component/ownership tests ผ่าน 2 files / 7 tests และ ESLint ของ quiet-state files ผ่าน
-- production build ผ่านด้วย webpack fallback (`npm run build -- --webpack`); default Turbopack build ถูก environment ปฏิเสธการ bind local port และต้องบันทึกเป็น environment-blocked ไม่ใช่ pass
-- Playwright visual run ยังไม่พร้อมรับรอง เพราะ managed Chromium executable ไม่ได้ติดตั้งใน environment ปัจจุบัน; ห้ามถือ browser gate ว่าผ่านจนกว่าจะติดตั้งหรือกำหนด executable ที่ใช้งานได้และรัน suite สำเร็จ
-- ก่อนแก้ Next.js code ต้องอ่าน relevant documentation ใต้ `node_modules/next/dist/docs/` ตาม repository `AGENTS.md`
+ข้อจำกัดที่ยังบันทึกไว้มีเพียงรายการนอก scope ที่ไม่ block งานนี้: Vitest 2 expected failures และ
+ESLint 4 warnings ใน Dashboard/Threat Intelligence files ที่ไม่ได้แก้โดย filesystem visualization
+plan นี้ ไม่มี required filesystem gate, browser state, integration target หรือ production build ที่
+ค้างเป็น `NOT RUN`
 
 ## 8. Definition of done
 
