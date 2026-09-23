@@ -295,11 +295,95 @@ describe("verified CWD transition presentation model", () => {
     }
   });
 
-  it("fails a contradictory anchored hop number closed", () => {
-    const anchor = event("contradictory-anchor", "changed", "/a", "/b", { hopNumber: 8 });
+  it("covers the anchored hop-number boundary matrix and preserves valid hops without a usable retained total", () => {
+    const boundaryCases: Array<{
+      label: string;
+      event: SessionCwdHistoryEvent;
+      retainedTotal: number | undefined;
+      expectedAbsoluteHop: number | null;
+    }> = [
+      {
+        label: "undefined/absent",
+        event: event("anchor-absent", "changed", "/a", "/b"),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "zero",
+        event: event("anchor-zero", "changed", "/a", "/b", { hopNumber: 0 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "negative integer",
+        event: event("anchor-negative", "changed", "/a", "/b", { hopNumber: -1 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "fractional number",
+        event: event("anchor-fractional", "changed", "/a", "/b", { hopNumber: 2.5 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "NaN",
+        event: event("anchor-nan", "changed", "/a", "/b", { hopNumber: Number.NaN }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "positive Infinity",
+        event: event("anchor-infinity", "changed", "/a", "/b", { hopNumber: Number.POSITIVE_INFINITY }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "unsafe integer",
+        event: event("anchor-unsafe", "changed", "/a", "/b", { hopNumber: Number.MAX_SAFE_INTEGER + 1 }),
+        retainedTotal: Number.MAX_SAFE_INTEGER,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "valid positive safe integer within retained total",
+        event: event("anchor-valid", "changed", "/a", "/b", { hopNumber: 5 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: 5,
+      },
+      {
+        label: "valid hop equal to retained total",
+        event: event("anchor-at-total", "changed", "/a", "/b", { hopNumber: 10 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: 10,
+      },
+      {
+        label: "valid hop greater than retained total",
+        event: event("anchor-beyond-total", "changed", "/a", "/b", { hopNumber: 11 }),
+        retainedTotal: 10,
+        expectedAbsoluteHop: null,
+      },
+      {
+        label: "valid hop with invalid retained total remains usable",
+        event: event("anchor-invalid-total", "changed", "/a", "/b", { hopNumber: 5 }),
+        retainedTotal: Number.NaN,
+        expectedAbsoluteHop: 5,
+      },
+      {
+        label: "valid hop with unavailable retained total remains usable",
+        event: event("anchor-unavailable-total", "changed", "/a", "/b", { hopNumber: 5 }),
+        retainedTotal: undefined,
+        expectedAbsoluteHop: 5,
+      },
+    ];
 
-    expect(deriveAnchoredVerifiedCwdTransition(anchor, 4).absoluteHop).toBeNull();
-    expect(deriveAnchoredVerifiedCwdTransition(anchor, Number.NaN).absoluteHop).toBe(8);
+    for (const boundaryCase of boundaryCases) {
+      expect(
+        deriveAnchoredVerifiedCwdTransition(boundaryCase.event, boundaryCase.retainedTotal).absoluteHop,
+        boundaryCase.label,
+      ).toBe(boundaryCase.expectedAbsoluteHop);
+    }
+
+    expect(Object.prototype.hasOwnProperty.call(boundaryCases[0].event, "hopNumber")).toBe(false);
   });
 
   it("preserves input order and output length", () => {
@@ -448,18 +532,19 @@ describe("useAuditReplay transition exposure", () => {
   });
 
   it("fails an anchored transition hop closed when hopNumber is missing or invalid", async () => {
-    const anchor = event("anchored-invalid", "changed", "/a", "/b", { hopNumber: 0 });
+    const zeroAnchor = event("anchored-invalid", "changed", "/a", "/b", { hopNumber: 0 });
 
     await renderProbe({
       history: [],
-      selectedId: anchor.id,
-      anchoredHop: anchor,
+      selectedId: zeroAnchor.id,
+      anchoredHop: zeroAnchor,
       historyTotalItems: 4,
       historyComplete: false,
     });
     expect(readProbe(container).currentTransition?.absoluteHop).toBeNull();
 
-    const missingHop = { ...anchor, id: "anchored-missing" };
+    const missingHop = event("anchored-missing", "changed", "/a", "/b");
+    expect(Object.prototype.hasOwnProperty.call(missingHop, "hopNumber")).toBe(false);
     await renderProbe({
       history: [],
       selectedId: missingHop.id,
@@ -467,7 +552,13 @@ describe("useAuditReplay transition exposure", () => {
       historyTotalItems: 4,
       historyComplete: false,
     });
-    expect(readProbe(container).currentTransition?.absoluteHop).toBeNull();
+    const result = readProbe(container);
+    expect(result.currentTransition).toMatchObject({
+      eventId: missingHop.id,
+      absoluteHop: null,
+    });
+    expect(result.displayedHistoryIds).toEqual([]);
+    expect(result.displayedTransitions).toEqual([]);
   });
 
   it("returns no current transition when there is no current event", async () => {

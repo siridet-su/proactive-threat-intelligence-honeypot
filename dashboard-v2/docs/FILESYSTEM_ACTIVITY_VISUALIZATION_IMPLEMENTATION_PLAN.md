@@ -634,6 +634,22 @@ Anchored events outside the loaded page use their valid authoritative `hopNumber
 `displayedTransitions`, and expose `absoluteHop: null` when that number is missing, unsafe, non-positive,
 or contradictory with the retained total. `successfulHopNumber` is not used for this model.
 
+Anchored hop validation matrix:
+
+| `event.hopNumber` / retained total | `absoluteHop` |
+| --- | ---: |
+| undefined or absent | `null` |
+| `0` | `null` |
+| negative integer | `null` |
+| fractional number | `null` |
+| `NaN` | `null` |
+| positive `Infinity` | `null` |
+| unsafe integer (`Number.MAX_SAFE_INTEGER + 1`) | `null` |
+| valid positive safe integer within retained total | preserved |
+| valid hop equal to retained total | preserved |
+| valid hop greater than retained total | `null` |
+| valid hop with invalid or unavailable retained total | preserved; no contradictory upper bound is available |
+
 `AuditReplayPresentation` and `UseAuditReplayReturn` now expose typed `displayedTransitions` and
 `currentTransition`. The displayed array remains one-to-one with `displayedHistory`; the current loaded
 transition is selected by the same displayed index, while an anchored current transition is derived by
