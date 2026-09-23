@@ -824,7 +824,7 @@
   background: var(--surface-raised);
   color: var(--text);
   box-shadow: var(--shadow-raised);
-  content: attr(aria-label);
+  content: attr(data-tooltip-label);
   font-size: 0.75rem;
   font-weight: 500;
   line-height: 1rem;

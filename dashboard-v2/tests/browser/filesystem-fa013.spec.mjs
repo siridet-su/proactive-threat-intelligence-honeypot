@@ -155,7 +155,7 @@ test.describe("FA-013 real-browser evidence", () => {
 
     await page.getByRole("combobox").first().click();
     await page.getByRole("option", { name: /198\.51\.100\.7/ }).click();
-    await expect(page.getByTitle("Previous hop", { exact: true })).toBeVisible();
+    await expect(page.locator('button[data-tooltip-label="Previous hop"]')).toBeVisible();
     await assertFilesystemState({
       search: "?view=audit&sessionId=closed-session",
       live: false,
@@ -186,7 +186,7 @@ test.describe("FA-013 real-browser evidence", () => {
     });
 
     const historyLength = await page.evaluate(() => window.history.length);
-    await page.getByTitle("Previous hop", { exact: true }).click();
+    await page.locator('button[data-tooltip-label="Previous hop"]').click();
     await assertFilesystemState({
       search: "?view=audit&sessionId=closed-session&hideHome=1&targetPath=%2Fvar%2Flog&hop=hop-one",
       live: false,
@@ -250,7 +250,7 @@ test.describe("FA-013 real-browser evidence", () => {
     });
     await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toHaveCount(0);
     await expect(page.getByRole("combobox")).toHaveCount(0);
-    await expect(page.getByTitle("Previous hop", { exact: true })).toHaveCount(0);
+    await expect(page.locator('button[data-tooltip-label="Previous hop"]')).toHaveCount(0);
     expect(await page.evaluate(() => window.history.length)).toBe(historyLength + 1);
 
     await page.goForward();
@@ -691,6 +691,8 @@ test.describe("FA-013 real-browser evidence", () => {
                 (button.textContent ?? "").trim(),
               ),
               hasKeyboardTooltip: button.hasAttribute("data-keyboard-tooltip"),
+              customTooltipLabel: button.getAttribute("data-tooltip-label"),
+              hasNativeTitle: button.hasAttribute("title"),
             };
           }),
       );
@@ -701,6 +703,8 @@ test.describe("FA-013 real-browser evidence", () => {
       expect(mapTargets.filter((target) => target.iconOnly && target.width < 40)).toEqual([]);
       expect(mapTargets.filter((target) => target.iconOnly && !target.hasAccessibleName)).toEqual([]);
       expect(mapTargets.filter((target) => target.iconOnly && !target.hasKeyboardTooltip)).toEqual([]);
+      expect(mapTargets.filter((target) => target.hasKeyboardTooltip && !target.customTooltipLabel)).toEqual([]);
+      expect(mapTargets.filter((target) => target.hasKeyboardTooltip && target.hasNativeTitle)).toEqual([]);
       const zoomOut = page.getByRole("button", { name: "Zoom out" });
       await zoomOut.focus();
       await expect.poll(() => zoomOut.evaluate((button) => ({
@@ -714,6 +718,8 @@ test.describe("FA-013 real-browser evidence", () => {
       expect(timelineTargets.filter((target) => target.iconOnly && target.width < 40)).toEqual([]);
       expect(timelineTargets.filter((target) => target.iconOnly && !target.hasAccessibleName)).toEqual([]);
       expect(timelineTargets.filter((target) => target.iconOnly && !target.hasKeyboardTooltip)).toEqual([]);
+      expect(timelineTargets.filter((target) => target.hasKeyboardTooltip && !target.customTooltipLabel)).toEqual([]);
+      expect(timelineTargets.filter((target) => target.hasKeyboardTooltip && target.hasNativeTitle)).toEqual([]);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
       await assertNoBrowserFailures(page);
     } finally {

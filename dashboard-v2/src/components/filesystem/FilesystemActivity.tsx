@@ -1130,8 +1130,8 @@ export function FilesystemActivity() {
                             onClick={handlePrevHop}
                             disabled={selectedHistoryIndex <= 0}
                             className="ui-button h-9 min-h-9 w-9 p-0"
-                            title="Previous hop (←)"
                             aria-label="Previous hop"
+                            data-tooltip-label="Previous hop (←)"
                             data-keyboard-tooltip
                           >
                             <ChevronLeft className="h-3.5 w-3.5" />
@@ -1153,8 +1153,8 @@ export function FilesystemActivity() {
                             onClick={handleNextHop}
                             disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                             className="ui-button h-9 min-h-9 w-9 p-0"
-                            title="Next hop (→)"
                             aria-label="Next hop"
+                            data-tooltip-label="Next hop (→)"
                             data-keyboard-tooltip
                           >
                             <ChevronRight className="h-3.5 w-3.5" />
@@ -1301,8 +1301,8 @@ export function FilesystemActivity() {
                     onClick={handlePrevHop}
                     disabled={selectedHistoryIndex <= 0}
                     className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Previous hop (←)"
                     aria-label="Previous hop"
+                    data-tooltip-label="Previous hop (←)"
                     data-keyboard-tooltip
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
@@ -1324,8 +1324,8 @@ export function FilesystemActivity() {
                     onClick={handleNextHop}
                     disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                     className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Next hop (→)"
                     aria-label="Next hop"
+                    data-tooltip-label="Next hop (→)"
                     data-keyboard-tooltip
                   >
                     <ChevronRight className="h-3.5 w-3.5" />

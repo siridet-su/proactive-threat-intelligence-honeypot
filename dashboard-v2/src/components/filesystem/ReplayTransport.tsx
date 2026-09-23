@@ -166,8 +166,8 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Jump to first hop"
               aria-label="First hop"
+              data-tooltip-label="Jump to first hop"
               data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(0)}
@@ -177,8 +177,8 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Previous hop"
               aria-label="Previous hop"
+              data-tooltip-label="Previous hop"
               data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(Math.max(0, selectedHistoryIndex - 1))}
@@ -217,8 +217,8 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Next hop"
               aria-label="Next hop"
+              data-tooltip-label="Next hop"
               data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(Math.min(displayedHistoryLength - 1, selectedHistoryIndex + 1))}
@@ -228,8 +228,8 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Jump to latest hop"
               aria-label="Latest hop"
+              data-tooltip-label="Jump to latest hop"
               data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(displayedHistoryLength - 1)}

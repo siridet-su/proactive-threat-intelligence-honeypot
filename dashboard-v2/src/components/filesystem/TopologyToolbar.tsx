@@ -127,8 +127,8 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Zoom out"
           aria-label="Zoom out"
+          data-tooltip-label="Zoom out"
           data-keyboard-tooltip
           onClick={() => zoomOut()}
         >
@@ -144,8 +144,8 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Zoom in"
           aria-label="Zoom in"
+          data-tooltip-label="Zoom in"
           data-keyboard-tooltip
           onClick={() => zoomIn()}
         >
@@ -157,8 +157,8 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Fit topology in view"
           aria-label="Fit topology in view"
+          data-tooltip-label="Fit topology in view"
           data-keyboard-tooltip
           onClick={fitTopology}
         >
@@ -167,8 +167,8 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Center selected IP"
           aria-label="Center selected IP"
+          data-tooltip-label="Center selected IP"
           data-keyboard-tooltip
           onClick={() => {
             // Selection is supplied by the live client stream and can differ
@@ -370,7 +370,7 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-9 min-h-9 w-9 p-0"
-          title={
+          data-tooltip-label={
             isTopologyExpanded
               ? isAuditMode
                 ? "Exit fullscreen audit studio"

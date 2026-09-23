@@ -58,7 +58,7 @@ export function ForensicTimestampRow({
             type="button"
             onClick={() => void copyIsoTimestamp()}
             aria-label={`Copy ${label} ISO timestamp`}
-            title={`Copy ${label} ISO timestamp`}
+            data-tooltip-label={`Copy ${label} ISO timestamp`}
             data-keyboard-tooltip
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
           >
