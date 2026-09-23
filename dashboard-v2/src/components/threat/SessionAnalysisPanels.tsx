@@ -978,6 +978,31 @@ function tiTimestampLabel(value: unknown): string {
   }).format(timestamp);
 }
 
+function providerName(value: unknown): string {
+  const name = String(value || "").toLowerCase();
+  return ({ abuseipdb: "AbuseIPDB", otx: "AlienVault OTX", shodan_official: "Shodan" } as Record<string, string>)[name] || readableCode(value);
+}
+
+function providerResult(provider: unknown, normalized: JsonRecord): string {
+  const name = String(provider || "").toLowerCase();
+  if (name === "abuseipdb") {
+    const score = hasMeaningfulValue(normalized.abuse_confidence_score) ? `${display(normalized.abuse_confidence_score)}/100` : "not reported";
+    const reports = hasMeaningfulValue(normalized.total_reports) ? `${display(normalized.total_reports)} community reports` : "report count unavailable";
+    return `AbuseIPDB score: ${score} · ${reports}. This is provider reputation, not model confidence.`;
+  }
+  if (name === "otx") {
+    const pulses = list(normalized.pulses).map(record);
+    const count = hasMeaningfulValue(normalized.pulse_count) ? display(normalized.pulse_count) : String(pulses.length);
+    return `OTX pulse matches: ${count}. A pulse match is third-party context, not confirmed session behavior.`;
+  }
+  if (name === "shodan_official") {
+    const ports = list(normalized.ports).slice(0, 8).map(String).join(", ");
+    const asn = hasMeaningfulValue(normalized.asn) ? `ASN ${display(normalized.asn)}` : "ASN not reported";
+    return `Internet-facing host context: ${ports ? `ports ${ports}` : "ports not reported"} · ${asn}. These are not ports observed in Cowrie.`;
+  }
+  return "Provider context is stored; inspect the details below for its bounded result.";
+}
+
 function ProviderContextRows({
   evidence,
   cache,
@@ -1078,14 +1103,16 @@ function ProviderContextRows({
         const pulses = list(normalized.pulses).map(record);
         const freshness = sourceIpCacheFreshness(item, asOf);
         return (
-          <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+          <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono font-semibold text-text">{summaryValue(item.provider, "provider unavailable")} cache</span>
-              <span className="ui-badge text-[11px]">{tiLookupState(item, freshness)}</span>
+              <span className="text-base font-semibold text-text">{providerName(item.provider)}</span>
+              <span className="ui-badge text-xs">{freshnessLabel(freshness)}</span>
             </div>
-            <p className="mt-1 text-text-muted">lookup: {summaryValue(item.lookup_at, "Not recorded")} · expires: {summaryValue(item.expires_at, "Not recorded")} · freshness: {freshnessLabel(freshness)}</p>
+            <p className="mt-2 text-sm leading-6 text-text">{providerResult(item.provider, normalized)}</p>
+            {item.provider === "otx" && pulses.length > 0 && <p className="mt-1 text-sm text-text-muted">Example: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
+            <p className="mt-2 text-xs text-text-muted">Checked {tiTimestampLabel(item.lookup_at)} · valid until {tiTimestampLabel(item.expires_at)}</p>
             <TraceabilityDetails
-              title="Cached provider and observable details"
+              title="Lookup provenance and technical details"
               fields={[
                 ["Provider", summaryValue(item.provider, "Not recorded")],
                 ["Observable", summaryValue(item.observable_value || observable.value, "Not recorded")],
@@ -1099,24 +1126,12 @@ function ProviderContextRows({
                 ["Data age", dataAge(item.lookup_at)],
               ]}
             />
-            {item.provider === "abuseipdb" && hasMeaningfulValue(normalized.abuse_confidence_score) && (
-              <p className="mt-2 rounded-md border border-warning-border bg-warning-subtle p-2 text-text">
-                AbuseIPDB score: <strong>{display(normalized.abuse_confidence_score)}/100</strong> · {summaryValue(normalized.total_reports, "Unknown")} community reports. Provider reputation, not our model confidence or proof of activity in this session.
-              </p>
-            )}
-            {item.provider === "otx" && (
-              <div className="mt-2 rounded-md border border-border bg-surface p-2 text-text">
-                <p className="font-semibold">OTX pulse matches: {pulses.length}{normalized.truncated === true ? "+ (list truncated)" : ""}</p>
-                {pulses.length > 0 && <ul className="mt-1 list-inside list-disc space-y-1 text-text-muted">{pulses.slice(0, 3).map((pulse, pulseIndex) => <li key={`${pulseIndex}-${label(pulse.pulse_id)}`}>{summaryValue(pulse.name, "Unnamed pulse").slice(0, 120)}</li>)}</ul>}
-                <p className="mt-1 text-text-muted">Pulse matches are third-party context, not confirmed behavior by this source in our session.</p>
+            {context.length > 0 && <details className="mt-3 rounded-lg border border-border p-3 text-sm"><summary className="cursor-pointer font-medium text-text">Additional provider fields</summary><dl className="mt-3 grid gap-2 sm:grid-cols-2">{context.slice(0, 12).map(([key, value]) => (
+              <div key={key} className="rounded-md border border-border bg-surface-subtle p-2">
+                <dt className="text-xs text-text-subtle">{readableCode(key)}</dt>
+                <dd className="mt-1 break-words text-sm text-text">{value}</dd>
               </div>
-            )}
-            {context.length > 0 && <dl className="mt-2 grid gap-2 sm:grid-cols-2">{context.slice(0, 12).map(([key, value]) => (
-              <div key={key} className="rounded-md border border-border bg-surface p-2">
-                <dt className="text-[10px] uppercase tracking-[0.08em] text-text-subtle">{readableCode(key)}</dt>
-                <dd className="mt-1 break-words font-medium text-text">{value}</dd>
-              </div>
-            ))}</dl>}
+            ))}</dl></details>}
           </div>
         );
       })}
@@ -1269,7 +1284,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
         </p>
       )}
       {entities.length > 0 && <ScrollPanel title="Shared entities" count={entities.length} height="max-h-64"><ObservableList items={entities} empty="No shared entities are recorded." /></ScrollPanel>}
-      <ScrollPanel title="Provider results and freshness" count={evidence.length + cache.length} height="max-h-96">
+      <ScrollPanel title="What the providers reported" count={evidence.length + cache.length} height="max-h-[32rem]">
         <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
       </ScrollPanel>
       {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (

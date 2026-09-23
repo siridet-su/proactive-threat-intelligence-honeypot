@@ -355,7 +355,7 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     assert "TI_AVAILABLE" in text
     assert "virustotal" in text
     assert "Review the recorded evidence before action." in text
-    assert "Latest provider/cache lookup" in text
+    assert "Last checked" in text
     assert "28 Jul 2026, 17:10:30 ICT" in text
     assert "Redacted before persistence" in text
     assert "Internal Infrastructure Context" in text
@@ -444,6 +444,8 @@ def test_pdf_shows_reviewed_legacy_source_ip_provider_context(tmp_path: Path) ->
     text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
     assert "TI_AVAILABLE" in text
     assert "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY" in text
+    assert "What the providers reported" in text
+    assert "OK / UNKNOWN" not in text
     assert "abuse score: 23" in text
     assert "reports: 4" in text
 

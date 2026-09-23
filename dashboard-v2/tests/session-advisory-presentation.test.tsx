@@ -19,6 +19,10 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Observed SSH scanner feed");
     expect(html).toContain("ssh 22");
     expect(html).toContain("3 source-IP provider lookup results");
+    expect(html).toContain("What the providers reported");
+    expect(html).toContain("Lookup provenance and technical details");
+    expect(html).not.toContain("abuseipdb cache");
+    expect(html).not.toContain("normalized context:");
     expect(html).not.toContain("6 source-IP provider lookup results");
   });
 

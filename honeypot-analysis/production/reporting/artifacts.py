@@ -2595,44 +2595,31 @@ def write_pdf_report(
                 return counts.get(count_key)
             return None
 
-        eligible_types = external_summary.get("eligible_observable_types")
-        if not isinstance(eligible_types, list):
-            eligible_types = counts.get("eligible_observable_types")
+        cache_count = _ti_count("source_ip_cache_records_found", "source_ip_cache_records")
+        story.append(_p(
+            f"Provider context: {cache_count if cache_count is not None else 'no'} source-IP lookup results; "
+            f"{_ti_count('evidence_returned', 'evidence_returned') or 0} separately linked findings. "
+            f"{ti_status_reason_text}",
+            body,
+        ))
         ti_rows = [
-            ["TI field", "Recorded value"],
-            ["Projection status", ti_display_status],
-            ["State reason", ti_display_status_reason],
-            ["State explanation", ti_status_reason_text],
+            ["At a glance", "Recorded result"],
+            ["Intelligence state", ti_display_status],
             ["Freshness", _ti_display_status(freshness.get("state"))],
-            ["Latest provider/cache lookup", _format_timestamp(latest_ti_retrieval)],
-            ["Provider/cache result age", _freshness_age(latest_ti_retrieval, generated_at)],
+            ["Last checked", _format_timestamp(latest_ti_retrieval)],
             ["Eligible observables", _ti_count("eligible_observable_count", "eligible_observables")],
-            ["Eligible types", ", ".join(str(item) for item in eligible_types or []) or None],
-            ["Stored records / evidence", (
-                f"{_ti_count('records_found', 'records_found')} / "
-                f"{_ti_count('evidence_returned', 'evidence_returned')}"
-                if _ti_count("records_found", "records_found") is not None
-                or _ti_count("evidence_returned", "evidence_returned") is not None
-                else None
-            )],
-            ["Source-IP cache records", _ti_count("source_ip_cache_records_found", "source_ip_cache_records")],
-            ["Source-IP cache policy binding", ", ".join(
-                str(item)
-                for item in (
-                    external_summary.get("source_ip_cache_policy_bindings")
-                    or []
-                )
-            ) or None],
-            ["Source-IP cache freshness", external_summary.get("source_ip_cache_freshness")],
-            ["Latest source-IP cache lookup", _format_timestamp(
-                external_summary.get("source_ip_cache_latest_lookup_at")
-            )],
-            ["Shared entities", _ti_count("shared_entity_count", "shared_entities")],
-            ["Authority", external_summary.get("authority") or "CONTEXT_ONLY"],
+            ["Provider results", cache_count],
         ]
         if external_context.get("ok") is False:
             ti_rows.append(["Projection status", "Projection unavailable"])
         story.append(_table(ti_rows, [5.2 * cm, 11.8 * cm]))
+        policy_bindings = external_summary.get("source_ip_cache_policy_bindings") or []
+        if policy_bindings:
+            story.append(_p(
+                "Audit: provider results are non-authoritative context. Policy binding: "
+                + ", ".join(str(item) for item in policy_bindings[:3]),
+                small,
+            ))
 
         provider_rows = [["Provider", "Status", "Lookup / finding", "Records", "Freshness"]]
         provider_status = external_context.get("provider_status")
@@ -2664,7 +2651,7 @@ def write_pdf_report(
                 _table(provider_rows, [3.3 * cm, 3.0 * cm, 4.6 * cm, 2.0 * cm, 4.1 * cm]),
             ])
 
-        evidence_rows = [["Provider", "Observable", "Finding", "Summary / freshness"]]
+        evidence_rows = [["Provider / source", "What the provider reported", "Checked / freshness"]]
         for evidence in (external_context.get("evidence") or [])[:10]:
             if not isinstance(evidence, dict):
                 continue
@@ -2685,13 +2672,9 @@ def write_pdf_report(
             )
             evidence_rows.append([
                 provider,
-                observable_text,
-                f"{evidence.get('lookup_status') or '—'} / {evidence.get('finding_state') or '—'}",
-                (
-                    f"{_external_evidence_details(evidence)}; "
-                    f"{evidence.get('freshness_state') or 'freshness unavailable'}; "
-                    f"retrieved {_format_timestamp(evidence.get('retrieved_at'))}"
-                ),
+                f"{observable_text}: {_external_evidence_details(evidence)}",
+                (f"{_format_timestamp(evidence.get('retrieved_at'))}; "
+                 f"{evidence.get('freshness_state') or 'freshness unavailable'}"),
             ])
         remaining_evidence = max(0, 10 - len(evidence_rows) + 1)
         for cache_item in (external_context.get("source_ip_cache") or [])[:remaining_evidence]:
@@ -2704,28 +2687,21 @@ def write_pdf_report(
             if not isinstance(normalized_context, dict):
                 normalized_context = {}
             lookup_status = str(cache_item.get("lookup_status") or "UNAVAILABLE").strip()
-            finding_state = str(
-                normalized_context.get("finding_state")
-                or normalized_context.get("status")
-                or "UNKNOWN"
-            ).strip()
-            binding = str(
-                cache_item.get("policy_binding")
-                or "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"
-            )
+            if lookup_status != "OK":
+                result = f"Lookup status: {lookup_status}. No provider finding is inferred."
+            else:
+                result = _external_evidence_details({"normalized_extension": normalized_context})
+            cache_freshness = str(cache_item.get("freshness_state") or external_summary.get("source_ip_cache_freshness") or "not recorded")
             evidence_rows.append([
-                provider,
-                "session source IP",
-                f"{lookup_status} / {finding_state}",
-                (
-                    f"{_external_evidence_details({'normalized_extension': normalized_context})}; "
-                    f"{binding}; retrieved {_format_timestamp(cache_item.get('lookup_at'))}"
-                ),
+                f"{provider} (source IP)",
+                result,
+                f"{_format_timestamp(cache_item.get('lookup_at'))}; {cache_freshness}",
             ])
         if len(evidence_rows) > 1:
             story.extend([
-                _p("Bounded provider evidence (maximum 10 rows)", h2),
-                _table(evidence_rows, [2.8 * cm, 4.9 * cm, 3.7 * cm, 5.6 * cm]),
+                _p("What the providers reported (maximum 10 results)", h2),
+                _p("These are third-party observations about the source or artifact, not proof of activity in this Cowrie session. Provider reputation scores are not model confidence.", body),
+                _table(evidence_rows, [3.5 * cm, 9.3 * cm, 4.2 * cm]),
             ])
         else:
             story.append(_p(
