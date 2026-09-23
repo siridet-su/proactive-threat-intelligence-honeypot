@@ -47,14 +47,24 @@ runtime:
 - `GET /api/hardware/stream`: SSE from one process-shared MongoDB change
   stream watching `hardware_live` insert/replace events. It sends the latest
   30 slots first and a heartbeat every 15 seconds.
-- `GET /api/hardware`: latest 30 `hardware_live` slots, falling back to
-  `hardware_metrics_1m` and then legacy `hardware_metrics`.
+- `GET /api/hardware`: latest 30 `hardware_live` slots.
+- `GET /api/hardware/history`: bounded historical points from
+  `hardware_metrics_1m`; legacy `hardware_metrics` is not a runtime source.
+
+The history route accepts `range=1h|6h|24h|7d|30d` (default `24h`) or
+`range=custom&from=<ISO>&to=<ISO>` for a precise date/time window. Custom
+ranges are limited to the retained 30 days and cannot end in the future. An
+optional `sensor_id` narrows the result. It returns one series per sensor with
+minute rollup timestamps and `{min,avg,max}` metric summaries; long ranges are
+bounded to a maximum of 720 chart points.
 
 `hardware_live` is a bounded real-time projection, not an audit collection.
-Its current samples contain the values needed by System Health: total and
-per-core CPU utilization, memory and root-disk capacity values, temperature,
-and `wlan0` RX/TX throughput. Raw counters and audit-only collector fields are
-kept outside this browser-facing live ring.
+Its current `hardware_live.v3` samples contain the values needed by System
+Health: total and per-core CPU utilization, canonical memory pressure plus
+capacity values, root-disk percentage and capacity values, temperature, and
+`wlan0` RX/TX throughput. Raw counters, legacy memory aliases, and audit-only
+collector fields are kept outside this browser-facing live ring. Older v2
+documents remain readable during the rolling deployment.
 
 ## Error contract
 

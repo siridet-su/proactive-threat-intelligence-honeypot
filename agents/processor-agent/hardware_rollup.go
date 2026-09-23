@@ -20,19 +20,30 @@ import (
 // Health. Raw interface counters, collector semantics, and audit-only fields
 // remain outside hardware_live.
 var hardwareLiveFields = map[string]struct{}{
-	"cpu_percent":         {},
-	"cpu_core_percent":    {},
-	"mem_percent":         {},
-	"mem_total_bytes":     {},
-	"mem_available_bytes": {},
-	"mem_used_bytes":      {},
-	"disk_percent":        {},
-	"disk_total_bytes":    {},
-	"disk_free_bytes":     {},
-	"disk_used_bytes":     {},
-	"temperature":         {},
-	"net_wlan0_rx_mbps":   {},
-	"net_wlan0_tx_mbps":   {},
+	"cpu_percent":          {},
+	"cpu_core_percent":     {},
+	"mem_total_bytes":      {},
+	"mem_available_bytes":  {},
+	"mem_pressure_percent": {},
+	"disk_percent":         {},
+	"disk_total_bytes":     {},
+	"disk_free_bytes":      {},
+	"temperature":          {},
+	"net_wlan0_rx_mbps":    {},
+	"net_wlan0_tx_mbps":    {},
+}
+
+// hardwareRollupFields is deliberately smaller than hardwareLiveFields. The
+// history collection stores only the canonical trend metrics used by the
+// dashboard; raw counters, per-core values, capacities, and virtual-interface
+// rates remain out of the minute rollup.
+var hardwareRollupFields = map[string]struct{}{
+	"cpu_percent":          {},
+	"mem_pressure_percent": {},
+	"disk_percent":         {},
+	"temperature":          {},
+	"net_wlan0_rx_mbps":    {},
+	"net_wlan0_tx_mbps":    {},
 }
 
 const (
@@ -59,7 +70,6 @@ type hardwareAccumulator struct {
 	firstAt     time.Time
 	lastAt      time.Time
 	sampleCount int64
-	latest      map[string]any
 	numeric     map[string]*numericRollup
 }
 
@@ -69,6 +79,38 @@ func normalizeHardwareValue(value any) any {
 		return number
 	}
 	return text
+}
+
+func numericHardwareValue(values map[string]any, key string) (float64, bool) {
+	value, ok := values[key]
+	if !ok {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(valueToString(value), 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+		return 0, false
+	}
+	return number, true
+}
+
+// ensureMemoryPressureFields keeps rolling deployments safe: an older agent
+// may still publish total/available memory while the processor has already
+// switched to the canonical pressure fields.
+func ensureMemoryPressureFields(values map[string]any) {
+	total, hasTotal := numericHardwareValue(values, "mem_total_bytes")
+	available, hasAvailable := numericHardwareValue(values, "mem_available_bytes")
+	if !hasTotal || !hasAvailable {
+		return
+	}
+
+	if _, exists := values["mem_pressure_percent"]; exists || total <= 0 {
+		return
+	}
+	pressureUsed := total - available
+	if pressureUsed < 0 {
+		pressureUsed = 0
+	}
+	values["mem_pressure_percent"] = pressureUsed / total * 100
 }
 
 func parseHardwareSample(message redis.XMessage) (hardwareSample, bool) {
@@ -100,6 +142,7 @@ func parseHardwareSample(message redis.XMessage) (hardwareSample, bool) {
 		sensorID = "hardware-sensor"
 		values["sensor_id"] = sensorID
 	}
+	ensureMemoryPressureFields(values)
 	return hardwareSample{at: at, sensorID: sensorID, values: values}, true
 }
 
@@ -120,11 +163,10 @@ func buildHardwareLiveDocument(message redis.XMessage, slotCount int) (bson.M, b
 		}
 	}
 	document["_id"] = fmt.Sprintf("%s:%d", sample.sensorID, slot)
-	document["schema_version"] = "hardware_live.v2"
+	document["schema_version"] = "hardware_live.v3"
 	document["sensor_id"] = sample.sensorID
 	document["slot"] = slot
 	document["timestamp"] = sample.at
-	document["sample_unix"] = sample.at.Unix()
 	return document, true
 }
 
@@ -150,13 +192,8 @@ func writeHardwareLiveSample(
 }
 
 func isHardwareRollupMetric(name string) bool {
-	switch name {
-	case "cpu_percent", "mem_percent", "mem_pressure_percent", "disk_percent", "temperature":
-		return true
-	}
-	return strings.HasSuffix(name, "_bytes_per_second") ||
-		strings.HasSuffix(name, "_packets_per_second") ||
-		strings.HasSuffix(name, "_mbps")
+	_, keep := hardwareRollupFields[name]
+	return keep
 }
 
 func (accumulator *hardwareAccumulator) add(sample hardwareSample) {
@@ -165,7 +202,6 @@ func (accumulator *hardwareAccumulator) add(sample hardwareSample) {
 	}
 	if accumulator.sampleCount == 0 || !sample.at.Before(accumulator.lastAt) {
 		accumulator.lastAt = sample.at
-		accumulator.latest = sample.values
 	}
 	accumulator.sampleCount++
 
@@ -230,9 +266,6 @@ func buildHardwareMinuteRollups(
 	for _, sensorID := range sensorIDs {
 		accumulator := bySensor[sensorID]
 		document := bson.M{}
-		for key, value := range accumulator.latest {
-			document[key] = value
-		}
 
 		summary := bson.M{}
 		for name, metric := range accumulator.numeric {
@@ -244,11 +277,9 @@ func buildHardwareMinuteRollups(
 		}
 
 		document["_id"] = fmt.Sprintf("%s:%d", sensorID, bucketStart.Unix())
-		document["schema_version"] = "hardware_metrics_1m.v1"
+		document["schema_version"] = "hardware_metrics_1m.v2"
 		document["sensor_id"] = sensorID
 		document["timestamp"] = bucketStart
-		document["bucket_end"] = bucketEnd
-		document["resolution_seconds"] = int64(hardwareRollupResolution / time.Second)
 		document["sample_count"] = accumulator.sampleCount
 		document["sample_first_at"] = accumulator.firstAt
 		document["sample_last_at"] = accumulator.lastAt

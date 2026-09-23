@@ -6,6 +6,7 @@ import { CloudOff, Cpu, FlipHorizontal2, HardDrive, MemoryStick, Radio, RefreshC
 
 import { formatHardwareMetric, isHardwareTelemetry, parseHardwareStreamMessage } from "@/lib/dashboardTypes";
 import type { HardwareChartRecord, HardwareTelemetry } from "@/lib/dashboardTypes";
+import { HardwareHistory } from "@/components/dashboard/HardwareHistory";
 import { RegionState } from "@/components/ui/RegionState";
 
 const MAX_SAMPLES = 30;
@@ -29,6 +30,25 @@ function formatBytes(value: number | string | null | undefined) {
   let index = 0;
   while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index += 1; }
   return `${value < 0 ? "-" : ""}${amount.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+}
+function memoryPercent(metric: HardwareTelemetry | null | undefined) {
+  return metric?.mem_pressure_percent ?? metric?.mem_percent;
+}
+function memoryUsedBytes(metric: HardwareTelemetry | null | undefined) {
+  const direct = metric?.mem_used_bytes;
+  if (direct !== undefined && direct !== null) return direct;
+  if (typeof metric?.mem_total_bytes === "number" && typeof metric.mem_available_bytes === "number") {
+    return Math.max(0, metric.mem_total_bytes - metric.mem_available_bytes);
+  }
+  return null;
+}
+function diskUsedBytes(metric: HardwareTelemetry | null | undefined) {
+  const direct = metric?.disk_used_bytes;
+  if (direct !== undefined && direct !== null) return direct;
+  if (typeof metric?.disk_total_bytes === "number" && typeof metric.disk_free_bytes === "number") {
+    return Math.max(0, metric.disk_total_bytes - metric.disk_free_bytes);
+  }
+  return null;
 }
 function formatAge(milliseconds: number) { if (milliseconds < 5_000) return "just now"; if (milliseconds < 60_000) return `${Math.floor(milliseconds / 1_000)}s ago`; return `${Math.floor(milliseconds / 60_000)}m ago`; }
 
@@ -152,13 +172,14 @@ export function HardwareMonitor() {
     {loading && metrics.length === 0 ? <HardwareSkeleton /> : metrics.length === 0 ? <RegionState kind={fetchFailed ? "error" : "empty"} title={fetchFailed ? "Hardware telemetry unavailable" : "No hardware telemetry"} description={fetchFailed ? "The hardware service could not be reached. You can retry now or wait for the next automatic refresh." : "No verified telemetry samples were returned from hardware_live."} /> : <div className="flex min-h-0 flex-1 flex-col gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <MetricCard icon={Cpu} label="CPU usage" value={formatPercent(latest?.cpu_percent)} details={latest?.cpu_core_percent?.map((percentage, index) => ({ label: `Core ${index + 1}`, value: formatPercent(percentage) })) ?? []} />
-        <MetricCard icon={MemoryStick} label="Memory" value={formatPercent(latest?.mem_percent)} details={[{ label: "Used", value: formatBytes(latest?.mem_used_bytes) }, { label: "Available", value: formatBytes(latest?.mem_available_bytes) }, { label: "Total", value: formatBytes(latest?.mem_total_bytes) }]} />
-        <MetricCard icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} details={[{ label: "Used", value: formatBytes(latest?.disk_used_bytes) }, { label: "Free", value: formatBytes(latest?.disk_free_bytes) }, { label: "Total", value: formatBytes(latest?.disk_total_bytes) }]} />
+        <MetricCard icon={MemoryStick} label="Memory" value={formatPercent(memoryPercent(latest))} details={[{ label: "Used", value: formatBytes(memoryUsedBytes(latest)) }, { label: "Available", value: formatBytes(latest?.mem_available_bytes) }, { label: "Total", value: formatBytes(latest?.mem_total_bytes) }]} />
+        <MetricCard icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} details={[{ label: "Used", value: formatBytes(diskUsedBytes(latest)) }, { label: "Free", value: formatBytes(latest?.disk_free_bytes) }, { label: "Total", value: formatBytes(latest?.disk_total_bytes) }]} />
         <MetricCard icon={Thermometer} label="Temperature" value={formatTemperature(latest?.temperature)} details={[{ label: "Latest sample", value: latest?.time ?? "—" }, { label: "Reading", value: formatTemperature(latest?.temperature) }]} />
         <MetricCard icon={Wifi} label="wlan0 · RX / TX" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} suffix="Mbps" details={[{ label: "RX", value: `${formatThroughput(latest?.net_wlan0_rx_mbps)} Mbps` }, { label: "TX", value: `${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps` }]} />
       </div>
       <div className="grid min-h-[220px] flex-1 grid-cols-1 gap-4 lg:grid-cols-3"><HardwareChart title="CPU history" description={`${metrics.length} most recent verified samples`} data={metrics} dataKey="cpu_percent" domain={[0, 100]} stroke="var(--chart-1)" fill="var(--chart-1-subtle)" /><HardwareChart title="Thermal history" description="Temperature in °C" data={metrics} dataKey="temperature" stroke="var(--warning)" fill="var(--warning-subtle)" /><ThroughputChart data={metrics} /></div>
     </div>}
+    <HardwareHistory />
   </div>;
 }
 

@@ -86,19 +86,25 @@ func metricInterfaceName(name string) string {
 	return strings.Trim(metricNameSanitizer.ReplaceAllString(name, "_"), "_")
 }
 
-// getTemp reads the Raspberry Pi CPU temperature
-func getTemp() float64 {
-	data, err := os.ReadFile("/sys/class/thermal/thermal_zone0/temp")
-	if err != nil {
-		return 0.0
-	}
+// getTemp reads the Raspberry Pi CPU temperature. The boolean is false when
+// the sensor cannot be read or parsed; a failed sensor must not become a
+// misleading 0°C sample in history.
+func parseTemperature(data []byte) (float64, bool) {
 	tempStr := strings.TrimSpace(string(data))
 	tempInt, err := strconv.Atoi(tempStr)
 	if err != nil {
-		return 0.0
+		return 0, false
 	}
 	// The value is in millidegrees Celsius
-	return float64(tempInt) / 1000.0
+	return float64(tempInt) / 1000.0, true
+}
+
+func getTemp() (float64, bool) {
+	data, err := os.ReadFile("/sys/class/thermal/thermal_zone0/temp")
+	if err != nil {
+		return 0, false
+	}
+	return parseTemperature(data)
 }
 
 func main() {
@@ -114,7 +120,7 @@ func main() {
 	)
 	snapshotInterfaces := flag.String(
 		"snapshot-interfaces",
-		"wlan0,tailscale0,lo",
+		"wlan0",
 		"comma-separated interface allowlist used by --snapshot-json",
 	)
 	snapshotPrimaryInterface := flag.String(
@@ -249,22 +255,20 @@ func collectHardwareMetrics(
 		takenAt,
 	)
 
-	// 5. Temperature
-	temp := getTemp()
-	values["temperature"] = fmt.Sprintf("%.2f", temp)
+	// 5. Temperature. Omit the field when the kernel sensor is unavailable so
+	// the processor can retain a missing value instead of averaging 0°C.
+	if temp, ok := getTemp(); ok {
+		values["temperature"] = fmt.Sprintf("%.2f", temp)
+	}
 
 	return values, currentNetwork
 }
 
 func addMemoryMetrics(values map[string]interface{}, memory *mem.VirtualMemoryStat) {
-	// Preserve the historical gopsutil fields for existing dashboards.  The
-	// explicit pressure fields use total-available, matching psutil and the
-	// experimental telemetry schema used by model training.
+	// Use one unambiguous memory definition for new samples. The pressure value
+	// is total-available, which is also what the history rollup uses.
 	values["mem_total_bytes"] = memory.Total
 	values["mem_available_bytes"] = memory.Available
-	values["mem_used_bytes"] = memory.Used
-	values["mem_percent"] = fmt.Sprintf("%.2f", memory.UsedPercent)
-	values["mem_used_semantics"] = "legacy_total_minus_free_buffers_cached"
 	pressureUsed := uint64(0)
 	if memory.Total >= memory.Available {
 		pressureUsed = memory.Total - memory.Available
@@ -273,9 +277,7 @@ func addMemoryMetrics(values map[string]interface{}, memory *mem.VirtualMemorySt
 	if memory.Total > 0 {
 		pressurePercent = float64(pressureUsed) / float64(memory.Total) * 100
 	}
-	values["mem_pressure_used_bytes"] = pressureUsed
 	values["mem_pressure_percent"] = fmt.Sprintf("%.2f", pressurePercent)
-	values["mem_pressure_semantics"] = "total_minus_available"
 }
 
 func addCPUMetrics(values map[string]interface{}, total []float64, cores []float64) {
@@ -299,7 +301,6 @@ func addCPUMetrics(values map[string]interface{}, total []float64, cores []float
 func addDiskMetrics(values map[string]interface{}, usage *disk.UsageStat) {
 	values["disk_total_bytes"] = usage.Total
 	values["disk_free_bytes"] = usage.Free
-	values["disk_used_bytes"] = usage.Used
 	values["disk_percent"] = fmt.Sprintf("%.2f", usage.UsedPercent)
 }
 
@@ -371,15 +372,10 @@ func collectNetworkMetrics(
 	}
 
 	current := &networkSample{takenAt: takenAt, byName: make(map[string]net.IOCountersStat)}
-	values["network_primary_interface"] = primaryInterface
-	values["network_interfaces"] = strings.Join(interfaces, ",")
 
 	elapsedSeconds := 0.0
 	if previous != nil {
 		elapsedSeconds = takenAt.Sub(previous.takenAt).Seconds()
-		if elapsedSeconds > 0 {
-			values["network_sample_interval_seconds"] = fmt.Sprintf("%.3f", elapsedSeconds)
-		}
 	}
 
 	for _, interfaceName := range interfaces {
@@ -392,16 +388,6 @@ func collectNetworkMetrics(
 
 		current.byName[interfaceName] = counter
 		values[prefix+"up"] = 1
-		addInterfaceMetrics(values, prefix, counter, nil, 0)
-
-		// Preserve the old fields for current dashboards, but define them as the
-		// primary physical interface counters rather than all interfaces combined.
-		if interfaceName == primaryInterface {
-			values["net_bytes_sent"] = counter.BytesSent
-			values["net_bytes_recv"] = counter.BytesRecv
-			values["net_packets_sent"] = counter.PacketsSent
-			values["net_packets_recv"] = counter.PacketsRecv
-		}
 
 		previousCounter, hadPrevious := net.IOCountersStat{}, false
 		if previous != nil {
@@ -424,23 +410,12 @@ func addInterfaceMetrics(
 	previous *net.IOCountersStat,
 	elapsedSeconds float64,
 ) {
-	values[prefix+"rx_bytes_total"] = counter.BytesRecv
-	values[prefix+"tx_bytes_total"] = counter.BytesSent
-	values[prefix+"rx_packets_total"] = counter.PacketsRecv
-	values[prefix+"tx_packets_total"] = counter.PacketsSent
-	values[prefix+"rx_errors_total"] = counter.Errin
-	values[prefix+"tx_errors_total"] = counter.Errout
-	values[prefix+"rx_dropped_total"] = counter.Dropin
-	values[prefix+"tx_dropped_total"] = counter.Dropout
-
 	if previous == nil || elapsedSeconds <= 0 {
 		return
 	}
 	if counter.BytesRecv >= previous.BytesRecv && counter.BytesSent >= previous.BytesSent {
 		rxBytesPerSecond := float64(counter.BytesRecv-previous.BytesRecv) / elapsedSeconds
 		txBytesPerSecond := float64(counter.BytesSent-previous.BytesSent) / elapsedSeconds
-		values[prefix+"rx_bytes_per_second"] = fmt.Sprintf("%.3f", rxBytesPerSecond)
-		values[prefix+"tx_bytes_per_second"] = fmt.Sprintf("%.3f", txBytesPerSecond)
 		values[prefix+"rx_mbps"] = fmt.Sprintf("%.6f", rxBytesPerSecond*8/1_000_000)
 		values[prefix+"tx_mbps"] = fmt.Sprintf("%.6f", txBytesPerSecond*8/1_000_000)
 	}

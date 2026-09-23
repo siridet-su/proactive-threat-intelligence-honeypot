@@ -15,7 +15,7 @@ Redis bounded, minute history enabled, and the TI worker disabled.
 ## Implementation
 
 - The processor maps each valid sample to
-  `slot = sample_unix % HARDWARE_LIVE_SLOTS`.
+  `slot = Unix(sample_timestamp) % HARDWARE_LIVE_SLOTS`.
 - `HARDWARE_LIVE_SLOTS` defaults to 30.
 - `ReplaceOne(..., upsert=true)` writes
   `hardware_live/<sensor_id>:<slot>` before acknowledging the Redis message.

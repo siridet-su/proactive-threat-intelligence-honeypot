@@ -5,8 +5,9 @@
 Implemented for new hardware telemetry on 2026-09-10. One-second samples remain
 in a bounded local Redis stream, while the processor replaces 30 fixed
 `hardware_live` MongoDB slots and upserts completed one-minute rollups.
-Existing legacy `hardware_metrics` documents without `expires_at` still
-require a deliberate migration before TTL can remove them.
+Existing legacy `hardware_metrics` documents are retained as historical/archive
+data; the active pipeline neither reads nor writes that collection, so no
+migration is required for the current live or history dashboard paths.
 
 ## Context
 
@@ -49,9 +50,9 @@ splits.
 | `sessions` | one redacted, bounded summary per SSH session | 90 days |
 | `attacker_profiles` | upserted IP-level counts and risk summary | 180 days or 10K profiles |
 | `threat_intel` | provider-shared lookup cache | per-record provider expiry |
-| `hardware_metrics` | legacy native hardware samples; no new writes | existing TTL where present; migration required |
-| `hardware_live` | last 30 one-second samples per sensor | fixed ring; documents are replaced |
-| `hardware_metrics_1m` | one deterministic min/avg/max rollup per sensor/minute | 30 days via TTL |
+| `hardware_metrics` | legacy native hardware samples; no new writes or runtime reads | retained for separate archive/cleanup work |
+| `hardware_live` | last 30 one-second `hardware_live.v3` samples per sensor; canonical memory pressure and `wlan0` throughput | fixed ring; documents are replaced |
+| `hardware_metrics_1m` | compact `hardware_metrics_1m.v2` min/avg/max rollup per sensor/minute | 30 days via TTL |
 | `daily_rollups` | future dashboard/report aggregates | long-lived and compact |
 | debug normalised/enriched events | temporary troubleshooting only | disabled by default or 24 hours |
 
@@ -71,6 +72,15 @@ event/bucket time, not from dashboard read time. The Processor creates TTL
 indexes on `events.expires_at` and `hardware_metrics_1m.expires_at` when it starts.
 MongoDB TTL cleanup is asynchronous, so expiry is not an exact deletion timer.
 
+The active hardware writer keeps memory semantics canonical (`mem_total_bytes`,
+`mem_available_bytes`, and `mem_pressure_percent`); used bytes are derived from
+the capacity fields. It stores only `wlan0` RX/TX Mbps in the live/history
+projections; overlay interfaces can remain in a short-lived local diagnostic
+stream but are never summed with the physical uplink. Minute bucket timestamps
+and live slot timestamps are authoritative, so redundant end-time, resolution,
+and epoch-copy fields are not written to new documents. Readers remain
+backward-compatible with older documents and no migration is required.
+
 ## Index budget
 
 Indexes use Free Tier storage too. Keep only indexes demonstrated by dashboard
@@ -89,19 +99,14 @@ hardware_metrics_1m.expires_at (TTL)
 Review and drop superseded legacy indexes separately after confirming the live
 query paths. Do not drop indexes as part of an automatic startup action.
 
-## Existing-data migration
+## Legacy collection cleanup (optional)
 
-TTL indexes only affect documents that have `expires_at`. Before enabling the
-pipeline for a demonstration:
-
-1. record the Atlas database size and collection counts;
-2. backfill `expires_at` in bounded batches, starting with
-   `hardware_metrics`;
-3. let TTL monitor delete old data asynchronously;
-4. verify dashboard hardware endpoints still receive recent samples;
-5. only then consider removing duplicate legacy collections or indexes.
-
-Backfill must be dry-run by default and must not run automatically on the Pi.
+No migration or backfill is part of the active telemetry deployment. New data
+continues directly into `hardware_live` and `hardware_metrics_1m`; the history
+API reads both the current compact rollup shape and older rollup documents.
+Any later archive, TTL backfill, or deletion of legacy `hardware_metrics` data
+must be a separately reviewed, dry-run-first operation and must not run at Pi
+startup.
 
 ## Live hardware storage budget
 
