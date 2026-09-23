@@ -289,6 +289,31 @@ export function TransitionOverlay({
                       strokeWidth="2"
                     />
                   )}
+                  {state === "current" && (
+                    <circle
+                      data-testid="current-transition-indicator"
+                      cx={geometry.targetX}
+                      cy={geometry.targetY}
+                      r="1.05"
+                      fill="var(--surface)"
+                      stroke="var(--primary)"
+                      strokeWidth="0.55"
+                    />
+                  )}
+                  {state === "current" && !reducedMotion && (
+                    <circle
+                      data-testid="transition-current-pulse"
+                      cx={geometry.targetX}
+                      cy={geometry.targetY}
+                      r="1.05"
+                      fill="none"
+                      stroke="var(--primary)"
+                      strokeWidth="0.35"
+                    >
+                      <animate attributeName="r" values="1.05;2.5;1.05" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.8;0;0.8" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
+                    </circle>
+                  )}
                   <motion.path
                     initial={false}
                     animate={{ d: geometry.route }}
@@ -306,35 +331,10 @@ export function TransitionOverlay({
                     data-transition-self-loop={geometry.selfLoop ? "true" : undefined}
                     data-anchored-transition={item.isAnchored ? "true" : undefined}
                   />
-                  {state === "current" && (
-                    <circle
-                      data-testid="current-transition-indicator"
-                      cx={geometry.targetX}
-                      cy={geometry.targetY}
-                      r="1.05"
-                      fill="var(--surface)"
-                      stroke="var(--primary)"
-                      strokeWidth="0.55"
-                    />
-                  )}
                   {state === "current" && !reducedMotion && (
-                    <>
-                      <circle data-testid="transition-travel-packet" r="0.72" fill="var(--primary)">
-                        <animateMotion dur={`${Math.max(300, durationMs)}ms`} repeatCount="indefinite" path={geometry.route} />
-                      </circle>
-                      <circle
-                        data-testid="transition-current-pulse"
-                        cx={geometry.targetX}
-                        cy={geometry.targetY}
-                        r="1.05"
-                        fill="none"
-                        stroke="var(--primary)"
-                        strokeWidth="0.35"
-                      >
-                        <animate attributeName="r" values="1.05;2.5;1.05" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                        <animate attributeName="opacity" values="0.8;0;0.8" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                      </circle>
-                    </>
+                    <circle data-testid="transition-travel-packet" r="0.72" fill="var(--primary)">
+                      <animateMotion dur={`${Math.max(300, durationMs)}ms`} repeatCount="indefinite" path={geometry.route} />
+                    </circle>
                   )}
                 </g>
               );

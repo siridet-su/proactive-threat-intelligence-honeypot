@@ -217,6 +217,27 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(container.querySelector('[data-testid="transition-current-pulse"]')).toBeNull();
   });
 
+  it("paints the current endpoint indicator behind the transition arrowhead", async () => {
+    await act(async () => {
+      root.render(createElement(TransitionOverlay, {
+        transitions,
+        currentTransition: transitions[2],
+        nodes,
+        reducedMotion: false,
+        durationMs: 1400,
+      }));
+    });
+
+    const currentPath = container.querySelector('[data-transition-event-id="cross-two"][data-transition-kind="directed"]');
+    const indicator = container.querySelector('[data-testid="current-transition-indicator"]');
+    const pulse = container.querySelector('[data-testid="transition-current-pulse"]');
+    expect(currentPath).not.toBeNull();
+    expect(indicator).not.toBeNull();
+    expect(pulse).not.toBeNull();
+    expect(indicator!.compareDocumentPosition(currentPath!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(pulse!.compareDocumentPosition(currentPath!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
   it("exposes a legend and chronological accessible sequence that match every rendered state", async () => {
     await act(async () => {
       root.render(createElement(TransitionOverlay, {
