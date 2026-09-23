@@ -157,6 +157,19 @@ def test_th04_chronology_quality_categories_and_propagation() -> None:
     assert chronology_quality_for_records(ordered)["quality"] == (
         "timestamp_supported"
     )
+    interleaved = [
+        {"sequence_index": 2, "source_index": 5, "timestamp": "2026-08-26T00:00:00Z"},
+        {"sequence_index": 6, "source_index": 6, "timestamp": "2026-08-26T00:00:01Z"},
+        {"sequence_index": 3, "source_index": 7, "timestamp": "2026-08-26T00:00:02Z"},
+    ]
+    assert chronology_quality_for_records(interleaved) == {
+        "quality": "timestamp_supported",
+        "ordering_basis": "timestamp_then_source_index",
+        "timestamp_count": 3,
+        "record_count": 3,
+    }
+    interleaved[2]["timestamp"] = "2026-08-26T00:00:00Z"
+    assert chronology_quality_for_records(interleaved)["quality"] == "contradictory_timestamp"
     assert chronology_quality_for_records(
         [{"sequence_index": 0}, {"sequence_index": 1}]
     )["quality"] == "fallback_input_order"

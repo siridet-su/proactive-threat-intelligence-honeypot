@@ -67,12 +67,21 @@ def chronology_quality_for_records(records: Any) -> dict[str, Any]:
         sequence_index = _integer_or_none(item.get("sequence_index"))
         source_index = _integer_or_none(item.get("source_index"))
         indexed.append((sequence_index, source_index, input_index, item))
+    # Command sequence indexes count commands only; direct Cowrie events use
+    # the raw-event index.  Comparing those two counters can reverse a real
+    # transfer -> chmod transition.  Only use source order when every record
+    # has a durable source index; otherwise retain the conservative fallback.
+    source_ordered = bool(indexed) and all(entry[1] is not None for entry in indexed)
     indexed.sort(
         key=lambda entry: (
-            entry[0] if entry[0] is not None else (
+            entry[1] if source_ordered else (
+                entry[0] if entry[0] is not None else (
+                    entry[1] if entry[1] is not None else entry[2]
+                )
+            ),
+            entry[0] if source_ordered and entry[0] is not None else (
                 entry[1] if entry[1] is not None else entry[2]
             ),
-            entry[1] if entry[1] is not None else entry[2],
             entry[2],
             _clean(entry[3].get("fact_id") or entry[3].get("evidence_id")),
         )
@@ -96,7 +105,10 @@ def chronology_quality_for_records(records: Any) -> dict[str, Any]:
     if not any(present):
         return {
             "quality": "fallback_input_order",
-            "ordering_basis": "sequence_index_then_source_index",
+            "ordering_basis": (
+                "source_index_then_sequence_index" if source_ordered
+                else "sequence_index_then_source_index"
+            ),
             "timestamp_count": 0,
             "record_count": len(items),
         }
@@ -113,13 +125,20 @@ def chronology_quality_for_records(records: Any) -> dict[str, Any]:
         quality = "contradictory_timestamp"
     else:
         quality = "timestamp_supported"
+    if quality == "timestamp_supported":
+        ordering_basis = (
+            "timestamp_then_source_index" if source_ordered
+            else "timestamp_then_sequence_index"
+        )
+    else:
+        ordering_basis = (
+            "source_index_then_sequence_index_with_timestamp_diagnostics"
+            if source_ordered
+            else "sequence_index_then_source_index_with_timestamp_diagnostics"
+        )
     return {
         "quality": quality,
-        "ordering_basis": (
-            "timestamp_then_sequence_index"
-            if quality == "timestamp_supported"
-            else "sequence_index_then_source_index_with_timestamp_diagnostics"
-        ),
+        "ordering_basis": ordering_basis,
         "timestamp_count": sum(present),
         "record_count": len(items),
     }
