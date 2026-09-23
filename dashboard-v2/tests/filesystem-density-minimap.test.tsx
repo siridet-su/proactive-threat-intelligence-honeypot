@@ -235,6 +235,8 @@ describe("FSV-007C: density-aware fit, minimap, and endpoint coverage", () => {
       densityAnalysisHiddenNodes: 0,
       isTopologyExpanded: false,
       isAuditMode: true,
+      transitionDisplayMode: "current" as const,
+      setTransitionDisplayMode: () => {},
       handleToggleExpand: () => {},
     };
     await act(async () => root.render(createElement(TopologyToolbar, props)));
@@ -250,6 +252,8 @@ describe("FSV-007C: density-aware fit, minimap, and endpoint coverage", () => {
       (container.querySelector('[aria-label="View settings"]') as HTMLButtonElement).click();
     });
     expect(container.textContent).toContain("Density Mode");
+    expect(container.querySelector('[aria-label="Transition visibility"]')).not.toBeNull();
+    expect(container.textContent).toContain("Current hop");
     expect(container.textContent).toContain("Auto arrange");
     expect(container.querySelector('[aria-label="Minimap visibility"]')).not.toBeNull();
     expect(container.textContent).toContain("Restore default layout");

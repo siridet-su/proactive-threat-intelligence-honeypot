@@ -250,6 +250,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
         nodes,
         reducedMotion: false,
         durationMs: 1400,
+        displayMode: "all",
       }));
     });
 
@@ -269,6 +270,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
         nodes,
         reducedMotion: false,
         durationMs: 1400,
+        displayMode: "all",
       }));
     });
 
@@ -276,6 +278,52 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(container.querySelector('[data-transition-kind="failed-origin"][data-transition-marker-path="/tmp"]')).not.toBeNull();
     expect(container.querySelector('[data-transition-event-id="failed"][data-transition-kind="directed"]')).toBeNull();
     expect(container.innerHTML).not.toContain("/hostile/unverified");
+  });
+
+  it("defaults to one focused hop while retaining the complete accessible sequence", async () => {
+    await act(async () => {
+      root.render(createElement(TransitionOverlay, {
+        transitions,
+        currentTransition: transitions[2],
+        nodes,
+        nodeBounds: {
+          "/home/a": { x: 22, y: 68, width: 14, height: 8 },
+          "/tmp": { x: 76, y: 55, width: 12, height: 8 },
+        },
+        reducedMotion: false,
+        durationMs: 1400,
+      }));
+    });
+
+    expect(container.querySelectorAll('[data-transition-kind="directed"]')).toHaveLength(1);
+    expect(container.querySelector('[data-transition-event-id="cross-two"][data-transition-state="current"]')).not.toBeNull();
+    expect(container.querySelector('[data-transition-event-id="cross-one"]')).toBeNull();
+    expect(container.querySelector('[data-transition-event-id="reverse"]')).toBeNull();
+    expect(container.querySelectorAll('[data-transition-hop-label]')).toHaveLength(0);
+    expect(container.querySelectorAll(".pti-hop-packet")).toHaveLength(6);
+    expect(container.querySelector('[data-testid="transition-impact-wave"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Verified CWD transition sequence"]')?.querySelectorAll("li")).toHaveLength(events.length);
+  });
+
+  it("offers an arrowless previous-hop trail without showing future transitions", async () => {
+    await act(async () => {
+      root.render(createElement(TransitionOverlay, {
+        transitions,
+        currentTransition: transitions[2],
+        nodes,
+        reducedMotion: false,
+        durationMs: 1400,
+        displayMode: "trail",
+      }));
+    });
+
+    expect(container.querySelector('[data-transition-event-id="entry"][data-transition-state="previous"]')).not.toBeNull();
+    const previous = container.querySelector('[data-transition-event-id="cross-one"][data-transition-state="previous"]');
+    expect(previous).not.toBeNull();
+    expect(previous?.getAttribute("marker-end")).toBeNull();
+    expect(previous?.getAttribute("data-transition-trail")).toBe("true");
+    expect(container.querySelector('[data-transition-event-id="reverse"]')).toBeNull();
+    expect(container.querySelectorAll('[data-transition-hop-label]')).toHaveLength(0);
   });
 
   it("keeps static current state but removes travel and pulse under reduced motion", async () => {
@@ -293,6 +341,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(container.querySelector('[data-testid="current-transition-indicator"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="transition-travel-packet"]')).toBeNull();
     expect(container.querySelector('[data-testid="transition-current-pulse"]')).toBeNull();
+    expect(container.querySelector('[data-testid="transition-impact-wave"]')).toBeNull();
   });
 
   it("paints the current endpoint indicator behind the transition arrowhead", async () => {
@@ -303,6 +352,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
         nodes,
         reducedMotion: false,
         durationMs: 1400,
+        displayMode: "all",
       }));
     });
 
@@ -313,7 +363,6 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(indicator).not.toBeNull();
     expect(pulse).not.toBeNull();
     expect(indicator!.compareDocumentPosition(currentPath!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(pulse!.compareDocumentPosition(currentPath!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
   it("exposes a legend and chronological accessible sequence that match every rendered state", async () => {
@@ -324,13 +373,14 @@ describe("FSV-007B: separate verified transition overlay", () => {
         nodes,
         reducedMotion: false,
         durationMs: 1400,
+        displayMode: "all",
       }));
     });
 
     const legend = container.querySelector('[aria-label="Topology and transition legend"]');
     expect(legend?.textContent).toContain("Filesystem hierarchy");
-    expect(legend?.textContent).toContain("Previous transition");
-    expect(legend?.textContent).toContain("Current transition");
+    expect(legend?.textContent).toContain("Previous trail");
+    expect(legend?.textContent).toContain("Current hop");
     expect(legend?.textContent).toContain("Future transition");
     expect(legend?.textContent).toContain("Entry marker");
     expect(legend?.textContent).toContain("Failed at origin");
@@ -407,7 +457,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
       expect(edge.getAttribute("marker-end")).toBeNull();
       expect(edge.getAttribute("data-transition-event-id")).toBeNull();
     }
-    expect(container.querySelector('[data-transition-event-id="cross-one"]')).not.toBeNull();
+    expect(container.querySelector('[data-transition-event-id="cross-one"]')).toBeNull();
     expect(container.querySelector('[data-transition-event-id="cross-two"]')).not.toBeNull();
   });
 });

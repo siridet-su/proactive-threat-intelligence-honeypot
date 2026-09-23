@@ -8,6 +8,7 @@ import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import type { GraphElementBounds, GraphNode } from "./filesystemUtils";
 
 export type TransitionOverlayState = "previous" | "current" | "future";
+export type TransitionDisplayMode = "current" | "trail" | "all";
 
 export interface TransitionOverlayItem {
   transition: VerifiedCwdTransition;
@@ -24,6 +25,7 @@ export interface TransitionOverlayProps {
   reducedMotion: boolean;
   layoutTransition?: Transition;
   showLegend?: boolean;
+  displayMode?: TransitionDisplayMode;
 }
 
 export interface OverlayGeometry {
@@ -344,6 +346,15 @@ export function planTransitionOverlayRoutes(
   });
 }
 
+export function selectVisibleTransitionItems(
+  items: readonly TransitionOverlayItem[],
+  displayMode: TransitionDisplayMode,
+): TransitionOverlayItem[] {
+  if (displayMode === "all") return [...items];
+  if (displayMode === "trail") return items.filter((item) => item.state !== "future");
+  return items.filter((item) => item.state === "current");
+}
+
 function stateStyle(state: TransitionOverlayState) {
   if (state === "current") {
     return { color: "var(--primary)", opacity: 1, width: 0.72 };
@@ -374,16 +385,16 @@ function describeTransition(item: TransitionOverlayItem): string {
   return `${prefix} transition; verified endpoints unavailable`;
 }
 
-export function TransitionLegend() {
+export function TransitionLegend({ displayMode = "current" }: { displayMode?: TransitionDisplayMode }) {
   return (
     <aside
       aria-label="Topology and transition legend"
       className="pointer-events-none absolute bottom-3 left-3 z-50 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border bg-surface/95 px-3 py-2 text-xs text-text-muted shadow-sm backdrop-blur-sm"
     >
       <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong" aria-hidden="true" />Filesystem hierarchy</span>
-      <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 bg-primary/50" aria-hidden="true" />Previous transition</span>
-      <span className="inline-flex items-center gap-1.5 font-semibold text-text"><span className="h-0.5 w-5 bg-primary" aria-hidden="true" />Current transition</span>
-      <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong/40" aria-hidden="true" />Future transition</span>
+      {displayMode !== "current" && <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 bg-primary/50" aria-hidden="true" />Previous trail</span>}
+      <span className="inline-flex items-center gap-1.5 font-semibold text-text"><span className="h-0.5 w-5 bg-primary" aria-hidden="true" />Current hop</span>
+      {displayMode === "all" && <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong/40" aria-hidden="true" />Future transition</span>}
       <span className="inline-flex items-center gap-1.5"><CornerDownRight className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Entry marker</span>
       <span className="inline-flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />Failed at origin</span>
     </aside>
@@ -399,6 +410,7 @@ export function TransitionOverlay({
   reducedMotion,
   layoutTransition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] },
   showLegend = true,
+  displayMode = "current",
 }: TransitionOverlayProps) {
   const markerNamespace = useId().replace(/:/g, "");
   const items = useMemo(
@@ -406,16 +418,25 @@ export function TransitionOverlay({
     [currentTransition, transitions],
   );
   const nodeByPath = useMemo(() => new Map(nodes.map((node) => [node.path, node])), [nodes]);
+  const visibleItems = useMemo(
+    () => selectVisibleTransitionItems(items, displayMode),
+    [displayMode, items],
+  );
   const rendered = useMemo(
-    () => planTransitionOverlayRoutes(items, nodeByPath, nodeBounds),
-    [items, nodeBounds, nodeByPath],
+    () => planTransitionOverlayRoutes(visibleItems, nodeByPath, nodeBounds),
+    [nodeBounds, nodeByPath, visibleItems],
   );
   const hasAnchoredCurrent = items.some((item) => item.isAnchored && item.state === "current");
 
   return (
     <>
-      <div className="pti-transition-overlay pointer-events-none absolute inset-0 z-[5]" data-testid="verified-transition-overlay">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+      <div
+        className="pti-transition-overlay pti-hop-energy pointer-events-none absolute inset-0 z-[5]"
+        data-testid="verified-transition-overlay"
+        data-transition-display-mode={displayMode}
+        style={{ "--hop-cycle-duration": `${Math.max(600, durationMs)}ms` } as CSSProperties}
+      >
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 z-[1] h-full w-full overflow-visible" aria-hidden="true">
           <defs>
             {(["previous", "current", "future"] as const).map((state) => {
               const style = stateStyle(state);
@@ -448,9 +469,7 @@ export function TransitionOverlay({
                       animate={{ d: geometry.route }}
                       transition={reducedMotion ? { duration: 0 } : layoutTransition}
                       fill="none"
-                      stroke="var(--primary)"
-                      strokeOpacity="0.1"
-                      strokeWidth="1.25"
+                      className="pti-hop-route-glow"
                     />
                   )}
                   {state === "current" && (
@@ -464,20 +483,6 @@ export function TransitionOverlay({
                       strokeWidth="0.55"
                     />
                   )}
-                  {state === "current" && !reducedMotion && (
-                    <circle
-                      data-testid="transition-current-pulse"
-                      cx={geometry.targetX}
-                      cy={geometry.targetY}
-                      r="1.05"
-                      fill="none"
-                      stroke="var(--primary)"
-                      strokeWidth="0.35"
-                    >
-                      <animate attributeName="r" values="1.05;2.5;1.05" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                      <animate attributeName="opacity" values="0.8;0;0.8" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                    </circle>
-                  )}
                   <motion.path
                     initial={false}
                     animate={{ d: geometry.route }}
@@ -487,19 +492,31 @@ export function TransitionOverlay({
                     strokeOpacity={style.opacity}
                     strokeWidth={style.width}
                     strokeLinecap="round"
-                    markerEnd={`url(#${markerNamespace}-${state}-transition-arrow)`}
+                    markerEnd={displayMode === "trail" && state === "previous"
+                      ? undefined
+                      : `url(#${markerNamespace}-${state}-transition-arrow)`}
                     data-transition-event-id={transition.eventId}
                     data-transition-kind="directed"
                     data-transition-state={state}
                     data-transition-route={`${transition.fromPath}→${transition.toPath}`}
                     data-transition-self-loop={geometry.selfLoop ? "true" : undefined}
                     data-transition-lane={lane ?? undefined}
+                    data-transition-trail={displayMode === "trail" && state === "previous" ? "true" : undefined}
                     data-anchored-transition={item.isAnchored ? "true" : undefined}
                   />
                   {state === "current" && !reducedMotion && (
-                    <circle data-testid="transition-travel-packet" r="0.72" fill="var(--primary)">
-                      <animateMotion dur={`${Math.max(300, durationMs)}ms`} repeatCount="indefinite" path={geometry.route} />
-                    </circle>
+                    <g data-testid="transition-travel-packet">
+                      {(["bloom", "wake", "tail", "halo", "body", "core"] as const).map((layer) => (
+                        <motion.path
+                          key={layer}
+                          initial={false}
+                          animate={{ d: geometry.route }}
+                          transition={layoutTransition}
+                          pathLength={100}
+                          className={`pti-hop-packet pti-hop-packet-${layer}`}
+                        />
+                      ))}
+                    </g>
                   )}
                 </g>
               );
@@ -543,7 +560,39 @@ export function TransitionOverlay({
           })}
         </svg>
 
-        {rendered.map(({ item, geometry, marker }, index) => {
+        {rendered.map(({ item, geometry }, index) => {
+          const transition = item.transition;
+          if (
+            reducedMotion ||
+            item.state !== "current" ||
+            !geometry ||
+            !transition.fromPath ||
+            !transition.toPath ||
+            transition.fromPath === transition.toPath
+          ) return null;
+          const target = nodeByPath.get(transition.toPath);
+          if (!target) return null;
+          const bounds = nodeBounds[transition.toPath];
+          return (
+            <motion.div
+              key={`impact:${transition.eventId}:${index}`}
+              data-testid="transition-impact-wave"
+              initial={false}
+              animate={{
+                left: `${target.x}%`,
+                top: `${target.y}%`,
+                width: `${bounds?.width ?? 12}%`,
+                height: `${bounds?.height ?? 5}%`,
+              }}
+              transition={layoutTransition}
+              className="absolute z-0 -translate-x-1/2 -translate-y-1/2 rounded-lg"
+            >
+              <span className="pti-hop-wave" data-testid="transition-current-pulse" />
+            </motion.div>
+          );
+        })}
+
+        {displayMode === "all" && rendered.map(({ item, geometry, marker }, index) => {
           const point = geometry ? { x: geometry.labelX, y: geometry.labelY } : marker;
           if (!point) return null;
           const isCurrent = item.state === "current";
@@ -585,7 +634,7 @@ export function TransitionOverlay({
       <ol aria-label="Verified CWD transition sequence" className="sr-only">
         {items.map((item, index) => <li key={`${item.transition.eventId}:${index}`}>{describeTransition(item)}</li>)}
       </ol>
-      {showLegend && <TransitionLegend />}
+      {showLegend && <TransitionLegend displayMode={displayMode} />}
     </>
   );
 }

@@ -1243,7 +1243,7 @@ pre-existing items outside filesystem visualization scope. The branch was synchr
 
 #### Post-completion transition routing hardening — **DONE (2026-09-24)**
 
-The verified transition overlay now plans the complete displayed route set before rendering instead
+In `All transitions` mode, the verified transition overlay plans the complete displayed route set before rendering instead
 of deriving each curve independently. Directed transitions attach to deterministic edge-facing node
 ports; repeated routes receive distinct port/lane offsets and reverse routes remain on opposite sides
 of the route family. The planner samples each quadratic route against unrelated measured node bounds
@@ -1253,9 +1253,10 @@ Forward/reverse tracks must remain at least eight graph-coordinate units apart a
 the real-browser gate requires at least 18 rendered pixels at mobile and desktop widths. The current
 track halo is deliberately narrower and lower-opacity so emphasis does not resemble a duplicate edge.
 
-This correction preserves the evidence contract: no transition is deduplicated, bundled into a
-synthetic event, or removed. Every event retains its own path element, hop label, direction, state,
-event ID, and chronological accessible-list entry. In the real-browser replay fixture, the source
+This correction preserves the evidence contract: no transition is deduplicated or bundled into a
+synthetic event. In `All transitions` mode every event retains its own path element, hop label,
+direction, state, and event ID; every visibility mode retains the complete chronological accessible-list
+entry set. In the real-browser replay fixture, the source
 connector and verified transition entering the same directory use visibly separate node ports, and
 the forward/reverse hop labels remain non-overlapping at both mobile and desktop widths.
 
@@ -1268,6 +1269,27 @@ Verification:
 - ESLint: **0 errors**; one pre-existing Threat Intelligence warning remains outside this change
 - webpack production build: **PASSED**, 18/18 static pages generated
 - `git diff --check`: **PASSED**
+
+#### Post-completion replay focus and transfer effect — **DONE (2026-09-24)**
+
+Audit replay now uses a focus-plus-context visibility policy instead of painting the entire retained
+route history over the topology by default. `Current hop` is the default and renders exactly the
+selected verified event; `Current + trail` adds earlier events as faint, arrowless context while
+keeping future events hidden; `All transitions` remains available under View for forensic comparison
+and preserves the full routed/labelled presentation. The screen-reader transition sequence remains
+complete in every mode, so reducing visual density does not remove event identity or chronology.
+
+The current directed hop restores the synchronized transfer effect introduced in commit `df731d9`:
+six tapered light-packet layers travel from the verified origin to the verified destination, then a
+capsule-shaped radiation wave expands from the destination on the same animation clock. Reduced-motion
+mode keeps the static directed evidence while suppressing both packet travel and impact radiation.
+Audit source connectors remain visible but are deliberately dimmed while a replay hop is focused, and
+default mode omits redundant floating hop-number labels because the target badge and timeline already
+carry that information.
+
+Regression coverage proves the one-route default, arrowless historical trail, opt-in full route set,
+complete accessible sequence, restored synchronized packet/wave CSS animations, reduced-motion
+behavior, and real-browser mode switching at mobile and desktop widths.
 
 ## 6. File ownership map for implementation
 

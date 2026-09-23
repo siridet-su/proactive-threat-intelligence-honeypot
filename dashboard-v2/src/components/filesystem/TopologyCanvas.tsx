@@ -34,7 +34,11 @@ import type {
 import { TopologyToolbar } from "./TopologyToolbar";
 import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
-import { TransitionLegend, TransitionOverlay } from "./TransitionOverlay";
+import {
+  TransitionLegend,
+  TransitionOverlay,
+  type TransitionDisplayMode,
+} from "./TransitionOverlay";
 import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import {
   deriveMinimapVisibility,
@@ -356,6 +360,7 @@ export function TopologyCanvas({
 
   const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
   const [minimapPreference, setMinimapPreference] = useState<MinimapVisibilityPreference>("auto");
+  const [transitionDisplayMode, setTransitionDisplayMode] = useState<TransitionDisplayMode>("current");
 
   // Render limits state
   const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
@@ -869,6 +874,8 @@ export function TopologyCanvas({
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
           isAuditMode={isAuditMode}
+          transitionDisplayMode={transitionDisplayMode}
+          setTransitionDisplayMode={setTransitionDisplayMode}
           handleToggleExpand={handleToggleExpand}
         />
       </TopologyCanvasHeader>
@@ -1071,7 +1078,9 @@ export function TopologyCanvas({
                   </div>
                 )}
 
-                {(displayedTransitions.length > 0 || currentTransition) && <TransitionLegend />}
+                {(displayedTransitions.length > 0 || currentTransition) && (
+                  <TransitionLegend displayMode={transitionDisplayMode} />
+                )}
 
                 <motion.div
                   ref={graphPlaneRef}
@@ -1176,8 +1185,12 @@ export function TopologyCanvas({
                                     }
                                     fill="none"
                                     stroke={isPrimarySelected ? "var(--primary)" : isClusterSelected ? "var(--primary)" : "var(--border-strong)"}
-                                    strokeOpacity={isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
-                                    strokeWidth={isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
+                                    strokeOpacity={isAuditMode && currentTransition
+                                      ? isPrimarySelected ? 0.32 : isClusterSelected ? 0.24 : 0.18
+                                      : isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
+                                    strokeWidth={isAuditMode && currentTransition
+                                      ? isPrimarySelected ? "0.24" : "0.18"
+                                      : isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
                                     strokeDasharray={isPrimarySelected ? "none" : isClusterSelected ? "1.5 1.5" : "0.75 1.6"}
                                     data-source-connection={callout.sourceIp}
                                     data-source-target-path={path}
@@ -1216,6 +1229,7 @@ export function TopologyCanvas({
                           : TOPOLOGY_TRANSITION
                       }
                       showLegend={false}
+                      displayMode={transitionDisplayMode}
                     />
                   )}
                   {failedHopMessage && failedAnnotationNode && (

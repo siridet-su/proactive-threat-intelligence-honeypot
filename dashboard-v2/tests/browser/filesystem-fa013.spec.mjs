@@ -418,11 +418,27 @@ test.describe("FA-013 real-browser evidence", () => {
       const revisit = overlay.locator('[data-transition-event-id="replay-revisit"][data-transition-state="current"][data-transition-kind="directed"]');
       await expect(revisit).toHaveAttribute("data-transition-kind", "directed");
       await expect(revisit).toHaveAttribute("data-transition-route", "/tmp→/home/cowrie");
+      await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(1);
+      await expect(overlay.locator('[data-transition-hop-label="true"]')).toHaveCount(0);
+      await expect(overlay.locator('[data-testid="transition-impact-wave"]')).toHaveCount(1);
+      const transferAnimation = await overlay.evaluate((element) => ({
+        packetName: getComputedStyle(element.querySelector(".pti-hop-packet-core")).animationName,
+        packetDuration: getComputedStyle(element.querySelector(".pti-hop-packet-core")).animationDuration,
+        waveName: getComputedStyle(element.querySelector(".pti-hop-wave")).animationName,
+        waveDuration: getComputedStyle(element.querySelector(".pti-hop-wave")).animationDuration,
+      }));
+      expect(transferAnimation).toEqual({
+        packetName: "pti-hop-transfer-core",
+        packetDuration: "1.4s",
+        waveName: "pti-hop-wave",
+        waveDuration: "1.4s",
+      });
       const sourceConnection = page
         .getByRole("region", { name: /Filesystem topology map workspace/ })
         .locator('path[data-source-target-path="/home/cowrie"]')
         .first();
       await expect(sourceConnection).toBeVisible();
+      await expect(sourceConnection).toHaveAttribute("stroke-opacity", "0.32");
       const sharedTargetPorts = await page.evaluate(
         ({ sourceSelector, transitionSelector }) => {
           const toScreenPoint = (path, useStart) => {
@@ -452,6 +468,10 @@ test.describe("FA-013 real-browser evidence", () => {
         sharedTargetPorts.source.x - sharedTargetPorts.transition.x,
         sharedTargetPorts.source.y - sharedTargetPorts.transition.y,
       )).toBeGreaterThan(4);
+
+      await page.getByRole("button", { name: "View settings" }).click();
+      await page.getByRole("group", { name: "Transition visibility" }).getByRole("button", { name: "All transitions" }).click();
+      await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(2);
       const transitionLaneMidpoints = await page.evaluate(() => {
         const screenMidpoint = (selector) => {
           const path = document.querySelector(selector);
