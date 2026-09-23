@@ -451,7 +451,9 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(revisit).toHaveAttribute("data-transition-state", "current");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
-      await page.getByRole("button", { name: "View settings" }).click();
+      const viewSettings = page.getByRole("button", { name: "View settings" });
+      await viewSettings.focus();
+      await viewSettings.press("Enter");
       await page.getByRole("group", { name: "Minimap visibility" }).getByRole("button", { name: "Show" }).click();
       await expect(page.getByTestId("topology-minimap")).toBeVisible();
       await assertNoBrowserFailures(page);
@@ -527,5 +529,54 @@ test.describe("FA-013 real-browser evidence", () => {
     await page.getByRole("button", { name: "Exit Fullscreen Studio" }).click();
     await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
     await assertNoBrowserFailures(page);
+  });
+
+  test("K: topology primary and View controls remain grouped at 1280px, 768px, and 200% zoom", async ({ page }) => {
+    const scenarios = [
+      { width: 1280, height: 900, zoom: 1 },
+      { width: 768, height: 900, zoom: 1 },
+      { width: 1280, height: 900, zoom: 2 },
+    ];
+
+    for (const scenario of scenarios) {
+      await page.setViewportSize({ width: scenario.width, height: scenario.height });
+      await openAuditPage(page, { url: "/filesystem-activity?view=audit&sessionId=closed-session" });
+      if (scenario.zoom !== 1) {
+        await page.evaluate((zoom) => { document.documentElement.style.zoom = String(zoom); }, scenario.zoom);
+      }
+
+      const canvasToolbar = page.getByRole("toolbar", { name: "Topology canvas controls" });
+      await expect(canvasToolbar).toBeVisible();
+      const primaryControls = [
+        page.getByRole("button", { name: "Zoom out" }),
+        page.getByRole("button", { name: "Zoom in" }),
+        page.getByRole("button", { name: "Fit topology in view" }),
+        page.getByRole("button", { name: "Center selected IP" }),
+        page.getByRole("button", { name: "View settings" }),
+      ];
+      const toolbarBox = await canvasToolbar.boundingBox();
+      expect(toolbarBox).not.toBeNull();
+      for (const control of primaryControls) {
+        await expect(control).toBeVisible();
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box.x).toBeGreaterThanOrEqual(toolbarBox.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(toolbarBox.x + toolbarBox.width + 1);
+        expect(box.y).toBeGreaterThanOrEqual(toolbarBox.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(toolbarBox.y + toolbarBox.height + 1);
+      }
+
+      const viewSettings = page.getByRole("button", { name: "View settings" });
+      await viewSettings.focus();
+      await viewSettings.press("Enter");
+      const viewMenu = page.locator('#topology-view-settings');
+      await expect(viewMenu).toBeVisible();
+      await expect(viewMenu).toContainText("Density Mode");
+      await expect(viewMenu).toContainText("Auto arrange");
+      await expect(viewMenu).toContainText("Show background grid");
+      await expect(viewMenu).toContainText("Restore default layout");
+      await expect(page.getByRole("group", { name: "Minimap visibility" })).toBeVisible();
+      await assertNoBrowserFailures(page);
+    }
   });
 });

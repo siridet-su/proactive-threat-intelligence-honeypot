@@ -29,15 +29,15 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-009 — Simplify workspace controls**
+Current focus: **FSV-011 — Pointer-capable splitter**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
 | 0 | Baseline and characterization | `DONE` |
 | 1 | Evidence semantics | `DONE` |
 | 2 | Verified transition model/rendering | `DONE` |
-| 3 | Workspace structure | `IN_PROGRESS` |
-| 4 | Accessibility/responsive interaction | `BLOCKED_BY_3` |
+| 3 | Workspace structure | `DONE` |
+| 4 | Accessibility/responsive interaction | `IN_PROGRESS` |
 | 5 | Final verification/documentation | `BLOCKED_BY_4` |
 
 ## 2. Non-negotiable data contracts
@@ -889,12 +889,38 @@ Verification:
   outside filesystem scope.
 - `npm run build -- --webpack`: **PASSED** (18/18 static pages generated).
 
-#### `FSV-009` Simplify workspace controls
+#### `FSV-009` Simplify workspace controls — **DONE (2026-09-23)**
 
 - primary: Zoom, Fit, Locate
 - secondary menu: Arrange, Density, Grid, Reset
 - status/coverage ไม่อยู่ใน toolbar customization group
 - toolbar ต้องไม่เกิด orphan controls ที่ 1280 px, 768 px และ 200% zoom
+
+Implemented and verified behavior:
+
+- The control hierarchy introduced with FSV-007C already satisfies this item: Zoom out/in, Fit, and
+  Locate remain in the direct `Canvas navigation` group; Arrange, Density, Minimap, Grid, Auto
+  arrange, Undo, and Restore default layout remain behind `View settings`.
+- Status, evidence coverage, overlap messaging, and legends remain informational in the summary bar;
+  they are not duplicated as toolbar customization controls.
+- Added a real-browser layout contract at 1280px, 768px, and simulated 200% zoom. Every direct
+  control remains visible inside the canvas toolbar, and the View menu remains keyboard reachable
+  with all secondary controls grouped together.
+- No production change was required for this item; the existing renderer already met the planned
+  control hierarchy. The new browser characterization prevents future regression.
+
+Verification:
+
+- `npx vitest run tests/filesystem-density-minimap.test.tsx`: existing component contract
+  **PASSED** (6/6 tests).
+- Focused responsive toolbar browser case: **PASSED** (1/1).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (9/9 real-browser tests).
+- The latest full gate remains **PASSED** from FSV-008/FSV-010A: 737 Vitest tests passed,
+  2 expected failures, 14 skipped; lint 0 errors with 4 unrelated upstream warnings; webpack build
+  generated 18/18 static pages.
+
+Checkpoint 3 is **DONE**. Checkpoint 4 is **IN_PROGRESS** with `FSV-011` as the current focus.
 
 Checkpoint 3 gate:
 
