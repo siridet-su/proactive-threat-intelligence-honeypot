@@ -26,7 +26,10 @@ async function callRoute(id = SESSION_ID) {
 }
 
 describe("Admin-only Cowrie command evidence route", () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
 
   it("requires an authenticated session and does not query command storage for anonymous users", async () => {
     vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue(null);
@@ -92,6 +95,33 @@ describe("Admin-only Cowrie command evidence route", () => {
     expect(response.headers.get("vary")).toContain("Cookie");
     expect(loadCommands).toHaveBeenCalledWith(SESSION_ID);
     expect(body.commands[0].input).toContain("attacker:synthetic-password");
+  });
+
+  it("allows the explicit development Mongo path only on loopback", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO", "true");
+    vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue(operator("admin"));
+    vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
+    const local = vi.spyOn(commandServer, "loadLocalAdminCowrieCommands").mockResolvedValue({
+      ok: true,
+      schema_version: "dashboard.admin_cowrie_commands.v1",
+      session_id: SESSION_ID,
+      sensitive: true,
+      content_scope: "administrator_only_cowrie_command_input",
+      historical_originals: "unrecoverable_if_redacted_before_persistence",
+      commands: [],
+      truncated: false,
+    });
+    const remoteResponse = await callRoute();
+    expect(remoteResponse.status).toBe(403);
+    expect(local).not.toHaveBeenCalled();
+
+    const localResponse = await GET(
+      new Request(`http://127.0.0.1:3187/api/sessions/${SESSION_ID}/commands`),
+      { params: Promise.resolve({ id: SESSION_ID }) },
+    );
+    expect(localResponse.status).toBe(200);
+    expect(local).toHaveBeenCalledWith(SESSION_ID);
   });
 
   it("rejects noncanonical session ids without calling the sensitive upstream", async () => {

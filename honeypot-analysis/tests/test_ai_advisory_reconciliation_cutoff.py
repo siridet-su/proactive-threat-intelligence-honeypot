@@ -502,6 +502,44 @@ def test_activation_receipt_cutoff_mismatch_fails_closed(tmp_path: Path) -> None
         )
 
 
+def test_activation_receipt_accepts_release_window_but_rejects_unbounded_validity(
+    tmp_path: Path,
+) -> None:
+    receipt = _activation_receipt(tmp_path / "activation.json", CUTOFF)
+    checked = datetime.now(timezone.utc)
+    document = json.loads(receipt.read_text(encoding="utf-8"))
+    document["health_checked_at"] = checked.isoformat()
+    document["expires_at"] = (checked + timedelta(days=30)).isoformat()
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    receipt.chmod(0o600)
+
+    validate_activation_receipt(
+        str(receipt),
+        provider_id="fixture",
+        model_id="fixture-model",
+        adapter_revision="fixture.v1",
+        endpoint="",
+        hosted=False,
+        reconciliation_cutoff=CUTOFF,
+        now=checked,
+    )
+
+    document["expires_at"] = (checked + timedelta(days=30, seconds=1)).isoformat()
+    receipt.write_text(json.dumps(document), encoding="utf-8")
+    receipt.chmod(0o600)
+    with pytest.raises(ValueError, match="exceeds 30 days"):
+        validate_activation_receipt(
+            str(receipt),
+            provider_id="fixture",
+            model_id="fixture-model",
+            adapter_revision="fixture.v1",
+            endpoint="",
+            hosted=False,
+            reconciliation_cutoff=CUTOFF,
+            now=checked,
+        )
+
+
 def test_cutoff_persists_across_config_reload_and_worker_restart_boundary(
     tmp_path: Path,
 ) -> None:
@@ -560,6 +598,24 @@ def test_existing_outbox_row_remains_idempotent(tmp_path: Path) -> None:
 
     assert first == second
     assert len(storage.list_rows("ai_advisory_outbox")) == 1
+
+
+def test_analysis_enqueue_can_be_enabled_without_provider_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AI_ADVISORY_ENQUEUE_ENABLED", "true")
+    monkeypatch.setenv(
+        "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON",
+        json.dumps(CUTOFF),
+    )
+    monkeypatch.setenv("ENABLE_AI_ADVISORY", "false")
+
+    config = ProductionConfig.from_env()
+
+    assert config.ai_advisory_enqueue_enabled is True
+    assert config.enable_ai_advisory is False
+    assert config.ai_advisory_provider == "disabled"
+    assert config.ai_advisory_reconciliation_cutoff == CUTOFF
 
 
 def test_reconciliation_preserves_active_queue_count_bound(tmp_path: Path) -> None:

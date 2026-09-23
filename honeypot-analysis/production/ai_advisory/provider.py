@@ -117,13 +117,22 @@ class FixtureAIAdvisoryProvider:
         except OSError as exc:
             raise AIProviderUnavailable("fixture provider response is unavailable") from exc
         if len(raw) > max_response_bytes:
-            raise AIAdvisoryContractError("provider response exceeds the configured limit")
+            raise AIAdvisoryContractError(
+                "provider response exceeds the configured limit",
+                code="provider_response_too_large",
+            )
         try:
             loaded = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise AIAdvisoryContractError("provider response is not valid JSON") from exc
+            raise AIAdvisoryContractError(
+                "provider response is not valid JSON",
+                code="provider_response_malformed",
+            ) from exc
         if not isinstance(loaded, dict):
-            raise AIAdvisoryContractError("provider response must be an object")
+            raise AIAdvisoryContractError(
+                "provider response must be an object",
+                code="provider_response_malformed",
+            )
         return AIProviderResponse(
             provider_id=self.provider_id,
             model_id=self.model_id,

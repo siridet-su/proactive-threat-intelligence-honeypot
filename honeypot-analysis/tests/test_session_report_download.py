@@ -173,6 +173,53 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
     assert not (tmp_path / "reports").exists()
 
 
+def test_session_report_pdf_receives_bounded_cwd_projection(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session_id = "session_v1_report_cwd_projection"
+    captured = {}
+    event_rows = [
+        {
+            "event_id": "cwd-event-1",
+            "session_id": session_id,
+            "eventid": "cowrie.session.cwd",
+            "timestamp": "2026-09-22T10:00:00Z",
+            "payload_json": json.dumps({
+                "eventid": "cowrie.session.cwd",
+                "cwd_from_path": "/home/test",
+                "cwd_path": "/tmp",
+            }),
+        }
+    ]
+
+    def render(report, session, **_kwargs):
+        captured["events"] = session.get("raw_events")
+        return b"%PDF-1.7 bounded cwd fixture"
+
+    monkeypatch.setattr(monitor_web, "render_pdf_report_bytes", render)
+    monkeypatch.setattr(monitor_web, "build_session_ti_projection", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(monitor_web, "load_ai_advisory_detail", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(monitor_web, "load_next_distinct_prediction", lambda *_args, **_kwargs: {})
+
+    pdf, error = monitor_web.load_session_report_pdf(
+        _config(tmp_path, session_id, event_rows=event_rows),
+        session_id,
+    )
+
+    assert pdf == b"%PDF-1.7 bounded cwd fixture"
+    assert error == {}
+    assert len(captured["events"]) == 1
+    cwd_event = captured["events"][0]
+    assert cwd_event["event_id"] == "cwd-event-1"
+    assert cwd_event["eventid"] == "cowrie.session.cwd"
+    assert cwd_event["cwd_from_path"] == "/home/test"
+    assert cwd_event["cwd_path"] == "/tmp"
+    assert cwd_event["cwd_action"] == "changed"
+    assert cwd_event["cwd_status"] == "observed"
+    assert "payload_json" not in cwd_event
+
+
 def test_report_next_distinct_context_rejects_cross_session_and_stale_labels() -> None:
     session_id = "session_v1_report_prediction"
 

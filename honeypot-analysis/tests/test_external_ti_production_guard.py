@@ -6,8 +6,8 @@ import hashlib
 from pathlib import Path
 
 from production.enrichment.external_ti_contract import (
-    SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256,
-    SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256,
+    SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
     load_source_ip_governance_amendment,
 )
 from production.enrichment.external_ti_proof_guard import (
@@ -33,17 +33,21 @@ def _storage(tmp_path: Path) -> SQLiteStorage:
 
 def test_production_policy_is_hash_bound_and_bounded() -> None:
     digest = hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest()
-    assert digest == SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256
+    assert digest == SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256
     policy = load_source_ip_governance_amendment(
         str(POLICY_PATH),
         expected_sha256=digest,
     )
-    assert policy.version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION
+    assert policy.version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION
     assert policy.continuous_processing is True
     assert policy.minimum_refresh_interval_seconds == 86_400
     assert policy.max_distinct_source_ips_per_utc_day == 100
     assert policy.canonical_mongodb_enrichment_record_write is False
     assert set(policy.authorized_providers) == {"abuseipdb", "otx", "shodan_official"}
+    assert policy.allowed_outbound_fields == (
+        "normalized_source_ip",
+        "sha256_file_hash",
+    )
     assert policy.authorizes_provider("shodan_official")
     assert policy.authorizes_provider("otx")
     assert not policy.authorizes_provider("shodan_internetdb")

@@ -10,7 +10,7 @@ import os
 import re
 import stat
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence
 from urllib.parse import SplitResult, unquote, urlsplit
@@ -42,6 +42,7 @@ ACTIVATION_KEYS = {
 # by the MongoDB-specific loader below.
 _SYSTEMD_CREDENTIALS_ROOT = Path("/run/credentials")
 _SYSTEMD_MONGODB_CREDENTIAL_NAME = "mongodb-uri"
+_MAX_ACTIVATION_RECEIPT_VALIDITY = timedelta(days=30)
 
 
 def _open_absolute_no_symlink(path: Path) -> int:
@@ -265,7 +266,7 @@ def validate_activation_receipt(
     reconciliation_cutoff: Mapping[str, Any],
     now: datetime | None = None,
 ) -> Dict[str, Any]:
-    """Require a short-lived, owner-only deployment/health attestation."""
+    """Require a bounded, owner-only deployment/health attestation."""
 
     try:
         receipt = json.loads(
@@ -309,8 +310,8 @@ def validate_activation_receipt(
         raise ValueError("AI advisory activation receipt timestamps are invalid") from exc
     if checked > reference or expires <= reference or expires <= checked:
         raise ValueError("AI advisory activation receipt is stale or not yet valid")
-    if (expires - checked).total_seconds() > 3600:
-        raise ValueError("AI advisory activation receipt validity exceeds one hour")
+    if expires - checked > _MAX_ACTIVATION_RECEIPT_VALIDITY:
+        raise ValueError("AI advisory activation receipt validity exceeds 30 days")
     return dict(receipt)
 
 

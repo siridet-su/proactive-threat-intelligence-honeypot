@@ -31,31 +31,16 @@ from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
 
-TI_DISPLAY_STATUS = {
-    "POLICY_BLOCKED": "LOOKUP_NOT_EXECUTED",
-    "TI_PENDING": "LOOKUP_PENDING",
-    "TI_PARTIAL": "PARTIAL_CONTEXT",
-    "TI_EXPIRED": "STORED_CONTEXT_STALE",
-    "TI_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
-    "TI_AVAILABLE": "AVAILABLE",
-    "AVAILABLE": "AVAILABLE",
-    "TI_FRESH": "FRESH",
-    "TI_STALE": "STALE",
-    "TI_AUTH_DISABLED": "LOOKUP_AUTH_DISABLED",
-    "TI_RATE_LIMITED": "LOOKUP_RATE_LIMITED",
-    "PROVIDER_EVIDENCE_AVAILABLE": "EVIDENCE_AVAILABLE",
-    "NO_ELIGIBLE_OBSERVABLE": "NO_ELIGIBLE_DATA",
-    "NO_STORED_PROVIDER_RESULT": "NO_STORED_RESULT",
-    "PROVIDER_RESULT_PENDING": "LOOKUP_PENDING",
-    "EXPIRED_STORED_RESULT": "STORED_CONTEXT_STALE",
-    "PROVIDER_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
-    "STATUS_NOT_SPECIFIED": "STATE_NOT_AVAILABLE",
-}
-
-
 def _ti_display_status(value: Any) -> str:
+    """Render the canonical ETI state without inventing report vocabulary.
+
+    The report is a durable projection of the API read model.  Translating
+    states here made the same session appear to have different ETI outcomes
+    in the API and PDF, so normalization is deliberately limited to casing.
+    """
+
     normalized = str(value or "NOT_AVAILABLE").strip().upper()
-    return TI_DISPLAY_STATUS.get(normalized, normalized)
+    return normalized
 
 
 def _latest_ti_lookup_at(external_context: Any) -> Any:
@@ -1322,6 +1307,46 @@ def write_markdown_report(
             )
         if not report.get("behavioral_findings"):
             lines.append("- No policy-supported behavioral finding.")
+        session_assessment = report.get("session_hypothesis_assessment") or {}
+        if isinstance(session_assessment, dict):
+            lines.extend(["", "## Session-wide Evidence Assessment"])
+            lines.append(
+                f"- Status: {session_assessment.get('status', 'unavailable')}"
+            )
+            graph = session_assessment.get("evidence_graph") or {}
+            lines.append(
+                "- Evidence graph: "
+                f"{graph.get('evidence_nodes', 0)} evidence nodes, "
+                f"{graph.get('fact_nodes', 0)} facts, "
+                f"{graph.get('relationship_edges', 0)} relationships, "
+                f"{graph.get('chain_nodes', 0)} chains"
+            )
+            for family in session_assessment.get("semantic_families") or []:
+                if not isinstance(family, dict):
+                    continue
+                lines.append(
+                    f"- {family.get('semantic_family', 'unknown')}: "
+                    f"{family.get('status', 'unavailable')}; "
+                    f"facts={family.get('observed_fact_count', 0)}; "
+                    f"findings={len(family.get('finding_ids') or [])}; "
+                    f"missing={', '.join(family.get('missing_evidence') or []) or 'none recorded'}"
+                )
+            follow_on = session_assessment.get("follow_on_hypothesis") or {}
+            lines.append(
+                f"- Follow-on hypothesis: {follow_on.get('status', 'unavailable')}"
+                + (
+                    f" — {follow_on.get('reason')}"
+                    if follow_on.get("reason")
+                    else ""
+                )
+            )
+            falsifiers = session_assessment.get("falsifiers") or []
+            if falsifiers:
+                lines.append("- Observed falsifiers: " + "; ".join(
+                    str(item.get("meaning"))
+                    for item in falsifiers
+                    if isinstance(item, dict) and item.get("meaning")
+                ))
         lines.extend(["", "## Falsifiable Hypothesis Alternatives"])
         for hypothesis_set in report.get("hypothesis_sets") or []:
             lines.append(f"- {hypothesis_set.get('question', '')} (`{hypothesis_set.get('hypothesis_set_id', '')}`)")
@@ -1429,6 +1454,33 @@ def write_pdf_report(
     prediction_snapshot: Optional[Dict[str, Any]] = None,
 ) -> str:
     report = _safe_artifact_mapping(report, "report")
+    # The generic artifact scrubber intentionally drops path-shaped fields.
+    # Carry only bounded CWD transition metadata into this authenticated PDF;
+    # never carry the original event body or command/credential text.
+    cwd_metadata: List[Dict[str, str]] = []
+    raw_events = session_payload.get("raw_events")
+    if isinstance(raw_events, list):
+        for event in raw_events[:100]:
+            if not isinstance(event, dict) or event.get("eventid") != "cowrie.session.cwd":
+                continue
+            target = event.get("cwd_path")
+            origin = event.get("cwd_from_path")
+            if not isinstance(target, str) or not target.startswith("/") or len(target) > 256:
+                continue
+            if any(ord(character) < 0x20 or ord(character) == 0x7F for character in target):
+                continue
+            if not isinstance(origin, str) or not origin.startswith("/") or len(origin) > 256:
+                origin = ""
+            if any(ord(character) < 0x20 or ord(character) == 0x7F for character in origin):
+                origin = ""
+            cwd_metadata.append({
+                "eventid": "cowrie.session.cwd",
+                "cwd_path": _safe_artifact_text(target, "cwd_path"),
+                "cwd_from_path": _safe_artifact_text(origin, "cwd_from_path") if origin else "",
+                "cwd_action": "changed" if origin and origin != target else "entered",
+                "cwd_status": "observed",
+                "timestamp": _safe_artifact_text(str(event.get("timestamp") or "")[:64], "timestamp"),
+            })
     # ``login_username`` is intentionally redacted by the generic credential
     # policy. Preserve a separately named, bounded account label for analyst
     # context when the worker supplied one (or when an older payload still
@@ -1447,6 +1499,8 @@ def write_pdf_report(
         if safe_account and safe_account != "[REDACTED]":
             session_input["observed_account_identifier"] = safe_account
     session_payload = _safe_artifact_mapping(session_input, "session")
+    if cwd_metadata:
+        session_payload["raw_events"] = cwd_metadata
     external_ti = (
         _safe_artifact_mapping(external_ti_projection, "external_ti_projection")
         if isinstance(external_ti_projection, dict)
@@ -1604,6 +1658,9 @@ def write_pdf_report(
         return parsed.astimezone(ict).strftime("%d %b %Y, %H:%M:%S ICT")
 
     def _duration_value(value: Any, start_value: Any, end_value: Any) -> str:
+        observed_interval = _duration_text(start_value, end_value)
+        if observed_interval != "Unavailable":
+            return observed_interval
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             seconds = max(float(value), 0.0)
             if seconds < 60:
@@ -1697,7 +1754,19 @@ def write_pdf_report(
             else:
                 rendered = _value(value, limit=120)
             details.append(f"{label}: {rendered}")
-        return "; ".join(details[:8]) or _value(
+        pulses = extension.get("pulses")
+        if isinstance(pulses, list) and pulses:
+            if not extension.get("pulse_count"):
+                details.append(f"OTX pulses: {len(pulses)}")
+            pulse_names = [
+                _value(pulse.get("name"), "", 100)
+                for pulse in pulses[:2]
+                if isinstance(pulse, dict) and isinstance(pulse.get("name"), str)
+                and pulse.get("name").strip()
+            ]
+            if pulse_names:
+                details.append(f"pulse examples: {'; '.join(pulse_names)}")
+        return "; ".join(details[:10]) or _value(
             item.get("summary"), "No normalized provider detail", 800
         )
 
@@ -1940,17 +2009,8 @@ def write_pdf_report(
             "The external-TI read model did not record a more specific state.",
         )
     )
-    ti_status = (
-        ti_status_reason
-        if ti_raw_status in {"TI_PENDING", "NOT_RECORDED"}
-        and ti_status_reason != "STATUS_NOT_SPECIFIED"
-        else ti_raw_status
-    )
+    ti_status = ti_raw_status
     ti_display_status = _ti_display_status(ti_status)
-    if ti_status_reason == "EXPIRED_STORED_RESULT":
-        # The coarse API status remains backward compatible, but the report
-        # must not present stale context as an in-progress live lookup.
-        ti_display_status = _ti_display_status("TI_EXPIRED")
     ti_display_status_reason = _ti_display_status(ti_status_reason)
     ti_freshness = (
         external_context.get("freshness")
@@ -2123,6 +2183,33 @@ def write_pdf_report(
         or report.get("summary")
         or "No summary available."
     )
+    raw_events = session_payload.get("raw_events") or session_payload.get("events") or []
+    cwd_rows = [["Time", "From", "To", "Action", "Status"]]
+    previous_cwd = ""
+    if isinstance(raw_events, list):
+        for event in raw_events[:100]:
+            if not isinstance(event, dict):
+                continue
+            event_id = str(event.get("eventid") or event.get("event_id") or "").strip().lower()
+            if event_id != "cowrie.session.cwd":
+                continue
+            target_path = event.get("cwd_path")
+            if not target_path:
+                continue
+            from_path = event.get("cwd_from_path") or previous_cwd
+            action = event.get("cwd_action") or (
+                "changed" if from_path and from_path != target_path else "entered"
+            )
+            status = event.get("cwd_status") or "observed"
+            cwd_rows.append([
+                _format_timestamp(event.get("timestamp") or event.get("received_at")),
+                _value(from_path, "Initial directory", 256),
+                _value(target_path, "Unavailable", 256),
+                _value(action, "observed", 80),
+                _value(status, "observed", 80),
+            ])
+            previous_cwd = str(target_path)
+
     story.extend([
         _p("2. Evidence and Session Context", h1),
         _p(summary, body),
@@ -2169,7 +2256,20 @@ def write_pdf_report(
             ["Unknown command outcomes", command_unknown_count],
         ], [5.8 * cm, 11.2 * cm]),
         Spacer(1, 0.25 * cm),
-        _p("2.3 Evidence Assessment", h2),
+    ])
+    cwd_section_offset = 1 if len(cwd_rows) > 1 else 0
+    if cwd_section_offset:
+        story.extend([
+            _p("2.3 Filesystem Activity / Working Directory", h2),
+            _table(cwd_rows, [3.7 * cm, 4.0 * cm, 4.0 * cm, 2.8 * cm, 2.5 * cm]),
+            _p(
+                "Working-directory transitions are direct Cowrie session evidence. Command text and credential values are not included in this table.",
+                small,
+            ),
+            Spacer(1, 0.2 * cm),
+        ])
+    story.extend([
+        _p(f"2.{3 + cwd_section_offset} Evidence Assessment", h2),
         _p(
             "The evidence model is deliberately layered. A direct command observation is stronger than a session correlation, "
             "and a prediction-only hypothesis is not presented as an observed technique. Command inputs are summarized by count "
@@ -2181,13 +2281,14 @@ def write_pdf_report(
     if evidence_lines:
         layer_rows = [["Evidence layer", "Count", "Meaning"]]
         meanings = {
-            "Direct command TTPs": "Directly supported by trusted command evidence",
+            "Direct command TTPs": "Behavioral-layer count; separately reviewed rule mappings appear below",
             "Session-correlated TTPs": "Policy-bounded session correlation; not a probability",
             "Prediction-only hypotheses": "Forecast only; not an observation",
         }
         for line in evidence_lines:
             label, _, value = line.partition(":")
-            layer_rows.append([label, value.strip(), meanings.get(label, "Recorded evidence layer")])
+            display_label = "Direct command TTPs (behavioral layer)" if label == "Direct command TTPs" else label
+            layer_rows.append([display_label, value.strip(), meanings.get(label, "Recorded evidence layer")])
         layer_rows.append([
             "Trusted technique mappings",
             len(technique_ids),
@@ -2197,7 +2298,7 @@ def write_pdf_report(
     else:
         story.append(_p("No evidence-layer summary was recorded for this session.", body))
 
-    story.append(_p("2.4 Trusted Technique Mappings", h2))
+    story.append(_p(f"2.{4 + cwd_section_offset} Trusted Technique Mappings", h2))
     sources = session_payload.get("ttp_sources", {})
     technique_rows = [[
         "Main technique",
@@ -2274,7 +2375,7 @@ def write_pdf_report(
         small,
     ))
 
-    story.extend([_p("2.5 Behavioral Findings and Alternatives", h2)])
+    story.extend([_p(f"2.{5 + cwd_section_offset} Behavioral Findings and Alternatives", h2)])
     if report.get("schema_version") == "session_assessment.v4":
         findings = report.get("behavioral_findings") or []
         finding_rows = [["Status", "Finding", "Evidence references"]]
@@ -2294,6 +2395,50 @@ def write_pdf_report(
                 "No policy-supported behavioral finding was established from the recorded evidence.",
                 body,
             ))
+        session_assessment = report.get("session_hypothesis_assessment") or {}
+        if isinstance(session_assessment, dict):
+            story.append(_p(f"2.{6 + cwd_section_offset} Session-wide Evidence Assessment", h2))
+            graph = session_assessment.get("evidence_graph") or {}
+            story.append(_p(
+                "The following ledger evaluates all activated semantic families in this session. "
+                "It records evidence and policy gates; it does not promote forecasts or external context into observed behavior.",
+                body,
+            ))
+            family_rows = [["Semantic family", "Status", "Facts", "Findings", "Evidence gate"]]
+            for family in session_assessment.get("semantic_families") or []:
+                if not isinstance(family, dict):
+                    continue
+                missing = ", ".join(family.get("missing_evidence") or []) or "none recorded"
+                family_rows.append([
+                    family.get("semantic_family") or "unknown",
+                    family.get("status") or "unavailable",
+                    str(family.get("observed_fact_count", 0)),
+                    str(len(family.get("finding_ids") or [])),
+                    _compact(missing, limit=260),
+                ])
+            if len(family_rows) > 1:
+                story.append(_table(family_rows, [3.1 * cm, 3.2 * cm, 1.4 * cm, 1.5 * cm, 7.0 * cm]))
+            else:
+                story.append(_p("No activated semantic-family assessment was recorded.", body))
+            story.append(_p(
+                "Evidence graph: "
+                f"{graph.get('evidence_nodes', 0)} evidence nodes, "
+                f"{graph.get('fact_nodes', 0)} facts, "
+                f"{graph.get('relationship_edges', 0)} relationships, "
+                f"{graph.get('chain_nodes', 0)} chains.",
+                small,
+            ))
+            follow_on_assessment = session_assessment.get("follow_on_hypothesis") or {}
+            story.append(_p(
+                "Follow-on hypothesis status: "
+                f"{follow_on_assessment.get('status', 'unavailable')}"
+                + (
+                    f" — {follow_on_assessment.get('reason')}"
+                    if follow_on_assessment.get("reason")
+                    else ""
+                ),
+                body,
+            ))
         hypothesis_rows = [["Question / hypothesis set", "Alternative hypotheses"]]
         for hypothesis_set in report.get("hypothesis_sets") or []:
             if not isinstance(hypothesis_set, dict):
@@ -2308,7 +2453,7 @@ def write_pdf_report(
                 f"{hypothesis_set.get('question', '')} [{hypothesis_set.get('hypothesis_set_id', 'unidentified')}]",
                 "\n".join(alternatives) or "No alternatives recorded",
             ])
-        story.append(_p("2.6 Falsifiable Alternatives", h2))
+        story.append(_p(f"2.{7 + cwd_section_offset} Falsifiable Alternatives", h2))
         if len(hypothesis_rows) > 1:
             story.append(_table(hypothesis_rows, [7.5 * cm, 9.5 * cm]))
         else:

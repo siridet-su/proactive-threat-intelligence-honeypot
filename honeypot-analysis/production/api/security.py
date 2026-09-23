@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import posixpath
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import Any, Dict, Iterable, Mapping
@@ -19,6 +20,7 @@ from production.utils.sensitive_data import (
 from production.correlation.semantics import (
     resolve_confidence_semantics,
 )
+from production.correlation.session_ttp_knowledge import TTP_ID_RE, main_ttp_id
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,61 @@ def _row_payload(row: Mapping[str, Any]) -> Dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _safe_cwd_path(value: Any) -> str:
+    """Return only an absolute, bounded working-directory path.
+
+    Cowrie's ``cowrie.session.cwd`` event is useful filesystem telemetry, but
+    the event payload may also contain command-shaped fields.  Project the
+    path as a dedicated derived field instead of forwarding that payload.
+    """
+
+    if not isinstance(value, str):
+        return ""
+    candidate = value.strip()
+    if not candidate or len(candidate) > 2_048 or "\x00" in candidate:
+        return ""
+    if not candidate.startswith("/"):
+        return ""
+    normalized = posixpath.normpath(candidate)
+    if not normalized.startswith("/") or normalized == ".":
+        return ""
+    return normalized
+
+
+def _cwd_event_fields(row: Mapping[str, Any], payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Project safe CWD metadata from one canonical Cowrie event row."""
+
+    eventid = str(row.get("eventid") or payload.get("eventid") or "").strip().lower()
+    if eventid != "cowrie.session.cwd":
+        return {}
+    to_path = _safe_cwd_path(
+        row.get("cwd_path")
+        or payload.get("cwd_path")
+        or payload.get("cwd")
+        or payload.get("cwd_after")
+        or payload.get("to_cwd")
+        or payload.get("to_path")
+        or payload.get("path")
+    )
+    from_path = _safe_cwd_path(
+        row.get("cwd_from_path")
+        or payload.get("cwd_from_path")
+        or payload.get("oldcwd")
+        or payload.get("cwd_before")
+        or payload.get("from_cwd")
+        or payload.get("from_path")
+        or payload.get("previous_cwd")
+    )
+    if not to_path:
+        return {}
+    return {
+        "cwd_path": to_path,
+        **({"cwd_from_path": from_path} if from_path else {}),
+        "cwd_action": "changed" if from_path and from_path != to_path else "entered",
+        "cwd_status": "observed",
+    }
+
+
 def _is_command_event_row(row: Mapping[str, Any]) -> bool:
     """Identify Cowrie command-input rows before privacy projection."""
     payload = _row_payload(row)
@@ -196,6 +253,7 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 ),
             )
         )
+        view.update(_cwd_event_fields(item, payload))
     elif table == "sessions":
         view.update(
             _pick(
@@ -251,6 +309,40 @@ def api_row_view(table: str, row: Mapping[str, Any]) -> Dict[str, Any]:
                 "evidence_cutoff": payload.get("evidence_cutoff") or {},
             }
         )
+        # Next Distinct is a read-only advisory sidecar, not a canonical
+        # prediction snapshot. Preserve its bounded provenance fields when
+        # it is projected into the session-detail read model so the detail
+        # endpoint and /api/next-distinct expose the same source semantics.
+        for field in (
+            "prediction_type",
+            "prediction_status",
+            "prediction_status_reason",
+            "source",
+            "prediction_source",
+            "dashboard_source",
+            "state",
+            "status",
+            "availability",
+            "authority",
+            "advisory_only",
+            "read_only",
+            "canonical_write_allowed",
+            "next_distinct_tactic",
+            "stored_next_distinct_tactic",
+            "top1",
+            "top3",
+            "probabilities",
+            "freshness",
+            "history",
+            "model",
+            "sequence_id",
+            "progression_index",
+            "sidecar_record_schema",
+            "snapshot_role",
+            "historical_advisory",
+        ):
+            if field in payload:
+                view[field] = payload[field]
     elif table in {"prediction_backtest_runs", "prediction_calibration_runs"}:
         view.update(
             {
@@ -425,8 +517,17 @@ def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
     for row in rows:
         if not isinstance(row, Mapping):
             continue
-        if _is_command_event_row(row):
-            count += 1
+        if not _is_command_event_row(row):
+            continue
+        payload = _row_payload(row)
+        # Cowrie can emit an input event for an empty submitted line.  Such a
+        # row is useful terminal telemetry, but it is not a command and is
+        # omitted by both the private command projection and report builder.
+        # Keep historical rows countable when their payload did not retain an
+        # input key; only exclude an explicitly recorded blank input.
+        if "input" in payload and not str(payload.get("input") or "").strip():
+            continue
+        count += 1
     return count
 
 
@@ -472,10 +573,240 @@ def _redact_public_command_text(value: Any, key: str = "") -> Any:
 _COMPACT_SESSION_DETAIL_EVENT_LIMIT = 100
 _COMPACT_SESSION_DETAIL_TRUSTED_LIMIT = 50
 _COMPACT_SESSION_DETAIL_CORRELATION_LIMIT = 20
+_COMPACT_SESSION_DETAIL_CLASSIFICATION_LIMIT = 100
+_COMPACT_SESSION_DETAIL_TACTIC_PATH_LIMIT = 50
+_COMPACT_SESSION_DETAIL_TEXT_LIMIT = 160
+_COMPACT_SESSION_DETAIL_GUIDANCE_LIMIT = 20
+_COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT = 8
+
+
+def _compact_scalar_fields(source: Mapping[str, Any], names: Iterable[str]) -> Dict[str, Any]:
+    """Pick bounded scalar metadata without forwarding free-form evidence text."""
+    projected: Dict[str, Any] = {}
+    for name in names:
+        value = source.get(name)
+        if isinstance(value, str) and value:
+            projected[name] = value[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT]
+        elif isinstance(value, bool):
+            projected[name] = value
+        elif isinstance(value, int):
+            projected[name] = value
+        elif isinstance(value, float) and value == value and abs(value) != float("inf"):
+            projected[name] = value
+    return projected
+
+
+def _compact_classification_traceability(value: Any) -> Dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    projected = _compact_scalar_fields(
+        value,
+        (
+            "event_id",
+            "policy_or_rule_identifier",
+            "model_source",
+            "authority_state",
+            "evidence_tier",
+        ),
+    )
+    source_event = value.get("source_event")
+    if isinstance(source_event, Mapping):
+        safe_source_event = _compact_scalar_fields(
+            source_event,
+            ("cowrie_eventid", "event_type", "event_id"),
+        )
+        if safe_source_event:
+            projected["source_event"] = safe_source_event
+    for field, count_field in (
+        ("evidence_references", "evidence_reference_count"),
+        ("source_event_ids", "source_event_count"),
+    ):
+        values = value.get(field)
+        if isinstance(values, list):
+            projected[count_field] = len(values)
+    return projected
+
+
+def _compact_classification_events(items: Any) -> list[Dict[str, Any]]:
+    """Project classifier provenance while excluding command/source text."""
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        item = _normalize_inactive_classifier_event_for_public(item)
+        projected = _compact_scalar_fields(
+            item,
+            (
+                "evidence_id",
+                "event_id",
+                "command_event_id",
+                "event_timestamp",
+                "timestamp",
+                "eventid",
+                "cowrie_eventid",
+                "ttp",
+                "technique_id",
+                "name",
+                "tactic",
+                "evidence_tier",
+                "evidence_type",
+                "authority",
+                "source",
+                "rule_id",
+                "confidence_semantics",
+            ),
+        )
+        for field in ("ttp", "technique_id"):
+            identifier = projected.get(field)
+            if isinstance(identifier, str) and TTP_ID_RE.fullmatch(identifier.strip()):
+                projected[field] = main_ttp_id(identifier)
+        tactics = item.get("tactics")
+        if isinstance(tactics, list):
+            projected["tactics"] = [
+                value[:80]
+                for value in tactics[:20]
+                if isinstance(value, str) and value
+            ]
+        for source_key, safe_fields in (
+            ("authority_decision", ("decision", "authority", "evidence_tier", "status")),
+            ("s1_advisory", ("predicted_technique", "decision_score", "confidence_semantics")),
+            ("durable_evidence_order", ("event_id", "event_index")),
+        ):
+            nested = item.get(source_key)
+            if isinstance(nested, Mapping):
+                safe_nested = _compact_scalar_fields(nested, safe_fields)
+                if safe_nested:
+                    projected[source_key] = safe_nested
+        traceability = _compact_classification_traceability(item.get("traceability"))
+        if traceability:
+            projected["traceability"] = traceability
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_CLASSIFICATION_LIMIT:
+            break
+    return output
+
+
+def _normalize_inactive_classifier_event_for_public(
+    item: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Hide the historical disabled-model marker without rewriting storage."""
+
+    normalized = dict(item)
+    if str(normalized.get("source") or "").strip().lower() != "securebert_unavailable":
+        return normalized
+    normalized.update(
+        {
+            "source": "unclassified",
+            "name": "No active classifier",
+            "evidence_type": "unclassified",
+            "agreement_status": "not_applicable",
+            "confidence_semantics": "no_active_model_or_reviewed_rule",
+        }
+    )
+    for field in ("bert_ttp", "bert_tactic", "bert_confidence", "model_inference"):
+        normalized.pop(field, None)
+    authority = normalized.get("authority_decision")
+    if isinstance(authority, Mapping):
+        normalized["authority_decision"] = {
+            **dict(authority),
+            "decision": "audit_only",
+            "trusted_eligible": False,
+            "reasons": ["no_active_model_or_reviewed_rule"],
+        }
+    return normalized
+
+
+def _compact_observed_tactic_path(items: Any) -> list[Dict[str, Any]]:
+    """Keep only ordered tactic labels and bounded counts, never command text."""
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        tactic = item.get("tactic")
+        if not isinstance(tactic, str) or not tactic.strip():
+            continue
+        projected = {"tactic": tactic.strip()[:80]}
+        for source_field, count_field in (
+            ("techniques", "technique_count"),
+            ("evidence_refs", "evidence_ref_count"),
+            ("event_ids", "event_count"),
+        ):
+            values = item.get(source_field)
+            if isinstance(values, list):
+                projected[count_field] = len(values)
+        output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_TACTIC_PATH_LIMIT:
+            break
+    return output
+
+
+def _bounded_guidance_text_list(value: Any) -> list[str]:
+    """Keep policy-authored guidance text bounded and free of raw evidence."""
+
+    output: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, str):
+            continue
+        text = item.strip()
+        if not text:
+            continue
+        output.append(text[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT])
+        if len(output) >= _COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT:
+            break
+    return output
+
+
+def _compact_guidance_records(items: Any, *, kind: str) -> list[Dict[str, Any]]:
+    """Expose useful policy guidance without forwarding evidence or commands."""
+
+    output: list[Dict[str, Any]] = []
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        if kind == "finding":
+            projected = _compact_scalar_fields(
+                item,
+                (
+                    "finding_id",
+                    "finding_type",
+                    "severity",
+                    "statement",
+                    "rule_id",
+                    "evidence_status",
+                    "authority",
+                ),
+            )
+        else:
+            projected = _compact_scalar_fields(
+                item,
+                (
+                    "action_id",
+                    "description",
+                    "rationale",
+                    "rule_id",
+                    "priority",
+                ),
+            )
+            for field in (
+                "requires_manual_approval",
+                "safe_to_auto_execute",
+            ):
+                value = item.get(field)
+                if isinstance(value, bool):
+                    projected[field] = value
+            for field in ("preconditions", "verification_steps"):
+                values = _bounded_guidance_text_list(item.get(field))
+                if values:
+                    projected[field] = values
+        if projected:
+            output.append(projected)
+        if len(output) >= _COMPACT_SESSION_DETAIL_GUIDANCE_LIMIT:
+            break
+    return output
 
 
 def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
-    """Project safety/authority metadata without shipping historical evidence."""
+    """Project safety plus bounded policy content without shipping evidence."""
 
     source = dict(guidance) if isinstance(guidance, Mapping) else {}
     safety = source.get("safety") if isinstance(source.get("safety"), Mapping) else {}
@@ -532,6 +863,8 @@ def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
         },
         "finding_count": len(source.get("findings") or []) if isinstance(source.get("findings"), list) else 0,
         "advisory_action_count": len(source.get("advisory_actions") or []) if isinstance(source.get("advisory_actions"), list) else 0,
+        "findings": _compact_guidance_records(source.get("findings"), kind="finding"),
+        "advisory_actions": _compact_guidance_records(source.get("advisory_actions"), kind="action"),
     }
     return public_payload(result)
 
@@ -539,6 +872,21 @@ def _compact_session_guidance(guidance: Any) -> Dict[str, Any]:
 def _compact_trusted_observations(items: Any) -> list[Dict[str, Any]]:
     output: list[Dict[str, Any]] = []
     for item in items if isinstance(items, list) else []:
+        if isinstance(item, str):
+            identifier = item.strip().upper()
+            if TTP_ID_RE.fullmatch(identifier):
+                parent_identifier = main_ttp_id(identifier)
+                if parent_identifier != "T0000":
+                    output.append(
+                        {
+                            "technique_id": parent_identifier,
+                            "trust_tier": "trusted_observation",
+                            "mapping_semantics": "stored trusted identifier; supporting metadata unavailable",
+                        }
+                    )
+            if len(output) >= _COMPACT_SESSION_DETAIL_TRUSTED_LIMIT:
+                break
+            continue
         if not isinstance(item, Mapping):
             continue
         projected = _pick(
@@ -558,6 +906,14 @@ def _compact_trusted_observations(items: Any) -> list[Dict[str, Any]]:
                 "evidence_tier",
             ),
         )
+        identifier = item.get("technique_id") or item.get("ttp")
+        if isinstance(identifier, str) and TTP_ID_RE.fullmatch(identifier.strip()):
+            parent_identifier = main_ttp_id(identifier)
+            if parent_identifier != "T0000":
+                projected["technique_id"] = parent_identifier
+            else:
+                projected.pop("technique_id", None)
+                projected.pop("ttp", None)
         if isinstance(item.get("commands"), list):
             projected["command_count"] = len(item["commands"])
         if isinstance(item.get("evidence_refs"), list):
@@ -608,6 +964,169 @@ def _compact_correlations(items: Any) -> list[Dict[str, Any]]:
                 projected[count_key] = len(item[source_key])
         output.append(projected)
         if len(output) >= _COMPACT_SESSION_DETAIL_CORRELATION_LIMIT:
+            break
+    return output
+
+
+def _compact_session_hypothesis_assessment(value: Any) -> Dict[str, Any]:
+    """Expose the session-wide evidence ledger without raw command content."""
+
+    source = value if isinstance(value, Mapping) else {}
+    family_rows: list[Dict[str, Any]] = []
+    for raw in source.get("semantic_families") or []:
+        if not isinstance(raw, Mapping):
+            continue
+        family_rows.append({
+            "semantic_family": str(raw.get("semantic_family") or "")[:80],
+            "status": str(raw.get("status") or "")[:80],
+            "observed_fact_count": raw.get("observed_fact_count", 0),
+            "selector_match_count": raw.get("selector_match_count", 0),
+            "selector_abstention_count": raw.get("selector_abstention_count", 0),
+            "evidence_refs": [
+                str(item)[:160]
+                for item in (raw.get("evidence_refs") or [])[:50]
+                if isinstance(item, str) and item
+            ],
+            "finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "trusted_finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("trusted_finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "audit_only_finding_ids": [
+                str(item)[:160]
+                for item in (raw.get("audit_only_finding_ids") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "missing_evidence": [
+                str(item)[:200]
+                for item in (raw.get("missing_evidence") or [])[:20]
+                if isinstance(item, str) and item
+            ],
+            "falsifiers": [
+                {
+                    "code": str(item.get("code") or "")[:100],
+                    "semantic_family": str(item.get("semantic_family") or "")[:80],
+                    "evidence_refs": [
+                        str(ref)[:160]
+                        for ref in (item.get("evidence_refs") or [])[:50]
+                        if isinstance(ref, str) and ref
+                    ],
+                    "meaning": str(item.get("meaning") or "")[:240],
+                }
+                for item in (raw.get("falsifiers") or [])[:10]
+                if isinstance(item, Mapping)
+            ],
+        })
+    follow_on = source.get("follow_on_hypothesis")
+    follow_on = follow_on if isinstance(follow_on, Mapping) else {}
+    return {
+        "schema_version": source.get("schema_version") or "session_hypothesis_assessment.v1",
+        "scope": source.get("scope") or "session_wide",
+        "authority": source.get("authority") or "evidence_bounded_non_authoritative",
+        "status": source.get("status") or "unavailable",
+        "semantic_families": family_rows[:20],
+        "canonical_finding_ids": [
+            str(item)[:160]
+            for item in (source.get("canonical_finding_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "audit_only_candidate_ids": [
+            str(item)[:160]
+            for item in (source.get("audit_only_candidate_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "hypothesis_set_ids": [
+            str(item)[:160]
+            for item in (source.get("hypothesis_set_ids") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "follow_on_hypothesis": {
+            "status": follow_on.get("status") or "insufficient_evidence",
+            "reason": str(follow_on.get("reason") or "")[:600],
+            "authority": follow_on.get("authority") or "non_authoritative_forecast_or_bounded_hypothesis",
+            "evidence_gaps": [
+                {
+                    "text": str(item.get("text") or "")[:400],
+                    "evidence_refs": [
+                        str(ref)[:160]
+                        for ref in (item.get("evidence_refs") or [])[:50]
+                        if isinstance(ref, str) and ref
+                    ],
+                    "falsifier_codes": [
+                        str(code)[:100]
+                        for code in (item.get("falsifier_codes") or [])[:20]
+                        if isinstance(code, str) and code
+                    ],
+                }
+                for item in (follow_on.get("evidence_gaps") or [])[:20]
+                if isinstance(item, Mapping)
+            ],
+        },
+        "evidence_graph": dict(source.get("evidence_graph") or {}) if isinstance(source.get("evidence_graph"), Mapping) else {},
+        "classification_summary": dict(source.get("classification_summary") or {}) if isinstance(source.get("classification_summary"), Mapping) else {},
+        "missing_evidence": [
+            str(item)[:200]
+            for item in (source.get("missing_evidence") or [])[:50]
+            if isinstance(item, str) and item
+        ],
+        "falsifiers": [
+            {
+                "code": str(item.get("code") or "")[:100],
+                "semantic_family": str(item.get("semantic_family") or "")[:80],
+                "evidence_refs": [
+                    str(ref)[:160]
+                    for ref in (item.get("evidence_refs") or [])[:50]
+                    if isinstance(ref, str) and ref
+                ],
+                "meaning": str(item.get("meaning") or "")[:240],
+            }
+            for item in (source.get("falsifiers") or [])[:20]
+            if isinstance(item, Mapping)
+        ],
+        "forecast_is_not_observed_evidence": source.get("forecast_is_not_observed_evidence") is True,
+        "external_context_is_not_observed_evidence": source.get("external_context_is_not_observed_evidence") is True,
+        "assessment_sha256": str(source.get("assessment_sha256") or "")[:64],
+    }
+
+
+def _compact_hypothesis_sets(value: Any) -> list[Dict[str, Any]]:
+    """Expose bounded hypothesis meaning without raw command/event payloads."""
+
+    output: list[Dict[str, Any]] = []
+    for raw_set in value or []:
+        if not isinstance(raw_set, Mapping):
+            continue
+        hypotheses: list[Dict[str, Any]] = []
+        for raw_hypothesis in (raw_set.get("hypotheses") or [])[:8]:
+            if not isinstance(raw_hypothesis, Mapping):
+                continue
+            hypotheses.append({
+                "hypothesis_id": str(raw_hypothesis.get("hypothesis_id") or "")[:160],
+                "statement": str(raw_hypothesis.get("statement") or "")[:1_000],
+                "status": str(raw_hypothesis.get("status") or "")[:80],
+                "artifact_paths": [
+                    str(item)[:512]
+                    for item in (raw_hypothesis.get("artifact_paths") or [])[:20]
+                    if isinstance(item, str) and item
+                ],
+                "falsification_conditions": [
+                    str(item)[:500]
+                    for item in (raw_hypothesis.get("falsification_conditions") or [])[:20]
+                    if isinstance(item, str) and item
+                ],
+            })
+        output.append({
+            "hypothesis_set_id": str(raw_set.get("hypothesis_set_id") or "")[:160],
+            "question": str(raw_set.get("question") or "")[:1_000],
+            "scope": str(raw_set.get("scope") or "")[:160],
+            "hypotheses": hypotheses,
+        })
+        if len(output) >= 10:
             break
     return output
 
@@ -674,7 +1193,19 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "observed_trusted_ttps": _compact_trusted_observations(
             detail.get("observed_trusted_ttps") or session_payload.get("observed_trusted_ttps") or []
         ),
+        "classification_events": _compact_classification_events(
+            detail.get("classification_events") or session_payload.get("classification_events") or []
+        ),
+        "observed_tactic_path": _compact_observed_tactic_path(
+            detail.get("observed_tactic_path") or session_payload.get("observed_tactic_path") or []
+        ),
         "correlated_ttp_hypotheses": _compact_correlations(raw_correlations),
+        "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "session_hypothesis_assessment": _compact_session_hypothesis_assessment(
+            detail.get("session_hypothesis_assessment")
+        ),
         "session_ttp_correlation_summary": _pick(
             detail.get("session_ttp_correlation_summary") or {},
             (
@@ -695,6 +1226,7 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "enrichment_status": detail.get("enrichment_status") or {},
         "authentication_activity": authentication_view,
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),
@@ -793,10 +1325,20 @@ def session_detail_view(
         "observables": detail.get("observables") or [],
         "commands": public_commands,
         "classification_events": _redact_public_command_text(
-            detail.get("classification_events") or []
+            [
+                _normalize_inactive_classifier_event_for_public(item)
+                for item in (detail.get("classification_events") or [])
+                if isinstance(item, Mapping)
+            ]
         ),
         "observed_trusted_ttps": observed_trusted_ttps,
         "correlated_ttp_hypotheses": public_correlations,
+        "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "session_hypothesis_assessment": _compact_session_hypothesis_assessment(
+            detail.get("session_hypothesis_assessment")
+        ),
         "session_ttp_correlations": public_correlations,
         "session_ttp_correlation_summary": public_correlation_summary,
         "tactics": detail.get("tactics") or [],
@@ -806,6 +1348,7 @@ def session_detail_view(
         ),
         "enrichment_status": detail.get("enrichment_status") or {},
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
             "sensor_id": session_payload.get("sensor_id") or session_payload.get("sensor"),

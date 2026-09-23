@@ -35,14 +35,19 @@ SOURCE_IP_POLICY_VERSION = "1.0.0"
 SOURCE_IP_AMENDMENT_SCHEMA = "external_ti_source_ip_governance_amendment.v1"
 SOURCE_IP_PRODUCTION_POLICY_VERSION = "2.1.0"
 SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION = "2.2.0"
+SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION = "2.3.0"
 SOURCE_IP_PRODUCTION_POLICY_VERSIONS = frozenset(
     {
         SOURCE_IP_PRODUCTION_POLICY_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
     }
 )
 SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256 = (
     "02a6a7e6fad85fe61bb1cad3df2dbe839921f76675b05d5f0f95a7d5be80e4e0"
+)
+SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256 = (
+    "3350b9160d0b798dcd380571e11615a22e2ada20d1d9ba2b91f405d63d786e1c"
 )
 SOURCE_IP_PRODUCTION_SCHEMA = "external_ti_source_ip_governance.v2"
 SOURCE_IP_AMENDMENT_SHA256 = "b8e292d9eeb80e10af8695fe4b3e0a74216894191eca9790c8e75182203beace"
@@ -311,20 +316,26 @@ def load_source_ip_governance_amendment(
         "shodan_official",
         "abuseipdb",
     }
-    if is_production and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+    if is_production and policy_version in {
+        SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    }:
         expected_providers.add("otx")
     if not isinstance(authorized, list) or {
         str(item).strip().lower() for item in authorized
     } != expected_providers:
         raise ValueError("source-IP governance provider scope is invalid")
-    if is_production and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+    if is_production and policy_version in {
+        SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    }:
         transport_review = document.get("provider_transport_review")
         otx_review = (
             transport_review.get("otx")
             if isinstance(transport_review, Mapping)
             else None
         )
-        if not isinstance(otx_review, Mapping) or any(
+        invalid_otx_review = not isinstance(otx_review, Mapping) or any(
             (
                 otx_review.get("endpoint_id") != "otx_general_v1",
                 otx_review.get("adapter") != "otx",
@@ -337,10 +348,26 @@ def load_source_ip_governance_amendment(
                 otx_review.get("normalized_retention")
                 != "bounded_pulse_ids_names_tags_references_only",
             )
+        )
+        if (
+            not invalid_otx_review
+            and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION
         ):
+            invalid_otx_review = any(
+                (
+                    otx_review.get("allowed_observable_types") != ["ip", "hash"],
+                    otx_review.get("allowed_observable_roles")
+                    != ["source_ip", "file_hash"],
+                    otx_review.get("allowed_hash_algorithms") != ["sha256"],
+                )
+            )
+        if invalid_otx_review:
             raise ValueError("source-IP OTX transport scope is invalid")
     fields = scope.get("allowed_outbound_fields")
-    if fields != ["normalized_source_ip"]:
+    expected_fields = ["normalized_source_ip"]
+    if policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION:
+        expected_fields.append("sha256_file_hash")
+    if fields != expected_fields:
         raise ValueError("source-IP outbound field scope is invalid")
     required_scope = {
         "lookup_only": True,
@@ -374,7 +401,10 @@ def load_source_ip_governance_amendment(
     if any(eligibility.get(key) is not value for key, value in required_eligibility.items()):
         raise ValueError("source-IP eligibility controls are invalid")
     lifecycle = document.get("privacy_and_data_lifecycle")
-    if not isinstance(lifecycle, Mapping) or lifecycle.get("outbound_payload_minimization") != "normalized_source_ip_only" or lifecycle.get("raw_provider_response_persisted") is not False or lifecycle.get("normalized_bounded_fields_only") is not True or lifecycle.get("canonical_mongodb_enrichment_record_write") is not False:
+    expected_minimization = "normalized_source_ip_only"
+    if policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION:
+        expected_minimization = "normalized_source_ip_or_sha256_file_hash_only"
+    if not isinstance(lifecycle, Mapping) or lifecycle.get("outbound_payload_minimization") != expected_minimization or lifecycle.get("raw_provider_response_persisted") is not False or lifecycle.get("normalized_bounded_fields_only") is not True or lifecycle.get("canonical_mongodb_enrichment_record_write") is not False:
         raise ValueError("source-IP data lifecycle controls are invalid")
     authority = document.get("authority")
     if not isinstance(authority, Mapping) or authority.get("eti_authority") != EXTERNAL_TI_AUTHORITY or any(authority.get(key) != 0 for key in ("trusted_attck_writes", "trusted_history_writes", "canonical_classification_overrides", "response_actions")):
@@ -400,7 +430,7 @@ def load_source_ip_governance_amendment(
         version=policy_version,
         sha256=digest,
         authorized_providers=tuple(sorted({str(item).strip().lower() for item in authorized})),
-        allowed_outbound_fields=("normalized_source_ip",),
+        allowed_outbound_fields=tuple(expected_fields),
         continuous_processing=is_production,
         minimum_refresh_interval_seconds=minimum_refresh,
         max_distinct_source_ips_per_utc_day=max_daily_targets,
@@ -656,8 +686,13 @@ def _sighting_metadata(sighting: Mapping[str, Any]) -> Dict[str, Any]:
 def _base_decision(sighting: Mapping[str, Any]) -> Tuple[str, str, str, str, str]:
     observable_type = str(sighting.get("observable_type") or "").strip().lower()
     value = str(sighting.get("observable_value") or "").strip()
-    role = str(sighting.get("role") or "").strip().lower()
-    source = str(sighting.get("source") or "").strip().lower()
+    # Mongo observable_sightings keep the policy metadata in the bounded
+    # payload projection.  Read it through the same safe field accessor used
+    # by the provenance checks; otherwise a persisted source-IP sighting is
+    # incorrectly treated as role/source-less and is fail-closed as
+    # ``role_prohibited`` even though its canonical payload is complete.
+    role = _sighting_field(sighting, "role", "observable_role").lower()
+    source = _sighting_field(sighting, "source", "observable_source").lower()
     algorithm = str(_sighting_metadata(sighting).get("algorithm") or _sighting_metadata(sighting).get("hash_algorithm") or _sighting_metadata(sighting).get("hash_type") or "").strip().lower().replace("-", "")
     return observable_type, value, role, source, algorithm
 
@@ -729,7 +764,10 @@ def _source_ip_policy_authorized(
         "abuseipdb",
         "shodan_official",
     }
-    if version == SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION:
+    if version in {
+        SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    }:
         required.add("otx")
     if not required.issubset(normalized):
         return False

@@ -474,6 +474,46 @@ def test_pipeline_trigger_invokes_canonical_coordinator_with_public_bpg_keyword(
     assert validate_session_assessment_v4(report) == []
 
 
+def test_pipeline_trigger_preserves_authenticated_sensor_session_for_model2_binding() -> None:
+    """The canonical report payload must retain the authenticated Model2 alias."""
+
+    captured: dict[str, object] = {}
+
+    class CapturingCoordinator:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        async def analyze(self, ioc_bundle, tactic_summary, sessions_obj, **kwargs):
+            del ioc_bundle, tactic_summary
+            captured["session_id"] = sessions_obj[0].session_id
+            captured["sensor_session_id"] = sessions_obj[0].sensor_session_id
+            return build_session_assessment_v4(
+                sessions_obj,
+                raw_events=kwargs.get("raw_events", []),
+            )
+
+    state = SessionState(
+        session_id="session_v1_0123456789abcdef0123456789abcdef",
+        sensor_session_id="cowrie-session-local",
+        src_ip="203.0.113.14",
+        start_time="2026-07-28T01:00:00Z",
+    )
+    state.sensor = "sensor-a"
+    state.login_success = True
+    state.commands.append("whoami")
+    state.commands_success.append("whoami")
+
+    report = build_pipeline_trigger(
+        CapturingCoordinator,
+        behavior_policy_path=BEHAVIOR_POLICY,
+        classification_rules_path=CLASSIFICATION_POLICY,
+    )(state)
+
+    assert report is not None
+    assert captured["session_id"] == state.session_id
+    assert captured["sensor_session_id"] == "cowrie-session-local"
+
+
 def test_legacy_adapter_is_read_only_and_does_not_recompute() -> None:
     legacy = {"schema_version": "session_assessment.v3", "assessment_id": "historic"}
     original = copy.deepcopy(legacy)

@@ -1,6 +1,12 @@
 import Link from "next/link";
 import SessionAwareLink from "@/components/auth/SessionAwareLink";
 
+/**
+ * คอมโพเนนต์ส่วนท้ายของหน้า (Footer)
+ * แสดงชื่อโปรเจกต์ คำอธิบายสั้นๆ และเมนูนำทาง (Navigation) พื้นฐาน
+ * 
+ * @returns {JSX.Element} ส่วน Footer ของระบบ
+ */
 export default function Footer() {
   return (
     <footer className="w-full border-t border-border bg-surface px-5 py-8 text-sm leading-6 text-text-muted sm:px-8">

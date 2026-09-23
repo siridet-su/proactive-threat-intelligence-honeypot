@@ -4,6 +4,7 @@ import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 import { CANONICAL_SESSION_ID_PATTERN } from "@/lib/sensor-session-identity";
+import { getMongoClient } from "@/lib/mongodb";
 
 const MAX_TOKEN_BYTES = 4_096;
 const MAX_UPSTREAM_BYTES = 1_000_000;
@@ -206,4 +207,50 @@ export async function loadAdminCowrieCommands(sessionId: string): Promise<AdminC
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/** Local development only: exact-session, Admin-gated command review from canonical Mongo. */
+export async function loadLocalAdminCowrieCommands(sessionId: string): Promise<AdminCowrieCommandProjection> {
+  if (!CANONICAL_SESSION_ID_PATTERN.test(sessionId)) throw new TypeError("invalid canonical session identifier");
+  if (process.env.NODE_ENV !== "development" || process.env.PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO !== "true") {
+    throw new Error("local command review is disabled");
+  }
+  const client = await getMongoClient();
+  const rows = await client.db("honeypot_canonical_v1").collection("events")
+    .find(
+      { session_id: sessionId, eventid: { $in: [...COMMAND_EVENT_IDS] } },
+      { projection: { _id: 0, event_id: 1, eventid: 1, timestamp: 1, payload_json: 1 } },
+    )
+    .sort({ timestamp: 1, event_id: 1 })
+    .limit(MAX_COMMANDS + 1)
+    .maxTimeMS(20_000)
+    .toArray();
+  const commands = rows.map((row) => {
+    if (typeof row.payload_json !== "string" || Buffer.byteLength(row.payload_json, "utf8") > MAX_UPSTREAM_BYTES) {
+      throw new Error("canonical command payload is unavailable");
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(row.payload_json);
+    } catch {
+      throw new Error("canonical command payload is invalid");
+    }
+    if (!isRecord(payload) || typeof payload.input !== "string") {
+      throw new Error("canonical command input is unavailable");
+    }
+    return {
+      event_id: row.event_id,
+      eventid: row.eventid,
+      timestamp: row.timestamp,
+      input: payload.input,
+    };
+  });
+  return projectUpstreamCommands(sessionId, {
+    ok: true,
+    schema_version: "monitor.internal_command_view.v1",
+    sensitive: true,
+    session_id: sessionId,
+    commands,
+    truncated: rows.length > MAX_COMMANDS,
+  });
 }

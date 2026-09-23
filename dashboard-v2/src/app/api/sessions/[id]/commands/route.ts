@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
-import { loadAdminCowrieCommands } from "@/lib/session-command-server";
+import { loadAdminCowrieCommands, loadLocalAdminCowrieCommands } from "@/lib/session-command-server";
 import { CANONICAL_SESSION_ID_PATTERN } from "@/lib/sensor-session-identity";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +35,14 @@ export async function GET(
       return json({ ok: false, error: "Invalid session identifier" }, 400);
     }
 
-    const projection = await loadAdminCowrieCommands(id);
+    const localReview = process.env.NODE_ENV === "development"
+      && process.env.PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO === "true";
+    if (localReview && !new Set(["127.0.0.1", "localhost", "[::1]"]).has(new URL(request.url).hostname)) {
+      return json({ ok: false, error: "Local command review requires loopback access" }, 403);
+    }
+    const projection = localReview
+      ? await loadLocalAdminCowrieCommands(id)
+      : await loadAdminCowrieCommands(id);
     return json(projection as unknown as Record<string, unknown>, 200);
   } catch {
     // Do not log or return command text or event payloads on any failure path.

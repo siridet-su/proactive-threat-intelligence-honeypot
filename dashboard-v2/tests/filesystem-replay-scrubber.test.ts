@@ -14,16 +14,18 @@ import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
 import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "../src/lib/dashboardTypes";
 
-function makeEvent(id: string, at: string | null, action: SessionCwdHistoryEvent["action"] = "change"): SessionCwdHistoryEvent {
+function makeEvent(id: string, at: string | null, action: SessionCwdHistoryEvent["action"] = "changed"): SessionCwdHistoryEvent {
   return {
     id,
     sessionId: "sess-replay",
+    sequence: null,
+    sourceEventId: null,
     fromPath: "/",
     toPath: `/${id}`,
     command: `cd /${id}`,
     action,
-    status: action === "failed_change" ? "failed" : "confirmed",
-    at,
+    status: action === "failed_change" ? "unknown" : "confirmed",
+    at: at as string,
   };
 }
 

@@ -1,7 +1,10 @@
 import { RiskLevel } from "@/types/honeypot";
 
 /**
- * Standard badge classes for risk / severity levels across all views.
+ * คืนค่า CSS classes สำหรับสร้าง Badge แสดงระดับความรุนแรง (Severity)
+ * 
+ * @param {RiskLevel | string} severity - ระดับความรุนแรง (Critical, High, Medium, Low)
+ * @returns {string} CSS classes สำหรับ Tailwind เพื่อใช้สร้าง Badge
  */
 export function severityBadgeClass(severity: RiskLevel | string): string {
   switch (severity) {
@@ -19,7 +22,10 @@ export function severityBadgeClass(severity: RiskLevel | string): string {
 }
 
 /**
- * Color class for status dots (e.g. Session ID leading indicator)
+ * คืนค่า CSS class สำหรับสีของจุดสถานะ (Status Dot) เช่น การแสดงสถานะหน้า Session ID
+ * 
+ * @param {RiskLevel | string} severity - ระดับความรุนแรง
+ * @returns {string} CSS background class สำหรับจุดสถานะ
  */
 export function severityDotClass(severity: RiskLevel | string): string {
   switch (severity) {
@@ -37,14 +43,20 @@ export function severityDotClass(severity: RiskLevel | string): string {
 }
 
 /**
- * Color class for status bars (e.g. Priority Queue item leading bar)
+ * คืนค่า CSS class สำหรับแถบสถานะ (Status Bar) 
+ * 
+ * @param {RiskLevel | string} severity - ระดับความรุนแรง
+ * @returns {string} CSS background class
  */
 export function severityBarClass(severity: RiskLevel | string): string {
   return severityDotClass(severity);
 }
 
 /**
- * Raw CSS variable for map pins / inline canvas / charts
+ * คืนค่ารหัสสีดิบ (CSS Variable) สำหรับนำไปใช้กับ Map Pins, Canvas หรือ Charts
+ * 
+ * @param {RiskLevel | string} severity - ระดับความรุนแรง
+ * @returns {string} CSS Variable ของสีนั้นๆ
  */
 export function severityColor(severity: RiskLevel | string): string {
   switch (severity) {
@@ -62,11 +74,12 @@ export function severityColor(severity: RiskLevel | string): string {
 }
 
 /**
- * Classification badge styling aligned with Target Landscape chart colors:
- * - APT: Purple (chart-4)
- * - BOT: Teal (chart-2)
- * - SCRIPT KIDDIE: Slate (neutral)
- * - Other / Fallback: Amber (chart-3)
+ * คืนค่า CSS classes สำหรับ Badge จัดกลุ่มประเภทผู้โจมตี (Classification)
+ * มีการจัดการกับข้อมูลแบบเก่าที่อาจส่งมาเป็นโค้ดสี (Legacy typeColor) ด้วย
+ * 
+ * @param {string} [classificationOrColor] - ประเภทผู้โจมตี (เช่น APT, BOT) หรือสี
+ * @param {string} [typeColor] - สีแบบเก่า (Legacy text color)
+ * @returns {string} CSS classes สำหรับ Badge ของกลุ่มผู้โจมตี
  */
 export function classificationBadgeClass(classificationOrColor?: string, typeColor?: string): string {
   const val = classificationOrColor || "";
@@ -85,7 +98,7 @@ export function classificationBadgeClass(classificationOrColor?: string, typeCol
     return "bg-chart-3-subtle text-chart-3 border-chart-3-border";
   }
 
-  // Fallback check if classificationOrColor was a legacy typeColor string
+  // Fallback สำหรับ Legacy color strings
   const checkColor = typeColor || val;
   if (checkColor.includes("text-red-400")) return "bg-severity-critical-subtle text-severity-critical border-severity-critical-border";
   if (checkColor.includes("text-amber-400")) return "bg-severity-medium-subtle text-severity-medium border-severity-medium-border";
@@ -94,7 +107,10 @@ export function classificationBadgeClass(classificationOrColor?: string, typeCol
 }
 
 /**
- * Badge styling for malware vault artifact types.
+ * คืนค่า CSS classes สำหรับ Badge ระบุประเภทของมัลแวร์ใน Malware Vault
+ * 
+ * @param {string} type - ประเภทของไฟล์หรือ Artifact
+ * @returns {string} CSS classes สำหรับ Malware Type Badge
  */
 export function malwareTypeBadgeClass(type: string): string {
   if (type.includes("Malicious IP")) {

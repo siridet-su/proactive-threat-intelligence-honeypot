@@ -290,6 +290,7 @@ class SessionState:
     session_id:       str
     src_ip:           str
     start_time:       str
+    end_time:         str          = ""       # authoritative terminal event timestamp
     src_port:         int          = 0
     dst_ip:           str          = ""
     dst_port:         int          = 22
@@ -737,6 +738,7 @@ class SessionMonitor:
                 alerts += self._check_thresholds(state)
 
         elif eid == "cowrie.session.closed":
+            state.end_time = str(source_timestamp or timestamp or "").strip()
             state.duration = float(event.get("duration", 0))
             alerts += self._finalize_session(state)
 
@@ -1305,7 +1307,7 @@ class SessionMonitor:
                 return finalize(self._securebert_classify(text))
 
             if not self.bert_fn:
-                return None, "unknown", "securebert_unavailable", 0.0
+                return None, "unknown", "unclassified", 0.0
 
             try:
                 ttp, confidence = self.bert_fn(text)
@@ -1388,7 +1390,7 @@ class SessionMonitor:
             (ttp, tactic, source, confidence)
         """
         if not self.bert_fn:
-            return None, "unknown", "securebert_unavailable", 0.0
+            return None, "unknown", "unclassified", 0.0
 
         try:
             result = self.bert_fn(cmd)
@@ -1737,7 +1739,14 @@ def build_pipeline_trigger(
                 {
                     "src_ip": state.src_ip,
                     "session_id": state.session_id,
+                    # Preserve the authenticated Cowrie-local identity so the
+                    # ensemble resolver can bind Model2's protected result
+                    # spool record back to this canonical sensor session.  It
+                    # is accepted only when sensor_id + sensor_session_id
+                    # deterministically reproduce session_id.
+                    "sensor_session_id": getattr(state, "sensor_session_id", ""),
                     "start_time": state.start_time,
+                    "end_time": getattr(state, "end_time", ""),
                     "commands": state.commands,
                     "commands_success": state.commands_success,
                     "commands_failed": getattr(state, "commands_failed", []),
@@ -1856,7 +1865,9 @@ def build_pipeline_trigger(
             def __init__(self, view):
                 self.src_ip             = view.get('src_ip', '')
                 self.session_id         = view.get('session_id', '')
+                self.sensor_session_id  = view.get('sensor_session_id', '')
                 self.start_time         = view.get('start_time', '')
+                self.end_time           = view.get('end_time', '')
                 self.commands           = view.get('commands', [])
                 self.commands_success   = view.get('commands_success', [])
                 self.commands_failed    = view.get('commands_failed', [])

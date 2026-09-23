@@ -13,6 +13,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from html import escape
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler
@@ -66,7 +67,12 @@ from production.utils.http_security import (
     single_header_value,
     validate_bind_auth,
 )
-from production.utils.serialization import html_script_json, stable_id, utc_now
+from production.utils.serialization import (
+    event_id as canonical_event_id,
+    html_script_json,
+    stable_id,
+    utc_now,
+)
 from production.utils.service_lifecycle import serve_http_until_stopped
 from production.storage.mongodb_backend import MONGODB_EVENT_SCHEMA
 from production.utils.sensor_identity import (
@@ -87,6 +93,7 @@ DEFAULT_SESSION_LIMIT = 500
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
+SESSION_CWD_HISTORY_SCHEMA = "monitor.session_cwd_history.v1"
 MAX_ADMIN_COMMAND_EVENTS = 100
 MAX_ADMIN_COMMAND_INPUT_BYTES = 4096
 MONITOR_SUMMARY_SCAN_LIMIT = 100_000
@@ -360,8 +367,7 @@ def _is_canonical_command_event_for_session(
 ) -> bool:
     """Require the stored event's authenticated sensor/session binding."""
     if (
-        row.get("schema_version") != MONGODB_EVENT_SCHEMA
-        or row.get("session_id") != session_id
+        row.get("session_id") != session_id
         or payload.get("session") != session_id
     ):
         return False
@@ -389,13 +395,31 @@ def _is_canonical_command_event_for_session(
     if expected_session_id != session_id:
         return False
 
+    durable_event_id = row.get("event_id")
+    storage_schema = row.get("schema_version")
+    if storage_schema == MONGODB_EVENT_SCHEMA:
+        storage_binding_valid = True
+    elif storage_schema in (None, ""):
+        # SQLite deliberately has no per-row schema_version column.  Bind its
+        # command view to the backend-neutral canonical event identity instead
+        # of incorrectly requiring the MongoDB storage envelope.
+        storage_binding_valid = (
+            isinstance(durable_event_id, str)
+            and bool(durable_event_id)
+            and durable_event_id == canonical_event_id(sensor_id, payload)
+        )
+    else:
+        storage_binding_valid = False
+
     row_event_id = row.get("eventid")
     return (
+        storage_binding_valid
+        and
         isinstance(row_event_id, str)
         and bool(row_event_id)
         and row_event_id == payload.get("eventid")
-        and isinstance(row.get("event_id"), str)
-        and bool(row.get("event_id"))
+        and isinstance(durable_event_id, str)
+        and bool(durable_event_id)
     )
 
 
@@ -485,6 +509,12 @@ def load_internal_command_detail(
         event_id = row.get("eventid") or payload.get("eventid")
         if not _is_persisted_command_event(event_id):
             continue
+        bounded_input = _bounded_command_input(payload.get("input"))
+        if bounded_input is None or not bounded_input[0].strip():
+            # Empty terminal submissions remain canonical event telemetry but
+            # are not commands. Keep this projection aligned with the public
+            # command count, session assessment, and report.
+            continue
         if len(commands) >= MAX_ADMIN_COMMAND_EVENTS:
             truncated = True
             break
@@ -521,12 +551,7 @@ def load_internal_command_detail(
                     "evidence_tier": str(item.get("evidence_tier") or ""),
                 }
             )
-        bounded_input = _bounded_command_input(payload.get("input"))
-        if bounded_input is None:
-            raw_input = ""
-            input_truncated = False
-        else:
-            raw_input, input_truncated = bounded_input
+        raw_input, input_truncated = bounded_input
         truncated = truncated or input_truncated
         commands.append(
             {
@@ -1053,9 +1078,212 @@ def _report_payload(row: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _complete_report_payload(
+    report_payload: Dict[str, Any],
+    reports_dir: str,
+) -> Dict[str, Any]:
+    """Merge the bounded stored report row with its canonical JSON artifact.
+
+    Report rows intentionally retain a compact projection, while hypothesis
+    sets and their falsifiers live in the immutable report artifact. Session
+    detail must use the same merged source as PDF rendering or the dashboard
+    can contradict the downloadable report.
+    """
+
+    artifact_paths = _artifact_paths(report_payload, reports_dir)
+    artifact_payload = _load_report_json_from_artifact(
+        artifact_paths,
+        reports_dir,
+    )
+    return _merged_report_payload(report_payload, artifact_payload)
+
+
+def _latest_iso_timestamp(values: Iterable[Any]) -> str:
+    """Return the latest valid ISO-8601 timestamp without trusting row order."""
+
+    latest: tuple[datetime, str] | None = None
+    for value in values:
+        text = _text(value).strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+        if latest is None or parsed > latest[0]:
+            latest = (parsed, text)
+    return latest[1] if latest is not None else ""
+
+
+def _elapsed_seconds(start_value: Any, end_value: Any) -> float | None:
+    """Return the non-negative elapsed interval between two ISO timestamps."""
+
+    try:
+        start = datetime.fromisoformat(str(start_value or "").replace("Z", "+00:00"))
+        end = datetime.fromisoformat(str(end_value or "").replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if start.tzinfo is None or start.utcoffset() is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None or end.utcoffset() is None:
+        end = end.replace(tzinfo=timezone.utc)
+    elapsed = (end.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds()
+    return elapsed if elapsed >= 0 else None
+
+
 def _event_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     payload = _payload_from_row(row)
     return payload if isinstance(payload, dict) else {}
+
+
+def load_session_cwd_history(
+    config: MonitorConfig,
+    session_id: str,
+    *,
+    hop: str = "",
+    _storage: Any = None,
+) -> Dict[str, Any]:
+    """Project observed Cowrie CWD transitions from canonical event rows.
+
+    The filesystem page historically read the processor-owned ``cwd_events``
+    collections directly.  Production session identity is canonicalized in
+    the monitor storage, so that read can legitimately return an empty page
+    even when ``cowrie.session.cwd`` is present in the authoritative event
+    ledger.  This bounded projection reads only the exact session's canonical
+    events and exposes paths, timestamps, and event IDs—never command text or
+    the original event payload.
+    """
+
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "missing_session_id",
+            "error": "session_id is required",
+            "session_id": "",
+            "timestamp": utc_now(),
+        }
+    if len(clean_session_id) > 256 or any(
+        ord(character) < 0x20 or ord(character) == 0x7F
+        for character in clean_session_id
+    ):
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "malformed_session_id",
+            "error": "session_id is malformed",
+            "session_id": clean_session_id[:256],
+            "timestamp": utc_now(),
+        }
+    if hop and (len(hop) > 300 or any(ord(character) < 0x20 or ord(character) == 0x7F for character in hop)):
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "malformed_hop",
+            "error": "hop is malformed",
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+    try:
+        storage = _storage or _open_monitor_storage(config)
+        session_rows, session_error = _storage_session_rows(storage, "sessions", clean_session_id, 1)
+        if not session_rows:
+            return {
+                "ok": False,
+                "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+                "error_code": "session_not_found",
+                "error": session_error or "session was not found",
+                "session_id": clean_session_id,
+                "timestamp": utc_now(),
+            }
+        event_rows, event_error = _storage_session_rows(
+            storage,
+            "events",
+            clean_session_id,
+            MAX_SESSION_EVENTS,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "error_code": "storage_unavailable",
+            "error": _storage_error("CWD event query", exc),
+            "session_id": clean_session_id,
+            "timestamp": utc_now(),
+        }
+
+    projected_events = event_views(event_rows)
+    projected_events = [
+        item
+        for item in projected_events
+        if item.get("eventid") == "cowrie.session.cwd" and item.get("cwd_path")
+    ]
+    projected_events.sort(
+        key=lambda item: (
+            str(item.get("timestamp") or item.get("received_at") or ""),
+            str(item.get("event_id") or ""),
+        )
+    )
+    items: List[Dict[str, Any]] = []
+    previous_path = ""
+    for sequence, event in enumerate(projected_events, start=1):
+        event_id = str(event.get("event_id") or "")
+        target_path = str(event.get("cwd_path") or "")
+        from_path = str(event.get("cwd_from_path") or previous_path or "")
+        action = "changed" if from_path and from_path != target_path else "entered"
+        item = {
+            "sessionId": clean_session_id,
+            "at": str(event.get("timestamp") or event.get("received_at") or ""),
+            "eventId": event_id,
+            "sequence": sequence,
+            "fromPath": from_path or None,
+            "toPath": target_path,
+            "action": action,
+            "status": "observed",
+            "sourceEventId": event_id,
+        }
+        items.append(item)
+        previous_path = target_path
+
+    if hop:
+        selected = next((item for item in items if item.get("eventId") == hop), None)
+        if selected is None:
+            return {
+                "ok": True,
+                "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+                "session_id": clean_session_id,
+                "item": None,
+                "timestamp": utc_now(),
+            }
+        return {
+            "ok": True,
+            "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+            "session_id": clean_session_id,
+            "item": selected,
+            "hopNumber": selected.get("sequence"),
+            "successfulHopNumber": selected.get("sequence"),
+            "totalItems": len(items),
+            "timestamp": utc_now(),
+        }
+    return {
+        "ok": True,
+        "schema_version": SESSION_CWD_HISTORY_SCHEMA,
+        "session_id": clean_session_id,
+        "items": items,
+        "nextCursor": None,
+        "totalItems": len(items),
+        "totalSuccessfulItems": sum(
+            1 for item in items if item.get("action") != "failed_change"
+        ),
+        "complete": True,
+        "source": "canonical_events",
+        "errors": {"events": event_error} if event_error else {},
+        "timestamp": utc_now(),
+    }
 
 
 def _authentication_activity(
@@ -1760,6 +1988,8 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
         canonical_evidence = merged.get("canonical_evidence") or {}
         coverage = canonical_evidence.get("semantic_coverage") or {}
         graph = canonical_evidence.get("semantic_graph") or {}
+        session_hypothesis = merged.get("session_hypothesis_assessment") or {}
+        session_families = session_hypothesis.get("semantic_families") or []
         return {
             "schema_version": "session_assessment.v4",
             "campaign_name": "",
@@ -1783,6 +2013,18 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
                 f"{len(graph.get('fact_nodes') or [])} facts / "
                 f"{len(graph.get('relationship_edges') or [])} relationships / "
                 f"{len(graph.get('chain_nodes') or [])} chains"
+            ),
+            "session_hypothesis_status": _text(
+                session_hypothesis.get("status") or "unavailable"
+            ),
+            "session_hypothesis_family_count": _text(len(session_families)),
+            "session_hypothesis_canonical_finding_count": _text(
+                len(session_hypothesis.get("canonical_finding_ids") or [])
+            ),
+            "session_hypothesis_missing_evidence": "; ".join(
+                _text(item)
+                for item in session_hypothesis.get("missing_evidence") or []
+                if _text(item)
             ),
             "post_session_follow_on_hypothesis": "; ".join(
                 _text(hypothesis.get("statement"))
@@ -2475,6 +2717,45 @@ def _model2_result_bound_to_session(model2: Any, session_id: str) -> bool:
     )
 
 
+def _session_ensemble_projection(
+    value: Any,
+    session_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a session-bound ensemble projection, if it is safe to expose.
+
+    A closed session stores its final ensemble in the canonical session row.
+    The prediction snapshot is a secondary read model and can legitimately
+    lag the terminal session write.  Prefer a candidate with a bound Model2
+    result; otherwise retain a candidate that is explicitly for this session
+    when it only carries Model1/unavailable Model2 evidence.
+    """
+
+    if not isinstance(value, dict) or _text(value.get("session_id")) != session_id:
+        return None
+    model2 = value.get("model2")
+    if isinstance(model2, dict) and model2.get("available") is True:
+        if not _model2_result_bound_to_session(model2, session_id):
+            return None
+    return value
+
+
+def _select_session_ensemble(
+    session_id: str,
+    *candidates: Any,
+) -> Dict[str, Any]:
+    """Select exact-session ensemble evidence, preferring bound Model2."""
+
+    safe_candidates = [
+        selected
+        for candidate in candidates
+        if (selected := _session_ensemble_projection(candidate, session_id)) is not None
+    ]
+    for candidate in safe_candidates:
+        if _model2_result_bound_to_session(candidate.get("model2"), session_id):
+            return candidate
+    return safe_candidates[0] if safe_candidates else {}
+
+
 def load_dashboard_session_detail(
     config: MonitorConfig,
     session_id: str,
@@ -2565,6 +2846,20 @@ def load_dashboard_session_detail(
         for row in related["prediction_snapshots"]
         if _row_session_id(row) == clean_session_id
     ]
+    next_distinct_projection = _next_distinct_projection_for_session_row(
+        clean_session_id,
+        session_rows[0],
+    )
+    if not prediction_rows:
+        sidecar_snapshot = _next_distinct_snapshot_row(
+            next_distinct_projection,
+            clean_session_id,
+        )
+        if sidecar_snapshot:
+            # The sidecar is append-only and remains the dedicated Next
+            # Distinct source of truth. This row is a bounded read-model
+            # projection only; it is never written to MongoDB.
+            prediction_rows = [sidecar_snapshot]
     latest_jobs = _index_by_latest(job_rows, "session_id", "updated_at")
     latest_reports = _index_by_latest(report_rows, "session_id", "created_at")
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
@@ -2575,15 +2870,14 @@ def load_dashboard_session_detail(
     if latest_prediction and _row_session_id(latest_prediction) != clean_session_id:
         latest_prediction = {}
         latest_prediction_payload = {}
-    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
-    if not isinstance(ensemble_evidence, dict):
-        ensemble_evidence = {}
-    stored_model2 = ensemble_evidence.get("model2")
-    stored_model2_available = (
-        isinstance(stored_model2, dict)
-        and stored_model2.get("available") is True
+    ensemble_evidence = _select_session_ensemble(
+        clean_session_id,
+        latest_prediction_payload.get("ensemble_evidence"),
+        payload.get("ensemble_evidence"),
     )
-    if not _model2_result_bound_to_session(stored_model2, clean_session_id):
+    if not _model2_result_bound_to_session(
+        ensemble_evidence.get("model2"), clean_session_id
+    ):
         try:
             live_ensemble = build_ensemble_from_session_payload(
                 payload,
@@ -2591,22 +2885,19 @@ def load_dashboard_session_detail(
             )
         except Exception:
             live_ensemble = {}
-        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
-        if (
-            isinstance(live_ensemble, dict)
-            and (
-                not isinstance(live_model2, dict)
-                or live_model2.get("available") is not True
-                or _model2_result_bound_to_session(live_model2, clean_session_id)
-            )
-        ):
-            ensemble_evidence = live_ensemble
-        elif stored_model2_available:
-            # A stored, available result with a missing or mismatched binding
-            # cannot be exposed as evidence for the requested session.
+        selected_live = _select_session_ensemble(clean_session_id, live_ensemble)
+        if _model2_result_bound_to_session(
+            selected_live.get("model2"), clean_session_id
+        ) or not ensemble_evidence:
+            ensemble_evidence = selected_live
+        elif not _session_ensemble_projection(ensemble_evidence, clean_session_id):
             ensemble_evidence = {}
     authentication_activity = _authentication_activity(payload, event_rows)
-    report_payload = _report_payload(selected.get("report_row"))
+    stored_report_payload = _report_payload(selected.get("report_row"))
+    report_payload = _complete_report_payload(
+        stored_report_payload,
+        config.reports_dir,
+    )
     historical_guidance = _historical_response_guidance_payload(
         report_payload,
         configured_policy_path=config.response_guidance_policy_path,
@@ -2626,10 +2917,18 @@ def load_dashboard_session_detail(
         payload.get("is_ended") or session_rows[0].get("ended")
     )
     overview["end_time"] = (
-        event_timestamps[-1]
-        if overview["is_ended"] and event_timestamps
+        _latest_iso_timestamp(event_timestamps)
+        if overview["is_ended"]
         else ""
     )
+    if overview["is_ended"]:
+        projected_duration = _elapsed_seconds(
+            overview.get("start_time"),
+            overview.get("end_time"),
+        )
+        if projected_duration is not None:
+            overview["recorded_duration"] = overview.get("duration") or ""
+            overview["duration"] = projected_duration
     detail = {
         "ok": True,
         "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
@@ -2654,6 +2953,11 @@ def load_dashboard_session_detail(
             report_payload.get("hypothesis_sets") or [],
             report_payload.get("canonical_evidence") or {},
         ),
+        "session_hypothesis_assessment": copy.deepcopy(
+            report_payload.get("session_hypothesis_assessment")
+            if isinstance(report_payload.get("session_hypothesis_assessment"), dict)
+            else {}
+        ),
         "session_ttp_correlations": payload.get("session_ttp_correlations") or [],
         "session_ttp_correlation_summary": payload.get("session_ttp_correlation_summary") or {},
         "tactics": payload.get("tactics") or [],
@@ -2661,6 +2965,7 @@ def load_dashboard_session_detail(
         "ttp_command_map": payload.get("ttp_command_map") or {},
         "enrichment_status": payload.get("enrichment_status") or {},
         "ensemble_evidence": ensemble_evidence,
+        "next_distinct_prediction": next_distinct_projection,
         "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
         "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
@@ -2820,16 +3125,7 @@ def load_next_distinct_prediction(
             "session_id": clean_session_id,
             "timestamp": utc_now(),
         }
-    projection = build_dashboard_prediction(clean_session_id, rows[0])
-    session_payload = _session_payload(rows[0])
-    projection["session_ended"] = bool(
-        session_payload.get("is_ended") or rows[0].get("ended")
-    )
-    projection["ok"] = projection.get("prediction_status") not in {
-        "UNAVAILABLE",
-    }
-    projection["timestamp"] = utc_now()
-    return projection
+    return _next_distinct_projection_for_session_row(clean_session_id, rows[0])
 
 
 def _dashboard_next_distinct_projection(
@@ -2911,6 +3207,91 @@ def _dashboard_next_distinct_projection(
                 "no session-end prediction is emitted"
             )
     return result
+
+
+def _next_distinct_projection_for_session_row(
+    session_id: str,
+    session_row: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build the exact read-only Next Distinct projection for one session.
+
+    Both the dedicated endpoint and the session-detail endpoint must pass
+    through this adapter.  The helper only reads the retained sidecar; it
+    never emits a session-end prediction and never persists a snapshot.
+    """
+
+    projection = build_dashboard_prediction(session_id, session_row)
+    session_payload = _session_payload(session_row)
+    projection["session_ended"] = bool(
+        session_payload.get("is_ended") or session_row.get("ended")
+    )
+    projection["ok"] = projection.get("prediction_status") not in {
+        "UNAVAILABLE",
+    }
+    projection["timestamp"] = utc_now()
+    return _dashboard_next_distinct_projection(projection, session_id)
+
+
+def _next_distinct_snapshot_row(
+    projection: Any,
+    session_id: str,
+) -> Dict[str, Any]:
+    """Adapt eligible sidecar data into an in-memory detail read-model row."""
+
+    if not isinstance(projection, dict):
+        return {}
+    if (
+        _text(projection.get("session_id")) != session_id
+        or _text(projection.get("sequence_id")) != session_id
+        or _text(projection.get("source")).upper() != "NEXT_DISTINCT_POC"
+    ):
+        return {}
+    prediction_status = _text(projection.get("prediction_status")).upper()
+    state = _text(projection.get("state")).upper()
+    if prediction_status != "PREDICTED":
+        return {}
+    top1 = projection.get("next_distinct_tactic")
+    if state == "SESSION_ENDED":
+        top1 = projection.get("stored_next_distinct_tactic")
+    if not isinstance(top1, str) or not top1.strip():
+        return {}
+    freshness = projection.get("freshness")
+    freshness = freshness if isinstance(freshness, dict) else {}
+    generated_at = _text(
+        freshness.get("generated_at") or projection.get("generated_at")
+    )
+    snapshot_role = (
+        "historical_advisory"
+        if state == "SESSION_ENDED"
+        else "active_advisory"
+    )
+    payload = copy.deepcopy(projection)
+    payload.update(
+        {
+            "session_id": session_id,
+            "snapshot_role": snapshot_role,
+            "prediction_source": "NEXT_DISTINCT_POC",
+            "historical_advisory": snapshot_role == "historical_advisory",
+            "read_only": True,
+            "advisory_only": True,
+        }
+    )
+    return {
+        "snapshot_id": stable_id(
+            "next_distinct_detail_snapshot",
+            {
+                "session_id": session_id,
+                "generated_at": generated_at,
+                "progression_index": projection.get("progression_index"),
+                "top1": top1,
+            },
+        ),
+        "session_id": session_id,
+        "created_at": generated_at or utc_now(),
+        "source": "NEXT_DISTINCT_POC",
+        "snapshot_role": snapshot_role,
+        "payload": payload,
+    }
 
 
 def _report_next_distinct_snapshot(
@@ -3064,6 +3445,10 @@ def load_session_report_pdf(
             clean_session_id,
             MAX_SESSION_EVENTS,
         )
+        # Reuse the bounded public event projection for the on-demand PDF.
+        # This supplies lifecycle/authentication/CWD metadata to the renderer
+        # without forwarding storage documents or raw command text.
+        session_payload["raw_events"] = event_views(event_rows)
         authentication_activity = _authentication_activity(session_payload, event_rows)
         authentication_attempts = authentication_activity.get("attempts") or []
         if authentication_activity.get("attempt_count", 0):
@@ -3251,11 +3636,14 @@ def load_session_detail(
     payload = selected["payload"]
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     latest_prediction_payload = _payload_from_row(latest_prediction)
-    ensemble_evidence = latest_prediction_payload.get("ensemble_evidence")
-    if not isinstance(ensemble_evidence, dict):
-        ensemble_evidence = {}
-    stored_model2 = ensemble_evidence.get("model2")
-    if not isinstance(stored_model2, dict) or stored_model2.get("available") is not True:
+    ensemble_evidence = _select_session_ensemble(
+        session_id,
+        latest_prediction_payload.get("ensemble_evidence"),
+        payload.get("ensemble_evidence"),
+    )
+    if not _model2_result_bound_to_session(
+        ensemble_evidence.get("model2"), session_id
+    ):
         try:
             live_ensemble = build_ensemble_from_session_payload(
                 payload,
@@ -3263,9 +3651,11 @@ def load_session_detail(
             )
         except Exception:
             live_ensemble = {}
-        live_model2 = live_ensemble.get("model2") if isinstance(live_ensemble, dict) else None
-        if isinstance(live_model2, dict) and live_model2.get("available") is True:
-            ensemble_evidence = live_ensemble
+        selected_live = _select_session_ensemble(session_id, live_ensemble)
+        if _model2_result_bound_to_session(
+            selected_live.get("model2"), session_id
+        ) or not ensemble_evidence:
+            ensemble_evidence = selected_live
     decoded_enrichment_records = [_row_with_payload(row) for row in enrichment_record_rows]
     src_ip = payload.get("src_ip") or selected.get("src_ip")
     enrichment_contexts = [
@@ -6294,6 +6684,25 @@ class MonitorHandler(BaseHTTPRequestHandler):
             return
         if not self._require_read():
             return
+        if parsed.path == "/api/session-cwd-history":
+            query = parse_qs(parsed.query)
+            session_id = query.get("session_id", [""])[0]
+            hop = query.get("hop", [""])[0]
+            detail = load_session_cwd_history(
+                self.monitor_config,
+                session_id=session_id,
+                hop=hop,
+            )
+            if detail.get("ok"):
+                status = HTTPStatus.OK
+            elif detail.get("error_code") in {"missing_session_id", "malformed_session_id", "malformed_hop"}:
+                status = HTTPStatus.BAD_REQUEST
+            elif detail.get("error_code") == "session_not_found":
+                status = HTTPStatus.NOT_FOUND
+            else:
+                status = HTTPStatus.INTERNAL_SERVER_ERROR
+            self._send_json(status, detail)
+            return
         if parsed.path == "/api/ai-advisory":
             query = parse_qs(parsed.query)
             session_id = query.get("session_id", [""])[0]
@@ -6626,6 +7035,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.db_path:
         config.db_path = args.db_path
         config.database_url = f"sqlite:///{args.db_path}"
+        # ``_open_monitor_storage`` uses the process-owned ProductionConfig.
+        # Keep the deprecated explicit SQLite override internally consistent;
+        # otherwise the CLI descriptor says SQLite while the adapter opens the
+        # default or environment-selected backend.
+        if config.production_config is not None:
+            config.production_config.database_backend = "sqlite"
+            config.production_config.sqlite_database_path = args.db_path
+            config.production_config.database_url = f"sqlite:///{args.db_path}"
     if args.reports_dir:
         config.reports_dir = args.reports_dir
         if config.production_config:

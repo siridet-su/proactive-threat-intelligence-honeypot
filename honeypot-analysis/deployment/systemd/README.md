@@ -180,7 +180,7 @@ following exist and pass validation:
   `AI_ADVISORY_RECONCILIATION_CUTOFF_JSON`, with the exact same object and
   `reconciliation_mode=new_sessions_only` in the activation receipt.
 
-The activation receipt is valid for at most one hour. Configuration fails
+The activation receipt is valid for at most 30 days. Configuration fails
 closed if it is missing, stale, has unexpected fields, names a different
 provider/model/adapter/endpoint, or does not attest the managed worker and
 credential state, or names a different reconciliation cutoff. The cutoff is

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest } from "@/lib/auth/session";
-import { getSessionCwdHistory, getSessionCwdHistoryHop, MAX_CWD_IDENTIFIER_LENGTH } from "@/lib/filesystem-server";
+import {
+  getRemoteSessionCwdHistory,
+  getRemoteSessionCwdHistoryHop,
+  getSessionCwdHistory,
+  getSessionCwdHistoryHop,
+  MAX_CWD_IDENTIFIER_LENGTH,
+} from "@/lib/filesystem-server";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +31,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     if (hop) {
-      const result = await getSessionCwdHistoryHop(id, hop);
+      let result;
+      try {
+        result = await getSessionCwdHistoryHop(id, hop);
+      } catch {
+        result = { item: null };
+      }
+      if (!result.item) {
+        result = (await getRemoteSessionCwdHistoryHop(id, hop)) ?? result;
+      }
       if (!result.item) {
         return NextResponse.json({ item: null, error: "Hop not found or unavailable" }, { status: 404 });
       }
@@ -34,7 +48,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       });
     }
 
-    return NextResponse.json(await getSessionCwdHistory(id, cursor), {
+    let result;
+    try {
+      result = await getSessionCwdHistory(id, cursor);
+    } catch {
+      result = { items: [], totalItems: 0, totalSuccessfulItems: 0, nextCursor: null, complete: false };
+    }
+    if (result.items.length === 0 && result.totalItems === 0) {
+      result = (await getRemoteSessionCwdHistory(id, cursor)) ?? result;
+    }
+    return NextResponse.json(result, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

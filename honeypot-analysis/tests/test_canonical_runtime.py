@@ -109,6 +109,14 @@ def test_large_session_report_uses_complete_durable_event_manifest(tmp_path) -> 
     job_payload = json.loads(job_row["payload_json"])
     assert len(job_payload["raw_events"]) == config.session_event_history_limit
     assert job_payload["canonical_event_manifest"]["event_count"] == len(events)
+    manifest = job_payload["canonical_event_manifest"]
+    assert manifest["schema_version"] == "durable_session_event_manifest.v1"
+    assert manifest["through_received_at"]
+    assert len(manifest["event_entries"]) == len(events)
+    assert all(
+        set(entry) == {"event_id", "received_at", "payload_sha256"}
+        for entry in manifest["event_entries"]
+    )
 
     reconstructed = reconstruct_canonical_session_events(
         storage,
@@ -161,6 +169,8 @@ def test_terminal_fallback_reconstructs_full_durable_session_before_artifacts(
     assert len(queued["raw_events"]) == 2
     assert len(queued["commands"]) == 2
     assert queued["canonical_event_manifest"]["event_count"] == len(events)
+    assert queued["canonical_event_manifest"]["through_received_at"]
+    assert len(queued["canonical_event_manifest"]["event_entries"]) == len(events)
 
     assert asyncio.run(
         AnalysisWorker(config).process_once(coordinator_class=_FailingCoordinator)

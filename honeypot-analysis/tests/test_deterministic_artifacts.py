@@ -150,6 +150,44 @@ def test_pdf_is_byte_deterministic(tmp_path: Path) -> None:
     or importlib.util.find_spec("pypdf") is None,
     reason="optional PDF renderer/parser unavailable",
 )
+def test_pdf_keeps_bounded_cwd_and_otx_pulse_context(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    session["raw_events"] = [{
+        "eventid": "cowrie.session.cwd",
+        "cwd_from_path": "/home/test",
+        "cwd_path": "/tmp",
+        "timestamp": "2026-07-28T10:10:30Z",
+        "input": "MUST_NOT_APPEAR_IN_PDF",
+    }]
+    external_ti = {
+        "ok": True,
+        "status": "TI_AVAILABLE",
+        "source_ip_cache": [{
+            "provider": "otx",
+            "lookup_status": "OK",
+            "lookup_at": "2026-07-28T10:10:40Z",
+            "policy_binding": "CURRENT_POLICY",
+            "normalized_context": {"pulses": [{"name": "Example botnet pulse"}]},
+        }],
+    }
+    output_dir = tmp_path / "cwd-otx-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(write_pdf_report(report, session, output_dir, external_ti_projection=external_ti))
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+    assert "Filesystem Activity / Working Directory" in text
+    assert "/home/test" in text
+    assert "/tmp" in text
+    assert "Example botnet pulse" in text
+    assert "MUST_NOT_APPEAR_IN_PDF" not in text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
 def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     tmp_path: Path,
 ) -> None:
@@ -281,6 +319,47 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     assert "8.8.8.8" in text
     assert "censys" not in text.lower()
     assert "Must not be rendered" not in text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
+def test_pdf_uses_exact_external_ti_api_status_vocabulary(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    external_ti = {
+        "ok": True,
+        "status": "TI_PENDING",
+        "status_reason": "NO_ELIGIBLE_OBSERVABLE",
+        "status_reason_text": "No eligible observable was available.",
+        "freshness": {"state": "TI_PENDING"},
+        "external_ti_summary": {
+            "status": "TI_PENDING",
+            "status_reason": "NO_ELIGIBLE_OBSERVABLE",
+            "eligible_observable_count": 0,
+            "records_found": 0,
+            "evidence_returned": 0,
+        },
+    }
+    output_dir = tmp_path / "exact-ti-status-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(
+        write_pdf_report(
+            report,
+            session,
+            output_dir,
+            external_ti_projection=external_ti,
+        )
+    )
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+
+    assert "TI_PENDING" in text
+    assert "NO_ELIGIBLE_OBSERVABLE" in text
+    assert "NO_ELIGIBLE_DATA" not in text
+    assert "LOOKUP_PENDING" not in text
 
 
 def test_evidence_reference_summary_is_bounded_and_content_addressed() -> None:

@@ -79,6 +79,7 @@ def _ti_status_reason(
     stale_count: int,
     has_available: bool,
     has_error: bool,
+    pending_jobs: bool = False,
 ) -> str:
     """Return a deterministic explanation for the coarse TI status.
 
@@ -104,6 +105,8 @@ def _ti_status_reason(
         return "POLICY_BLOCKED"
     if has_error:
         return "PROVIDER_UNAVAILABLE"
+    if pending_jobs:
+        return "PROVIDER_RESULT_PENDING"
     if evidence or source_ip_cache_context:
         return "PROVIDER_RESULT_PENDING"
     return "NO_STORED_PROVIDER_RESULT"
@@ -1146,11 +1149,21 @@ def build_session_ti_projection(
     observables = list(eligible)[:MAX_OBSERVABLES]
     omitted_observables = max(0, len(eligible) - len(observables))
 
+    # Source-IP ETI uses the governed provider cache as its only durable
+    # provider-result store.  Do not merge pre-policy canonical
+    # ``enrichment_records`` for an IP into this projection: those rows can be
+    # stale legacy context and otherwise make a fresh source-IP lookup appear
+    # to have a current finding.
+    record_observables = [
+        key
+        for key in observables
+        if not (source_ip_mode == SOURCE_IP_ENRICHMENT_MODE and key[0] == "ip")
+    ]
     records: List[Dict[str, Any]] = []
-    if observables:
+    if record_observables:
         try:
             batch_records = storage.list_enrichment_records_for_observables(
-                observables,
+                record_observables,
                 allow_stale=True,
             )
             records = [dict(item) for item in (batch_records or [])[:MAX_OBSERVABLES]]
@@ -1199,6 +1212,26 @@ def build_session_ti_projection(
                         break
             if len(source_ip_cache_context) >= MAX_EVIDENCE:
                 break
+
+    job_rows: List[Dict[str, Any]] = []
+    try:
+        job_loader = getattr(storage, "list_rows_for_session", None)
+        if callable(job_loader):
+            job_rows = [
+                dict(item)
+                for item in (job_loader("enrichment_jobs", clean_session_id, limit=100) or [])
+                if isinstance(item, Mapping)
+            ]
+    except Exception:
+        job_rows = []
+    job_status_counts: Dict[str, int] = {}
+    for row in job_rows:
+        status = str(row.get("status") or "unknown").strip().lower() or "unknown"
+        job_status_counts[status] = job_status_counts.get(status, 0) + 1
+    pending_jobs = any(
+        status in {"queued", "running", "retry"}
+        for status in job_status_counts
+    )
 
     evidence: List[Dict[str, Any]] = []
     provider_records: List[Mapping[str, Any]] = []
@@ -1290,6 +1323,7 @@ def build_session_ti_projection(
         stale_count=stale_count,
         has_available=has_available,
         has_error=has_error,
+        pending_jobs=pending_jobs,
     )
     return {
         "ok": True,
@@ -1331,6 +1365,8 @@ def build_session_ti_projection(
                 ),
                 default=None,
             ),
+            "enrichment_jobs": len(job_rows),
+            "enrichment_jobs_pending": pending_jobs,
             "shared_entity_count": len(shared_entities),
             "authority": EXTERNAL_TI_AUTHORITY,
             "uncertainty": "context only; no provider finding is a project classification",
@@ -1338,6 +1374,11 @@ def build_session_ti_projection(
         "evidence": evidence,
         "source_ip_cache": source_ip_cache_context,
         "shared_entities": shared_entities,
+        "enrichment_job_summary": {
+            "total": len(job_rows),
+            "status_counts": dict(sorted(job_status_counts.items())),
+            "pending": pending_jobs,
+        },
         "provider_status": _provider_summary(provider_records, configured),
         "freshness": {
             "state": freshness_state,
@@ -1354,6 +1395,8 @@ def build_session_ti_projection(
             "records_found": len(records),
             "evidence_returned": len(evidence),
             "source_ip_cache_records": len(source_ip_cache_context),
+            "enrichment_jobs": len(job_rows),
+            "enrichment_jobs_pending": pending_jobs,
             "shared_entities": len(shared_entities),
         },
         "truncation": {

@@ -16,6 +16,9 @@ from production.enrichment.external_ti_contract import (
     SOURCE_IP_AMENDMENT_SHA256,
     SOURCE_IP_ENRICHMENT_MODE,
     default_external_ti_provider_configs,
+    evaluate_outbound_sighting,
+    load_source_ip_governance_amendment,
+    parse_source_ip_cutoff_utc,
 )
 from production.enrichment.external_ti_session import (
     OBSERVABLE_TI_SCHEMA,
@@ -117,6 +120,34 @@ def test_session_summary_counts_types_and_keeps_hash_alias_hash_only(tmp_path: P
     assert response["counts"]["eligible_source_ip"] == 1
     # The existing session contract remains source-IP-value safe.
     assert SOURCE_IP not in json.dumps(response)
+
+
+def test_source_ip_gate_reads_policy_metadata_from_persisted_payload(tmp_path: Path) -> None:
+    config = _source_config(tmp_path)
+    sighting = _sighting("payload-provenance-session")
+    # Mongo's bounded observable-sighting row stores role/source in payload;
+    # this is the shape consumed by the enrichment worker after a read-back.
+    sighting.pop("role")
+    sighting.pop("source")
+    governance = load_source_ip_governance_amendment(
+        config.source_ip_governance_path,
+        expected_sha256=config.source_ip_governance_sha256,
+    )
+
+    decision = evaluate_outbound_sighting(
+        sighting,
+        provider="abuseipdb",
+        source_ip_governance=governance,
+        source_ip_cutoff_utc=parse_source_ip_cutoff_utc(
+            config.source_ip_enrichment_not_before_utc
+        ),
+        source_ip_mode=config.source_ip_enrichment_mode,
+    )
+
+    assert decision.eligible is True
+    assert decision.code == "eligible_source_ip"
+    assert decision.role == "source_ip"
+    assert decision.source == "cowrie_event"
 
 
 def test_source_ip_pivot_is_exact_role_scoped_bounded_and_excludes_session(tmp_path: Path) -> None:
@@ -260,7 +291,7 @@ def test_session_projection_explains_no_eligible_observable(tmp_path: Path) -> N
     assert result["counts"]["eligible_observables"] == 0
 
 
-def test_session_projection_explains_policy_blocked_stored_context(tmp_path: Path) -> None:
+def test_source_ip_projection_does_not_promote_legacy_canonical_ip_context(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     session_id = "policy-blocked-session"
     storage.save_session({"session_id": session_id, "src_ip": SOURCE_IP})
@@ -280,12 +311,12 @@ def test_session_projection_explains_policy_blocked_stored_context(tmp_path: Pat
     )
 
     assert result["status"] == "TI_PENDING"
-    assert result["status_reason"] == "POLICY_BLOCKED"
+    assert result["status_reason"] == "NO_STORED_PROVIDER_RESULT"
     assert result["status_reason_text"]
-    assert result["freshness"]["state"] in {"TI_FRESH", "TI_EXPIRED"}
+    assert result["freshness"]["state"] == "TI_PENDING"
 
 
-def test_session_projection_labels_stale_policy_context_as_expired(tmp_path: Path) -> None:
+def test_source_ip_projection_ignores_expired_legacy_canonical_ip_context(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     session_id = "expired-policy-context-session"
     storage.save_session({"session_id": session_id, "src_ip": SOURCE_IP})
@@ -311,9 +342,9 @@ def test_session_projection_labels_stale_policy_context_as_expired(tmp_path: Pat
     )
 
     assert result["status"] == "TI_PENDING"
-    assert result["status_reason"] == "EXPIRED_STORED_RESULT"
+    assert result["status_reason"] == "NO_STORED_PROVIDER_RESULT"
     assert result["status_reason_text"]
-    assert result["freshness"]["state"] == "TI_EXPIRED"
+    assert result["freshness"]["state"] == "TI_PENDING"
 
 
 def test_source_ip_observable_lookup_uses_governed_cache_provenance(tmp_path: Path) -> None:

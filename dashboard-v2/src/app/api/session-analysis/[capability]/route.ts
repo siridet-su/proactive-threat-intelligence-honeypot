@@ -6,8 +6,14 @@ import { projectNextDistinct } from "@/lib/next-distinct-projection";
 export const dynamic = "force-dynamic";
 
 const MAX_RESPONSE_BYTES = 1_000_000;
-const DEFAULT_UPSTREAM_TIMEOUT_MS = 2_500;
-const FULL_DETAIL_UPSTREAM_TIMEOUT_MS = 6_000;
+// The local review dashboard reaches the production monitor through an SSH
+// tunnel.  Exact-session projections may legitimately need several MongoDB
+// reads, so a 2.5/6 second cutoff converted healthy-but-slow responses into
+// misleading UNAVAILABLE panels.  These are bounded request deadlines, not
+// cache lifetimes.
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 30_000;
+const FULL_DETAIL_UPSTREAM_TIMEOUT_MS = 60_000;
+const SESSION_TI_UPSTREAM_TIMEOUT_MS = 60_000;
 const SESSION_ID_PATTERN = /^[\x20-\x7e]{1,256}$/;
 const OBSERVABLE_TYPES = new Set(["ip", "hash"]);
 
@@ -108,6 +114,7 @@ function projectDetail(capability: Capability, payload: JsonRecord): JsonRecord 
       report_summary: payload.report_summary || {},
       correlated_ttp_hypotheses: payload.correlated_ttp_hypotheses || [],
       hypothesis_sets: payload.hypothesis_sets || [],
+      session_hypothesis_assessment: payload.session_hypothesis_assessment || {},
       reports: payload.reports || [],
       non_claims: [
         "does not establish attacker identity or intent",
@@ -175,7 +182,11 @@ export async function GET(
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    capability === "detail" ? FULL_DETAIL_UPSTREAM_TIMEOUT_MS : DEFAULT_UPSTREAM_TIMEOUT_MS,
+    capability === "detail"
+      ? FULL_DETAIL_UPSTREAM_TIMEOUT_MS
+      : capability === "session-ti"
+        ? SESSION_TI_UPSTREAM_TIMEOUT_MS
+        : DEFAULT_UPSTREAM_TIMEOUT_MS,
   );
   try {
     const headers: Record<string, string> = {};
@@ -208,6 +219,22 @@ export async function GET(
           headers: { "Cache-Control": "private, no-store" },
         });
       }
+    }
+
+    if (capability === "ai-advisory" && response.status === 404 && monitorJson && isRecord(payload)) {
+      // An optional worker that is not deployed is a valid capability state,
+      // not a missing dashboard resource. Preserve the explicit unavailable
+      // payload while preventing routine local sessions from surfacing a
+      // misleading HTTP failure in the browser.
+      return NextResponse.json({
+        ...projectDetail(capability, payload),
+        capability_ready: false,
+        error: "Capability is not deployed for this release",
+        reason: "Capability is not deployed for this release",
+      }, {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+      });
     }
 
     const projected = isRecord(payload)

@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Sensitive Credentials & Receipts
+.mongodb_uri
+.mongodb_uri/
+.epoch_receipt.json
+*.env.local

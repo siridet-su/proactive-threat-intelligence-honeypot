@@ -462,11 +462,16 @@ def load_analysis_context(
             sigma_cache_path=config.sigma_cache_path or None,
             allow_network_refresh=False,
         )
+    # A configured offline MITRE cache is needed for deterministic tactic and
+    # technique presentation even when optional feed loading is disabled.  It
+    # does not enable network refresh or change feed-status semantics.
+    if config.enable_feed_loading or config.mitre_attack_path:
         mitre_attack = load_mitre_attack_db(
             cache_path=config.mitre_attack_path or None,
             silent=True,
             allow_network_refresh=False,
         )
+    if config.enable_feed_loading:
         feed_status = collect_feed_status(config)
         feed_status["status"] = "loaded"
         feed_status["loading_enabled"] = True
@@ -507,14 +512,19 @@ def reconstruct_canonical_session_events(
         raise SessionAssessmentV4Error(
             "analysis job lacks a canonical durable event manifest"
         )
-    required = {
+    compact_required = {
         "schema_version",
         "session_id",
         "through_event_id",
         "event_count",
         "manifest_sha256",
     }
-    if set(expected) != required:
+    complete_required = compact_required | {
+        "through_received_at",
+        "event_entries",
+    }
+    expected_keys = set(expected)
+    if expected_keys not in (compact_required, complete_required):
         raise SessionAssessmentV4Error(
             "analysis job canonical event manifest contract is invalid"
         )
@@ -523,7 +533,7 @@ def reconstruct_canonical_session_events(
         str(expected.get("through_event_id") or ""),
         max_events,
     )
-    actual_summary = {key: actual[key] for key in required}
+    actual_summary = {key: actual[key] for key in expected_keys}
     if actual_summary != expected:
         raise SessionAssessmentV4Error(
             "durable session evidence does not match the analysis manifest"
@@ -624,12 +634,8 @@ async def analyze_job(
         str(session_payload.get("canonical_event_manifest", {}).get("through_event_id") or ""),
         config.canonical_evidence_max_events,
     )
-    replay_manifest_keys = (
-        "schema_version",
-        "session_id",
-        "through_event_id",
-        "event_count",
-        "manifest_sha256",
+    replay_manifest_keys = tuple(
+        session_payload.get("canonical_event_manifest", {}).keys()
     )
     if {
         key: replay_snapshot.get(key) for key in replay_manifest_keys
@@ -899,7 +905,8 @@ class AnalysisWorker:
                                 job["claim_token"],
                                 fallback,
                                 enqueue_ai_advisory=(
-                                    self.config.enable_ai_advisory
+                                    self.config.ai_advisory_enqueue_enabled
+                                    or self.config.enable_ai_advisory
                                 ),
                                 ai_advisory_max_queue_records=(
                                     self.config.ai_advisory_max_queue_records
@@ -957,7 +964,8 @@ class AnalysisWorker:
                         job["claim_token"],
                         report,
                         enqueue_ai_advisory=(
-                            self.config.enable_ai_advisory
+                            self.config.ai_advisory_enqueue_enabled
+                            or self.config.enable_ai_advisory
                         ),
                         ai_advisory_max_queue_records=(
                             self.config.ai_advisory_max_queue_records

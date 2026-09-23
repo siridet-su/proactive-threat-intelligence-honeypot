@@ -30,9 +30,9 @@ const session: FilesystemTopologySession = {
 };
 
 const history: SessionCwdHistoryEvent[] = [
-  { id: "event-c", sessionId: "session-a", fromPath: "/b", toPath: "/c", command: "cd /c", action: "change", status: "confirmed", at: "2026-09-19T00:00:10.000Z" },
-  { id: "event-b", sessionId: "session-a", fromPath: "/a", toPath: "/b", command: "cd /b", action: "change", status: "confirmed", at: "2026-09-19T00:00:05.000Z" },
-  { id: "event-a", sessionId: "session-a", fromPath: "/", toPath: "/a", command: "cd /a", action: "change", status: "confirmed", at: "2026-09-19T00:00:00.000Z" },
+  { id: "event-c", sessionId: "session-a", fromPath: "/b", toPath: "/c", command: "cd /c", action: "changed", status: "confirmed", at: "2026-09-19T00:00:10.000Z" },
+  { id: "event-b", sessionId: "session-a", fromPath: "/a", toPath: "/b", command: "cd /b", action: "changed", status: "confirmed", at: "2026-09-19T00:00:05.000Z" },
+  { id: "event-a", sessionId: "session-a", fromPath: "/", toPath: "/a", command: "cd /a", action: "changed", status: "confirmed", at: "2026-09-19T00:00:00.000Z" },
 ];
 
 function jsonResponse(payload: unknown): Response {

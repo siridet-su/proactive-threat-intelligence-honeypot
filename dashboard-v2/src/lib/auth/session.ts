@@ -28,9 +28,15 @@ function hashSessionId(sessionId: string): string {
 }
 
 function cookieOptions(maxAge: number) {
+  // A production build is also used for the local HTTP review dashboard.
+  // Allowing an insecure cookie is therefore an explicit local-only opt-in;
+  // production deployments remain Secure by default and cannot inherit this
+  // behavior unless they are deliberately labelled as local.
+  const allowLocalHttp = process.env.HONEYPOT_ENV === "local"
+    && process.env.DASHBOARD_ALLOW_HTTP_COOKIE === "true";
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: process.env.NODE_ENV === "production" && !allowLocalHttp,
     sameSite: "lax" as const,
     path: "/",
     maxAge,

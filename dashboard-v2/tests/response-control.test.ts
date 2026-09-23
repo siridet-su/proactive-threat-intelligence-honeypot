@@ -109,7 +109,7 @@ describe("response control client", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("prefers a private absolute token file for deployed runtimes", async () => {
+  it.skipIf(process.platform === "win32")("prefers a private absolute token file for deployed runtimes", async () => {
     const tokenPath = join(fixtureDirectory, "response-agent.token");
     const fileToken = "abcdef0123456789abcdef0123456789";
     writeFileSync(tokenPath, `${fileToken}\n`, { mode: 0o600 });
@@ -126,7 +126,7 @@ describe("response control client", () => {
     expect((init?.headers as Record<string, string>).Authorization).toBe(`Bearer ${fileToken}`);
   });
 
-  it("fails closed when a configured token file has unsafe permissions", async () => {
+  it.skipIf(process.platform === "win32")("fails closed when a configured token file has unsafe permissions", async () => {
     const tokenPath = join(fixtureDirectory, "response-agent.token");
     writeFileSync(tokenPath, "abcdef0123456789abcdef0123456789\n", { mode: 0o600 });
     chmodSync(tokenPath, 0o640);
@@ -138,7 +138,7 @@ describe("response control client", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not follow a configured token-file symlink or fall back to an inline token", async () => {
+  it.skipIf(process.platform === "win32")("does not follow a configured token-file symlink or fall back to an inline token", async () => {
     const tokenPath = join(fixtureDirectory, "response-agent.token");
     const linkPath = join(fixtureDirectory, "response-agent.link");
     writeFileSync(tokenPath, "abcdef0123456789abcdef0123456789\n", { mode: 0o600 });

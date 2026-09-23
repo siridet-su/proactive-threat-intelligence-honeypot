@@ -41,7 +41,7 @@ describe("Response action status and capability separation (FA-004)", () => {
     vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
       sessionId: "s-1",
       operatorId: "op-1",
-      role: "admin",
+      role: "Admin",
       mustChangePassword: false,
       expiresAt: new Date(Date.now() + 3600_000),
     });
@@ -72,7 +72,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     resetResponseControlHealthCache();
 
@@ -95,7 +95,7 @@ describe("Response action status and capability separation (FA-004)", () => {
     vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
       sessionId: "s-1",
       operatorId: "op-1",
-      role: "admin",
+      role: "Admin",
       mustChangePassword: false,
       expiresAt: new Date(Date.now() + 3600_000),
     });
@@ -126,7 +126,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const request = new Request(`http://localhost/api/sessions/${VALID_SESSION_ID}/actions/terminate?actionId=${VALID_ACTION_ID}`);
     const response = await GET(request, { params: Promise.resolve({ id: VALID_SESSION_ID }) });
@@ -218,7 +218,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
 
@@ -263,7 +263,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID);
     expect(result.action).toBeNull();
@@ -320,7 +320,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
 
@@ -372,7 +372,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
 
@@ -422,7 +422,7 @@ describe("Response action status and capability separation (FA-004)", () => {
           createIndex: vi.fn().mockResolvedValue("index"),
         }),
       }),
-    } as unknown as ReturnType<typeof mongo.getMongoClient>);
+    } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
     const result = await getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID);
 
@@ -485,7 +485,7 @@ describe("Response action status and capability separation (FA-004)", () => {
             createIndex: vi.fn().mockResolvedValue("index"),
           }),
         }),
-      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
       const [resWinner, resLoser] = await Promise.all([
         getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
@@ -547,7 +547,7 @@ describe("Response action status and capability separation (FA-004)", () => {
             createIndex: vi.fn().mockResolvedValue("index"),
           }),
         }),
-      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
       const [resWinner, resLoser] = await Promise.all([
         getTerminateActionWithState(VALID_SESSION_ID, VALID_ACTION_ID),
@@ -569,7 +569,7 @@ describe("Response action status and capability separation (FA-004)", () => {
       vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
         sessionId: "s-1",
         operatorId: "op-1",
-        role: "admin",
+        role: "Admin",
         mustChangePassword: false,
         expiresAt: new Date(Date.now() + 3600_000),
       });
@@ -586,7 +586,7 @@ describe("Response action status and capability separation (FA-004)", () => {
             createIndex: vi.fn().mockResolvedValue("index"),
           }),
         }),
-      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
       const request = new Request(`http://localhost/api/sessions/${VALID_SESSION_ID}/actions/terminate?actionId=${unknownActionId}`);
       const response = await GET(request, { params: Promise.resolve({ id: VALID_SESSION_ID }) });
@@ -605,7 +605,7 @@ describe("Response action status and capability separation (FA-004)", () => {
       vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue({
         sessionId: "s-1",
         operatorId: "op-1",
-        role: "admin",
+        role: "Admin",
         mustChangePassword: false,
         expiresAt: new Date(Date.now() + 3600_000),
       });
@@ -627,7 +627,7 @@ describe("Response action status and capability separation (FA-004)", () => {
             createIndex: vi.fn().mockResolvedValue("index"),
           }),
         }),
-      } as unknown as ReturnType<typeof mongo.getMongoClient>);
+      } as unknown as Awaited<ReturnType<typeof mongo.getMongoClient>>);
 
       const request = new Request(`http://localhost/api/sessions/${targetSessionId}/actions/terminate?actionId=${crossSessionActionId}`);
       const response = await GET(request, { params: Promise.resolve({ id: targetSessionId }) });

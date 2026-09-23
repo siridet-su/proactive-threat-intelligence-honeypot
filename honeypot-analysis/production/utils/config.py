@@ -100,6 +100,10 @@ def _apply_ai_environment_overrides(values: Mapping[str, Any]) -> Dict[str, Any]
     result["enable_ai_advisory"] = _env_bool(
         "ENABLE_AI_ADVISORY", bool(result.get("enable_ai_advisory", False))
     )
+    result["ai_advisory_enqueue_enabled"] = _env_bool(
+        "AI_ADVISORY_ENQUEUE_ENABLED",
+        bool(result.get("ai_advisory_enqueue_enabled", False)),
+    )
     result["ai_advisory_provider"] = os.getenv(
         "AI_ADVISORY_PROVIDER", str(result.get("ai_advisory_provider") or "disabled")
     ).strip().lower()
@@ -423,6 +427,10 @@ class ProductionConfig:
     # Optional post-persistence AI advisory.  No provider is selected by
     # default and this path never participates in canonical analysis.
     enable_ai_advisory: bool = False
+    # Analysis workers only need permission to enqueue a bounded report
+    # reference. Provider credentials and activation remain isolated to the
+    # AI advisory worker.
+    ai_advisory_enqueue_enabled: bool = False
     ai_advisory_provider: str = "disabled"
     ai_advisory_model: str = ""
     ai_advisory_project: str = ""
@@ -1162,6 +1170,10 @@ class ProductionConfig:
                 self.ai_advisory_reconciliation_cutoff
             )
             self.ai_advisory_reconciliation_cutoff = reconciliation_cutoff
+        if self.ai_advisory_enqueue_enabled and reconciliation_cutoff is None:
+            raise ValueError(
+                "AI advisory enqueue requires a reconciliation cutoff"
+            )
         if self.enable_ai_advisory:
             if ai_provider == "disabled":
                 raise ValueError(
@@ -1529,6 +1541,10 @@ class ProductionConfig:
         cfg.analysis_suppress_stdout = _env_bool("ANALYSIS_SUPPRESS_STDOUT", cfg.analysis_suppress_stdout)
         cfg.enable_ai_advisory = _env_bool(
             "ENABLE_AI_ADVISORY", cfg.enable_ai_advisory
+        )
+        cfg.ai_advisory_enqueue_enabled = _env_bool(
+            "AI_ADVISORY_ENQUEUE_ENABLED",
+            cfg.ai_advisory_enqueue_enabled,
         )
         cfg.ai_advisory_provider = os.getenv(
             "AI_ADVISORY_PROVIDER", cfg.ai_advisory_provider

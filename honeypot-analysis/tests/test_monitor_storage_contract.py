@@ -212,3 +212,38 @@ def test_session_detail_command_count_comes_from_durable_event_rows(
     assert detail["ok"] is True
     assert len(detail["events_table_rows"]) == 8
     assert detail["overview"]["command_count"] == 3
+
+
+def test_session_detail_command_count_excludes_explicit_blank_input(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "blank-input-monitor.db"
+    storage = open_storage(f"sqlite:///{database_path}")
+    storage.save_session(
+        {
+            "session_id": "blank-input-session",
+            "src_ip": "203.0.113.21",
+            "commands": [],
+            "is_ended": True,
+        }
+    )
+    for index, command_input in enumerate(("id", "", "   ", "uname -a")):
+        storage.store_event(
+            "sensor-monitor",
+            {
+                "eventid": "cowrie.command.input",
+                "session": "blank-input-session",
+                "src_ip": "203.0.113.21",
+                "timestamp": f"2026-07-17T00:00:0{index}Z",
+                "input": command_input,
+            },
+        )
+
+    config = monitor_web.MonitorConfig(
+        db_path=str(database_path),
+        reports_dir=str(tmp_path / "reports"),
+    )
+    detail = monitor_web.load_session_detail(config, "blank-input-session")
+
+    assert detail["ok"] is True
+    assert detail["overview"]["command_count"] == 2
