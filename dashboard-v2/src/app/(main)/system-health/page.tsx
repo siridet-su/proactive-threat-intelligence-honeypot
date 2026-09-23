@@ -1,6 +1,7 @@
 "use client";
+import Link from "next/link";
+import { Archive, ArrowUpRight } from "lucide-react";
 import { AttackerTable } from "@/components/dashboard/AttackerTable";
-import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
 import { HardwareMonitor } from "@/components/dashboard/HardwareMonitor";
 
 export default function SystemHealthPage() {
@@ -12,6 +13,11 @@ export default function SystemHealthPage() {
             <h1 className="mt-3 text-2xl font-semibold leading-8 tracking-tight">System health</h1>
             <p className="mt-2 text-sm text-text-muted">Review realtime and historical hardware telemetry supporting the honeypot.</p>
           </div>
+          <Link href="/backup-retention" className="ui-button min-h-10 shrink-0 gap-2 text-xs">
+            <Archive className="h-4 w-4 text-primary" aria-hidden="true" />
+            Backup &amp; retention
+            <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+          </Link>
        </header>
 
        {/* ---------------- Hardware Task Manager ---------------- */}
@@ -20,9 +26,6 @@ export default function SystemHealthPage() {
             <HardwareMonitor />
           </div>
        </section>
-
-       {/* ---------------- Hardware Backup ---------------- */}
-       <HardwareBackupStatus />
 
        {/* ---------------- Top Source Summary ---------------- */}
        <div className="grid grid-cols-1 gap-6">

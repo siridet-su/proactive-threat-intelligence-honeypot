@@ -9,6 +9,7 @@ const protectedPrefixes = [
   "/filesystem-activity",
   "/malware-vault",
   "/system-health",
+  "/backup-retention",
   "/user-management",
   "/profile",
   "/change-password",
@@ -45,4 +46,4 @@ export async function proxy(request: NextRequest) {
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/dashboard/:path*", "/threat-intel/:path*", "/archives/:path*", "/filesystem-activity/:path*", "/malware-vault/:path*", "/system-health/:path*", "/user-management/:path*", "/profile/:path*", "/change-password"] };
+export const config = { matcher: ["/dashboard/:path*", "/threat-intel/:path*", "/archives/:path*", "/filesystem-activity/:path*", "/malware-vault/:path*", "/system-health/:path*", "/backup-retention/:path*", "/user-management/:path*", "/profile/:path*", "/change-password"] };
