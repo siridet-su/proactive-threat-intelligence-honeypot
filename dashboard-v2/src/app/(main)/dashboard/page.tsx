@@ -7,55 +7,27 @@ import {
   AlertTriangle,
   ArrowUpRight,
   BarChart3,
-  ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
-  Download,
   Globe,
   Maximize,
   Minimize,
   Radio,
   RefreshCw,
-  Search,
+  Server,
   ShieldCheck,
-  SlidersHorizontal,
-  X,
+  Globe2,
+  Ghost,
 } from "lucide-react";
-
 import AttackRateChart, { type ActivityPoint } from "@/components/dashboard/AttackRateChart";
 import RegionalMap from "@/components/dashboard/RegionalMap";
-import { SeverityBadge } from "@/components/dashboard/SeverityBadge";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState, RefreshStatus, type RegionStatus } from "@/components/ui/RegionState";
-import { SelectMenu } from "@/components/ui/SelectMenu";
 import type {
   DashboardThreatEvent,
   ThreatDashboardSummary,
-  ThreatDirectoryPage,
-  ThreatSeverityFilter,
 } from "@/lib/dashboardTypes";
-import { classificationBadgeClass, severityDotClass, severityBarClass } from "@/lib/presentation";
 import { cn } from "@/lib/utils";
 
-const DIRECTORY_PAGE_SIZE = 20;
-const severityOptions: ThreatSeverityFilter[] = ["All", "Critical", "High", "Medium", "Low"];
-
 type RequestStatus = "loading" | "ready" | "error";
-
-interface SeverityDatum {
-  label: string;
-  value: number;
-  color: string;
-}
-
-const severityOrder = ["Critical", "High", "Medium", "Low"];
-const severityColors: Record<string, string> = {
-  Critical: "var(--severity-critical)",
-  High: "var(--severity-high)",
-  Medium: "var(--severity-medium)",
-  Low: "var(--severity-low)",
-};
 
 function buildActivityData(events: DashboardThreatEvent[], windowHours: number | null): ActivityPoint[] {
   const timestamps = events
@@ -63,7 +35,6 @@ function buildActivityData(events: DashboardThreatEvent[], windowHours: number |
     .filter((timestamp) => Number.isFinite(timestamp))
     .sort((left, right) => left - right);
   if (!timestamps.length) return [];
-
   const latest = timestamps[timestamps.length - 1];
   const observedSpan = Math.max(latest - timestamps[0], 60 * 60 * 1_000);
   const range = windowHours && windowHours > 0 ? windowHours * 60 * 60 * 1_000 : observedSpan;
@@ -71,90 +42,46 @@ function buildActivityData(events: DashboardThreatEvent[], windowHours: number |
   const bucketSize = range / bucketCount;
   const start = latest - range;
   const buckets = Array.from({ length: bucketCount }, () => 0);
-
   timestamps.forEach((timestamp) => {
     if (timestamp < start) return;
     const index = Math.min(bucketCount - 1, Math.floor((timestamp - start) / bucketSize));
     buckets[index] += 1;
   });
-
   return buckets.map((rate, index) => ({
     time: new Date(start + (index + 1) * bucketSize).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     rate,
   }));
 }
 
-function buildSeverityData(events: DashboardThreatEvent[]): SeverityDatum[] {
-  const counts = new Map<string, number>();
-  events.forEach((event) => {
-    const severity = event.severity?.trim() || "Unknown";
-    counts.set(severity, (counts.get(severity) ?? 0) + 1);
-  });
-  const labels = [
-    ...severityOrder.filter((severity) => counts.has(severity)),
-    ...Array.from(counts.keys()).filter((severity) => !severityOrder.includes(severity)).sort(),
-  ];
-  return labels.map((label) => ({
-    label,
-    value: counts.get(label) ?? 0,
-    color: severityColors[label] ?? "var(--neutral)",
-  }));
-}
-
-function severityGradient(data: SeverityDatum[]): string {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
-  if (!total) return "var(--border)";
-  let cursor = 0;
-  const stops = data.map((item) => {
-    const start = cursor;
-    cursor += (item.value / total) * 100;
-    return `${item.color} ${start.toFixed(2)}% ${cursor.toFixed(2)}%`;
-  });
-  return `conic-gradient(${stops.join(", ")})`;
-}
-
 export default function DashboardPage() {
   const { threats: sessions, status, lastUpdated, refresh } = useThreatFeed();
   const mapPanel = useRef<HTMLDivElement>(null);
-  const directoryRequest = useRef(0);
   const summaryRequest = useRef(0);
   const summaryRef = useRef<ThreatDashboardSummary | null>(null);
-  const directoryRef = useRef<ThreatDirectoryPage | null>(null);
-  const directoryLoaderRef = useRef<(background?: boolean) => Promise<void>>(async () => undefined);
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [queryInput, setQueryInput] = useState("");
-  const query = useDebouncedValue(queryInput, 320);
-  const [severityFilter, setSeverityFilter] = useState<ThreatSeverityFilter>("All");
-  const [filterOpen, setFilterOpen] = useState(false);
   const [summary, setSummary] = useState<ThreatDashboardSummary | null>(null);
   const [summaryStatus, setSummaryStatus] = useState<RequestStatus>("loading");
-  const [directory, setDirectory] = useState<ThreatDirectoryPage | null>(null);
-  const [directoryStatus, setDirectoryStatus] = useState<RequestStatus>("loading");
-  const [directoryRefreshing, setDirectoryRefreshing] = useState(false);
-  const [exportStatus, setExportStatus] = useState<string>("");
-  const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setIsHydrated(true));
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  const renderedSessions = useMemo(() => isHydrated ? sessions : [], [isHydrated, sessions]);
+  const renderedSessions = useMemo(() => (isHydrated ? sessions : []), [isHydrated, sessions]);
   const renderedStatus = isHydrated ? status : "loading";
   const renderedLastUpdated = isHydrated ? lastUpdated : null;
   const isUpdating = renderedStatus === "loading" || renderedStatus === "refreshing";
   const isRefreshDisabled = !isHydrated || isUpdating;
 
-  useEffect(() => { summaryRef.current = summary; }, [summary]);
-  useEffect(() => { directoryRef.current = directory; }, [directory]);
+  useEffect(() => {
+    summaryRef.current = summary;
+  }, [summary]);
 
   const loadSummary = useCallback(async () => {
     const requestId = summaryRequest.current + 1;
     summaryRequest.current = requestId;
     if (!summaryRef.current) setSummaryStatus("loading");
-
     try {
       const response = await fetch("/api/threats/summary", { cache: "no-store" });
       if (!response.ok) throw new Error("Threat summary unavailable");
@@ -167,46 +94,15 @@ export default function DashboardPage() {
     }
   }, []);
 
-  const loadDirectory = useCallback(async (background = false) => {
-    const requestId = directoryRequest.current + 1;
-    directoryRequest.current = requestId;
-    if (background || directoryRef.current) setDirectoryRefreshing(true);
-    else setDirectoryStatus("loading");
-
-    try {
-      const params = new URLSearchParams({ page: String(currentPage), pageSize: String(DIRECTORY_PAGE_SIZE) });
-      if (query) params.set("query", query);
-      if (severityFilter !== "All") params.set("severity", severityFilter);
-      const response = await fetch(`/api/threats/directory?${params}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Threat directory unavailable");
-      const data: unknown = await response.json();
-      if (!isThreatDirectoryPage(data) || directoryRequest.current !== requestId) return;
-      setDirectory(data);
-      setDirectoryStatus("ready");
-      if (data.page !== currentPage) setCurrentPage(data.page);
-    } catch {
-      if (directoryRequest.current === requestId) setDirectoryStatus("error");
-    } finally {
-      if (directoryRequest.current === requestId) setDirectoryRefreshing(false);
-    }
-  }, [currentPage, query, severityFilter]);
-
-  useEffect(() => { directoryLoaderRef.current = loadDirectory; }, [loadDirectory]);
-
   useEffect(() => {
     const timer = window.setTimeout(() => void loadSummary(), 0);
     return () => window.clearTimeout(timer);
   }, [loadSummary]);
-  useEffect(() => {
-    const timer = window.setTimeout(() => void loadDirectory(), 0);
-    return () => window.clearTimeout(timer);
-  }, [loadDirectory]);
 
   useEffect(() => {
     if (!lastUpdated) return;
     const timer = window.setTimeout(() => {
       void loadSummary();
-      void directoryLoaderRef.current(true);
     }, 800);
     return () => window.clearTimeout(timer);
   }, [lastUpdated, loadSummary]);
@@ -225,8 +121,14 @@ export default function DashboardPage() {
       if (!controls?.length) return;
       const first = controls[0];
       const last = controls[controls.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      }
+      if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -237,234 +139,445 @@ export default function DashboardPage() {
   }, [isFullScreen]);
 
   const feedState = statePresentation(renderedStatus);
-  const directoryItems = directory?.items ?? [];
-  const directoryTotal = directory?.total ?? 0;
-  const directoryTotalPages = directory?.totalPages ?? 1;
-  const isDirectoryInitialLoad = directoryStatus === "loading" && !directory;
-  const isDirectoryUnavailable = directoryStatus === "error" && !directory;
-  const hasDirectoryRefreshError = directoryStatus === "error" && Boolean(directory);
+
   const activityData = useMemo(
     () => buildActivityData(renderedSessions, summary?.windowHours ?? null),
-    [renderedSessions, summary?.windowHours],
+    [renderedSessions, summary?.windowHours]
   );
-  const severityData = useMemo(() => buildSeverityData(renderedSessions), [renderedSessions]);
+
+  const activeDeceptions = useMemo(() => {
+    return renderedSessions.filter((entry) => entry.session_status === "active" || entry.duration === "Active").length;
+  }, [renderedSessions]);
+
   const metrics = [
-    { title: "Observed sessions", value: summary?.sessions, description: summary ? `${summary.windowHours}-hour window` : "Awaiting summary", icon: ActivitySquare, tone: "info" as const },
-    { title: "Distinct sources", value: summary?.uniqueSources, description: summary ? "Unique origin IPs" : "Awaiting summary", icon: Globe, tone: "info" as const },
-    { title: "Priority sessions", value: summary?.prioritySessions, description: summary ? "Critical and High" : "Awaiting summary", icon: AlertTriangle, tone: "danger" as const },
-    { title: "Feed status", value: feedState.metric, description: formatUpdatedAt(renderedLastUpdated), icon: Radio, tone: feedState.tone },
+    {
+      title: "Observed sessions",
+      value: summary?.sessions,
+      description: summary ? `In last ${summary.windowHours} hours` : "Awaiting summary",
+      icon: ActivitySquare,
+      tone: "info" as const,
+      isLoading: summaryStatus === "loading",
+      isError: summaryStatus === "error" && !summary,
+    },
+    {
+      title: "Distinct sources",
+      value: summary?.uniqueSources,
+      description: summary ? "Unique origin IPs" : "Awaiting summary",
+      icon: Globe,
+      tone: "info" as const,
+      isLoading: summaryStatus === "loading",
+      isError: summaryStatus === "error" && !summary,
+    },
+    {
+      title: "Active deceptions",
+      value: isHydrated ? activeDeceptions : undefined,
+      description: "Live interactive decoys",
+      icon: Ghost,
+      tone: "warning" as const,
+      isLoading: renderedStatus === "loading",
+      isError: renderedStatus === "error",
+    },
+    {
+      title: "Feed status",
+      value: feedState.metric,
+      description: formatUpdatedAt(renderedLastUpdated),
+      icon: Radio,
+      tone: feedState.tone,
+      isLoading: false,
+      isError: false,
+    },
   ];
 
-  const getPageNumbers = () => {
-    let start = Math.max(1, currentPage - 2);
-    const end = Math.min(directoryTotalPages, start + 4);
-    if (end - start < 4) start = Math.max(1, end - 4);
-    return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => start + index);
-  };
-
-  const handleExport = async () => {
-    if (!directoryTotal || isExporting) return;
-    setIsExporting(true);
-    setExportStatus("Preparing server-side export…");
-    try {
-      const params = new URLSearchParams();
-      if (query) params.set("query", query);
-      if (severityFilter !== "All") params.set("severity", severityFilter);
-      const response = await fetch(`/api/threats/directory/export?${params}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Threat directory export unavailable");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `pti-incursion-directory-${new Date().toISOString().slice(0, 10)}.csv`;
-      anchor.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 0);
-      const exported = Number.parseInt(response.headers.get("X-PTI-Export-Count") ?? "0", 10);
-      const total = Number.parseInt(response.headers.get("X-PTI-Export-Total") ?? "0", 10);
-      const truncated = response.headers.get("X-PTI-Export-Truncated") === "true";
-      setExportStatus(truncated ? `Downloaded ${exported.toLocaleString()} of ${total.toLocaleString()} matching sessions.` : `Downloaded ${exported.toLocaleString()} matching session${exported === 1 ? "" : "s"}.`);
-    } catch {
-      setExportStatus("Export unavailable. Please try again.");
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
   return (
-    <div className="space-y-6 pb-10">
-      <header className="flex flex-col justify-between gap-5 border-b border-border pb-6 xl:flex-row xl:items-end">
+    <div className="space-y-6 pb-12 font-sans">
+      {/* Top Header */}
+      <header className="flex flex-col justify-between gap-3 border-b border-border pb-4 sm:flex-row sm:items-end">
         <div>
-          <div className="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-info"><span>Operations / Monitoring</span><span className="h-1 w-1 rounded-full bg-border-strong" aria-hidden="true" /><span className="flex items-center gap-2 text-text-subtle"><span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />Live workspace</span></div>
-          <h1 className="mt-3 text-2xl font-semibold leading-8 tracking-tight sm:text-[28px] sm:leading-9">Overview Dashboard</h1>
-          <p className="mt-2 max-w-2xl text-sm text-text-muted sm:text-base">Prioritize fresh signals, then move into the full investigation directory.</p>
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info">
+            <span>Operations</span>
+            <span className="h-1 w-1 rounded-full bg-border-strong" aria-hidden="true" />
+            <span className="inline-flex items-center gap-1.5 text-text-subtle font-normal">
+              <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
+              Live workspace
+            </span>
+          </div>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-text sm:text-3xl">Overview Dashboard</h1>
+          <p className="text-sm text-text-muted">Real-time telemetry and honeypot intrusion activity.</p>
         </div>
-        <div className="flex flex-wrap items-center gap-3 xl:justify-end">
-          <span role="status" aria-live="polite" className={cn("ui-badge", feedState.className)}>{renderedStatus === "refreshing" ? <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> : <Radio className="h-3.5 w-3.5" aria-hidden="true" />}{feedState.label}</span>
+        <div className="flex items-center gap-3">
+          <span role="status" aria-live="polite" className={cn("ui-badge text-xs font-medium", feedState.className)}>
+            {renderedStatus === "refreshing" ? (
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+            ) : (
+              <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+            {feedState.label}
+          </span>
           <RefreshStatus status={renderedStatus} />
-          <button type="button" onClick={() => { void refresh(); void loadSummary(); void loadDirectory(true); }} disabled={isRefreshDisabled} className="ui-button min-h-9 px-3 text-xs" aria-label="Refresh dashboard data"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Refresh</button>
+          <button
+            type="button"
+            onClick={() => {
+              void refresh();
+              void loadSummary();
+            }}
+            disabled={isRefreshDisabled}
+            className="ui-button min-h-9 px-3.5 text-xs font-medium"
+            aria-label="Refresh dashboard data"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", isUpdating && "animate-spin text-primary")} aria-hidden="true" />
+            Refresh
+          </button>
         </div>
       </header>
 
-      <section aria-label="Situation summary" aria-busy={summaryStatus === "loading" || isUpdating} className="ui-panel overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-info">Situation summary</p>
-            <p className="mt-1 text-xs text-text-muted">Current operational counts from the monitored session feed.</p>
-          </div>
-          <span className="text-xs text-text-subtle">{formatUpdatedAt(lastUpdated)}</span>
-        </div>
+      {/* KPI Cards */}
+      <section aria-label="Situation summary" aria-busy={summaryStatus === "loading" || isUpdating} className="ui-panel overflow-hidden border border-border bg-surface">
         <dl className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-4 xl:divide-x">
-          {metrics.map(({ title, value, description, icon: Icon, tone }, index) => (
-            <div key={title} className="flex min-w-0 items-start gap-3 px-4 py-4 first:bg-info-subtle/20 sm:px-5 xl:px-5">
-              <span className={cn("mt-0.5 shrink-0", tone === "danger" ? "text-danger" : tone === "success" ? "text-success" : tone === "warning" ? "text-warning" : tone === "info" ? "text-info" : "text-primary")}><Icon className="h-4 w-4" aria-hidden="true" /></span>
-              <div className="min-w-0">
+          {metrics.map(({ title, value, description, icon: Icon, tone, isLoading, isError }) => (
+            <div key={title} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover/40">
+              <span
+                className={cn(
+                  "grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-border/80",
+                  tone === "danger"
+                    ? "border-danger-border bg-danger-subtle text-danger"
+                    : tone === "success"
+                    ? "border-success-border bg-success-subtle text-success"
+                    : tone === "warning"
+                    ? "border-warning-border bg-warning-subtle text-warning"
+                    : "border-info-border bg-info-subtle text-info"
+                )}
+              >
+                <Icon className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
                 <dt className="text-xs font-medium text-text-muted">{title}</dt>
-                {summaryStatus === "loading" && index < 3 ? <div className="mt-3 space-y-2" aria-label={`Loading ${title}`}><div className="ui-skeleton h-7 w-16" /><div className="ui-skeleton h-3 w-28" /></div>
-                  : summaryStatus === "error" && !summary && index < 3 ? <div className="mt-2"><dd className="flex items-center gap-2 text-sm font-medium text-danger"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Unavailable</dd><button type="button" onClick={() => void loadSummary()} className="mt-1 text-xs font-medium text-primary hover:text-primary-action-hover">Retry summary</button></div>
-                    : <><dd className={cn("mt-1 text-2xl font-semibold leading-8 tabular-nums", tone === "danger" && typeof value === "number" && value > 0 ? "text-danger" : "text-text")}>{value ?? "—"}</dd><dd className="mt-1 text-xs text-text-muted">{description}</dd></>}
+                {isLoading ? (
+                  <div className="mt-1 space-y-1" aria-label={`Loading ${title}`}>
+                    <div className="ui-skeleton h-6 w-16" />
+                  </div>
+                ) : isError ? (
+                  <div className="mt-1">
+                    <dd className="text-xs font-medium text-danger">Unavailable</dd>
+                  </div>
+                ) : (
+                  <>
+                    <dd className={cn("mt-0.5 text-2xl font-bold leading-none tabular-nums", tone === "danger" && typeof value === "number" && value > 0 ? "text-danger" : "text-text")}>
+                      {value ?? "—"}
+                    </dd>
+                    <dd className="mt-1 text-xs text-text-subtle truncate">{description}</dd>
+                  </>
+                )}
               </div>
             </div>
           ))}
         </dl>
       </section>
 
-      <section aria-label="Live operational picture">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <div><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-info">Live operational picture</p><p className="mt-1 text-xs text-text-muted">Source geography and the most recent session observations.</p></div>
-          <span className="text-xs text-text-subtle">Primary investigation entry point</span>
+      {/* Row 1: Global Map & Attack Vector Summary */}
+      <section aria-label="Live operational picture" className="space-y-4">
+        <div>
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-info">Live Operational Picture</h2>
+          <p className="mt-1 text-xs text-text-muted">Source geography and the most recent session observations.</p>
         </div>
-        <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:gap-6">
-          <div ref={mapPanel} role={isFullScreen ? "dialog" : undefined} aria-modal={isFullScreen ? true : undefined} aria-labelledby="distribution-title" className={cn("ui-panel flex min-h-[360px] flex-col overflow-hidden", isFullScreen ? "fixed inset-0 z-[100] h-dvh w-screen rounded-none" : "xl:col-span-8")}>
-            <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border px-4 py-3 sm:px-5">
+
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:items-stretch">
+          {/* Map Panel */}
+          <div
+            ref={mapPanel}
+            role={isFullScreen ? "dialog" : undefined}
+            aria-modal={isFullScreen ? true : undefined}
+            aria-labelledby="distribution-title"
+            className={cn(
+              "ui-panel flex flex-col overflow-hidden border border-border bg-surface",
+              isFullScreen ? "fixed inset-0 z-[100] h-dvh w-screen rounded-none" : "xl:col-span-8 h-[420px]"
+            )}
+          >
+            <div className="flex flex-col sm:flex-row sm:items-start justify-between border-b border-border px-5 py-4 sm:px-6 gap-4">
               <div>
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><Globe className="h-4 w-4" aria-hidden="true" />Global telemetry</div>
-                <h2 id="distribution-title" className="mt-1 text-base font-semibold">Global threat activity</h2>
+                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-info mb-1.5">
+                  <Globe className="h-4 w-4" aria-hidden="true" />
+                  Global Telemetry
+                </div>
+                <h3 id="distribution-title" className="text-lg font-bold text-text">Global threat activity</h3>
                 <p className="mt-1 text-xs text-text-muted">Observed source locations from the live session feed.</p>
               </div>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
-                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rotate-45 bg-danger" aria-hidden="true" />Critical</span>
-                <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-info" aria-hidden="true" />Active</span>
-                <button onClick={() => setIsFullScreen((value) => !value)} className="ui-button h-9 min-h-9 w-9 p-0" title={isFullScreen ? "Exit full screen" : "Open full screen"} aria-label={isFullScreen ? "Exit full screen" : "Open full screen"}>{isFullScreen ? <Minimize className="h-4 w-4" aria-hidden="true" /> : <Maximize className="h-4 w-4" aria-hidden="true" />}</button>
+              <div className="flex items-center gap-4 text-xs text-text-muted sm:pt-2">
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <span className="h-2.5 w-2.5 rotate-45 bg-danger" aria-hidden="true" />
+                  Critical
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-medium">
+                  <span className="h-2.5 w-2.5 rounded-full bg-info" aria-hidden="true" />
+                  Active
+                </span>
+                <button
+                  onClick={() => setIsFullScreen((value) => !value)}
+                  className="flex items-center justify-center rounded-md border border-border bg-surface h-8 w-8 text-text-subtle hover:bg-surface-hover hover:text-text transition-colors ml-1"
+                  title={isFullScreen ? "Exit full screen" : "Open full screen"}
+                  aria-label={isFullScreen ? "Exit full screen" : "Open full screen"}
+                >
+                  {isFullScreen ? <Minimize className="h-4 w-4" aria-hidden="true" /> : <Maximize className="h-4 w-4" aria-hidden="true" />}
+                </button>
               </div>
             </div>
-            <div className="min-h-0 flex-1 bg-surface-subtle"><RegionalMap /></div>
-          </div>
-          <LiveThreatFeedPanel sessions={renderedSessions} status={renderedStatus} className="xl:col-span-4" />
-        </div>
-      </section>
-
-      <section aria-label="Signal review">
-        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-          <div><p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-info">Signal review</p><p className="mt-1 text-xs text-text-muted">Trend, severity mix, and analyst context for the current observation window.</p></div>
-          <span className="text-xs text-text-subtle">Context only · no automated response</span>
-        </div>
-        <div className="ui-panel overflow-hidden">
-          <div className="grid grid-cols-1 divide-y divide-border xl:grid-cols-12 xl:divide-x xl:divide-y-0">
-            <article className="min-w-0 p-4 sm:p-5 xl:col-span-6">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><BarChart3 className="h-4 w-4" aria-hidden="true" />Activity over time</div>
-                  <h2 className="mt-1 text-base font-semibold">Threat trend</h2>
-                  <p className="mt-1 text-xs text-text-muted">Observed sessions grouped across the current feed window.</p>
-                </div>
-                <span className="ui-badge border-info-border bg-info-subtle text-info">{summary ? String(summary.windowHours) + "h window" : "Window pending"}</span>
+            <div className={cn("relative flex items-center justify-center overflow-hidden bg-surface-subtle", isFullScreen ? "min-h-0 flex-1" : "flex-1 min-h-0")}>
+              <div className="relative h-full w-full overflow-hidden">
+                <RegionalMap />
               </div>
-              <div className="mt-4 h-[230px]"><AttackRateChart data={activityData} /></div>
-            </article>
-            <div className="min-w-0 p-4 sm:p-5 xl:col-span-3"><SeverityDistributionPanel data={severityData} embedded /></div>
-            <div className="min-w-0 p-4 sm:p-5 xl:col-span-3"><AnalystInsightPanel summary={summary} status={summaryStatus} feedState={feedState} embedded /></div>
+            </div>
           </div>
+
+          <AttackVectorSummaryPanel sessions={renderedSessions} status={renderedStatus} className="xl:col-span-4 h-[420px]" />
         </div>
       </section>
 
-      <section className="ui-panel overflow-hidden" aria-labelledby="directory-title" aria-busy={isDirectoryInitialLoad || directoryRefreshing}>
-        <div className="border-b border-border px-4 py-4 sm:px-5"><div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><ActivitySquare className="h-4 w-4" aria-hidden="true" />Investigation directory</div><h2 id="directory-title" className="mt-1 text-base font-semibold">Live Incursion Directory</h2><p className="mt-1 text-xs text-text-muted">Search the full session directory, not only the live map buffer.</p></div><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><label className="relative block min-w-0 sm:w-64"><span className="sr-only">Search incursion directory</span><Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-subtle" aria-hidden="true" /><input value={queryInput} onChange={(event) => { setQueryInput(event.target.value); setCurrentPage(1); }} type="search" placeholder="Session, IP, sensor…" className="ui-field pl-10 pr-8" />{queryInput && <button type="button" onClick={() => { setQueryInput(""); setCurrentPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-subtle hover:text-text" aria-label="Clear search input"><X className="h-3.5 w-3.5" aria-hidden="true" /></button>}</label><button onClick={() => setFilterOpen((value) => !value)} className={cn("ui-button", (filterOpen || severityFilter !== "All") && "border-primary bg-primary-subtle text-primary")} aria-expanded={filterOpen} aria-controls="incursion-filter-panel"><SlidersHorizontal className="h-4 w-4" aria-hidden="true" />Filter{severityFilter !== "All" && <span className="grid h-5 min-w-5 place-items-center rounded-full bg-primary px-1 text-xs text-on-primary">1</span>}</button><button onClick={() => void handleExport()} disabled={!directoryTotal || isExporting} className="ui-button"><Download className="h-4 w-4" aria-hidden="true" />{isExporting ? "Exporting…" : "Export"}</button></div></div>
-          {filterOpen && <div id="incursion-filter-panel" className="mt-4 flex flex-col gap-3 rounded-lg border border-border bg-surface-subtle p-3 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3 text-sm font-medium text-text-muted"><span>Severity</span><SelectMenu value={severityFilter} onValueChange={(value) => { setSeverityFilter(value as ThreatSeverityFilter); setCurrentPage(1); }} options={severityOptions} className="min-w-32" /></div><div className="flex items-center justify-between gap-3 text-xs text-text-muted sm:justify-end"><span>{directoryTotal.toLocaleString()} matching session{directoryTotal === 1 ? "" : "s"}</span>{(queryInput || severityFilter !== "All") && <button onClick={() => { setQueryInput(""); setSeverityFilter("All"); setCurrentPage(1); }} className="inline-flex items-center gap-1.5 font-medium text-primary hover:text-primary-action-hover"><X className="h-3.5 w-3.5" aria-hidden="true" />Clear filters</button>}</div></div>}
-          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-text-muted" aria-live="polite">{directoryRefreshing && <span className="inline-flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Updating directory…</span>}{hasDirectoryRefreshError && <span className="inline-flex items-center gap-1.5 text-warning"><AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />Refresh failed · showing the last successful result</span>}{exportStatus && <span>{exportStatus}</span>}</div>
+      {/* Row 2: Signal Review (Attack Trend + Live Threat Feed + Analyst Context) */}
+      <section aria-label="Signal review" className="ui-panel overflow-hidden border border-border bg-surface shadow-xs">
+        <div className="grid grid-cols-1 divide-y divide-border xl:grid-cols-12 xl:divide-x xl:divide-y-0">
+          
+          {/* ปรับเป็น xl:col-span-6 เพื่อให้กราฟกว้างครึ่งหนึ่งของหน้าจอ */}
+          <article className="flex flex-col p-5 xl:col-span-6 h-[300px]">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info">
+                  <BarChart3 className="h-4 w-4" aria-hidden="true" />
+                  Attack Rate
+                </div>
+                <h3 className="mt-1 text-base font-semibold text-text">Activity Over Time</h3>
+              </div>
+              <span className="ui-badge text-xs border-info-border bg-info-subtle text-info">
+                {summary ? `${summary.windowHours}h window` : "Observing"}
+              </span>
+            </div>
+            <div className="mt-3 flex-1 min-h-0">
+              <AttackRateChart data={activityData} />
+            </div>
+          </article>
+
+          {/* ปรับลดลงเป็น xl:col-span-3 */}
+          <div className="p-4 xl:col-span-3 h-[300px] flex flex-col">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info mb-1">
+              <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+              Live Threat Feed
+            </div>
+            <h3 className="text-base font-semibold text-text mb-2">Recent Interceptions</h3>
+            <div className="min-h-0 flex-1 divide-y divide-border/60 overflow-y-auto pr-1">
+              {renderedSessions.slice(0, 3).map((session) => (
+                <Link
+                  key={session.id}
+                  href={"/threat-intel/" + session.id}
+                  className="group flex items-center justify-between gap-3 py-2 px-1 rounded transition-colors hover:bg-surface-hover/70"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-mono font-semibold text-primary truncate max-w-[100px]">{session.sourceIp}</span>
+                      <span className="text-text-subtle font-mono text-[10px] shrink-0">({session.time})</span>
+                    </div>
+                    <div className="truncate text-[11px] text-text-muted mt-0.5">{session.sensor}</div>
+                  </div>
+                  <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-text-subtle group-hover:text-primary" aria-hidden="true" />
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* ปรับลดลงเป็น xl:col-span-3 */}
+          <div className="p-5 xl:col-span-3 flex flex-col justify-between bg-surface-subtle/30 h-[300px]">
+            <AnalystInsightPanel summary={summary} status={summaryStatus} feedState={feedState} activeDeceptions={activeDeceptions} embedded />
+          </div>
         </div>
-        <div className="min-h-[360px]">{isDirectoryInitialLoad && <DirectorySkeleton />}{isDirectoryUnavailable && <div className="p-4 sm:p-6"><RegionState kind="error" title="Sessions unavailable" description="We couldn’t load the session directory." /><button type="button" onClick={() => void loadDirectory()} className="ui-button mt-4"><RefreshCw className="h-4 w-4" aria-hidden="true" />Retry directory</button></div>}{!isDirectoryInitialLoad && !isDirectoryUnavailable && directoryItems.length === 0 && <div className="p-4 sm:p-6"><RegionState kind="empty" title={directoryTotal === 0 && (queryInput || severityFilter !== "All") ? "No matching sessions" : "No active sessions"} description={directoryTotal === 0 && (queryInput || severityFilter !== "All") ? "Try a different search or severity filter." : "No sessions were returned from the directory."} /></div>}{!isDirectoryInitialLoad && !isDirectoryUnavailable && directoryItems.length > 0 && <DirectoryResults sessions={directoryItems} />}</div>
-        {directoryTotal > 0 && directoryTotalPages > 1 && <nav aria-label="Directory pages" className="flex flex-wrap items-center gap-2 border-t border-border bg-surface-subtle p-4"><p className="mr-auto text-xs text-text-muted">Page {currentPage} of {directoryTotalPages} · {directoryTotal.toLocaleString()} sessions</p><button type="button" disabled={currentPage === 1} onClick={() => setCurrentPage(1)} className="ui-button min-h-9 px-2.5 text-xs" aria-label="First page"><ChevronsLeft className="h-3.5 w-3.5" aria-hidden="true" />First</button><button type="button" disabled={currentPage === 1} onClick={() => setCurrentPage((page) => page - 1)} className="ui-button min-h-9 px-2.5 text-xs"><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />Prev</button>{getPageNumbers().map((pageNumber) => <button type="button" key={pageNumber} onClick={() => setCurrentPage(pageNumber)} aria-current={currentPage === pageNumber ? "page" : undefined} aria-label={`Page ${pageNumber}`} className="ui-button min-h-9 min-w-9 px-2 text-xs">{pageNumber}</button>)}<button type="button" disabled={currentPage === directoryTotalPages} onClick={() => setCurrentPage((page) => page + 1)} className="ui-button min-h-9 px-2.5 text-xs">Next<ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button><button type="button" disabled={currentPage === directoryTotalPages} onClick={() => setCurrentPage(directoryTotalPages)} className="ui-button min-h-9 px-2.5 text-xs" aria-label="Last page">Last<ChevronsRight className="h-3.5 w-3.5" aria-hidden="true" /></button></nav>}
       </section>
     </div>
   );
 }
 
-function LiveThreatFeedPanel({ sessions, status, className }: { sessions: DashboardThreatEvent[]; status: RegionStatus; className?: string }) {
+function AttackVectorSummaryPanel({ sessions, status, className }: { sessions: DashboardThreatEvent[]; status: RegionStatus; className?: string }) {
   const loading = status === "loading";
   const unavailable = status === "error";
-  const events = sessions.slice(0, 6);
+
+  const topSensors = useMemo(() => {
+    const counts = new Map<string, number>();
+    sessions.forEach((log) => {
+      const sensorName = log.sensor?.trim() || "Unknown Sensor";
+      counts.set(sensorName, (counts.get(sensorName) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([name, count]) => ({
+        name,
+        count,
+        percent: sessions.length > 0 ? Math.round((count / sessions.length) * 100) : 0,
+      }));
+  }, [sessions]);
+
+  const topCountries = useMemo(() => {
+    const counts = new Map<string, number>();
+    sessions.forEach((log) => {
+      const country = log.geo?.country?.trim() || "Unknown";
+      counts.set(country, (counts.get(country) ?? 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([country, count]) => ({
+        country,
+        count,
+        percent: sessions.length > 0 ? Math.round((count / sessions.length) * 100) : 0,
+      }));
+  }, [sessions]);
 
   return (
-    <aside className={cn("ui-panel flex min-h-[360px] flex-col overflow-hidden", className)} aria-labelledby="live-feed-title" aria-busy={loading || status === "refreshing"}>
-      <div className="flex items-start justify-between gap-4 border-b border-border px-4 py-3 sm:px-5">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><Radio className="h-4 w-4" aria-hidden="true" />Observed stream</div>
-          <h2 id="live-feed-title" className="mt-1 text-base font-semibold sm:text-lg">Live threat feed</h2>
-          <p className="mt-1 text-sm text-text-muted">Latest sessions from the monitored feed.</p>
+    <aside className={cn("ui-panel flex flex-col overflow-hidden border border-border shadow-xs bg-surface", className)} aria-labelledby="vector-summary-title">
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-5 py-3">
+        <div id="vector-summary-title" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info">
+          <Server className="h-3.5 w-3.5" aria-hidden="true" />
+          Attack Vector Summary
         </div>
-        <span className={cn("mt-1 flex h-2.5 w-2.5 shrink-0 rounded-full", status === "error" ? "bg-danger" : status === "stale" ? "bg-warning" : status === "ready" ? "bg-success" : "bg-info")} title={statePresentation(status).label} aria-label={statePresentation(status).label} />
+        <span
+          className={cn(
+            "h-2 w-2 rounded-full",
+            status === "error" ? "bg-danger" : status === "stale" ? "bg-warning" : status === "ready" ? "bg-success" : "bg-info"
+          )}
+        />
       </div>
-      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-        {loading && Array.from({ length: 5 }, (_, index) => <PrioritySkeleton key={"feed-loading-" + index} />)}
-        {!loading && unavailable && <RegionState kind="error" title="Live feed unavailable" description="The monitored session feed could not be loaded." />}
-        {!loading && !unavailable && events.length === 0 && <RegionState kind="empty" title="No session observations" description="The latest response contains no sessions for this view." />}
-        {!loading && !unavailable && events.map((session) => <Link key={session.id} href={"/threat-intel/" + session.id} className="group flex gap-3 rounded-lg border border-transparent p-3 hover:border-primary-border hover:bg-primary-subtle focus-visible:border-primary-border">
-          <span className={cn("mt-1 h-9 w-1 shrink-0 rounded-full", severityBarClass(session.severity))} aria-hidden="true" />
-          <span className="min-w-0 flex-1">
-            <span className="flex flex-wrap items-center justify-between gap-2"><span className="font-mono text-xs text-text-subtle">{session.time}</span><SeverityBadge severity={session.severity} className="px-2 py-1 text-xs" /></span>
-            <span className="mt-2 block truncate text-sm font-medium text-text">{session.classification}</span>
-            <span className="mt-1 block truncate font-mono text-xs text-primary">{session.sourceIp}</span>
-            <span className="mt-1 block truncate text-xs text-text-muted">{session.sensor}</span>
-          </span>
-          <ArrowUpRight className="mt-1 h-4 w-4 shrink-0 text-text-subtle transition-colors group-hover:text-primary" aria-hidden="true" />
-        </Link>)}
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3.5 space-y-4">
+        {loading && (
+          <div className="space-y-3 py-6 text-center">
+            <RegionState kind="loading" title="Compiling vectors..." />
+          </div>
+        )}
+        {!loading && unavailable && <RegionState kind="error" title="Telemetry unavailable" />}
+        {!loading && !unavailable && sessions.length === 0 && <RegionState kind="empty" title="No session metrics" />}
+        {!loading && !unavailable && sessions.length > 0 && (
+          <>
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold text-text-muted mb-2">
+                <span className="flex items-center gap-1.5">
+                  <Server className="h-3.5 w-3.5 text-primary" />
+                  Top Targeted Sensors
+                </span>
+                <span>Hits</span>
+              </div>
+              <div className="space-y-2">
+                {topSensors.map((item) => (
+                  <div key={item.name} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-text truncate max-w-[150px]">{item.name}</span>
+                      <span className="font-mono text-text-subtle text-xs">{item.count} ({item.percent}%)</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-border/60 overflow-hidden">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${item.percent}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="border-t border-border/70 pt-3">
+              <div className="flex items-center justify-between text-xs font-semibold text-text-muted mb-2">
+                <span className="flex items-center gap-1.5">
+                  <Globe2 className="h-3.5 w-3.5 text-info" />
+                  Top Origin Countries
+                </span>
+                <span>Traffic</span>
+              </div>
+              <div className="space-y-2">
+                {topCountries.map((item) => (
+                  <div key={item.country} className="space-y-1">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-text truncate max-w-[150px]">{item.country}</span>
+                      <span className="font-mono text-text-subtle text-xs">{item.count} ({item.percent}%)</span>
+                    </div>
+                    <div className="h-1.5 w-full rounded-full bg-border/60 overflow-hidden">
+                      <div className="h-full rounded-full bg-info" style={{ width: `${item.percent}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
       </div>
-      <div className="border-t border-border bg-surface-subtle p-3"><Link href="/threat-intel" className="ui-button w-full justify-between border-primary-border bg-primary-subtle text-primary hover:bg-primary-border/20">Open threat intelligence<ArrowUpRight className="h-4 w-4" aria-hidden="true" /></Link></div>
+
+      <div className="border-t border-border bg-surface-subtle/50 p-2.5 text-center">
+        <Link href="/threat-intel" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+          <span>View full incursion feed &amp; directory</span>
+          <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
+      </div>
     </aside>
   );
 }
 
-function SeverityDistributionPanel({ data, className, embedded = false }: { data: SeverityDatum[]; className?: string; embedded?: boolean }) {
-  const total = data.reduce((sum, item) => sum + item.value, 0);
-
+function AnalystInsightPanel({
+  summary,
+  status,
+  feedState,
+  activeDeceptions,
+}: {
+  summary: ThreatDashboardSummary | null;
+  status: RequestStatus;
+  feedState: ReturnType<typeof statePresentation>;
+  activeDeceptions: number;
+  embedded?: boolean;
+}) {
   return (
-    <article className={cn(embedded ? "min-w-0" : "ui-panel overflow-hidden", className)} aria-labelledby="severity-distribution-title">
-      <div className={cn(embedded ? "" : "border-b border-border px-5 py-4 sm:px-6")}>
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Severity mix</div>
-        <h2 id="severity-distribution-title" className="mt-1 text-base font-semibold sm:text-lg">Session severity</h2>
-        <p className="mt-1 text-sm text-text-muted">Distribution of the visible live feed.</p>
+    <article className="flex flex-col justify-between h-full">
+      <div>
+        <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-info">
+          <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
+          Security Context
+        </div>
+        <h3 className="text-sm font-semibold text-text mt-0.5">Analyst Briefing</h3>
       </div>
-      <div className={cn(embedded ? "mt-4" : "p-5 sm:p-6")}>
-        {!data.length ? <RegionState kind="empty" title="No severity observations" description="The live feed has not returned sessions for this view." /> : <><div className="mx-auto grid h-36 w-36 place-items-center rounded-full" style={{ background: severityGradient(data) }}><div className="grid h-24 w-24 place-items-center rounded-full bg-surface text-center"><strong className="text-xl tabular-nums text-text">{total.toLocaleString()}</strong><span className="text-[11px] text-text-muted">observed</span></div></div><div className="mt-6 space-y-3">{data.map((item) => <div key={item.label} className="flex items-center gap-2 text-xs"><span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-text-muted">{item.label}</span><span className="tabular-nums text-text-subtle">{Math.round((item.value / total) * 100)}%</span><span className="w-8 text-right font-medium tabular-nums text-text">{item.value.toLocaleString()}</span></div>)}</div></>}
+      <div className="my-auto py-2">
+        {status === "loading" ? (
+          <div className="space-y-2">
+            <div className="ui-skeleton h-4 w-full" />
+            <div className="ui-skeleton h-4 w-4/5" />
+          </div>
+        ) : status === "error" || !summary ? (
+          <p className="text-xs text-danger">Briefing data unavailable.</p>
+        ) : (
+          <div className="rounded-lg border border-info-border/50 bg-info-subtle/30 p-3 text-[11px] leading-relaxed text-text">
+            <p>
+              Recorded <strong className="font-semibold">{summary.sessions.toLocaleString()} incursions</strong> from{" "}
+              <strong className="font-semibold">{summary.uniqueSources.toLocaleString()} distinct IPs</strong> within{" "}
+              <strong>{summary.windowHours}h</strong>.
+            </p>
+            <p className="mt-1 text-text-muted">
+              Currently engaging <strong className="font-semibold text-text">{activeDeceptions}</strong> active deception sequences.
+            </p>
+          </div>
+        )}
+      </div>
+      <div className="flex items-center justify-between border-t border-border/60 pt-1.5">
+        <span className={cn("ui-badge text-[10px]", feedState.className)}>{feedState.label}</span>
+        <Link href="/threat-intel" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+          Investigate
+          <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
+        </Link>
       </div>
     </article>
   );
 }
 
-function AnalystInsightPanel({ summary, status, feedState, className, embedded = false }: { summary: ThreatDashboardSummary | null; status: RequestStatus; feedState: ReturnType<typeof statePresentation>; className?: string; embedded?: boolean }) {
-  return (
-    <article className={cn(embedded ? "min-w-0" : "ui-panel overflow-hidden", className)} aria-labelledby="analyst-insight-title">
-      <div className={cn(embedded ? "" : "border-b border-border px-5 py-4 sm:px-6")}>
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-info"><ShieldCheck className="h-4 w-4" aria-hidden="true" />Analyst context</div>
-        <h2 id="analyst-insight-title" className="mt-1 text-base font-semibold sm:text-lg">Security insight</h2>
-        <p className="mt-1 text-sm text-text-muted">A concise read of the current observed window.</p>
-      </div>
-      <div className={cn("flex flex-col justify-between gap-5", embedded ? "mt-4" : "min-h-[270px] p-5 sm:p-6")}>
-        {status === "loading" ? <RegionState kind="loading" title="Building current insight" description="Waiting for the summary response." /> : status === "error" || !summary ? <RegionState kind="error" title="Insight unavailable" description="The dashboard summary could not be loaded." /> : <div className="rounded-xl border border-info-border bg-info-subtle/50 p-4"><p className="text-sm leading-6 text-text"><strong>{summary.sessions.toLocaleString()}</strong> observed sessions across <strong>{summary.uniqueSources.toLocaleString()}</strong> distinct sources in the current <strong>{summary.windowHours}-hour</strong> window.</p><p className="mt-3 text-xs leading-5 text-text-muted">{summary.prioritySessions.toLocaleString()} sessions are marked Critical or High. This is contextual telemetry, not an automated response decision.</p></div>}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4"><span className={cn("ui-badge", feedState.className)}>{feedState.label}</span><Link href="/threat-intel" className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary-action-hover">Review sessions<ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></Link></div>
-      </div>
-    </article>
-  );
+function statePresentation(status: RegionStatus) {
+  if (status === "error") return { label: "Feed offline", metric: "Offline", tone: "danger" as const, className: "border-danger-border bg-danger-subtle text-danger" };
+  if (status === "stale") return { label: "Feed stale", metric: "Stale", tone: "warning" as const, className: "border-warning-border bg-warning-subtle text-warning" };
+  if (status === "refreshing") return { label: "Updating...", metric: "Updating", tone: "info" as const, className: "border-info-border bg-info-subtle text-info" };
+  if (status === "loading") return { label: "Connecting...", metric: "Connecting", tone: "info" as const, className: "border-info-border bg-info-subtle text-info" };
+  return { label: "Live", metric: "Connected", tone: "success" as const, className: "border-success-border bg-success-subtle text-success" };
 }
 
-function PrioritySkeleton() { return <div className="flex gap-3 rounded-lg border border-border p-3" aria-hidden="true"><div className="ui-skeleton h-8 w-1 shrink-0" /><div className="min-w-0 flex-1 space-y-2"><div className="ui-skeleton h-3 w-20" /><div className="ui-skeleton h-4 w-4/5" /><div className="ui-skeleton h-3 w-2/5" /></div></div>; }
+function formatUpdatedAt(timestamp: number | null) {
+  return timestamp ? `Updated ${new Date(timestamp).toLocaleTimeString([], { hour12: false })}` : "Awaiting first response";
+}
 
-
-function DirectorySkeleton() { return <div className="space-y-px bg-border" aria-label="Loading session directory">{Array.from({ length: 6 }, (_, row) => <div key={row} className="grid min-h-[68px] grid-cols-4 gap-4 bg-surface p-4 sm:grid-cols-7 sm:px-6">{Array.from({ length: 7 }, (_, column) => <div key={column} className={cn("ui-skeleton h-4", column > 3 ? "hidden sm:block" : "")} />)}</div>)}</div>; }
-
-function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) { return <><div className="space-y-2 p-3 md:hidden">{sessions.map((session) => <article key={session.id} className="rounded-lg border border-border bg-surface p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="flex items-center gap-2 font-mono text-sm font-medium text-text"><span className={cn("h-2 w-2 shrink-0 rounded-full", severityDotClass(session.severity))} aria-hidden="true" />{session.id}</p><p className="mt-1 font-mono text-xs text-primary">{session.sourceIp}</p></div><SeverityBadge severity={session.severity} /></div><dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-xs"><div><dt className="text-text-subtle">Attacker type</dt><dd className="mt-1"><span className={cn("ui-badge", classificationBadgeClass(session.classification, session.typeColor))}>{session.classification}</span></dd></div><div><dt className="text-text-subtle">Session status</dt><dd className="mt-1 font-mono text-text">{session.duration}</dd></div><div><dt className="text-text-subtle">Observed</dt><dd className="mt-1 font-mono text-text">{session.date} {session.time}</dd></div><div><dt className="text-text-subtle">Sensor</dt><dd className="mt-1 truncate text-text" title={session.sensor}>{session.sensor}</dd></div></dl><Link href={`/threat-intel/${session.id}`} className="ui-button mt-4 w-full text-primary">View details<ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></Link></article>)}</div><div className="hidden h-[330px] md:block"><div className="ui-scroll-region h-full" role="region" aria-label="Incursion directory table. Scroll to view all rows and columns." tabIndex={0}><table className="ui-table min-w-[980px]"><thead><tr>{["SESSION ID", "ORIGIN IP", "ATTACKER TYPE", "SEVERITY", "DATE & TIME", "SESSION STATUS", "ACTION"].map((label) => <th key={label} scope="col" className={label === "ACTION" ? "text-right" : undefined}>{label}</th>)}</tr></thead><tbody>{sessions.map((session) => <tr key={session.id} className="group text-text-muted"><td><span className="inline-flex items-center gap-2" title={session.id} aria-label={session.id} tabIndex={0}><span className={cn("h-2 w-2 shrink-0 rounded-full", severityDotClass(session.severity))} aria-hidden="true" /><span className="font-mono text-sm font-medium text-text">{session.id.length > 12 ? `${session.id.substring(0, 10).toUpperCase()}…` : session.id.toUpperCase()}</span></span></td><td className="font-mono text-sm text-text">{session.sourceIp}</td><td><span className={cn("ui-badge", classificationBadgeClass(session.classification, session.typeColor))}>{session.classification}</span></td><td><SeverityBadge severity={session.severity} /></td><td className="font-mono text-xs"><div className="text-text">{session.date}</div><div className="mt-1 text-text-subtle">{session.time}</div></td><td className="font-mono text-xs">{session.duration}</td><td className="text-right"><Link href={`/threat-intel/${session.id}`} className="ui-button min-h-9 px-3 text-xs text-primary">View Details<ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></Link></td></tr>)}</tbody></table></div></div></>; }
-function statePresentation(status: RegionStatus) { if (status === "error") return { label: "Feed unavailable", metric: "Offline", tone: "danger" as const, className: "border-danger-border bg-danger-subtle text-danger" }; if (status === "stale") return { label: "Feed stale", metric: "Stale", tone: "warning" as const, className: "border-warning-border bg-warning-subtle text-warning" }; if (status === "refreshing") return { label: "Refreshing feed", metric: "Updating", tone: "info" as const, className: "border-info-border bg-info-subtle text-info" }; if (status === "loading") return { label: "Connecting to feed", metric: "Connecting", tone: "info" as const, className: "border-info-border bg-info-subtle text-info" }; return { label: "Live feed active", metric: "Connected", tone: "success" as const, className: "border-success-border bg-success-subtle text-success" }; }
-function formatUpdatedAt(timestamp: number | null) { return timestamp ? `Updated ${new Date(timestamp).toLocaleTimeString([], { hour12: false })}` : "Awaiting first response"; }
-function useDebouncedValue(value: string, delay: number) { const [debouncedValue, setDebouncedValue] = useState(value); useEffect(() => { const timer = window.setTimeout(() => setDebouncedValue(value), delay); return () => window.clearTimeout(timer); }, [delay, value]); return debouncedValue; }
-function isThreatDashboardSummary(value: unknown): value is ThreatDashboardSummary { if (!value || typeof value !== "object" || Array.isArray(value)) return false; const summary = value as Record<string, unknown>; return typeof summary.windowHours === "number" && typeof summary.sessions === "number" && typeof summary.uniqueSources === "number" && typeof summary.prioritySessions === "number"; }
-function isThreatDirectoryPage(value: unknown): value is ThreatDirectoryPage { if (!value || typeof value !== "object" || Array.isArray(value)) return false; const page = value as Record<string, unknown>; return Array.isArray(page.items) && typeof page.page === "number" && typeof page.pageSize === "number" && typeof page.total === "number" && typeof page.totalPages === "number"; }
+function isThreatDashboardSummary(value: unknown): value is ThreatDashboardSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const summary = value as Record<string, unknown>;
+  return typeof summary.windowHours === "number" && typeof summary.sessions === "number" && typeof summary.uniqueSources === "number" && typeof summary.prioritySessions === "number";
+}

@@ -6,6 +6,7 @@ import { LocateFixed } from "lucide-react";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 
 import { RefreshStatus } from "@/components/ui/RegionState";
+import { cn } from "@/lib/utils";
 
 interface MapMarker {
   id: string;
@@ -22,7 +23,7 @@ interface MapPosition {
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const defaultPosition: MapPosition = { coordinates: [0, 20], zoom: 1 };
 
-export default function RegionalMap() {
+export default function RegionalMap({ className }: { className?: string } = {}) {
   const { threats, status } = useThreatFeed();
   const [isHydrated, setIsHydrated] = useState(false);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
@@ -86,11 +87,16 @@ export default function RegionalMap() {
 
   return (
     // คง touchAction: "none" ไว้เพื่อป้องกันเบราว์เซอร์ซูมหน้าจอ
-    <div aria-label="Attack distribution map" aria-busy={renderedStatus === "loading" || renderedStatus === "refreshing"} className="ui-map relative h-full w-full cursor-grab bg-surface-subtle active:cursor-grabbing" style={{ touchAction: "none" }}>
+    <div
+      aria-label="Attack distribution map"
+      aria-busy={renderedStatus === "loading" || renderedStatus === "refreshing"}
+      className={cn("ui-map relative aspect-square h-full w-full cursor-grab bg-surface-subtle active:cursor-grabbing", className)}
+      style={{ touchAction: "none" }}
+    >
       <ComposableMap
         projection="geoMercator"
-        width={1000}
-        height={460}
+        width={800}
+        height={800}
         projectionConfig={{ scale: 125 }}
         aria-label="World attack distribution. Use the zoom controls to adjust the view."
         style={{ width: "100%", height: "100%" }}

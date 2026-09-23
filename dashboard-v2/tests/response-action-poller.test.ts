@@ -550,11 +550,11 @@ describe("ResponseActionPollingController (FA-003)", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(fetchState).toHaveBeenCalledTimes(1);
-    expect(capturedSignal?.aborted).toBe(false);
+    expect((capturedSignal as AbortSignal | null)?.aborted).toBe(false);
 
     // Simulate session change: abort old poller
     poller.abort();
-    expect(capturedSignal?.aborted).toBe(true);
+    expect((capturedSignal as AbortSignal | null)?.aborted).toBe(true);
 
     // Advance past slow response completion
     await vi.advanceTimersByTimeAsync(1_000);

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-
 import SessionAwareLink from "@/components/auth/SessionAwareLink";
 import ThemeToggle from "@/components/theme/ThemeToggle";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -20,18 +19,28 @@ const topics = [
 type TopicId = (typeof topics)[number]["id"];
 type OpenMenu = "account" | "mobile" | null;
 
-type PublicSession = {
+export interface PublicSession {
   operatorId: string;
   role: string;
   fullName: string;
-};
-
-function getTopicFromHash(): TopicId | null {
-  const topic = window.location.hash.slice(1);
-  return topics.some(({ id }) => id === topic) ? topic as TopicId : null;
 }
 
-function topicLinkClass(active: boolean) {
+/**
+ * ดึงหัวข้อปัจจุบันจาก URL Hash
+ * @returns {TopicId | null} - ID ของหัวข้อ หรือ null
+ */
+function getTopicFromHash(): TopicId | null {
+  if (typeof window === "undefined") return null;
+  const topic = window.location.hash.slice(1);
+  return topics.some(({ id }) => id === topic) ? (topic as TopicId) : null;
+}
+
+/**
+ * สร้าง CSS classes สำหรับลิงก์หัวข้อใน Navbar ตามสถานะการใช้งาน
+ * @param {boolean} active - กำลังใช้งานหัวข้อนี้อยู่หรือไม่
+ * @returns {string} - CSS classes
+ */
+function topicLinkClass(active: boolean): string {
   return cn(
     "group relative rounded-lg border px-3 py-2 transition-colors duration-150",
     active
@@ -40,10 +49,22 @@ function topicLinkClass(active: boolean) {
   );
 }
 
-function getAccountName(session: PublicSession) {
+/**
+ * ดึงชื่อที่จะนำไปแสดงผลของผู้ใช้งาน (ใช้ชื่อเต็ม หากไม่มีจะใช้ Operator ID แทน)
+ * @param {PublicSession} session - ข้อมูล Session ของผู้ใช้
+ * @returns {string} - ชื่อสำหรับแสดงผล
+ */
+function getAccountName(session: PublicSession): string {
   return session.fullName.trim() || session.operatorId;
 }
 
+/**
+ * คอมโพเนนต์แถบนำทางหลักของเว็บไซต์ (Navbar)
+ * รองรับการตรวจสอบสถานะการล็อกอิน, การเปลี่ยนหัวข้อตามการเลื่อนหน้าจอ (Scroll),
+ * เมนูโปรไฟล์, และระบบยืนยันการออกจากระบบ
+ * 
+ * @returns {JSX.Element} - Navbar Component
+ */
 export default function Navbar() {
   const [activeTopic, setActiveTopic] = useState<TopicId>("overview");
   const [session, setSession] = useState<PublicSession | null>(null);
@@ -53,9 +74,9 @@ export default function Navbar() {
   const navbar = useRef<HTMLElement>(null);
   const router = useRouter();
 
+  // ตรวจสอบสถานะ Session จาก API เมื่อโหลดคอมโพเนนต์
   useEffect(() => {
     const controller = new AbortController();
-
     const loadSession = async () => {
       try {
         const response = await fetch("/api/auth/session", {
@@ -63,14 +84,12 @@ export default function Navbar() {
           signal: controller.signal,
         });
         if (!response.ok) return;
-
         const data: unknown = await response.json();
         if (!data || typeof data !== "object" || Array.isArray(data)) return;
-
         const candidate = data as Record<string, unknown>;
         if (typeof candidate.operatorId !== "string" || typeof candidate.role !== "string") return;
         if (controller.signal.aborted) return;
-
+        
         setSession({
           operatorId: candidate.operatorId,
           role: candidate.role,
@@ -80,11 +99,11 @@ export default function Navbar() {
         if (!controller.signal.aborted) setSession(null);
       }
     };
-
     void loadSession();
     return () => controller.abort();
   }, []);
 
+  // จัดการการเปลี่ยน Active Topic ตามการ Scroll หน้าจอ
   useEffect(() => {
     const sections = topics
       .map(({ id }) => document.getElementById(id))
@@ -111,16 +130,18 @@ export default function Navbar() {
 
     const hashTopic = getTopicFromHash();
     const hashTimer = hashTopic ? window.setTimeout(() => setActiveTopic(hashTopic), 0) : undefined;
+    
     const handleHashChange = () => {
       const nextTopic = getTopicFromHash();
       if (nextTopic) setActiveTopic(nextTopic);
       updateActiveTopic();
     };
+
     updateActiveTopic();
     window.addEventListener("scroll", updateActiveTopic, { passive: true });
     window.addEventListener("resize", updateActiveTopic);
     window.addEventListener("hashchange", handleHashChange);
-
+    
     return () => {
       if (hashTimer) window.clearTimeout(hashTimer);
       if (frame) window.cancelAnimationFrame(frame);
@@ -130,6 +151,7 @@ export default function Navbar() {
     };
   }, []);
 
+  // ปิดเมนูเมื่อคลิกพื้นที่ด้านนอก หรือกดปุ่ม Escape
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent) => {
       if (event.target instanceof Node && !navbar.current?.contains(event.target)) setOpenMenu(null);
@@ -137,7 +159,6 @@ export default function Navbar() {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpenMenu(null);
     };
-
     document.addEventListener("pointerdown", closeOnOutsidePointer);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
@@ -155,6 +176,7 @@ export default function Navbar() {
     setOpenMenu(null);
   };
 
+  /** ฟังก์ชันยืนยันการออกจากระบบ (Sign out) */
   const confirmLogout = async () => {
     if (isLoggingOut) return;
     setIsLoggingOut(true);
@@ -178,7 +200,6 @@ export default function Navbar() {
           <span className="grid h-8 w-8 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary" aria-hidden="true">P</span>
           PTI-Honeypot
         </Link>
-
         <div className="hidden items-center gap-1 text-sm font-medium text-text-muted lg:flex">
           {topics.map((topic) => {
             const active = activeTopic === topic.id;
@@ -199,7 +220,6 @@ export default function Navbar() {
             );
           })}
         </div>
-
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           {session ? (

@@ -10,6 +10,7 @@ vi.mock("server-only", () => ({}));
 
 import type {
   FilesystemClosedSession,
+  FilesystemTopologySession,
   FilesystemTopologySnapshot,
 } from "@/lib/dashboardTypes";
 import {
@@ -1380,9 +1381,9 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     });
     let selectedSessionId: string | null = null;
     let expiredSessionId: string | null = null;
-    const extraAuditSessions = new Map<string, FilesystemClosedSession>();
+    const extraAuditSessions = new Map<string, FilesystemClosedSession | FilesystemTopologySession>();
     const recordLookedUpSessionSpy = vi.fn();
-    const setExtraAuditSessionsSpy = vi.fn((updater: (prev: Map<string, FilesystemClosedSession>) => Map<string, FilesystemClosedSession>) => {
+    const setExtraAuditSessionsSpy = vi.fn((updater: (prev: Map<string, FilesystemClosedSession | FilesystemTopologySession>) => Map<string, FilesystemClosedSession | FilesystemTopologySession>) => {
       const next = updater(extraAuditSessions);
       extraAuditSessions.clear();
       for (const [id, session] of next) extraAuditSessions.set(id, session);
@@ -1730,7 +1731,7 @@ describe("FA-008: Filesystem Activity Navigation History Traversability", () => 
     });
     let failApplication = true;
     const setExpiredSessionIdSpy = vi.fn();
-    const setExtraAuditSessionsSpy = vi.fn((updater: (prev: Map<string, FilesystemClosedSession>) => Map<string, FilesystemClosedSession>) => {
+    const setExtraAuditSessionsSpy = vi.fn((updater: (prev: Map<string, FilesystemClosedSession | FilesystemTopologySession>) => Map<string, FilesystemClosedSession | FilesystemTopologySession>) => {
       updater(new Map());
     });
     const selectSessionSpy = vi.fn(() => {
