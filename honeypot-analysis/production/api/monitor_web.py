@@ -509,6 +509,12 @@ def load_internal_command_detail(
         event_id = row.get("eventid") or payload.get("eventid")
         if not _is_persisted_command_event(event_id):
             continue
+        bounded_input = _bounded_command_input(payload.get("input"))
+        if bounded_input is None or not bounded_input[0].strip():
+            # Empty terminal submissions remain canonical event telemetry but
+            # are not commands. Keep this projection aligned with the public
+            # command count, session assessment, and report.
+            continue
         if len(commands) >= MAX_ADMIN_COMMAND_EVENTS:
             truncated = True
             break
@@ -545,12 +551,7 @@ def load_internal_command_detail(
                     "evidence_tier": str(item.get("evidence_tier") or ""),
                 }
             )
-        bounded_input = _bounded_command_input(payload.get("input"))
-        if bounded_input is None:
-            raw_input = ""
-            input_truncated = False
-        else:
-            raw_input, input_truncated = bounded_input
+        raw_input, input_truncated = bounded_input
         truncated = truncated or input_truncated
         commands.append(
             {

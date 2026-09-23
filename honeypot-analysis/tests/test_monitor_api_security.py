@@ -846,6 +846,35 @@ def test_internal_view_preserves_benign_command_after_short_login_credentials() 
     assert "ls -al" not in json.dumps(public, sort_keys=True)
 
 
+def test_internal_view_excludes_blank_terminal_submissions() -> None:
+    rows = [
+        _canonical_command_event_row(
+            f"event-{index}",
+            "cowrie.command.input",
+            f"2026-08-05T00:00:0{index}Z",
+            {"input": value},
+        )
+        for index, value in enumerate(("id", "", "   ", "uname -a"), start=1)
+    ]
+
+    class RawStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
+            if table == "events":
+                return rows
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        _COMMAND_TEST_SESSION_ID,
+        _storage=RawStorage(),
+    )
+
+    assert internal["ok"] is True
+    assert [command["input"] for command in internal["commands"]] == ["id", "uname -a"]
+
+
 def test_internal_view_accepts_integrity_bound_sqlite_command_row() -> None:
     bound = bind_authenticated_sensor_identity(
         {
