@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-007A` — Introduce a pure transition presentation model**
+Current focus: **`FSV-007B` — Add a separate transition overlay**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -556,7 +556,7 @@ Verification:
 
 Checkpoint 1 status: **DONE**
 
-Checkpoint 2 status: **IN_PROGRESS**; current focus is `FSV-007A`.
+Checkpoint 2 status: **IN_PROGRESS**; current focus is `FSV-007B`.
 
 ```bash
 npm test
@@ -571,36 +571,88 @@ git diff --check
 
 Goal: แยก filesystem structure ออกจาก event sequence ใน domain model ก่อนเปลี่ยนสีหรือ animation
 
-#### `FSV-007A` Introduce a pure transition presentation model
+#### `FSV-007A` Introduce a pure transition presentation model — **DONE (2026-09-23)**
 
-Suggested model:
+Final model and pure mappers:
 
 ```ts
-type VerifiedCwdTransition = {
+type CwdTransitionPresentationKind =
+  | "directed"
+  | "entry"
+  | "failed-origin"
+  | "unavailable";
+
+interface VerifiedCwdTransition {
   eventId: string;
-  absoluteHop: number;
+  absoluteHop: number | null;
   action: "entered" | "changed" | "failed_change";
+  presentationKind: CwdTransitionPresentationKind;
   fromPath: string | null;
   toPath: string | null;
+  markerPath: string | null;
   observedAt: string;
-  status: string;
-};
+  status: SessionCwdHistoryEvent["status"];
+}
+
+deriveVerifiedCwdTransition(
+  event: SessionCwdHistoryEvent,
+  absoluteHop: number | null | undefined,
+): VerifiedCwdTransition;
+
+deriveVerifiedCwdTransitions(
+  events: readonly SessionCwdHistoryEvent[],
+  historyTotalItems: number | null | undefined,
+): VerifiedCwdTransition[];
 ```
 
-Rules:
+The anchored helper `deriveAnchoredVerifiedCwdTransition(event, historyTotalItems)` validates the
+positive safe `event.hopNumber` against a valid retained total and delegates to the same single-event
+mapper. Invalid, missing, or contradictory hop metadata produces `absoluteHop: null` without dropping
+the event.
 
-- `changed`: render directed transition only when both endpoints are verified
-- `entered`: render entry marker; do not invent a parent transition
-- `failed_change`: origin annotation only; `toPath` is null at presentation boundary
-- repeated A → B and B → A events remain separate transitions
-- event ID/hop number is identity; path is not identity
-- hierarchy nodes remain unique by canonical path
+| Source event | Presentation result |
+| --- | --- |
+| `changed` with two verified absolute endpoints | `directed`; preserves exact `fromPath → toPath` direction, including non-parent transitions |
+| `entered` with a verified target | `entry`; marks `toPath` only and never creates a parent or `fromPath → toPath` transition |
+| `failed_change` with a verified origin | `failed-origin`; preserves `fromPath` as origin/marker and always exposes `toPath: null` |
+| `failed_change` without a verified origin | `failed-origin`; preserves identity and metadata with no marker or endpoint |
+| Missing or invalid endpoint for `changed`/`entered` | `unavailable`; preserves identity and metadata with no drawable endpoint |
 
-Implementation order:
+Only non-empty paths beginning with `/` cross the verified path boundary. The mapper does not parse
+commands, infer parents, normalize paths, rewrite case, or mutate source events. Failed legacy
+destinations are omitted from the presentation object and therefore from serialized output.
 
-1. pure mapper and unit tests
-2. replay hook exposes typed transitions/current transition
-3. no Canvas visual change until mapper tests pass
+Repeated A → B events remain separate entries by event ID. Reverse B → A events preserve their direction,
+self transitions A → A retain their event identity, and non-parent `/home/a → /tmp` remains directed.
+No transition is deduplicated by path, direction, or endpoint pair; hierarchy nodes remain owned by the
+existing topology model.
+
+Absolute-hop behavior uses the complete retained event sequence. For a chronological loaded window, the
+mapper assigns `indexOffset + chronologicalIndex + 1`, where `indexOffset` comes from
+`historyTotalItems`; failed events therefore retain their positions when hidden by `showFailedAttempts`.
+Anchored events outside the loaded page use their valid authoritative `hopNumber`, remain separate from
+`displayedTransitions`, and expose `absoluteHop: null` when that number is missing, unsafe, non-positive,
+or contradictory with the retained total. `successfulHopNumber` is not used for this model.
+
+`AuditReplayPresentation` and `UseAuditReplayReturn` now expose typed `displayedTransitions` and
+`currentTransition`. The displayed array remains one-to-one with `displayedHistory`; the current loaded
+transition is selected by the same displayed index, while an anchored current transition is derived by
+the shared single-event mapper. Existing selection, filtering, navigation, timers, pacing, URL ownership,
+unloaded gaps, and `ActiveHopRoute` behavior remain unchanged.
+
+Canvas props and all visual renderer behavior are intentionally unchanged in FSV-007A. No transition
+overlay, edge recoloring, arrow, animation, layout, camera, minimap, or legend work entered this phase;
+FSV-007B will consume the model after its separate audit.
+
+Verification:
+
+- `npx vitest run tests/filesystem-transition-model.test.tsx`: **PASSED** (24/24 tests)
+- `npx vitest run tests/filesystem-transition-model.test.tsx tests/filesystem-hooks.test.ts tests/filesystem-failed-change-visualization.test.tsx tests/filesystem-hop-resolution.test.ts tests/filesystem-replay-scrubber.test.ts tests/filesystem-ownership-boundaries.test.tsx`: **PASSED** (123/123 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (465 tests passed, 14 skipped)
+- `npm test`: **PASSED** (626 tests passed, 2 expected failures, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate: **NOT RUN**; this phase exposes data only and makes no visual change.
 
 #### `FSV-007B` Add a separate transition overlay
 

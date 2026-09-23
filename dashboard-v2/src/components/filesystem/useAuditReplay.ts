@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
+  deriveAnchoredVerifiedCwdTransition,
+  deriveVerifiedCwdTransitions,
+  type VerifiedCwdTransition,
+} from "./filesystemTransitions";
+import {
   buildReplayTimeline,
   calculateReplayPacingDelay,
   getHistoryWindowMetrics,
@@ -156,6 +161,8 @@ export interface AuditReplayPresentation {
   hopTimeMetrics: HopTimeMetrics[];
   sessionTimeSummary: SessionReplayTimeSummary;
   replayTimeline: ReplayTimeline;
+  displayedTransitions: VerifiedCwdTransition[];
+  currentTransition: VerifiedCwdTransition | null;
   isAnchoredSelected: boolean;
   showFailedAttempts: boolean;
   onToggleShowFailedAttempts: (show: boolean) => void;
@@ -198,6 +205,18 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   const displayedHistory = useMemo(
     () => filterDisplayedHistory(chronologicalHistory, showFailedAttempts),
     [chronologicalHistory, showFailedAttempts],
+  );
+
+  const chronologicalTransitions = useMemo(
+    () => deriveVerifiedCwdTransitions(chronologicalHistory, historyTotalItems),
+    [chronologicalHistory, historyTotalItems],
+  );
+
+  const displayedTransitions = useMemo(
+    () => showFailedAttempts
+      ? [...chronologicalTransitions]
+      : chronologicalTransitions.filter((transition) => transition.action !== "failed_change"),
+    [chronologicalTransitions, showFailedAttempts],
   );
 
   const isAnchoredSelected = useMemo(() => {
@@ -275,6 +294,14 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     isAnchoredSelected,
     selectedHistoryIndex,
   ]);
+
+  const currentTransition = useMemo(() => {
+    if (isAnchoredSelected && anchoredHop) {
+      return deriveAnchoredVerifiedCwdTransition(anchoredHop, historyTotalItems);
+    }
+    if (selectedHistoryIndex < 0) return null;
+    return displayedTransitions[selectedHistoryIndex] ?? null;
+  }, [anchoredHop, displayedTransitions, historyTotalItems, isAnchoredSelected, selectedHistoryIndex]);
 
   const timeMetrics = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
@@ -380,6 +407,8 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     selectedHistoryIndex,
     displayedHistoryMetrics,
     activeHop,
+    displayedTransitions,
+    currentTransition,
     hopTimeMetrics: timeMetrics.hopMetrics,
     sessionTimeSummary: timeMetrics.summary,
     replayTimeline,
