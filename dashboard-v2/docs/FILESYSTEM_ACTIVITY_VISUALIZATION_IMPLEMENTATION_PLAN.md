@@ -1249,6 +1249,9 @@ ports; repeated routes receive distinct port/lane offsets and reverse routes rem
 of the route family. The planner samples each quadratic route against unrelated measured node bounds
 and expands its lane until the route clears the occupied corridor. Hop labels are then assigned from
 multiple progress/clearance candidates while rejecting node and earlier-label collisions.
+Forward/reverse tracks must remain at least eight graph-coordinate units apart at their midpoint and
+the real-browser gate requires at least 18 rendered pixels at mobile and desktop widths. The current
+track halo is deliberately narrower and lower-opacity so emphasis does not resemble a duplicate edge.
 
 This correction preserves the evidence contract: no transition is deduplicated, bundled into a
 synthetic event, or removed. Every event retains its own path element, hop label, direction, state,

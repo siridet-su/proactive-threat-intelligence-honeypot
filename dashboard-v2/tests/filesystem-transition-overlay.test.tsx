@@ -156,6 +156,20 @@ describe("FSV-007B: separate verified transition overlay", () => {
     const forwardSide = Math.sign((repeated[0].geometry?.controlY ?? 0) - 61.5);
     const reverseSide = Math.sign((reverse?.geometry?.controlY ?? 0) - 61.5);
     expect(forwardSide).toBe(-reverseSide);
+    const curveMidpoint = (geometry: NonNullable<(typeof plans)[number]["geometry"]>) => ({
+      x: (geometry.startX + 2 * geometry.controlX + geometry.targetX) / 4,
+      y: (geometry.startY + 2 * geometry.controlY + geometry.targetY) / 4,
+    });
+    const forwardMidpoint = curveMidpoint(repeated[0].geometry!);
+    const reverseMidpoint = curveMidpoint(reverse!.geometry!);
+    expect(Math.hypot(
+      forwardMidpoint.x - reverseMidpoint.x,
+      forwardMidpoint.y - reverseMidpoint.y,
+    )).toBeGreaterThanOrEqual(8);
+    expect(Math.hypot(
+      repeated[0].geometry!.targetX - reverse!.geometry!.startX,
+      repeated[0].geometry!.targetY - reverse!.geometry!.startY,
+    )).toBeGreaterThanOrEqual(3);
 
     const labels = plans.map((plan) => plan.geometry!).map((geometry) => ({
       left: geometry.labelX - 2.25,

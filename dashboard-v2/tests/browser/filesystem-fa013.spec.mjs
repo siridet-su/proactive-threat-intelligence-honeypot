@@ -452,6 +452,26 @@ test.describe("FA-013 real-browser evidence", () => {
         sharedTargetPorts.source.x - sharedTargetPorts.transition.x,
         sharedTargetPorts.source.y - sharedTargetPorts.transition.y,
       )).toBeGreaterThan(4);
+      const transitionLaneMidpoints = await page.evaluate(() => {
+        const screenMidpoint = (selector) => {
+          const path = document.querySelector(selector);
+          if (!(path instanceof SVGPathElement)) return null;
+          const point = path.getPointAtLength(path.getTotalLength() / 2);
+          const matrix = path.getScreenCTM();
+          if (!matrix) return null;
+          return new DOMPoint(point.x, point.y).matrixTransform(matrix);
+        };
+        return {
+          forward: screenMidpoint('[data-transition-event-id="replay-change"][data-transition-kind="directed"]'),
+          reverse: screenMidpoint('[data-transition-event-id="replay-revisit"][data-transition-kind="directed"]'),
+        };
+      });
+      expect(transitionLaneMidpoints.forward).not.toBeNull();
+      expect(transitionLaneMidpoints.reverse).not.toBeNull();
+      expect(Math.hypot(
+        transitionLaneMidpoints.forward.x - transitionLaneMidpoints.reverse.x,
+        transitionLaneMidpoints.forward.y - transitionLaneMidpoints.reverse.y,
+      )).toBeGreaterThanOrEqual(18);
       const directedHopLabels = ["replay-change", "replay-revisit"].map((eventId) =>
         overlay.locator(`[data-transition-hop-label="true"][data-transition-event-id="${eventId}"]`),
       );

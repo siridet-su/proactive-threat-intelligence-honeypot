@@ -203,7 +203,7 @@ export function deriveDirectedTransitionGeometry(
   const distance = Math.max(1, Math.hypot(dx, dy));
   const perpendicularX = -dy / distance;
   const perpendicularY = dx / distance;
-  const portOffset = 0.8 + lane * 1.05;
+  const portOffset = 1.8 + lane * 1.25;
   const start = transitionPortPoint(
     from.x,
     from.y,
@@ -222,7 +222,7 @@ export function deriveDirectedTransitionGeometry(
     perpendicularX * portOffset,
     perpendicularY * portOffset,
   );
-  let laneOffset = 4.5 + lane * 3.5;
+  let laneOffset = clamp(distance * 0.2, 7.5, 11) + lane * 4;
   let controlX = (from.x + to.x) / 2 + perpendicularX * laneOffset;
   let controlY = (from.y + to.y) / 2 + perpendicularY * laneOffset;
   for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -449,8 +449,8 @@ export function TransitionOverlay({
                       transition={reducedMotion ? { duration: 0 } : layoutTransition}
                       fill="none"
                       stroke="var(--primary)"
-                      strokeOpacity="0.16"
-                      strokeWidth="2"
+                      strokeOpacity="0.1"
+                      strokeWidth="1.25"
                     />
                   )}
                   {state === "current" && (
