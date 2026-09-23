@@ -594,6 +594,12 @@ export function TopologyCanvas({
     if (!plane) return;
     const observer = new ResizeObserver(measureElementBounds);
     observer.observe(plane);
+    for (const element of nodeElementRefs.current.values()) {
+      observer.observe(element);
+    }
+    for (const element of calloutElementRefs.current.values()) {
+      observer.observe(element);
+    }
     return () => observer.disconnect();
   }, [graphCallouts, graphNodes, isTopologyExpanded, labelPositions, measureElementBounds, nodePositions]);
 
@@ -1126,6 +1132,8 @@ export function TopologyCanvas({
                                     strokeOpacity={isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
                                     strokeWidth={isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
                                     strokeDasharray={isPrimarySelected ? "none" : isClusterSelected ? "1.5 1.5" : "0.75 1.6"}
+                                    data-source-connection={callout.sourceIp}
+                                    data-source-target-path={path}
                                   />
                                   <motion.circle
                                     initial={false}

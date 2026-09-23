@@ -818,4 +818,54 @@ test.describe("FA-013 real-browser evidence", () => {
 
     await assertNoBrowserFailures(page);
   });
+
+  test("P: collapsing a multi-session source reanchors every source connector", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    monitorBrowserFailures(page);
+    await installApiFixtures(page, { multiSessionLive: true });
+    await page.goto("/filesystem-activity");
+
+    const sourceToggle = page.locator('button[aria-haspopup="listbox"]').filter({ hasText: "192.0.2.10" });
+    await expect(sourceToggle).toBeVisible({ timeout: 15_000 });
+    await expect(sourceToggle).toHaveAttribute("aria-expanded", "true");
+    const sourceCallout = sourceToggle.locator("..");
+    const expandedHeight = (await sourceCallout.boundingBox())?.height ?? 0;
+    const sourceRoutes = page
+      .getByRole("region", { name: /Filesystem topology map workspace/ })
+      .locator('path[data-source-connection="192.0.2.10"]');
+    await expect(sourceRoutes).toHaveCount(2);
+    const expandedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
+
+    await sourceToggle.click();
+    await expect(sourceToggle).toHaveAttribute("aria-expanded", "false");
+    await expect.poll(async () => (await sourceCallout.boundingBox())?.height ?? 0).toBeLessThan(expandedHeight);
+    await page.waitForTimeout(350);
+    const collapsedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => {
+      const coordinates = (path.getAttribute("d")?.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+      const svgBounds = path.ownerSVGElement?.getBoundingClientRect();
+      const endX = coordinates.at(-2) ?? Number.NaN;
+      const endY = coordinates.at(-1) ?? Number.NaN;
+      return {
+        d: path.getAttribute("d"),
+        x: svgBounds ? svgBounds.left + (endX / 100) * svgBounds.width : Number.NaN,
+        y: svgBounds ? svgBounds.top + (endY / 100) * svgBounds.height : Number.NaN,
+      };
+    }));
+    const collapsedBounds = await sourceCallout.boundingBox();
+    expect(collapsedRoutes.map(({ d }) => d)).not.toEqual(expandedRoutes);
+    expect(collapsedBounds).not.toBeNull();
+    for (const endpoint of collapsedRoutes) {
+      const withinHorizontalSpan = endpoint.x >= collapsedBounds.x - 2 && endpoint.x <= collapsedBounds.x + collapsedBounds.width + 2;
+      const withinVerticalSpan = endpoint.y >= collapsedBounds.y - 2 && endpoint.y <= collapsedBounds.y + collapsedBounds.height + 2;
+      const distanceToVerticalEdge = withinVerticalSpan
+        ? Math.min(Math.abs(endpoint.x - collapsedBounds.x), Math.abs(endpoint.x - (collapsedBounds.x + collapsedBounds.width)))
+        : Number.POSITIVE_INFINITY;
+      const distanceToHorizontalEdge = withinHorizontalSpan
+        ? Math.min(Math.abs(endpoint.y - collapsedBounds.y), Math.abs(endpoint.y - (collapsedBounds.y + collapsedBounds.height)))
+        : Number.POSITIVE_INFINITY;
+      expect(Math.min(distanceToVerticalEdge, distanceToHorizontalEdge)).toBeLessThanOrEqual(2);
+    }
+
+    await assertNoBrowserFailures(page);
+  });
 });
