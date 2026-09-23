@@ -8,6 +8,25 @@ import {
 } from "./fixtures/filesystem.mjs";
 
 test.describe("FA-013 real-browser evidence", () => {
+  test("loads verified topology when EventSource never opens or errors", async ({ page }) => {
+    monitorBrowserFailures(page);
+    await installApiFixtures(page);
+    await page.addInitScript(() => {
+      window.EventSource = class {
+        addEventListener() {}
+        close() {}
+      };
+    });
+    const topologyRequests = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/filesystem-topology") topologyRequests.push(request);
+    });
+    await page.goto("/filesystem-activity");
+    await expect(page.getByRole("button", { name: /Inspect source 192\.0\.2\.10; 1 session/ })).toBeVisible({ timeout: 15_000 });
+    expect(topologyRequests.length).toBeGreaterThan(0);
+    await assertNoBrowserFailures(page);
+  });
+
   test("production minimal: Live -> Audit -> Back -> Live -> Forward -> Audit", async ({ page }) => {
     monitorBrowserFailures(page);
     await installApiFixtures(page);

@@ -247,6 +247,49 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       expect(manager.getCleanupCount()).toBe(2);
     });
 
+    it("loads an initial REST snapshot when EventSource remains pending without an error", async () => {
+      const received: FilesystemTopologySnapshot[] = [];
+      const onHydrated = vi.fn();
+      const source = new MockEventSource("/api/filesystem-topology/stream");
+      const fetchFallback = vi.fn().mockResolvedValue(new Response(JSON.stringify(baseEmptySnapshot), { status: 200 }));
+      const manager = new FilesystemStreamLifecycleManager({
+        createEventSource: () => source as unknown as EventSource,
+        fetchFallback,
+        onSnapshot: (snapshot) => received.push(snapshot),
+        onStreamState: vi.fn(),
+        onHydrated,
+      });
+
+      manager.connect();
+      await vi.waitFor(() => expect(received).toHaveLength(1));
+      expect(fetchFallback).toHaveBeenCalledWith("/api/filesystem-topology", expect.objectContaining({ signal: expect.any(AbortSignal) }));
+      expect(onHydrated).toHaveBeenCalledOnce();
+      expect(source.closed).toBe(false);
+      manager.dispose();
+    });
+
+    it("shows an error instead of loading forever when both SSE and REST stall", async () => {
+      vi.useFakeTimers();
+      const onRegionStatus = vi.fn();
+      const manager = new FilesystemStreamLifecycleManager({
+        createEventSource: (url) => new MockEventSource(url) as unknown as EventSource,
+        fetchFallback: (_url, init) => new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("request timed out")), { once: true });
+        }),
+        onSnapshot: vi.fn(),
+        onStreamState: vi.fn(),
+        onRegionStatus,
+        onHydrated: vi.fn(),
+      });
+
+      manager.connect();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(onRegionStatus).toHaveBeenCalledWith(expect.any(Function));
+      expect(onRegionStatus.mock.lastCall?.[0]("loading")).toBe("error");
+      manager.dispose();
+      vi.useRealTimers();
+    });
+
     it("scopes connection lifecycle by generation, ignoring callbacks from superseded connections", () => {
       const createdSources: MockEventSource[] = [];
       const streamStates: string[] = [];
@@ -343,12 +386,12 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
 
       // Trigger error to start fallback fetch
       source1.onerror?.();
-      expect(fetchFallback).toHaveBeenCalledTimes(1);
+      expect(fetchFallback).toHaveBeenCalledTimes(2);
 
       // Reconnect immediately while fetch is in-flight
       manager.reconnect();
-      expect(abortedSignals.length).toBe(1);
-      expect(abortedSignals[0]).toBe(true);
+      expect(abortedSignals.length).toBe(2);
+      expect(abortedSignals).toEqual([true, true]);
 
       // Resolving the late fetch after abort must not throw or affect manager
       if (resolveFetch) {
