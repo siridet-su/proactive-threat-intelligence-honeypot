@@ -480,7 +480,17 @@ test.describe("FA-013 real-browser evidence", () => {
     await selectedDirectory.click();
     await expect(selectedDirectory).toHaveAttribute("aria-pressed", "true");
     const splitter = page.getByRole("separator", { name: /Resize timeline panel/ });
+    const minimumTimelineWidth = await splitter.getAttribute("aria-valuemin");
+    const maximumTimelineWidth = await splitter.getAttribute("aria-valuemax");
+    await splitter.press("Home");
+    await expect(splitter).toHaveAttribute("aria-valuenow", minimumTimelineWidth ?? "");
+    await expect(page).toHaveURL(/hop=replay-change/);
+    await splitter.press("End");
+    await expect(splitter).toHaveAttribute("aria-valuenow", maximumTimelineWidth ?? "");
+    await expect(page).toHaveURL(/hop=replay-change/);
+    await splitter.press(" ");
     const initialTimelineWidth = Number(await splitter.getAttribute("aria-valuenow"));
+    await splitter.hover();
     const splitterBox = await splitter.boundingBox();
     expect(splitterBox).not.toBeNull();
     await page.mouse.move(splitterBox.x + splitterBox.width / 2, splitterBox.y + splitterBox.height / 2);
@@ -494,7 +504,9 @@ test.describe("FA-013 real-browser evidence", () => {
     const historyRequestCount = fixtures.historyRequests.length;
 
     for (let iteration = 0; iteration < 10; iteration += 1) {
-      await page.getByRole("button", { name: "Enter Fullscreen Audit Studio" }).click();
+      const enterFullscreen = page.getByRole("button", { name: "Enter Fullscreen Audit Studio" });
+      await enterFullscreen.focus();
+      await enterFullscreen.press("Enter");
       const dialog = page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" });
       await expect(dialog).toBeVisible();
       expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
@@ -508,13 +520,18 @@ test.describe("FA-013 real-browser evidence", () => {
       if (iteration === 9) {
         await page.keyboard.press("Escape");
       } else {
-        await page.getByRole("button", { name: "Exit Fullscreen Studio" }).click();
+        const exitFullscreen = page.getByRole("button", { name: "Exit Fullscreen Studio" });
+        await exitFullscreen.focus();
+        await exitFullscreen.press("Enter");
       }
       await expect(page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" })).toHaveCount(0);
       await expect(page.getByTestId("verified-transition-overlay")).toHaveCount(1);
       await expect(page.getByTestId("topology-minimap")).toBeVisible();
       await expect(zoomStatus).toHaveAttribute("aria-label", adjustedZoomLabel ?? "");
-      await expect(selectedDirectory).toHaveAttribute("aria-pressed", "true");
+      await expect(selectedDirectory, `directory selection after fullscreen exit ${iteration + 1}`).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
       await expect(splitter).toHaveAttribute("aria-valuenow", adjustedTimelineWidth ?? "");
       await expect(page.getByRole("button", { name: "Enter Fullscreen Audit Studio" })).toBeFocused();
     }

@@ -121,7 +121,10 @@ export function FilesystemActivity() {
   const {
     timelineWidth,
     isDraggingTimeline,
-    handleSplitterMouseDown,
+    handleSplitterPointerDown,
+    handleSplitterPointerMove,
+    handleSplitterPointerUp,
+    handleSplitterPointerCancel,
     handleResetTimelineWidth,
     handleSplitterKeyDown,
   } = useTimelineDrag();
@@ -310,6 +313,10 @@ export function FilesystemActivity() {
     selectedLiveCwdRef.current = selectedLiveSession?.cwdState.path ?? null;
 
     setSelectedPath((current) => {
+      // Live snapshots are not authoritative for the retained audit graph. In
+      // audit mode, keep the operator's inspected path across stream refreshes;
+      // session and replay navigation update it through their own owners.
+      if (viewModeRef.current === "audit") return current;
       // If the active session actually changed its working directory, follow the new CWD.
       if (liveCwdChanged && selectedLiveSession?.cwdState.path && data.nodes.some((node) => node.path === selectedLiveSession.cwdState.path)) {
         return selectedLiveSession.cwdState.path;
@@ -845,7 +852,10 @@ export function FilesystemActivity() {
     isDraggingTimeline,
     isTimelineCollapsed,
     timelineWidth,
-    handleSplitterMouseDown,
+    handleSplitterPointerDown,
+    handleSplitterPointerMove,
+    handleSplitterPointerUp,
+    handleSplitterPointerCancel,
     handleResetTimelineWidth,
     handleSplitterKeyDown,
     history,

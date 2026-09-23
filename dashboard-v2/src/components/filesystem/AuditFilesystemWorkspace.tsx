@@ -99,7 +99,10 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
         <TimelineSplitter
           isDragging={props.isDraggingTimeline}
           width={props.timelineWidth}
-          onMouseDown={props.handleSplitterMouseDown}
+          onPointerDown={props.handleSplitterPointerDown}
+          onPointerMove={props.handleSplitterPointerMove}
+          onPointerUp={props.handleSplitterPointerUp}
+          onPointerCancel={props.handleSplitterPointerCancel}
           onDoubleClick={props.handleResetTimelineWidth}
           onKeyDown={props.handleSplitterKeyDown}
           className={isFullscreen ? "hidden sm:flex" : "hidden lg:flex"}

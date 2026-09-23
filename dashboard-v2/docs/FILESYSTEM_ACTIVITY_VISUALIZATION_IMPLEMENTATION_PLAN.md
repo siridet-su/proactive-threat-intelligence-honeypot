@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-011 — Pointer-capable splitter**
+Current focus: **FSV-012A — Complete tab semantics**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -932,13 +932,46 @@ Checkpoint 3 gate:
 
 ### Checkpoint 4 — Accessibility and responsive interaction
 
-#### `FSV-011` Pointer-capable splitter
+#### `FSV-011` Pointer-capable splitter — `DONE` (2026-09-23)
 
 - เปลี่ยนจาก mouse events เป็น Pointer Events
 - ใช้ pointer capture ระหว่าง drag
 - รองรับ mouse, touch และ pen
 - คง Arrow keys, Home/End และ accessible value text
 - drag cancellation/unmount ต้อง cleanup listeners เสมอ
+
+Implementation and acceptance evidence:
+
+- Replaced the splitter's window-level mouse listeners with Pointer Events owned by the separator.
+  Primary mouse, touch, and pen input now share one drag path and use pointer capture so movement
+  remains continuous outside the narrow splitter hit area.
+- Pointer up, pointer cancel, lost capture, and component unmount all release active capture and
+  restore body cursor/selection styles. Non-primary pointers and non-left mouse buttons are ignored.
+- The separator now exposes `aria-valuetext` in pixels. Arrow Left/Right retain stepped resizing,
+  Home and End select the documented minimum/maximum, and Enter/Space reset the default width.
+  These handled keys stop propagation so the audit replay owner cannot interpret splitter arrows as
+  hop navigation.
+- A focused happy-dom suite exercises mouse, touch, and pen capture; cancellation; post-cancel
+  movement; keyboard boundaries/reset; and cleanup during an active unmount. The initial test-first
+  run failed all 6 cases against the former mouse-only implementation; the final run passes 6/6.
+- The real-browser continuity case performs a captured mouse drag plus Home/End/reset, confirms the
+  selected hop URL is unchanged, then carries the resized width through ten fullscreen transitions.
+- Browser repetition exposed an authority-boundary regression: a reconnecting live snapshot could
+  clear a manually inspected retained-audit path because that path was absent from the live graph.
+  Audit mode now preserves its selected path across live stream refreshes; session/replay navigation
+  remain the owners that change retained-audit selection.
+
+Verification:
+
+- Focused splitter/layout/replay suites: **PASSED** (81/81 tests).
+- All filesystem suites: **PASSED** (486 passed, 14 skipped).
+- Full Vitest suite: **PASSED** (743 passed, 2 expected failures, 14 skipped).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (9/9 real-browser tests).
+- ESLint: **PASSED** with 0 errors and 4 unrelated upstream warnings.
+- Webpack production build: **PASSED**, 18/18 static pages generated.
+
+Checkpoint 4 remains **IN_PROGRESS** with `FSV-012A` as the current focus.
 
 #### `FSV-012A` Complete tab semantics
 
