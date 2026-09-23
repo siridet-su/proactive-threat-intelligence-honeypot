@@ -1,7 +1,7 @@
-import { AlertCircle, Clock, CornerDownRight, Plus, RefreshCw } from "lucide-react";
+import { AlertCircle, AlertTriangle, Clock, CornerDownRight, Plus, RefreshCw } from "lucide-react";
 import type { RegionStatus } from "@/components/ui/RegionState";
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
+import { actionLabel, formatFailedChangeMessage, formatFromPath, formatTimestamp, isInitialSshEntry, statusLabel } from "./filesystemUtils";
 
 export interface RouteEventListProps {
   historyComplete: boolean;
@@ -94,9 +94,9 @@ export function RouteEventList({
             return (
               <li key={event.id} className="relative pb-2.5 last:pb-0">
                 {index > 0 && isPauseDetected && (
-                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-mono text-warning select-none">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-mono text-warning select-none">
                     <div className="h-px w-3 bg-warning/40" aria-hidden="true" />
-                    <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-[10px] font-medium">
+                    <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-xs font-medium">
                       <Clock className="h-2.5 w-2.5" aria-hidden="true" />
                       Attacker pause: +{hopMetric?.formattedDelta}
                     </span>
@@ -137,7 +137,7 @@ export function RouteEventList({
                     </p>
                     <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1 flex items-center gap-1.5">
                       <span>{formatTimestamp(event.at)}</span>
-                      <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-[10px] text-text-muted">
+                      <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-xs text-text-muted">
                         {hopMetric?.formattedElapsed ?? "+00:00"}
                       </span>
                     </time>
@@ -159,23 +159,29 @@ export function RouteEventList({
                       )}
                     </div>
 
-                    {/* Line 2: Destination */}
-                    <div className="flex items-center gap-1.5 text-xs min-w-0">
-                      <CornerDownRight
-                        className={`h-3.5 w-3.5 shrink-0 ${isFailed ? "text-warning" : "text-primary"}`}
-                        aria-hidden="true"
-                      />
-                      <span
-                        className={`truncate font-semibold ${
-                          isFailed ? "line-through text-text-muted/60" : "text-text"
-                        }`}
-                        title={event.toPath ?? undefined}
-                      >
-                        {event.toPath ?? "Unknown"}
-                      </span>
+                    {/* Line 2: Verified destination or failed-origin warning */}
+                    <div className="flex items-start gap-1.5 text-xs min-w-0">
+                      {isFailed ? (
+                        <div
+                          role="status"
+                          data-testid="failed-change-event-status"
+                          aria-label={formatFailedChangeMessage(event.fromPath)}
+                          className="flex min-w-0 items-start gap-1.5 text-warning"
+                        >
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                          <span className="font-semibold">{formatFailedChangeMessage(event.fromPath)}</span>
+                        </div>
+                      ) : (
+                        <>
+                          <CornerDownRight className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+                          <span className="truncate font-semibold text-text" title={event.toPath ?? undefined}>
+                            {event.toPath ?? "Unknown"}
+                          </span>
+                        </>
+                      )}
                       {isFailed && (
                         <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning flex items-center gap-1">
-                          <AlertCircle className="h-3 w-3" /> Failed
+                          <AlertCircle className="h-3 w-3" aria-hidden="true" /> Failed
                         </span>
                       )}
                     </div>
@@ -201,7 +207,7 @@ export function RouteEventList({
                     </div>
 
                     <span
-                      className={`inline-flex shrink-0 items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                      className={`inline-flex shrink-0 items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded ${
                         isPauseDetected
                           ? "bg-warning-subtle text-warning border border-warning-border font-medium"
                           : "text-text-subtle bg-surface border border-border/50"
@@ -230,7 +236,7 @@ export function RouteEventList({
                     <button
                       type="button"
                       onClick={onLoadEarlier}
-                      className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
+                      className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-xs"
                     >
                       Load earlier
                     </button>
@@ -264,7 +270,7 @@ export function RouteEventList({
                         {String((showFailedAttempts ? anchoredHop.hopNumber : anchoredHop.successfulHopNumber ?? anchoredHop.hopNumber) ?? 1).padStart(2, "0")}
                       </span>
                       {actionLabel(anchoredHop)}
-                      <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-[10px] text-amber-300 font-sans">
+                      <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-xs text-amber-300 font-sans">
                         Anchored
                       </span>
                     </p>
@@ -272,11 +278,26 @@ export function RouteEventList({
                       {formatTimestamp(anchoredHop.at)}
                     </time>
                   </div>
-                  <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
-                    <span>{formatFromPath(anchoredHop)}</span>
-                    <span>→</span>
-                    <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
-                  </div>
+                  {anchoredHop.action === "failed_change" ? (
+                    <div
+                      role="status"
+                      data-testid="anchored-failed-change-status"
+                      aria-label={formatFailedChangeMessage(anchoredHop.fromPath)}
+                      className="mt-1.5 flex items-start gap-1.5 text-xs text-warning"
+                    >
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span className="font-semibold">{formatFailedChangeMessage(anchoredHop.fromPath)}</span>
+                      <span className="ml-auto shrink-0 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 font-sans text-xs font-semibold text-warning flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" aria-hidden="true" /> Failed
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex items-center gap-1.5 text-xs min-w-0 font-mono text-text-subtle">
+                      <span>{formatFromPath(anchoredHop)}</span>
+                      <span>→</span>
+                      <strong className="text-text truncate">{anchoredHop.toPath ?? "Unknown"}</strong>
+                    </div>
+                  )}
                 </button>
               </li>
             </>

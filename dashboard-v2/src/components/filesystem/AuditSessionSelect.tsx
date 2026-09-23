@@ -24,7 +24,10 @@ import {
   ComboboxSearchInput,
   useComboboxNavigation,
 } from "./ComboboxPopover";
-import { getPaginationRenderState } from "./useAuditDirectory";
+import { getPaginationRenderState, type RetainedCountStatus } from "./useAuditDirectory";
+import { deriveForensicTimestamp } from "./filesystemUtils";
+
+import type { TimeRangeFilter } from "./AuditFilterControls";
 
 const useIsomorphicLayoutEffect =
   typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect;
@@ -45,28 +48,13 @@ export function formatSessionMetadata(s: FilesystemTopologySession | FilesystemC
   const count = s.auditSummary?.eventCount ?? 0;
   const eventsStr = `${count} ${count === 1 ? 'event' : 'events'}`;
 
-  let timeStr = "";
-  let dateToFormat: Date | null = null;
-
-  if ("lifecycle" in s && s.lifecycle?.startedAt) {
-    dateToFormat = new Date(s.lifecycle.startedAt);
-  } else if (s.cwdState?.observedAt) {
-    dateToFormat = new Date(s.cwdState.observedAt);
-  }
-
-  if (dateToFormat) {
-    const now = new Date();
-    const isToday =
-      dateToFormat.getDate() === now.getDate() &&
-      dateToFormat.getMonth() === now.getMonth() &&
-      dateToFormat.getFullYear() === now.getFullYear();
-
-    if (isToday) {
-      timeStr = dateToFormat.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else {
-      timeStr = dateToFormat.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    }
-  }
+  const isClosed = "lifecycle" in s && Boolean(s.lifecycle);
+  const rawDateStr = isClosed ? s.lifecycle?.closedAt : s.cwdState?.observedAt;
+  const label = isClosed ? "Closed" : "Observed";
+  const timestamp = deriveForensicTimestamp(label, rawDateStr);
+  const timeStr = timestamp.available
+    ? `${label} ${timestamp.absolute}`
+    : `${label} time unavailable`;
 
   return { timeStr, eventsStr };
 }
@@ -100,6 +88,12 @@ export interface AuditSessionSelectProps {
   // Active filters for scoped searching
   hideHomeOnly?: boolean;
   targetPathFilter?: string | null;
+  timeRange?: TimeRangeFilter;
+
+  // Retained semantics (FSV-004)
+  retainedMatchingCount?: number | null;
+  retainedLoadedCount?: number;
+  retainedCountStatus?: RetainedCountStatus;
 
   // Error and retry state
   status?: "idle" | "loading" | "success" | "ready" | "stale" | "error";
@@ -119,6 +113,10 @@ export function AuditSessionSelect({
   allSessionsList,
   hideHomeOnly = false,
   targetPathFilter = null,
+  timeRange,
+  retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus = "loaded-only",
   status = "idle",
   onSearch,
   onClearSearch,
@@ -286,8 +284,36 @@ export function AuditSessionSelect({
 
   const isSelectedClosed = useMemo(() => {
     if (!selectedSession) return false;
-    return !sessions.some((s) => s.sessionId === selectedSession.sessionId);
-  }, [selectedSession, sessions]);
+    return "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle);
+  }, [selectedSession]);
+
+  const retainedGroupLabel = useMemo(() => {
+    const loaded = isSearchActive ? filteredClosedSessions.length : (retainedLoadedCount ?? filteredClosedSessions.length);
+    if (isSearchActive) {
+      return `Retained search results (${loaded} loaded)`;
+    }
+
+    if (
+      retainedMatchingCount !== null &&
+      typeof retainedMatchingCount === "number" &&
+      retainedCountStatus === "authoritative"
+    ) {
+      if (loaded < retainedMatchingCount) {
+        return `Retained sessions (${loaded} loaded of ${retainedMatchingCount} matching)`;
+      }
+      return `Retained sessions (${retainedMatchingCount} matching)`;
+    }
+
+    if (retainedCountStatus === "loading") {
+      return `Retained sessions (${loaded} loaded · exact match count loading)`;
+    }
+
+    if (retainedMatchingCount === null && retainedCountStatus !== "authoritative") {
+      return `Retained sessions (${loaded} loaded · exact match count unavailable)`;
+    }
+
+    return `Retained sessions (${loaded})`;
+  }, [isSearchActive, filteredClosedSessions.length, retainedMatchingCount, retainedLoadedCount, retainedCountStatus]);
 
   const isSelectedFilteredOut = useMemo(
     () =>
@@ -433,7 +459,7 @@ export function AuditSessionSelect({
           onClear={handleClearSearch}
           onKeyDown={handleInputKeyDown}
           onFocus={handleSearchInputFocus}
-          placeholder="Search IP, session ID, or path..."
+          placeholder="Search IP, session ID, or current/last CWD..."
           isLoading={effectiveIsLoading}
           ariaControls={listboxId}
         />
@@ -484,7 +510,14 @@ export function AuditSessionSelect({
         >
           {/* Active Sessions Group */}
           {filteredActiveSessions.length > 0 && (
-            <div role="group" aria-label={`Active Sessions (${filteredActiveSessions.length})`}>
+            <div
+              role="group"
+              aria-label={
+                timeRange && timeRange !== "all"
+                  ? `Active Sessions (${filteredActiveSessions.length}) · Outside Closed-at filter`
+                  : `Active Sessions (${filteredActiveSessions.length})`
+              }
+            >
               <div
                 className="px-2.5 py-1.5 text-xs font-semibold text-text-subtle uppercase tracking-wider flex items-center justify-between select-none"
                 aria-hidden="true"
@@ -493,10 +526,17 @@ export function AuditSessionSelect({
                   <span className="h-1.5 w-1.5 rounded-full bg-success" />
                   Active Sessions ({filteredActiveSessions.length})
                 </div>
-                {totalCount !== undefined && totalCount > allDisplaySessions.length && (
-                  <span className="text-xs font-mono text-primary/80 lowercase">
-                    filtered
+                {timeRange && timeRange !== "all" ? (
+                  <span className="text-xs font-sans font-normal text-text-subtle normal-case">
+                    Not filtered by Closed at
                   </span>
+                ) : (
+                  totalCount !== undefined &&
+                  totalCount > allDisplaySessions.length && (
+                    <span className="text-xs font-mono text-primary/80 lowercase">
+                      filtered
+                    </span>
+                  )
                 )}
               </div>
               <div className="space-y-0.5">
@@ -569,11 +609,11 @@ export function AuditSessionSelect({
             </div>
           )}
 
-          {/* Closed Sessions Group */}
+          {/* Retained Sessions Group */}
           {filteredClosedSessions.length > 0 && (
             <div
               role="group"
-              aria-label={`Closed Sessions (${filteredClosedSessions.length})`}
+              aria-label={retainedGroupLabel}
               className={filteredActiveSessions.length > 0 ? "mt-2 pt-2 border-t border-border/60" : ""}
             >
               <div
@@ -581,7 +621,7 @@ export function AuditSessionSelect({
                 aria-hidden="true"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/50" />
-                Closed Sessions ({filteredClosedSessions.length})
+                {retainedGroupLabel}
               </div>
               <div className="space-y-0.5">
                 {filteredClosedSessions.map((s, idx) => {
@@ -690,10 +730,10 @@ export function AuditSessionSelect({
 
           if (paginationState === "completed") {
             return (
-              <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
+              <div className="pt-2 pb-1 text-center font-mono text-xs text-text-subtle">
                 {isSearchActive
-                  ? `All matching search results loaded (${combinedClosedSessions.length})`
-                  : `All matching directory sessions loaded (${combinedClosedSessions.length})`}
+                  ? `All matching search results loaded (${filteredClosedSessions.length})`
+                  : `All matching directory sessions loaded (${filteredClosedSessions.length})`}
               </div>
             );
           }

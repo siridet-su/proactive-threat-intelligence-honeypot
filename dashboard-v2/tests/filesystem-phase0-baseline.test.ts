@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { buildAuditSnapshot } from "../src/components/filesystem/filesystemUtils";
+import {
+  buildAuditSnapshot,
+  getHistoryWindowMetrics,
+  isHistoryPage,
+} from "../src/components/filesystem/filesystemUtils";
 import { getFreshnessState } from "../src/lib/filesystem-freshness";
 import type {
   FilesystemClosedSession,
@@ -145,5 +149,84 @@ describe("Filesystem Activity Phase 0 semantic baseline", () => {
       isStale: false,
       telemetryAgeMs: 5_000,
     });
+  });
+
+  it("preserves authoritative evidence timestamps on session models and materialized nodes", () => {
+    const snapshot = buildAuditSnapshot(null, closedSession, completeHistory);
+
+    // Authoritative session and lifecycle timestamps remain unchanged across audit materialization
+    expect(closedSession.cwdState.observedAt).toBe("2026-09-17T11:45:00.000Z");
+    expect(closedSession.lifecycle.startedAt).toBe("2026-09-17T11:39:55.000Z");
+    expect(closedSession.lifecycle.closedAt).toBe("2026-09-17T11:46:00.000Z");
+
+    // Materialized node observedAt values come strictly from authoritative session/history events
+    const toolsNode = snapshot.nodes.find((node) => node.path === "/home/root/tools");
+    expect(toolsNode?.observedAt).toBe("2026-09-17T11:45:00.000Z");
+
+    const etcNode = snapshot.nodes.find((node) => node.path === "/etc/nginx");
+    expect(etcNode?.observedAt).toBe("2026-09-17T11:42:00.000Z");
+
+    const varLogNode = snapshot.nodes.find((node) => node.path === "/var/log");
+    expect(varLogNode?.observedAt).toBe("2026-09-17T11:42:00.000Z");
+
+    const rootNode = snapshot.nodes.find((node) => node.path === "/");
+    expect(rootNode?.observedAt).toBe("2026-09-17T11:45:00.000Z");
+  });
+
+  it("keeps partial history completeness metadata explicit and prevents silent conversion to complete", () => {
+    // Payloads omitting completeness metadata must be rejected
+    expect(isHistoryPage({ items: [], nextCursor: null })).toBe(false);
+
+    // Partial history window explicitly exposes unloaded items
+    const partialWindow = getHistoryWindowMetrics(50, 120, 10);
+    expect(partialWindow.loadedItems).toBe(50);
+    expect(partialWindow.totalItems).toBe(120);
+    expect(partialWindow.unloadedItems).toBe(70);
+    expect(partialWindow.unloadedItems).toBeGreaterThan(0);
+  });
+
+  it("preserves authoritative current path and ancestors without parsing command text", () => {
+    // Event includes simulated command payload that must not be parsed into graph nodes
+    const historyWithRawCommand: SessionCwdHistoryEvent[] = [
+      ...completeHistory,
+      {
+        id: "event-with-cmd",
+        sessionId: closedSession.sessionId,
+        sequence: "5",
+        at: "2026-09-17T11:43:00.000Z",
+        fromPath: "/var/log",
+        toPath: "/home/root/tools",
+        action: "changed",
+        status: "confirmed",
+        sourceEventId: "source-cmd",
+        // Even if raw event carried attacker command text:
+        ...({ command: "cd /opt/unverified-destination && rm -rf /var/spool" } as Record<string, unknown>),
+      },
+    ];
+
+    const snapshot = buildAuditSnapshot(null, closedSession, historyWithRawCommand);
+
+    // Authoritative current path and all its hierarchical ancestors are materialized
+    expect(snapshot.nodes.some((node) => node.path === "/home/root/tools")).toBe(true);
+    expect(snapshot.nodes.some((node) => node.path === "/home/root")).toBe(true);
+    expect(snapshot.nodes.some((node) => node.path === "/home")).toBe(true);
+    expect(snapshot.nodes.some((node) => node.path === "/")).toBe(true);
+
+    // Ancestor relationships match canonical paths
+    const toolsNode = snapshot.nodes.find((node) => node.path === "/home/root/tools");
+    expect(toolsNode).toMatchObject({
+      parentPath: "/home/root",
+      depth: 3,
+    });
+    const rootHomeNode = snapshot.nodes.find((node) => node.path === "/home/root");
+    expect(rootHomeNode).toMatchObject({
+      parentPath: "/home",
+      depth: 2,
+    });
+
+    // Command text is never parsed to synthesize unconfirmed directory nodes
+    expect(snapshot.nodes.some((node) => node.path.includes("opt"))).toBe(false);
+    expect(snapshot.nodes.some((node) => node.path.includes("unverified"))).toBe(false);
+    expect(snapshot.nodes.some((node) => node.path.includes("spool"))).toBe(false);
   });
 });

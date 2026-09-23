@@ -1,6 +1,9 @@
 import { Radio, Route, RefreshCw } from "lucide-react";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { formatPageBadgeText, type FreshnessState } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
+
+const FILESYSTEM_VIEW_TABS = ["live", "audit"] as const;
 
 interface FilesystemPageHeaderProps {
   viewMode: "live" | "audit";
@@ -47,10 +50,20 @@ export function FilesystemPageHeader({
           aria-label="Filesystem view modes"
         >
           <button
+            id="filesystem-live-tab"
             type="button"
             role="tab"
             aria-selected={viewMode === "live"}
+            aria-controls="filesystem-live-panel"
+            tabIndex={viewMode === "live" ? 0 : -1}
             onClick={() => switchViewMode("live")}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: FILESYSTEM_VIEW_TABS,
+              currentTab: "live",
+              onSelect: switchViewMode,
+              tabId: (tab) => `filesystem-${tab}-tab`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
               viewMode === "live"
                 ? "bg-surface text-primary shadow-xs border border-border"
@@ -62,10 +75,20 @@ export function FilesystemPageHeader({
           </button>
 
           <button
+            id="filesystem-audit-tab"
             type="button"
             role="tab"
             aria-selected={viewMode === "audit"}
+            aria-controls="filesystem-audit-panel"
+            tabIndex={viewMode === "audit" ? 0 : -1}
             onClick={() => switchViewMode("audit")}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: FILESYSTEM_VIEW_TABS,
+              currentTab: "audit",
+              onSelect: switchViewMode,
+              tabId: (tab) => `filesystem-${tab}-tab`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
               viewMode === "audit"
                 ? "bg-surface text-primary shadow-xs border border-border"

@@ -26,7 +26,7 @@ function CalendarSelectMenu({ value, options, onChange }: { value: string, optio
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`h-7 px-2.5 flex items-center gap-1.5 rounded-md border transition-all font-mono text-[11px] font-semibold ${
+        className={`h-7 px-2.5 flex items-center gap-1.5 rounded-md border transition-all font-mono text-xs font-semibold ${
           open
             ? "border-primary ring-2 ring-primary/20 bg-surface text-text shadow-sm"
             : "border-border/40 bg-surface-subtle/40 hover:bg-surface-hover hover:border-border/60 text-text"
@@ -52,7 +52,7 @@ function CalendarSelectMenu({ value, options, onChange }: { value: string, optio
                   onChange(opt.value);
                   setOpen(false);
                 }}
-                className={`text-left px-2.5 py-1.5 rounded-md text-[11px] font-mono transition-colors ${
+                className={`text-left px-2.5 py-1.5 rounded-md text-xs font-mono transition-colors ${
                   opt.value === value
                     ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                     : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
@@ -221,7 +221,7 @@ function Calendar({
         nav_button_next: "absolute right-0 top-1/2 -translate-y-1/2",
         table: "w-full border-collapse space-y-1",
         head_row: "flex justify-between",
-        head_cell: "text-text-subtle w-8 sm:w-8.5 font-mono text-[10px] uppercase font-semibold text-center select-none",
+        head_cell: "text-text-subtle w-8 sm:w-8.5 font-mono text-xs uppercase font-semibold text-center select-none",
         row: "flex w-full mt-1 justify-between",
         cell: "h-8 w-8 sm:h-8.5 sm:w-8.5 text-center text-xs p-0 relative focus-within:relative focus-within:z-20",
         day: "h-8 w-8 sm:h-8.5 sm:w-8.5 p-0 font-mono text-xs font-normal text-text hover:bg-surface-hover hover:text-text rounded-md flex justify-center items-center cursor-pointer transition-colors select-none",

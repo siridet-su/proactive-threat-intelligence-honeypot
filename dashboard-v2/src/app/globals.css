@@ -9,7 +9,7 @@
   --surface-hover: #EEF3F8;
   --text: #0F172A;
   --text-muted: #475569;
-  --text-subtle: #64748B;
+  --text-subtle: #607086;
   --border: #CBD5E1;
   --border-strong: #94A3B8;
   --primary: #B45309;
@@ -806,8 +806,68 @@
   .ui-scroll-reveal, .ui-scroll-reveal-hidden, .ui-scroll-reveal-visible { opacity: 1; transform: none; }
 }
 
+.filesystem-activity-scope [data-keyboard-tooltip] {
+  position: relative;
+}
+
+.filesystem-activity-scope [data-keyboard-tooltip]::after {
+  position: absolute;
+  z-index: 80;
+  inset-block-start: calc(100% + 0.35rem);
+  inset-inline-start: 50%;
+  width: max-content;
+  max-width: 14rem;
+  translate: -50% -0.2rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-raised);
+  content: attr(data-tooltip-label);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, translate 120ms ease;
+}
+
+.filesystem-activity-scope [data-keyboard-tooltip]:is(:hover, :focus-visible)::after {
+  translate: -50% 0;
+  opacity: 1;
+}
+
+.filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]::after {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  translate: 0 -0.2rem;
+}
+
+.filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]:is(:hover, :focus-visible)::after {
+  translate: 0 0;
+}
+
+@media (max-width: 639px) {
+  .filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]::after {
+    inset-inline-start: 0;
+    inset-inline-end: auto;
+  }
+}
+
 @media (hover: none), (pointer: coarse) {
   .pti-telemetry-path { animation: none; }
+  .filesystem-activity-scope :where(button, [role="button"], [role="tab"], [role="separator"], select, input:not([type="range"])) {
+    min-block-size: 44px !important;
+  }
+  .filesystem-activity-scope :where(button, [role="button"], [role="tab"], [role="separator"]) {
+    min-inline-size: 44px;
+  }
+  /* Canvas fit/zoom transforms scale node geometry. Keep the rendered hit box
+     above 40px even when a coarse-pointer topology is slightly zoomed out. */
+  .filesystem-activity-scope button[aria-label^="Inspect directory"] {
+    min-block-size: 52px !important;
+  }
 }
 
 @media print {

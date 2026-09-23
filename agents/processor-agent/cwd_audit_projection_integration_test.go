@@ -19,6 +19,13 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// The isolated Mongo fixture enables a one-second TTL monitor. Keep retained
+// test evidence safely ahead of the wall clock so this suite cannot become a
+// calendar-dependent time bomb while it exercises expiry ownership.
+func fa016FutureEvidenceTime() time.Time {
+	return time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Second)
+}
+
 func TestFA016AuditProjectionIntegration(t *testing.T) {
 	uri := os.Getenv("FA016_MONGO_URI")
 	databaseName := os.Getenv("FA016_MONGO_DB")
@@ -69,7 +76,7 @@ func TestFA016AuditProjectionIntegration(t *testing.T) {
 
 	// Keep the retained fixtures ahead of the wall clock. Source rows remain
 	// TTL-retained; projection expiry is only a source-owned cleanup watermark.
-	closedAt := time.Date(2026, 9, 19, 23, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	const v1ProjectionVersion = "cwd_audit_projection.v1"
 	_, err = db.Collection("cwd_session_state").InsertMany(ctx, []any{
 		bson.M{
@@ -395,7 +402,7 @@ func TestFA016ProjectionOrderingInterleavings(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 19, 23, 30, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	newer := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.2", SourceEventID: "event-z", At: base.Add(2 * time.Minute), FromPath: "/old", Path: "/new", Action: "changed", Status: "confirmed"}
 	older := cwdObservation{SessionID: "interleaved", SourceIP: "198.51.100.1", SourceEventID: "event-a", At: base, FromPath: "/old", Path: "/oldest", Action: "changed", Status: "confirmed"}
 	newerStateWritten := make(chan struct{})
@@ -520,7 +527,7 @@ func TestFA016BackfillHistoryRevisionBarrier(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 1, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	// The current state is newer than both retained history events. The first
 	// backfill snapshot is held after its cwd_events read, then the late event
 	// is durably inserted and projected before the snapshot resumes.
@@ -585,7 +592,7 @@ func TestFA016GenerationOwnedReadinessRace(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 2, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "generation-race", SourceEventID: "initial", At: base, Path: "/initial", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -684,7 +691,7 @@ func TestFA016HistoryCrashBoundariesAndDuplicateRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 3, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "stale-history", SourceEventID: "initial", At: base, Path: "/current", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -827,7 +834,7 @@ func TestFA016PaddedCanonicalBackfillConvergesOnce(t *testing.T) {
 	if err := mw.ensureIndexes(ctx); err != nil {
 		t.Fatal(err)
 	}
-	closedAt := time.Date(2026, 9, 20, 4, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	_, err = db.Collection("cwd_session_state").InsertMany(ctx, []any{
 		bson.M{"_id": "source-object-different", "sessionId": "  padded-canonical  ", "cwdState": bson.M{"path": " /home/padded "}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditProjectionGeneration": int64(1), "auditProjectionPendingGeneration": int64(1)},
 		bson.M{"_id": "legacy-source-different", "session_id": "  padded-legacy  ", "cwdState": bson.M{"path": "/etc/padded"}, "lifecycle": bson.M{"status": "closed", "closedAt": closedAt}, "auditProjectionGeneration": int64(1), "auditProjectionPendingGeneration": int64(1)},
@@ -901,7 +908,7 @@ func TestFA016EventOutboxSurvivesCloseBeforeHistoryInsert(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 5, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "event-outbox", SourceEventID: "initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -1038,7 +1045,7 @@ func TestFA016PendingEventFailureRetryAndCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 8, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "retry-session", SourceEventID: "retry-initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -1151,7 +1158,7 @@ func TestFA016ConcurrentReconcilersOwnPendingMarkersExactlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 9, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mwA.recordCwdObservation(ctx, cwdObservation{SessionID: "marker-race", SourceEventID: "marker-initial", At: base, Path: "/origin", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -1287,7 +1294,7 @@ func TestFA016RejectedObservedCannotStealGenerationOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	base := time.Date(2026, 9, 20, 6, 0, 0, 0, time.UTC)
+	base := fa016FutureEvidenceTime()
 	if err := mw.recordCwdObservation(ctx, cwdObservation{SessionID: "ownership-race", SourceEventID: "initial", At: base, Path: "/initial", Action: "observed", Status: "observed"}, retention); err != nil {
 		t.Fatal(err)
 	}
@@ -1422,7 +1429,7 @@ func TestFA016OldWriterCutoverConvergesCanonicalAndLegacyRows(t *testing.T) {
 	if err := mw.ensureIndexes(ctx); err != nil {
 		t.Fatal(err)
 	}
-	closedAt := time.Date(2026, 9, 20, 7, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion, "backfillCompletedAt": closedAt}); err != nil {
 		t.Fatal(err)
 	}
@@ -1492,7 +1499,7 @@ func TestFA016SourceOwnedRetentionRepairsProjectionFirstDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := time.Hour
-	closedAt := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	expiresAt := closedAt.Add(retention)
 	const sessionID = "retention-ordering-race"
 	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
@@ -1643,7 +1650,7 @@ func TestFA016RepairReadinessOwnershipContract(t *testing.T) {
 	if _, err := db.Collection("cwd_audit_projection_meta").InsertOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID, "projectionVersion": cwdAuditProjectionVersion}); err != nil {
 		t.Fatal(err)
 	}
-	closedAt := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	retention := time.Hour
 	addSource := func(id, field, sessionID string, generation, ready int64, pending any) bson.M {
 		doc := bson.M{
@@ -1780,7 +1787,7 @@ func TestFA016RepairCursorsNormalizeExpiryAndConvergeAcrossBatches(t *testing.T)
 	if _, err := db.Collection("cwd_audit_projection_meta").UpdateOne(ctx, bson.M{"_id": cwdAuditProjectionMetaID}, bson.M{"$unset": bson.M{"missingProjectionSessionCursor": ""}}); err != nil {
 		t.Fatal(err)
 	}
-	closedAt := time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+	closedAt := fa016FutureEvidenceTime()
 	retention := time.Hour
 	expiresAt := closedAt.Add(retention)
 	sources := make([]any, 0, 512+600)

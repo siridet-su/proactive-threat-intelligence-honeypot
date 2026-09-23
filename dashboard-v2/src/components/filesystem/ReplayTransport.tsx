@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock, CornerDownRight, FastF
 import type { KeyboardEvent } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatElapsedTime, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
+import { actionLabel, formatElapsedTime, formatFailedChangeMessage, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
 
 export interface ReplayTransportProps {
   isAnchoredSelected: boolean;
@@ -87,12 +87,23 @@ export function ReplayTransport({
           ) : (
             <CornerDownRight className="h-4 w-4 text-primary shrink-0" />
           )}
-          <span className="text-sm font-semibold truncate text-text">
-            <span className="text-text-subtle font-normal mr-1.5">from</span>
-            <span className="text-text-muted" title={fromPathStr || undefined}>{fromPathStr}</span>
-            <span className="text-text-subtle font-normal mx-1.5">to</span>
-            <span className={isFailedHop ? "line-through text-warning" : "text-text"} title={toPathStr}>{toPathStr}</span>
-          </span>
+          {isFailedHop ? (
+            <span
+              role="status"
+              data-testid="failed-change-transport-status"
+              aria-label={formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+              className="text-sm font-semibold text-warning"
+            >
+              {formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+            </span>
+          ) : (
+            <span className="text-sm font-semibold truncate text-text">
+              <span className="text-text-subtle font-normal mr-1.5">from</span>
+              <span className="text-text-muted" title={fromPathStr || undefined}>{fromPathStr}</span>
+              <span className="text-text-subtle font-normal mx-1.5">to</span>
+              <span className="text-text" title={toPathStr}>{toPathStr}</span>
+            </span>
+          )}
         </div>
         <span className={`text-xs px-2 py-1 rounded-md font-medium shrink-0 shadow-2xs ${
           isFailedHop ? 'bg-warning-subtle text-warning border border-warning-border' : 'bg-surface-subtle border border-border text-text'
@@ -103,7 +114,7 @@ export function ReplayTransport({
 
       {/* Scrubber Area */}
       <div className="space-y-1">
-        <div className="flex items-center justify-between text-[11px] font-mono text-text-muted px-1">
+        <div className="flex items-center justify-between text-xs font-mono text-text-muted px-1">
           <span>{timeMetrics.summary.formattedCurrentElapsed}</span>
           <span className="text-text-subtle font-sans font-medium px-2 truncate">
             {selectedHistoryIndex === 0
@@ -155,8 +166,9 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Jump to first hop"
               aria-label="First hop"
+              data-tooltip-label="Jump to first hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(0)}
             >
@@ -165,8 +177,9 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Previous hop"
               aria-label="Previous hop"
+              data-tooltip-label="Previous hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(Math.max(0, selectedHistoryIndex - 1))}
             >
@@ -204,8 +217,9 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Next hop"
               aria-label="Next hop"
+              data-tooltip-label="Next hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(Math.min(displayedHistoryLength - 1, selectedHistoryIndex + 1))}
             >
@@ -214,8 +228,9 @@ export function ReplayTransport({
             <button
               type="button"
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
-              title="Jump to latest hop"
               aria-label="Latest hop"
+              data-tooltip-label="Jump to latest hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(displayedHistoryLength - 1)}
             >
@@ -255,7 +270,7 @@ export function ReplayTransport({
 
           <div className="flex items-center gap-2 pl-2 shrink-0">
             {failedCount > 0 && (
-              <label className="flex items-center gap-1.5 text-[11px] text-text-subtle cursor-pointer select-none border border-transparent hover:border-border/50 px-1.5 py-1 rounded transition-colors">
+              <label className="flex items-center gap-1.5 text-xs text-text-subtle cursor-pointer select-none border border-transparent hover:border-border/50 px-1.5 py-1 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={showFailedAttempts}
@@ -266,7 +281,7 @@ export function ReplayTransport({
               </label>
             )}
 
-            <div className="text-[11px] font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2.5 py-1 rounded-md shadow-xs">
+            <div className="text-xs font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2.5 py-1 rounded-md shadow-xs">
               Hop <span className="text-text font-medium">{displayedHistoryMetrics.selectedNumber}</span>/{displayedHistoryMetrics.totalItems}
             </div>
           </div>

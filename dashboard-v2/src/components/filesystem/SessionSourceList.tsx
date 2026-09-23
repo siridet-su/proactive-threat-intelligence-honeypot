@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import type { FilesystemClosedSession, FilesystemTopologySession } from "@/lib/dashboardTypes";
 import { compactDirectoryPath, formatTimestamp } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 interface SessionSourceListProps {
   embedded?: boolean;
@@ -16,6 +17,8 @@ interface SessionSourceListProps {
 }
 
 type TabKey = "live" | "closed";
+
+const SOURCE_TABS = ["live", "closed"] as const;
 
 export function SessionSourceList({
   embedded = false,
@@ -111,12 +114,13 @@ export function SessionSourceList({
             aria-controls="panel-source-live"
             tabIndex={activeTab === "live" ? 0 : -1}
             onClick={() => selectTab("live")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              selectTab("closed");
-              document.getElementById("tab-source-closed")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: SOURCE_TABS,
+              currentTab: "live",
+              onSelect: selectTab,
+              tabId: (tab) => `tab-source-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "live"
                 ? "bg-success-subtle text-success shadow-xs"
@@ -142,12 +146,13 @@ export function SessionSourceList({
             aria-controls="panel-source-closed"
             tabIndex={activeTab === "closed" ? 0 : -1}
             onClick={() => selectTab("closed")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              selectTab("live");
-              document.getElementById("tab-source-live")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: SOURCE_TABS,
+              currentTab: "closed",
+              onSelect: selectTab,
+              tabId: (tab) => `tab-source-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "closed"
                 ? "bg-warning-subtle text-warning shadow-xs"
@@ -263,7 +268,7 @@ export function SessionSourceList({
                             <span className="font-mono text-xs font-semibold text-text truncate">
                               {source.sourceIp}
                             </span>
-                            <span className="rounded-full bg-surface px-1.5 py-0.2 text-[10px] font-bold text-primary border border-primary-border/40">
+                            <span className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-bold text-primary border border-primary-border/40">
                               {source.sessions.length} sessions
                             </span>
                           </div>
@@ -275,7 +280,7 @@ export function SessionSourceList({
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[11px] font-medium text-text-muted">
+                          <span className="text-xs font-medium text-text-muted">
                             {isExpanded ? "Collapse" : "Expand"}
                           </span>
                           <ChevronDown
@@ -332,9 +337,9 @@ export function SessionSourceList({
                                 </div>
                                 <div className="text-right shrink-0">
                                   {isSelected ? (
-                                    <span className="text-[11px] font-bold text-primary">Selected</span>
+                                    <span className="text-xs font-bold text-primary">Selected</span>
                                   ) : (
-                                    <span className="text-[10px] text-text-subtle">
+                                    <span className="text-xs text-text-subtle">
                                       {formatTimestamp(session.cwdState.observedAt)}
                                     </span>
                                   )}

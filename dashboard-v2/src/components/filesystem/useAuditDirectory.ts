@@ -249,6 +249,116 @@ export function getSessionTimestamp(s: FilesystemTopologySession | FilesystemClo
   return 0;
 }
 
+export type RetainedCountStatus = "authoritative" | "loaded-only" | "loading" | "error" | "stale";
+
+/**
+ * Strict validator for session counts: must be non-negative safe integers.
+ */
+export function isValidSessionCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Validates cross-field structural invariants for server summary counts.
+ * Fails closed if totalSessions or homeOnlyCount are invalid, if homeOnlyCount > totalSessions,
+ * or if matchingCount is present and invalid or > totalSessions.
+ */
+export function isSummaryCountEvidenceValid(
+  summary: AuditDirectorySummary | null | undefined,
+): summary is AuditDirectorySummary {
+  if (!summary) return false;
+  if (!isValidSessionCount(summary.totalSessions)) return false;
+  if (!isValidSessionCount(summary.homeOnlyCount)) return false;
+  if (summary.homeOnlyCount > summary.totalSessions) return false;
+  if (summary.matchingCount !== undefined) {
+    if (!isValidSessionCount(summary.matchingCount)) return false;
+    if (summary.matchingCount > summary.totalSessions) return false;
+  }
+  return true;
+}
+
+export interface ScopeAwareSummaryResult {
+  isValid: boolean;
+  derivedMatching: number | null;
+}
+
+export interface EvaluateScopeAwareSummaryCountsOptions {
+  summary: AuditDirectorySummary | null | undefined;
+  hideHomeOnly: boolean;
+  targetPathFilter: string | null;
+  retainedLoadedCount?: number;
+}
+
+/**
+ * Pure scope-aware validation and matching derivation helper.
+ * Enforces scope-specific invariants and fail-closed guarantees across totalSessions,
+ * homeOnlyCount, matchingCount, and loaded retained evidence.
+ */
+export function evaluateScopeAwareSummaryCounts({
+  summary,
+  hideHomeOnly,
+  targetPathFilter,
+  retainedLoadedCount = 0,
+}: EvaluateScopeAwareSummaryCountsOptions): ScopeAwareSummaryResult {
+  if (!isSummaryCountEvidenceValid(summary)) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  const hasPathFilter = Boolean(targetPathFilter);
+
+  // Invariant for every scope: totalSessions >= retainedLoadedCount
+  if (summary.totalSessions < retainedLoadedCount) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  let effectiveMatching: number;
+
+  if (!hideHomeOnly && !hasPathFilter) {
+    // 1. No hide-home and no target path
+    if (summary.matchingCount !== undefined) {
+      if (summary.matchingCount !== summary.totalSessions) {
+        return { isValid: false, derivedMatching: null };
+      }
+    }
+    effectiveMatching = summary.totalSessions;
+  } else if (hideHomeOnly && !hasPathFilter) {
+    // 2. Hide-home only
+    const nonHomeTotal = summary.totalSessions - summary.homeOnlyCount;
+    if (summary.matchingCount !== undefined) {
+      if (summary.matchingCount !== nonHomeTotal) {
+        return { isValid: false, derivedMatching: null };
+      }
+    }
+    effectiveMatching = nonHomeTotal;
+  } else if (!hideHomeOnly && hasPathFilter) {
+    // 3. Target path only
+    if (summary.matchingCount === undefined) {
+      return { isValid: false, derivedMatching: null };
+    }
+    if (summary.matchingCount > summary.totalSessions) {
+      return { isValid: false, derivedMatching: null };
+    }
+    effectiveMatching = summary.matchingCount;
+  } else {
+    // 4. Target path plus hide-home
+    const nonHomeTotal = summary.totalSessions - summary.homeOnlyCount;
+    if (summary.matchingCount === undefined) {
+      return { isValid: false, derivedMatching: null };
+    }
+    if (summary.matchingCount > nonHomeTotal) {
+      return { isValid: false, derivedMatching: null };
+    }
+    effectiveMatching = summary.matchingCount;
+  }
+
+  // Invariant for every scope: effective matching >= retainedLoadedCount
+  if (effectiveMatching < retainedLoadedCount) {
+    return { isValid: false, derivedMatching: null };
+  }
+
+  return { isValid: true, derivedMatching: effectiveMatching };
+}
+
 export interface AuthoritativeAuditMetrics {
   effectiveClosedSessions: FilesystemClosedSession[];
   allSessions: (FilesystemTopologySession | FilesystemClosedSession)[];
@@ -261,6 +371,13 @@ export interface AuthoritativeAuditMetrics {
   filteredSessionsCount: number;
   isSelectedFilteredOut: boolean;
   isAuthoritative: boolean;
+
+  // Retained semantics (FSV-004)
+  retainedLoadedCount: number;
+  retainedMatchingCount: number | null;
+  retainedTotalCount: number | null;
+  activeVisibleCount: number;
+  retainedCountStatus: RetainedCountStatus;
 }
 
 /**
@@ -278,7 +395,6 @@ export function deriveAuthoritativeAuditMetrics({
   summaryScopeKey,
   currentScopeKey,
   summaryStatus = "success",
-  auditDirectoryTotalCount,
   hideHomeOnly = false,
   targetPathFilter = null,
   selectedSessionId = null,
@@ -318,15 +434,12 @@ export function deriveAuthoritativeAuditMetrics({
       if (timeRange === "custom") return customDateRange?.to?.getTime();
       return getPresetDateRange(timeRange)?.to?.getTime();
     })() });
-  const resolvedSummaryScopeKey =
-    summaryScopeKey !== undefined ? summaryScopeKey : summary ? resolvedCurrentScopeKey : null;
-
   // Check if summary matches current scope
   const isScopeMatch =
     Boolean(summary) &&
     summaryStatus === "success" &&
-    resolvedSummaryScopeKey !== null &&
-    resolvedSummaryScopeKey === resolvedCurrentScopeKey;
+    summaryScopeKey != null &&
+    summaryScopeKey === resolvedCurrentScopeKey;
 
   // Distinct paths: merge active session paths with server-side closed distinct paths
   // Only use summary.distinctPaths when summaryStatus is success and summaryScopeKey matches currentScopeKey
@@ -338,10 +451,63 @@ export function deriveAuthoritativeAuditMetrics({
     distinctPaths = getDistinctSessionPaths(activeSessions, effectiveClosedSessions);
   }
 
+  const hasTimeFilter = Boolean(timeRange && timeRange !== "all");
+  let filterFrom: number | undefined;
+  let filterTo: number | undefined;
+  if (hasTimeFilter && timeRange) {
+    if (timeRange === "custom") {
+      filterFrom = customDateRange?.from?.getTime();
+      filterTo = customDateRange?.to?.getTime();
+    } else {
+      const presetRange = getPresetDateRange(timeRange);
+      filterFrom = presetRange?.from?.getTime();
+      filterTo = presetRange?.to?.getTime();
+    }
+  }
+
+  // Closed session filter predicate: retained sessions filter strictly by lifecycle.closedAt
+  const filterClosedSession = (s: FilesystemClosedSession): boolean => {
+    if (hideHomeOnly && isHomeOnlySession(s)) return false;
+    if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
+    if (hasTimeFilter) {
+      if (!s.lifecycle?.closedAt) return false;
+      const closedTs = new Date(s.lifecycle.closedAt).getTime();
+      if (Number.isNaN(closedTs) || closedTs <= 0) return false;
+      if (filterFrom != null && closedTs < filterFrom) return false;
+      if (filterTo != null && closedTs > filterTo) return false;
+    }
+    return true;
+  };
+
+  // Active session filter predicate: filtered by targetPath and hideHome
+  const filterActiveSession = (s: FilesystemTopologySession): boolean => {
+    if (hideHomeOnly && isHomeOnlySession(s)) return false;
+    if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
+    return true;
+  };
+
+  const filteredClosedSessions = effectiveClosedSessions.filter(filterClosedSession);
+  const filteredActiveSessions = activeSessions.filter(filterActiveSession);
+
+  // Retained counts (FSV-004) - Active sessions NEVER contaminate retained counts
+  const retainedLoadedCount = filteredClosedSessions.length;
+  const activeVisibleCount = filteredActiveSessions.length;
+
+  const countEvaluation =
+    isAudit && isScopeMatch
+      ? evaluateScopeAwareSummaryCounts({
+          summary,
+          hideHomeOnly,
+          targetPathFilter,
+          retainedLoadedCount,
+        })
+      : { isValid: false, derivedMatching: null };
+
   // Home-only count across all effective sessions
-  // Only use summary.homeOnlyCount when summaryStatus is success and summaryScopeKey matches currentScopeKey
+  // Only use summary.homeOnlyCount when summaryStatus is success, summaryScopeKey matches currentScopeKey,
+  // and summary count evidence passes pure scope-aware validation.
   let homeOnlyCount = 0;
-  if (isAudit && isScopeMatch && summary && typeof summary.homeOnlyCount === "number") {
+  if (isAudit && isScopeMatch && countEvaluation.isValid && summary) {
     let activeHomeOnly = 0;
     for (const s of activeSessions) {
       if (isHomeOnlySession(s)) activeHomeOnly++;
@@ -353,101 +519,89 @@ export function deriveAuthoritativeAuditMetrics({
     }
   }
 
-  const hasTimeFilter = Boolean(timeRange && timeRange !== "all");
+  let retainedTotalCount: number | null = null;
+  let retainedMatchingCount: number | null = null;
+  let retainedCountStatus: RetainedCountStatus = "loaded-only";
 
-  // Filter predicate
-  const filterFn = (s: FilesystemTopologySession | FilesystemClosedSession) => {
-    if (hideHomeOnly && isHomeOnlySession(s)) return false;
-    if (targetPathFilter && !sessionTouchesPath(s, targetPathFilter)) return false;
-    if (hasTimeFilter && timeRange) {
-      let ts = 0;
-      if ("lifecycle" in s && s.lifecycle?.closedAt) {
-        ts = new Date(s.lifecycle.closedAt).getTime();
-        if (Number.isNaN(ts)) ts = 0;
-      }
-      if (ts > 0) {
-        if (timeRange === "custom") {
-          if (customDateRange?.from && ts < customDateRange.from.getTime()) return false;
-          if (customDateRange?.to && ts > customDateRange.to.getTime()) return false;
-        } else {
-          const presetRange = getPresetDateRange(timeRange);
-          if (presetRange?.from && ts < presetRange.from.getTime()) return false;
-          if (presetRange?.to && ts > presetRange.to.getTime()) return false;
-        }
-      }
+  if (!isAudit) {
+    // In live mode, retained metrics reflect loaded closed session buffer
+    retainedTotalCount = effectiveClosedSessions.length;
+    retainedMatchingCount = null;
+    retainedCountStatus = "loaded-only";
+  } else if (summaryStatus === "loading") {
+    retainedCountStatus = "loading";
+    retainedTotalCount = null;
+    retainedMatchingCount = null;
+  } else if (summaryStatus === "error") {
+    retainedCountStatus = "error";
+    retainedTotalCount = null;
+    retainedMatchingCount = null;
+  } else if (summaryStatus === "stale") {
+    retainedCountStatus = "stale";
+    retainedTotalCount = null;
+    retainedMatchingCount = null;
+  } else if (isScopeMatch && summary) {
+    if (!countEvaluation.isValid || countEvaluation.derivedMatching === null) {
+      retainedMatchingCount = null;
+      retainedTotalCount = null;
+      retainedCountStatus = "loaded-only";
+    } else {
+      retainedMatchingCount = countEvaluation.derivedMatching;
+      retainedTotalCount = summary.totalSessions;
+      retainedCountStatus = "authoritative";
     }
-    return true;
-  };
-
-  const filteredActiveSessions = activeSessions.filter(filterFn);
-  const filteredClosedSessions = effectiveClosedSessions.filter(filterFn);
-
-  // Total session count
-  // Only use summary.totalSessions or auditDirectoryTotalCount when isScopeMatch is true
-  let totalSessionsCount = 0;
-  if (isAudit && isScopeMatch && summary && typeof summary.totalSessions === "number") {
-    totalSessionsCount = activeSessions.length + summary.totalSessions;
-  } else if (isAudit && isScopeMatch && typeof auditDirectoryTotalCount === "number" && auditDirectoryTotalCount > 0) {
-    totalSessionsCount = activeSessions.length + auditDirectoryTotalCount;
+  } else if (!summary && isDirectoryComplete) {
+    // Complete directory loaded for this scope
+    retainedMatchingCount = retainedLoadedCount;
+    retainedTotalCount = hideHomeOnly || targetPathFilter !== null ? null : retainedLoadedCount;
+    retainedCountStatus = "authoritative";
   } else {
-    totalSessionsCount = activeSessions.length + effectiveClosedSessions.length;
-  }
-
-  // Filtered sessions count
-  let filteredSessionsCount = 0;
-  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null || hasTimeFilter;
-  const isAuthoritative = !isAudit || (isScopeMatch && Boolean(summary)) || isDirectoryComplete;
-
-  if (hasTimeFilter) {
-    filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
-  } else if (!hasActiveFilters && isAudit) {
-    // When no filter is active in audit mode:
-    // If scope matches, totalSessionsCount is authoritative.
-    // If summary is loading or failed, totalSessionsCount is loaded count, and isAuthoritative is false.
-    filteredSessionsCount = totalSessionsCount;
-  } else if (
-    isAudit &&
-    isScopeMatch &&
-    hasActiveFilters &&
-    targetPathFilter &&
-    summary &&
-    typeof summary.matchingCount === "number"
-  ) {
-    // When targetPathFilter is active and server summary provides matchingCount for this scope
-    filteredSessionsCount = filteredActiveSessions.length + summary.matchingCount;
-  } else if (
-    isAudit &&
-    isScopeMatch &&
-    hasActiveFilters &&
-    hideHomeOnly &&
-    !targetPathFilter &&
-    summary &&
-    typeof summary.homeOnlyCount === "number" &&
-    typeof summary.totalSessions === "number"
-  ) {
-    // Home-only filter with valid scope summary
-    filteredSessionsCount =
-      filteredActiveSessions.length + Math.max(0, summary.totalSessions - summary.homeOnlyCount);
-  } else if (isAudit && isScopeMatch && hasActiveFilters && summary && typeof summary.matchingCount === "number") {
-    filteredSessionsCount = filteredActiveSessions.length + summary.matchingCount;
-  } else {
-    // Stale summary, error, or in-flight fetch: explicitly non-authoritative loaded-data fallback
-    filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
+    retainedMatchingCount = null;
+    retainedTotalCount = null;
+    retainedCountStatus = "loaded-only";
   }
 
   // Selected session pinned outside filter semantics
+  const hasActiveFilters = hideHomeOnly || targetPathFilter !== null || hasTimeFilter;
   let isSelectedFilteredOut = false;
   if (selectedSessionId && hasActiveFilters) {
     const selectedSession = sessionById.get(selectedSessionId);
     if (selectedSession) {
-      if (hideHomeOnly && isHomeOnlySession(selectedSession)) {
-        isSelectedFilteredOut = true;
-      } else if (targetPathFilter && !sessionTouchesPath(selectedSession, targetPathFilter)) {
-        isSelectedFilteredOut = true;
-      } else if (hasTimeFilter && !filterFn(selectedSession)) {
-        isSelectedFilteredOut = true;
+      const isClosed =
+        "lifecycle" in selectedSession && Boolean((selectedSession as FilesystemClosedSession).lifecycle);
+      if (isClosed) {
+        if (!filterClosedSession(selectedSession as FilesystemClosedSession)) {
+          isSelectedFilteredOut = true;
+        }
+      } else {
+        // Active session: does not match Closed-at filter if time filter is active
+        if (hasTimeFilter || !filterActiveSession(selectedSession as FilesystemTopologySession)) {
+          isSelectedFilteredOut = true;
+        }
       }
     }
+  }
+
+  const isAuthoritative = retainedCountStatus === "authoritative";
+
+  // Backward compatibility: totalSessionsCount
+  let totalSessionsCount = 0;
+  if (!isAudit) {
+    totalSessionsCount = activeSessions.length + effectiveClosedSessions.length;
+  } else if (retainedTotalCount !== null) {
+    totalSessionsCount = activeSessions.length + retainedTotalCount;
+  } else {
+    totalSessionsCount = activeSessions.length + effectiveClosedSessions.length;
+  }
+
+  // Backward compatibility: filteredSessionsCount
+  let filteredSessionsCount = 0;
+  if (!isAudit) {
+    filteredSessionsCount = filteredActiveSessions.length + filteredClosedSessions.length;
+  } else if (retainedMatchingCount !== null) {
+    filteredSessionsCount = filteredActiveSessions.length + retainedMatchingCount;
+  } else {
+    filteredSessionsCount = filteredActiveSessions.length + retainedLoadedCount;
   }
 
   return {
@@ -462,6 +616,11 @@ export function deriveAuthoritativeAuditMetrics({
     filteredSessionsCount,
     isSelectedFilteredOut,
     isAuthoritative,
+    retainedLoadedCount,
+    retainedMatchingCount,
+    retainedTotalCount,
+    activeVisibleCount,
+    retainedCountStatus,
   };
 }
 
@@ -717,6 +876,8 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
         limit: 25,
         hideHome,
         targetPath,
+        from: filterOptions?.from,
+        to: filterOptions?.to,
       });
 
       const res = await fetcher(url, { cache: "no-store", signal });
@@ -760,23 +921,31 @@ export function createAuditDirectoryStore(options: AuditDirectoryStoreOptions = 
     if (state.searchIsLoading || !state.searchHasMore || !state.searchCursor || !state.searchQuery) return;
     const parsed = parseAuditScopeKey(state.searchScopeKey);
 
-    // loadMoreSearch must either use the exact stored search scope or reject/reset when the current scope differs.
+    // Two explicit modes:
+    // A. No options argument: continue using the exact stored canonical scope.
+    // B. Options object supplied: treat as the complete current scope. If its canonical scope key
+    //    differs from state.searchScopeKey, reject/clear and send no cursor request.
     if (filterOptions) {
-      const requestedHideHome = Boolean(filterOptions.hideHome);
-      const requestedTargetPath = filterOptions.targetPath ?? null;
-      if (
-        requestedHideHome !== parsed.hideHome ||
-        normalizeAuditScopeTargetPath(requestedTargetPath) !== normalizeAuditScopeTargetPath(parsed.targetPath)
-      ) {
+      const requestedScopeKey = createAuditScopeKey({
+        q: state.searchQuery,
+        hideHome: Boolean(filterOptions.hideHome),
+        targetPath: filterOptions.targetPath ?? null,
+        from: filterOptions.from,
+        to: filterOptions.to,
+      });
+
+      if (requestedScopeKey !== state.searchScopeKey) {
         clearSearch();
         return;
       }
     }
 
-    // Always use the exact stored search scope
+    // Paginate using the exact stored canonical scope
     return searchSessions(state.searchQuery, state.searchCursor, {
       hideHome: parsed.hideHome,
       targetPath: parsed.targetPath,
+      from: parsed.from,
+      to: parsed.to,
     });
   };
 
@@ -1014,4 +1183,45 @@ export function useAuditDirectory({
         ? storeState.summary?.totalSessions
         : null) ?? storeState.directoryItems.length,
   };
+}
+
+export interface FormatRetainedSubtitleCoverageOptions {
+  retainedMatchingCount: number | null | undefined;
+  retainedLoadedCount: number;
+  retainedCountStatus?: RetainedCountStatus;
+  isSelectedFilteredOut: boolean;
+  hasActiveFilters: boolean;
+  coverageWording: string;
+}
+
+export function formatRetainedSubtitleCoverage({
+  retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus = "loaded-only",
+  isSelectedFilteredOut,
+  hasActiveFilters,
+  coverageWording,
+}: FormatRetainedSubtitleCoverageOptions): string {
+  if (!hasActiveFilters) {
+    return coverageWording;
+  }
+
+  if (retainedMatchingCount === 0 && retainedCountStatus === "authoritative") {
+    return `0 retained sessions match filter. This session is pinned outside the result set. ${coverageWording}`;
+  }
+
+  if (isSelectedFilteredOut) {
+    if (typeof retainedMatchingCount === "number" && retainedCountStatus === "authoritative") {
+      const loadedDisclose =
+        retainedLoadedCount < retainedMatchingCount
+          ? ` (${retainedMatchingCount} matching retained session${retainedMatchingCount === 1 ? "" : "s"} available · ${retainedLoadedCount} loaded)`
+          : ` (${retainedMatchingCount} matching retained session${retainedMatchingCount === 1 ? "" : "s"} available)`;
+      return `This session is pinned outside the active filter criteria${loadedDisclose}. ${coverageWording}`;
+    }
+
+    const statusSuffix = retainedCountStatus === "loading" ? "loading" : "unavailable";
+    return `This session is pinned outside the active filter criteria (${retainedLoadedCount} retained session${retainedLoadedCount === 1 ? "" : "s"} loaded; exact match count ${statusSuffix}). ${coverageWording}`;
+  }
+
+  return coverageWording;
 }

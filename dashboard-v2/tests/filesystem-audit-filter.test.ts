@@ -10,6 +10,7 @@ import {
   resolveSessionSelection,
   sessionTouchesPath,
 } from "../src/components/filesystem/filesystemUtils";
+import { buildAuditProjectionSummaryPipeline } from "../src/lib/filesystem-data";
 import type {
   FilesystemClosedSession,
   FilesystemTopologySession,
@@ -39,6 +40,14 @@ function session(
 }
 
 describe("filesystem audit filters", () => {
+  it("binds the hide-home summary expression to each projected visited path", () => {
+    const pipeline = buildAuditProjectionSummaryPipeline({ hideHome: true });
+    const serialized = JSON.stringify(pipeline);
+
+    expect(serialized).toContain('"input":"$$path"');
+    expect(serialized).not.toContain('"input":"$path"');
+  });
+
   it("does not classify a returned-home session as home-only", () => {
     const returnedHome = session(
       "returned-home",

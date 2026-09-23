@@ -1,9 +1,10 @@
 import React, { useState } from "react";
 import { AuditNoticeRegion } from "./AuditNoticeRegion";
-import { TopologyCanvas } from "./TopologyCanvas";
+import { TopologyCanvas, deriveTopologyPresentationContext } from "./TopologyCanvas";
 import { TimelineSplitter } from "./TimelineSplitter";
 import { FilesystemTimelinePanel } from "./FilesystemTimelinePanel";
 import { DEFAULT_STALE_THRESHOLD_MS } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 import { useFilesystemContext } from "./FilesystemContext";
 
@@ -12,6 +13,8 @@ export interface AuditFilesystemWorkspaceProps {
   onToggleFullscreen: () => void;
 }
 
+const AUDIT_WORKSPACE_TABS = ["map", "timeline"] as const;
+
 export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: AuditFilesystemWorkspaceProps) {
   const props = useFilesystemContext();
 
@@ -19,15 +22,45 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
 
   return (
     <div className="relative z-10 flex flex-col h-full w-full">
-      <div className="flex lg:hidden gap-2 border-b border-border pb-2 mb-4">
+      <div
+        className="flex lg:hidden gap-2 border-b border-border pb-2 mb-4"
+        role="tablist"
+        aria-label="Audit workspace views"
+      >
         <button
+          id="audit-map-tab"
+          type="button"
+          role="tab"
+          aria-selected={mobileTab === "map"}
+          aria-controls="audit-map-panel"
+          tabIndex={mobileTab === "map" ? 0 : -1}
           onClick={() => setMobileTab("map")}
+          onKeyDown={(event) => handleRovingTabKey({
+            event,
+            tabs: AUDIT_WORKSPACE_TABS,
+            currentTab: "map",
+            onSelect: setMobileTab,
+            tabId: (tab) => `audit-${tab}-tab`,
+          })}
           className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === "map" ? "bg-surface border-b-2 border-primary text-primary" : "text-text-subtle"}`}
         >
           Map
         </button>
         <button
+          id="audit-timeline-tab"
+          type="button"
+          role="tab"
+          aria-selected={mobileTab === "timeline"}
+          aria-controls="audit-timeline-panel"
+          tabIndex={mobileTab === "timeline" ? 0 : -1}
           onClick={() => setMobileTab("timeline")}
+          onKeyDown={(event) => handleRovingTabKey({
+            event,
+            tabs: AUDIT_WORKSPACE_TABS,
+            currentTab: "timeline",
+            onSelect: setMobileTab,
+            tabId: (tab) => `audit-${tab}-tab`,
+          })}
           className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === "timeline" ? "bg-surface border-b-2 border-primary text-primary" : "text-text-subtle"}`}
         >
           Timeline
@@ -41,6 +74,9 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
         }
       >
         <div
+          id="audit-map-panel"
+          role="tabpanel"
+          aria-labelledby="audit-map-tab"
           className={
             isFullscreen
               ? `min-w-0 flex-1 ${mobileTab === "map" ? "flex" : "hidden"} lg:flex flex-col`
@@ -64,6 +100,10 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
             filteredClosedSessions={props.filteredClosedSessions}
             handleResetAuditFilters={props.handleResetAuditFilters}
             handleClearSelection={props.handleClearSelection}
+            retainedMatchingCount={props.retainedMatchingCount}
+            retainedLoadedCount={props.retainedLoadedCount}
+            retainedTotalCount={props.retainedTotalCount}
+            retainedCountStatus={props.retainedCountStatus}
           />
           <TopologyCanvas
             snapshot={props.auditSnapshot ?? props.snapshot}
@@ -73,6 +113,8 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
           selectedSessionId={props.selectedSessionId}
           selectedPath={props.selectedPath}
           activeHop={props.activeHop}
+          displayedTransitions={props.displayedTransitions}
+          currentTransition={props.currentTransition}
           hopDurationMs={props.playbackSpeed}
           title={props.auditCanvasTitle}
           subtitle={props.auditCanvasSubtitle}
@@ -83,7 +125,7 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
           onRefresh={props.refresh}
           onReconnect={props.handleReconnect}
           staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
-          isAuditMode={true}
+          presentationContext={deriveTopologyPresentationContext("audit", props.selectedSession)}
           isResizingContainer={props.isDraggingTimeline}
           className="flex-1 min-h-0"
         />
@@ -93,14 +135,22 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
         <TimelineSplitter
           isDragging={props.isDraggingTimeline}
           width={props.timelineWidth}
-          onMouseDown={props.handleSplitterMouseDown}
+          onPointerDown={props.handleSplitterPointerDown}
+          onPointerMove={props.handleSplitterPointerMove}
+          onPointerUp={props.handleSplitterPointerUp}
+          onPointerCancel={props.handleSplitterPointerCancel}
           onDoubleClick={props.handleResetTimelineWidth}
           onKeyDown={props.handleSplitterKeyDown}
           className={isFullscreen ? "hidden sm:flex" : "hidden lg:flex"}
         />
       )}
 
-      <div className={`${mobileTab === "timeline" ? "flex" : "hidden"} lg:flex`}>
+      <div
+        id="audit-timeline-panel"
+        role="tabpanel"
+        aria-labelledby="audit-timeline-tab"
+        className={`${mobileTab === "timeline" ? "flex" : "hidden"} lg:flex`}
+      >
         <FilesystemTimelinePanel
         collapsed={props.isTimelineCollapsed}
         isDragging={props.isDraggingTimeline}

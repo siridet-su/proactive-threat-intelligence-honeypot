@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { GraphCallout, TopologyDensityMode, TopologyDensityPreference } from "./filesystemUtils";
+import type { MinimapVisibilityPreference } from "./topologyDensity";
 
 interface TopologyToolbarProps {
   zoom: number;
@@ -36,6 +37,9 @@ interface TopologyToolbarProps {
   resetMapWorkspace: () => void;
   densityPreference: TopologyDensityPreference;
   setDensityPreference: (pref: TopologyDensityPreference) => void;
+  minimapPreference: MinimapVisibilityPreference;
+  setMinimapPreference: (pref: MinimapVisibilityPreference) => void;
+  minimapVisible: boolean;
   showGrid: boolean;
   setShowGrid: (show: boolean) => void;
   effectiveDensityMode: TopologyDensityMode;
@@ -62,6 +66,9 @@ export function TopologyToolbar({
   resetMapWorkspace,
   densityPreference,
   setDensityPreference,
+  minimapPreference,
+  setMinimapPreference,
+  minimapVisible,
   showGrid,
   setShowGrid,
   effectiveDensityMode,
@@ -120,8 +127,9 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Zoom out"
           aria-label="Zoom out"
+          data-tooltip-label="Zoom out"
+          data-keyboard-tooltip
           onClick={() => zoomOut()}
         >
           <ZoomOut className="h-3.5 w-3.5" />
@@ -136,8 +144,9 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Zoom in"
           aria-label="Zoom in"
+          data-tooltip-label="Zoom in"
+          data-keyboard-tooltip
           onClick={() => zoomIn()}
         >
           <ZoomIn className="h-3.5 w-3.5" />
@@ -148,8 +157,9 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Fit topology in view"
           aria-label="Fit topology in view"
+          data-tooltip-label="Fit topology in view"
+          data-keyboard-tooltip
           onClick={fitTopology}
         >
           <ScanLine className="h-3.5 w-3.5" />
@@ -157,8 +167,9 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-8 min-h-8 w-8 p-0"
-          title="Center selected IP"
           aria-label="Center selected IP"
+          data-tooltip-label="Center selected IP"
+          data-keyboard-tooltip
           onClick={() => {
             // Selection is supplied by the live client stream and can differ
             // from the SSR snapshot. The callback is already a safe no-op
@@ -208,7 +219,7 @@ export function TopologyToolbar({
                 aria-label="View settings"
                 className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 origin-top-right rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
               >
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Interaction Mode
               </div>
               <div className="flex p-1 gap-1">
@@ -241,7 +252,7 @@ export function TopologyToolbar({
               </div>
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Density Mode
               </div>
               {(["auto", "detailed", "clustered", "aggregated"] as const).map((pref) => {
@@ -267,14 +278,41 @@ export function TopologyToolbar({
                 );
               })}
               {densityAnalysisHiddenNodes > 0 && (
-                <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-[11px] text-text-subtle">
+                <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-xs text-text-subtle">
                   {densityAnalysisHiddenNodes} {densityAnalysisHiddenNodes === 1 ? "path" : "paths"} aggregated
                 </div>
               )}
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Appearance
+              </div>
+              <div className="px-2.5 pb-1 pt-0.5 text-xs text-text-subtle">
+                Minimap {minimapVisible ? "visible" : "hidden"}
+              </div>
+              <div
+                role="group"
+                aria-label="Minimap visibility"
+                className="grid grid-cols-3 gap-1 px-1 pb-1"
+              >
+                {(["auto", "show", "hide"] as const).map((preference) => {
+                  const selected = minimapPreference === preference;
+                  return (
+                    <button
+                      key={preference}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setMinimapPreference(preference)}
+                      className={`min-h-8 rounded-md px-2 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                        selected
+                          ? "border border-primary-border bg-primary-subtle text-primary"
+                          : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+                      }`}
+                    >
+                      {preference}
+                    </button>
+                  );
+                })}
               </div>
               <button
                 type="button"
@@ -286,7 +324,7 @@ export function TopologyToolbar({
               </button>
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Layout Actions
               </div>
               {canUndoLayout && (
@@ -332,7 +370,7 @@ export function TopologyToolbar({
         <button
           type="button"
           className="ui-button h-9 min-h-9 w-9 p-0"
-          title={
+          data-tooltip-label={
             isTopologyExpanded
               ? isAuditMode
                 ? "Exit fullscreen audit studio"
@@ -351,6 +389,8 @@ export function TopologyToolbar({
                 : "Expand map workspace"
           }
           aria-pressed={isTopologyExpanded}
+          data-keyboard-tooltip
+          data-tooltip-placement="end"
           onClick={handleToggleExpand}
         >
           {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
