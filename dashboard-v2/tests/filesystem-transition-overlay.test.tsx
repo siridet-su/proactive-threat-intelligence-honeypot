@@ -8,6 +8,7 @@ import type { FilesystemTopologySnapshot, SessionCwdHistoryEvent } from "../src/
 import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
 import {
   TransitionOverlay,
+  deriveDirectedTransitionGeometry,
   deriveTransitionOverlayItems,
 } from "../src/components/filesystem/TransitionOverlay";
 import { deriveVerifiedCwdTransitions } from "../src/components/filesystem/filesystemTransitions";
@@ -70,6 +71,54 @@ describe("FSV-007B: separate verified transition overlay", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    {
+      name: "horizontal",
+      from: { x: 20, y: 30, width: 20, height: 10 },
+      to: { x: 80, y: 30, width: 12, height: 8 },
+    },
+    {
+      name: "vertical",
+      from: { x: 45, y: 20, width: 16, height: 8 },
+      to: { x: 45, y: 80, width: 18, height: 12 },
+    },
+    {
+      name: "diagonal",
+      from: { x: 18, y: 22, width: 14, height: 9 },
+      to: { x: 76, y: 73, width: 20, height: 11 },
+    },
+  ])("anchors $name transition endpoints on the rendered node borders", ({ from, to }) => {
+    const transition = deriveVerifiedCwdTransitions([
+      cwdEvent(`border-${from.x}`, "changed", "/from", "/to"),
+    ], 1)[0];
+    const geometry = deriveDirectedTransitionGeometry(
+      transition,
+      new Map([
+        ["/from", { path: "/from", parentPath: "/", depth: 1, sessionIds: [], observedAt: null, x: from.x, y: from.y }],
+        ["/to", { path: "/to", parentPath: "/", depth: 1, sessionIds: [], observedAt: null, x: to.x, y: to.y }],
+      ]),
+      { "/from": from, "/to": to },
+      0,
+    );
+
+    expect(geometry).not.toBeNull();
+    const onBorder = (
+      point: { x: number; y: number },
+      bounds: { x: number; y: number; width: number; height: number },
+    ) => {
+      const relativeX = Math.abs(point.x - bounds.x);
+      const relativeY = Math.abs(point.y - bounds.y);
+      const halfWidth = bounds.width / 2;
+      const halfHeight = bounds.height / 2;
+      return (
+        (Math.abs(relativeX - halfWidth) < 0.0001 && relativeY <= halfHeight + 0.0001) ||
+        (Math.abs(relativeY - halfHeight) < 0.0001 && relativeX <= halfWidth + 0.0001)
+      );
+    };
+    expect(onBorder({ x: geometry!.startX, y: geometry!.startY }, from)).toBe(true);
+    expect(onBorder({ x: geometry!.targetX, y: geometry!.targetY }, to)).toBe(true);
   });
 
   it("classifies previous, current, and future events without deduplicating revisits", () => {

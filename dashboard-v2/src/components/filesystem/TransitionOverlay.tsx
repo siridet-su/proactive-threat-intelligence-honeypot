@@ -26,8 +26,10 @@ export interface TransitionOverlayProps {
   showLegend?: boolean;
 }
 
-interface OverlayGeometry {
+export interface OverlayGeometry {
   route: string;
+  startX: number;
+  startY: number;
   labelX: number;
   labelY: number;
   targetX: number;
@@ -78,7 +80,27 @@ function markerPoint(
   return node ? { x: node.x, y: node.y } : null;
 }
 
-function directedGeometry(
+function rectangleBoundaryPoint(
+  centerX: number,
+  centerY: number,
+  towardX: number,
+  towardY: number,
+  bounds: GraphElementBounds | undefined,
+): { x: number; y: number } {
+  const deltaX = towardX - centerX;
+  const deltaY = towardY - centerY;
+  if (deltaX === 0 && deltaY === 0) return { x: centerX, y: centerY };
+
+  const halfWidth = bounds?.width && bounds.width > 0 ? bounds.width / 2 : 4;
+  const halfHeight = bounds?.height && bounds.height > 0 ? bounds.height / 2 : 2.5;
+  const scale = 1 / Math.max(Math.abs(deltaX) / halfWidth, Math.abs(deltaY) / halfHeight);
+  return {
+    x: centerX + deltaX * scale,
+    y: centerY + deltaY * scale,
+  };
+}
+
+export function deriveDirectedTransitionGeometry(
   transition: VerifiedCwdTransition,
   nodeByPath: ReadonlyMap<string, GraphNode>,
   nodeBounds: Readonly<Record<string, GraphElementBounds>>,
@@ -101,6 +123,8 @@ function directedGeometry(
     const endY = startY;
     return {
       route: `M ${startX} ${startY} C ${from.x + radiusX} ${from.y - radiusY}, ${from.x - radiusX} ${from.y - radiusY}, ${endX} ${endY}`,
+      startX,
+      startY,
       labelX: from.x,
       labelY: from.y - radiusY - 1.5,
       targetX: endX,
@@ -117,19 +141,17 @@ function directedGeometry(
   const laneOffset = 2 + lane * 3;
   const controlX = (from.x + to.x) / 2 + perpendicularX * laneOffset;
   const controlY = (from.y + to.y) / 2 + perpendicularY * laneOffset;
-  const fromBounds = nodeBounds[from.path];
-  const toBounds = nodeBounds[to.path];
-  const trimStart = Math.min(distance * 0.18, Math.max(2, ((fromBounds?.width ?? 8) + (fromBounds?.height ?? 5)) / 4));
-  const trimEnd = Math.min(distance * 0.18, Math.max(2, ((toBounds?.width ?? 8) + (toBounds?.height ?? 5)) / 4));
-  const unitX = dx / distance;
-  const unitY = dy / distance;
-  const startX = from.x + unitX * trimStart;
-  const startY = from.y + unitY * trimStart;
-  const endX = to.x - unitX * trimEnd;
-  const endY = to.y - unitY * trimEnd;
+  const start = rectangleBoundaryPoint(from.x, from.y, controlX, controlY, nodeBounds[from.path]);
+  const end = rectangleBoundaryPoint(to.x, to.y, controlX, controlY, nodeBounds[to.path]);
+  const startX = start.x;
+  const startY = start.y;
+  const endX = end.x;
+  const endY = end.y;
 
   return {
     route: `M ${startX} ${startY} Q ${controlX} ${controlY}, ${endX} ${endY}`,
+    startX,
+    startY,
     labelX: (startX + 2 * controlX + endX) / 4,
     labelY: (startY + 2 * controlY + endY) / 4,
     targetX: endX,
@@ -217,7 +239,7 @@ export function TransitionOverlay({
   const rendered = items.map((item) => {
     const transition = item.transition;
     const geometry = transition.presentationKind === "directed"
-      ? directedGeometry(transition, nodeByPath, nodeBounds, laneByEvent.get(transition.eventId) ?? 0)
+      ? deriveDirectedTransitionGeometry(transition, nodeByPath, nodeBounds, laneByEvent.get(transition.eventId) ?? 0)
       : null;
     const marker = transition.presentationKind === "entry" || transition.presentationKind === "failed-origin"
       ? markerPoint(transition.markerPath, nodeByPath)
