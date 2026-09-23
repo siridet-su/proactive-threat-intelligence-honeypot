@@ -3872,6 +3872,30 @@ def load_ai_advisory_detail(
             "timestamp": utc_now(),
         }
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    stored_selection = (
+        payload.get("validated_advisory")
+        if isinstance(payload.get("validated_advisory"), dict)
+        and str(payload.get("status") or "").lower() == "accepted"
+        and str((payload.get("validation") or {}).get("status") or "").lower() == "accepted"
+        else {}
+    )
+
+    def selected_refs(key: str) -> List[str]:
+        values = stored_selection.get(key)
+        if not isinstance(values, list):
+            return []
+        return [
+            value for value in values[:20]
+            if isinstance(value, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value)
+        ]
+
+    public_selection = {
+        "abstained": stored_selection.get("abstained") is True,
+        "selected_finding_ids": selected_refs("selected_finding_ids"),
+        "selected_relationship_ids": selected_refs("selected_relationship_ids"),
+        "ranked_action_ids": selected_refs("ranked_action_ids"),
+    } if stored_selection else {}
     shadow = payload.get("shadow_candidates")
     shadow = shadow if isinstance(shadow, dict) else {}
     raw_candidates = shadow.get("candidates")
@@ -3940,6 +3964,7 @@ def load_ai_advisory_detail(
             "status": payload.get("status"),
             "authority": payload.get("authority"),
             "validation": payload.get("validation") or {},
+            "validated_advisory": public_selection,
             "rendered_advisory": payload.get("rendered_advisory") or {},
             "shadow_candidates": shadow or {
                 "schema_version": "ai_shadow_candidate_set.v1",
