@@ -1,7 +1,28 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
-import { Archive, AlertTriangle, CalendarDays, CheckCircle2, Cloud, Clock3, Database, Play, RefreshCw, RotateCcw } from "lucide-react";
+import {
+  Activity,
+  AlertTriangle,
+  Archive,
+  ArrowUpRight,
+  CalendarDays,
+  CheckCircle2,
+  CircleDashed,
+  Cloud,
+  Clock3,
+  Database,
+  HardDrive,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Server,
+  ShieldCheck,
+  TimerReset,
+  XCircle,
+  type LucideIcon,
+} from "lucide-react";
 
 import { RegionState } from "@/components/ui/RegionState";
 import {
@@ -14,6 +35,24 @@ import {
 } from "@/lib/dashboardTypes";
 
 type BackupState = "healthy" | "partial" | "attention" | "running" | "not_started";
+type DayVisualStatus = HardwareBackupDay["status"] | "empty";
+type StatTone = "primary" | "success" | "info" | "warning" | "neutral";
+
+const toneClasses: Record<StatTone, string> = {
+  primary: "border-primary-border bg-primary-subtle text-primary",
+  success: "border-success-border bg-success-subtle text-success",
+  info: "border-info-border bg-info-subtle text-info",
+  warning: "border-warning-border bg-warning-subtle text-warning",
+  neutral: "border-border bg-surface-subtle text-text-muted",
+};
+
+const dayClasses: Record<DayVisualStatus, string> = {
+  success: "border-success-border bg-success-subtle text-success hover:border-success hover:shadow-[0_0_0_3px_color-mix(in_srgb,var(--success)_10%,transparent)]",
+  empty: "border-border bg-surface text-text-subtle hover:border-border-strong hover:bg-surface-hover",
+  running: "border-info-border bg-info-subtle text-info hover:border-info",
+  failed: "border-danger-border bg-danger-subtle text-danger hover:border-danger",
+  missing: "border-warning-border bg-warning-subtle text-warning hover:border-warning",
+};
 
 function formatNumber(value: number | null) {
   return value === null ? "—" : new Intl.NumberFormat().format(value);
@@ -35,13 +74,17 @@ function formatBytes(value: number | null) {
 function formatDay(value: string | null) {
   if (!value) return "—";
   const date = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(date.getTime()) ? date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "—";
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
+    : "—";
 }
 
 function formatDateTime(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "—";
 }
 
 function actionLabel(action: HardwareBackupRequestAction) {
@@ -49,8 +92,8 @@ function actionLabel(action: HardwareBackupRequestAction) {
 }
 
 function requestStatusLabel(request: HardwareBackupRequestView) {
-  if (request.status === "pending") return "Queued on Pi";
-  if (request.status === "running") return "Running on Pi";
+  if (request.status === "pending") return "Queued";
+  if (request.status === "running") return "Running";
   if (request.status === "success") return "Completed";
   return "Failed";
 }
@@ -63,7 +106,7 @@ function dayLabel(day: HardwareBackupDay) {
   return `${day.day}: completed, ${formatNumber(day.document_count)} documents, ${formatBytes(day.archive_bytes)}`;
 }
 
-function visualDayStatus(day: HardwareBackupDay) {
+function visualDayStatus(day: HardwareBackupDay): DayVisualStatus {
   if (day.status === "success" && day.document_count === 0) return "empty";
   return day.status;
 }
@@ -71,21 +114,52 @@ function visualDayStatus(day: HardwareBackupDay) {
 function statePresentation(data: HardwareBackupStatusData) {
   const { summary } = data;
   if (summary.failed_days > 0) {
-    return { state: "attention" as BackupState, label: "Needs attention", description: `${summary.failed_days} backup day${summary.failed_days === 1 ? "" : "s"} failed`, className: "border-danger-border bg-danger-subtle text-danger", Icon: AlertTriangle };
+    return {
+      state: "attention" as BackupState,
+      label: "Needs attention",
+      description: `${summary.failed_days} failed day${summary.failed_days === 1 ? "" : "s"}`,
+      className: "border-danger-border bg-danger-subtle text-danger",
+      Icon: AlertTriangle,
+    };
   }
   if (summary.running_days > 0) {
-    return { state: "running" as BackupState, label: "Backup in progress", description: "The scheduled worker is writing a manifest", className: "border-info-border bg-info-subtle text-info", Icon: Clock3 };
+    return {
+      state: "running" as BackupState,
+      label: "Backup in progress",
+      description: "Pi worker is writing a manifest",
+      className: "border-info-border bg-info-subtle text-info",
+      Icon: Clock3,
+    };
   }
   if (summary.missing_days > 0) {
-    return { state: "partial" as BackupState, label: "Partial coverage", description: `${summary.missing_days} expected day${summary.missing_days === 1 ? " is" : "s are"} not recorded`, className: "border-warning-border bg-warning-subtle text-warning", Icon: AlertTriangle };
+    return {
+      state: "partial" as BackupState,
+      label: "Partial coverage",
+      description: `${summary.missing_days} missing day${summary.missing_days === 1 ? "" : "s"}`,
+      className: "border-warning-border bg-warning-subtle text-warning",
+      Icon: AlertTriangle,
+    };
   }
   if (summary.successful_days > 0) {
-    return { state: "healthy" as BackupState, label: "Healthy", description: "All expected backup days have a manifest", className: "border-success-border bg-success-subtle text-success", Icon: CheckCircle2 };
+    return {
+      state: "healthy" as BackupState,
+      label: "Healthy",
+      description: "All expected days archived",
+      className: "border-success-border bg-success-subtle text-success",
+      Icon: CheckCircle2,
+    };
   }
-  return { state: "not_started" as BackupState, label: "Not started", description: "Waiting for the first scheduled backup", className: "border-border bg-surface-subtle text-text-muted", Icon: Archive };
+  return {
+    state: "not_started" as BackupState,
+    label: "Not started",
+    description: "Waiting for first archive",
+    className: "border-border bg-surface-subtle text-text-muted",
+    Icon: Archive,
+  };
 }
 
 export function HardwareBackupStatus() {
+  const reduceMotion = useReducedMotion();
   const [data, setData] = useState<HardwareBackupStatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -159,168 +233,234 @@ export function HardwareBackupStatus() {
   const coveragePercent = data && data.summary.expected_days > 0
     ? Math.min(100, Math.round((data.summary.successful_days / data.summary.expected_days) * 100))
     : 0;
+  const StatusIcon = presentation?.Icon ?? CircleDashed;
+  const activeRequest = request?.status === "pending" || request?.status === "running";
+  const actionDisabled = loading || refreshing || actionLoading !== null || activeRequest;
 
   return (
-    <section className="ui-panel flex flex-col overflow-hidden p-5 sm:p-6" aria-labelledby="hardware-backup-title">
-      <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-start sm:justify-between">
+    <motion.section
+      initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+      className="relative overflow-hidden rounded-[1.25rem] border border-border bg-surface shadow-[0_18px_55px_color-mix(in_srgb,var(--text)_8%,transparent)]"
+      aria-labelledby="hardware-backup-title"
+    >
+      <div className="pointer-events-none absolute -right-24 -top-32 h-80 w-80 rounded-full bg-primary/10 blur-3xl" aria-hidden="true" />
+      <div className="pointer-events-none absolute -bottom-40 left-1/3 h-72 w-72 rounded-full bg-info/5 blur-3xl" aria-hidden="true" />
+
+      <header className="relative flex flex-col gap-4 border-b border-border px-5 py-5 sm:px-6 sm:py-6 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-primary-border bg-primary-subtle text-primary shadow-[0_0_0_5px_color-mix(in_srgb,var(--primary)_6%,transparent)]">
+            <Archive className="h-5 w-5" aria-hidden="true" />
+            <span className="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-surface bg-success" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Hardware archive</span>
+              {presentation && (
+                <span className={`ui-badge text-[10px] ${presentation.className}`} aria-live="polite">
+                  <StatusIcon className="h-3 w-3" aria-hidden="true" />
+                  {presentation.label}
+                </span>
+              )}
+            </div>
+            <h2 id="hardware-backup-title" className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">Rollup backup</h2>
+            <p className="mt-0.5 text-xs text-text-muted">`hardware_metrics_1m` → private Backblaze B2</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-3 lg:justify-end">
+          <div className="text-left lg:text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Last sync</p>
+            <p className="mt-0.5 font-mono text-xs tabular-nums text-text-muted">{formatDateTime(data?.generated_at ?? null)}</p>
+          </div>
+          <button type="button" onClick={refresh} disabled={loading || refreshing} className="ui-button h-10 min-h-10 w-10 p-0" title="Refresh backup status" aria-label="Refresh backup status">
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
+          </button>
+        </div>
+      </header>
+
+      <div className="relative grid xl:grid-cols-[minmax(0,1fr)_19rem]">
+        <div className="min-w-0 p-5 sm:p-6">
+          {loading && !data ? (
+            <BackupSkeleton />
+          ) : error && !data ? (
+            <RegionState kind="error" title="Backup status unavailable" description={`${error}. Retry when the dashboard can reach MongoDB.`} />
+          ) : data && presentation ? (
+            <div className="space-y-6">
+              {error && <p role="status" className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">Showing the last successful result · {error}</p>}
+              <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+                <BackupStat icon={CalendarDays} label="Coverage" value={`${coveragePercent}%`} detail={`${data.summary.successful_days} / ${data.summary.expected_days} days`} tone={coveragePercent === 100 ? "success" : coveragePercent > 70 ? "warning" : "neutral"} />
+                <BackupStat icon={Database} label="Archived records" value={formatNumber(data.summary.archived_documents)} detail={`${formatBytes(data.summary.archive_bytes)} compressed`} tone="info" />
+                <BackupStat icon={HardDrive} label="Latest archive" value={formatDay(data.summary.latest_success_day)} detail={presentation.description} tone={presentation.state === "healthy" ? "success" : "warning"} />
+                <BackupStat icon={Clock3} label="Last completed" value={formatDateTime(data.summary.last_completed_at)} detail={`Window ends ${formatDay(data.expected_window.to.slice(0, 10))}`} tone="primary" />
+              </div>
+
+              <CoverageMap data={data} coveragePercent={coveragePercent} reduceMotion={Boolean(reduceMotion)} />
+            </div>
+          ) : (
+            <RegionState kind="empty" title="No backup status yet" description="The worker has not written a manifest." />
+          )}
+        </div>
+
+        <aside className="border-t border-border bg-surface-subtle/55 p-5 sm:p-6 xl:border-l xl:border-t-0" aria-label="Backup controls and destination">
+          {data ? (
+            <div className="space-y-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-subtle">Control room</p>
+                  <h3 className="mt-1 text-sm font-semibold">Pi worker</h3>
+                </div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-subtle px-2 py-1 text-[10px] font-semibold text-success">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />
+                  Connected
+                </span>
+              </div>
+
+              {actionError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle px-3 py-2 text-xs leading-5 text-danger">{actionError}</p>}
+
+              {data.can_control ? (
+                <div className="space-y-2">
+                  <button type="button" onClick={() => runAction("run_missing")} disabled={actionDisabled} className="ui-button ui-button-primary min-h-11 w-full justify-between rounded-xl px-3.5 text-xs">
+                    <span className="flex items-center gap-2"><Play className="h-4 w-4" aria-hidden="true" />Run missing days</span>
+                    <ArrowUpRight className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
+                  </button>
+                  <button type="button" onClick={() => runAction("retry_failed")} disabled={actionDisabled} className="ui-button min-h-10 w-full justify-between rounded-xl px-3.5 text-xs">
+                    <span className="flex items-center gap-2"><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Retry failed days</span>
+                    <span className="font-mono text-[10px] text-text-subtle">AUDITED</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-surface px-3.5 py-3 text-xs text-text-muted">
+                  <div className="flex items-center gap-2 font-medium text-text"><ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />Read-only mode</div>
+                  <p className="mt-1.5 text-[11px] leading-5 text-text-subtle">Admin access is required for Pi actions.</p>
+                </div>
+              )}
+
+              <AnimatePresence initial={false} mode="popLayout">
+                {request && <BackupRequestProgress request={request} reduceMotion={Boolean(reduceMotion)} />}
+              </AnimatePresence>
+
+              <CloudStorageSummary storage={data.storage} />
+
+              <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
+                <MiniFact icon={TimerReset} label="Schedule" value="03:30 daily" />
+                <MiniFact icon={CalendarDays} label="Lookback" value="30 days" />
+                <MiniFact icon={ShieldCheck} label="Safety hold" value="2 days" />
+                <MiniFact icon={Server} label="Source" value="Pi local" />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4" aria-hidden="true">
+              <div className="ui-skeleton h-5 w-28 rounded-md" />
+              <div className="ui-skeleton h-11 rounded-xl" />
+              <div className="ui-skeleton h-11 rounded-xl" />
+              <div className="ui-skeleton h-32 rounded-xl" />
+            </div>
+          )}
+        </aside>
+      </div>
+    </motion.section>
+  );
+}
+
+function BackupSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading hardware backup status">
+      <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => <div key={index} className="ui-skeleton h-[92px] rounded-xl" />)}
+      </div>
+      <div className="ui-skeleton h-64 rounded-xl" />
+    </div>
+  );
+}
+
+function CoverageMap({ data, coveragePercent, reduceMotion }: { data: HardwareBackupStatusData; coveragePercent: number; reduceMotion: boolean }) {
+  return (
+    <section className="rounded-xl border border-border bg-surface-subtle/60 p-4 sm:p-5" aria-labelledby="backup-coverage-title">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <Archive className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h2 id="hardware-backup-title" className="text-base font-semibold">Hardware backup</h2>
+            <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 id="backup-coverage-title" className="text-sm font-semibold">Coverage map</h3>
           </div>
-          <p className="mt-1 text-xs text-text-muted">Daily compressed archives of hardware_metrics_1m stored in Backblaze B2.</p>
+          <p className="mt-1 text-xs text-text-muted">{formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · UTC days</p>
         </div>
         <div className="flex items-center gap-2">
-          {presentation && (
-            <span className={`ui-badge ${presentation.className}`} aria-live="polite">
-              <presentation.Icon className="h-3.5 w-3.5" aria-hidden="true" />
-              {presentation.label}
-            </span>
-          )}
-          <button type="button" onClick={refresh} disabled={loading || refreshing} className="ui-button min-h-9 px-3 text-xs">
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
-            Refresh
-          </button>
+          <span className="font-mono text-2xl font-semibold tracking-tight text-text">{coveragePercent}%</span>
+          <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">covered</span>
         </div>
       </div>
 
-      {data?.can_control && (
-        <div className="flex flex-col gap-3 border-b border-border py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-xs font-medium text-text">Pi backup actions</p>
-            <p className="mt-1 text-xs text-text-subtle">Creates an audited request; the Pi worker polls MongoDB and reports progress here.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+      <div className="mt-5 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-[repeat(15,minmax(0,1fr))]" role="list" aria-label="Hardware backup days">
+        {data.days.map((day) => {
+          const status = visualDayStatus(day);
+          return (
             <button
+              key={day.day}
               type="button"
-              onClick={() => runAction("run_missing")}
-              disabled={loading || refreshing || actionLoading !== null || data.request?.status === "pending" || data.request?.status === "running"}
-              className="ui-button min-h-9 gap-1.5 px-3 text-xs"
+              role="listitem"
+              aria-label={dayLabel(day)}
+              title={dayLabel(day)}
+              className={`group relative flex min-h-[3.15rem] flex-col items-center justify-center rounded-lg border text-xs font-mono transition-all duration-200 hover:-translate-y-0.5 focus-visible:z-10 ${dayClasses[status]}`}
             >
-              <Play className="h-3.5 w-3.5" aria-hidden="true" />
-              {actionLoading === "run_missing" ? "Queueing…" : "Run missing"}
+              <span className="text-[10px] opacity-65">{day.day.slice(5, 7)}</span>
+              <span className="text-sm font-semibold">{day.day.slice(8, 10)}</span>
+              <span className={`absolute bottom-1 h-1 w-1 rounded-full ${status === "success" ? "bg-success" : status === "failed" ? "bg-danger" : status === "missing" ? "bg-warning" : status === "running" ? "bg-info" : "bg-text-subtle"}`} aria-hidden="true" />
             </button>
-            <button
-              type="button"
-              onClick={() => runAction("retry_failed")}
-              disabled={loading || refreshing || actionLoading !== null || data.request?.status === "pending" || data.request?.status === "running"}
-              className="ui-button min-h-9 gap-1.5 px-3 text-xs"
-            >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-              {actionLoading === "retry_failed" ? "Queueing…" : "Retry failed"}
-            </button>
-          </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] text-text-subtle" aria-label="Backup status legend">
+          <LegendDot className="bg-success" label="Archived" />
+          <LegendDot className="bg-text-subtle" label="Empty" />
+          <LegendDot className="bg-warning" label="Missing" />
+          <LegendDot className="bg-danger" label="Failed" />
         </div>
-      )}
-
-      {loading && !data ? (
-        <div className="grid gap-4 pt-4" aria-busy="true" aria-label="Loading hardware backup status">
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-            {Array.from({ length: 4 }, (_, index) => <div key={index} className="ui-skeleton h-20 rounded-lg" />)}
-          </div>
-          <div className="ui-skeleton h-14 rounded-lg" />
+        <div className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-surface-hover sm:max-w-48" aria-label={`Backup coverage ${coveragePercent}%`}>
+          <motion.div
+            initial={{ width: reduceMotion ? `${coveragePercent}%` : 0 }}
+            animate={{ width: `${coveragePercent}%` }}
+            transition={{ duration: reduceMotion ? 0 : 0.7, ease: [0.22, 1, 0.36, 1] }}
+            className="h-full rounded-full bg-gradient-to-r from-primary to-success"
+          />
         </div>
-      ) : error && !data ? (
-        <div className="pt-4">
-          <RegionState kind="error" title="Hardware backup status unavailable" description={`${error}. Retry when the dashboard can reach MongoDB.`} />
-        </div>
-      ) : data && presentation ? (
-        <div className="flex flex-col gap-4 pt-4">
-          {error && <p role="status" className="text-xs text-warning">{error} · showing the last successful result</p>}
-          {actionError && <p role="alert" className="rounded-lg border border-danger-border bg-danger-subtle px-3 py-2 text-xs text-danger">{actionError}</p>}
-
-          {data.request && <BackupRequestProgress request={data.request} />}
-
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-            <BackupStat icon={CalendarDays} label="Coverage" value={`${data.summary.successful_days}/${data.summary.expected_days}`} detail={`${coveragePercent}% of expected days`} />
-            <BackupStat icon={CheckCircle2} label="Latest archive" value={formatDay(data.summary.latest_success_day)} detail={presentation.description} />
-            <BackupStat icon={Database} label="Archived records" value={formatNumber(data.summary.archived_documents)} detail={`${formatBytes(data.summary.archive_bytes)} compressed`} />
-            <BackupStat icon={Clock3} label="Last completed" value={formatDateTime(data.summary.last_completed_at)} detail={`Window ends ${formatDay(data.expected_window.to.slice(0, 10))}`} />
-          </div>
-
-          <CloudStorageSummary storage={data.storage} />
-
-          <div className="rounded-lg border border-border bg-surface-subtle p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-xs font-medium text-text-muted">Backup coverage by UTC day</h3>
-                <p className="mt-1 text-xs text-text-subtle">{formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · current and previous day are held for late rollups</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 text-[11px] text-text-subtle" aria-label="Backup status legend">
-                <LegendDot className="bg-success" label="Archived" />
-                <LegendDot className="bg-text-subtle" label="Empty" />
-                <LegendDot className="bg-warning" label="Missing" />
-                <LegendDot className="bg-danger" label="Failed" />
-              </div>
-            </div>
-            <div className="mt-4 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-[repeat(15,minmax(0,1fr))]" role="list" aria-label="Hardware backup days">
-              {data.days.map((day) => {
-                const status = visualDayStatus(day);
-                return (
-                  <div
-                    key={day.day}
-                    role="listitem"
-                    aria-label={dayLabel(day)}
-                    title={dayLabel(day)}
-                    className={`flex min-h-11 items-center justify-center rounded-md border text-xs font-mono transition-colors duration-200 ${
-                      status === "success" ? "border-success-border bg-success-subtle text-success" :
-                      status === "empty" ? "border-border bg-surface text-text-subtle" :
-                      status === "running" ? "border-info-border bg-info-subtle text-info" :
-                      status === "failed" ? "border-danger-border bg-danger-subtle text-danger" :
-                      "border-warning-border bg-warning-subtle text-warning"
-                    }`}
-                  >
-                    {day.day.slice(8, 10)}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-hover" aria-label={`Backup coverage ${coveragePercent}%`}>
-              <div className="h-full rounded-full bg-success transition-[width] duration-500 ease-out" style={{ width: `${coveragePercent}%` }} />
-            </div>
-          </div>
-
-          <p className="flex items-center gap-1.5 text-xs text-text-subtle">
-            <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
-            Automatic worker · last started {formatDateTime(data.summary.last_started_at)} · collection <span className="font-mono">{data.collection}</span>
-          </p>
-        </div>
-      ) : (
-        <div className="pt-4"><RegionState kind="empty" title="No hardware backup status" description="The backup worker has not written a manifest yet." /></div>
-      )}
+      </div>
     </section>
   );
 }
 
 function CloudStorageSummary({ storage }: { storage: HardwareBackupStorageStatus | null }) {
   return (
-    <div className="rounded-lg border border-border bg-surface-subtle p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <Cloud className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-xs font-medium text-text">Backblaze B2 storage</h3>
+    <div className="rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="grid h-8 w-8 place-items-center rounded-lg border border-info-border bg-info-subtle text-info"><Cloud className="h-4 w-4" aria-hidden="true" /></span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-subtle">Destination</p>
+            <h3 className="mt-0.5 text-xs font-semibold">Backblaze B2</h3>
           </div>
-          <p className="mt-1 text-xs text-text-subtle">Usage reported by the Pi from retained file versions. B2 capacity is unlimited unless an account cap is configured.</p>
         </div>
-        <span className={`ui-badge ${storage ? "border-success-border bg-success-subtle text-success" : "border-border bg-surface text-text-subtle"}`}>
-          {storage ? "Reported" : "Waiting for Pi"}
-        </span>
+        <span className={`h-2 w-2 rounded-full ${storage ? "bg-success shadow-[0_0_0_4px_color-mix(in_srgb,var(--success)_12%,transparent)]" : "bg-text-subtle"}`} aria-label={storage ? "Storage reported" : "Storage not reported"} />
       </div>
       {storage ? (
-        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
-          <BackupStat icon={Cloud} label="Storage used" value={formatBytes(storage.storage_bytes)} detail="All retained B2 versions" />
-          <BackupStat icon={Archive} label="File versions" value={formatNumber(storage.file_versions)} detail={`Bucket ${storage.bucket}`} />
-          <BackupStat icon={Clock3} label="Last checked" value={formatDateTime(storage.checked_at)} detail="Pi → B2 API" />
-        </div>
+        <>
+          <p className="mt-5 font-mono text-3xl font-semibold tracking-tight text-text">{formatBytes(storage.storage_bytes)}</p>
+          <p className="mt-1 text-[11px] text-text-muted">{formatNumber(storage.file_versions)} file versions · all retained objects</p>
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-[10px] text-text-subtle">
+            <span className="max-w-[10rem] truncate font-mono" title={storage.bucket}>{storage.bucket}</span>
+            <span>Checked {formatDateTime(storage.checked_at)}</span>
+          </div>
+        </>
       ) : (
-        <p className="mt-4 rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-subtle">The next scheduled or on-demand backup run will write the first storage snapshot.</p>
+        <p className="mt-4 rounded-lg border border-border bg-surface-subtle px-3 py-2.5 text-[11px] leading-5 text-text-subtle">Waiting for the first storage snapshot.</p>
       )}
     </div>
   );
 }
 
-function BackupRequestProgress({ request }: { request: HardwareBackupRequestView }) {
+function BackupRequestProgress({ request, reduceMotion }: { request: HardwareBackupRequestView; reduceMotion: boolean }) {
   const isActive = request.status === "pending" || request.status === "running";
   const statusClassName = request.status === "success"
     ? "border-success-border bg-success-subtle text-success"
@@ -328,48 +468,73 @@ function BackupRequestProgress({ request }: { request: HardwareBackupRequestView
       ? "border-danger-border bg-danger-subtle text-danger"
       : "border-info-border bg-info-subtle text-info";
   const percent = Math.min(100, Math.max(0, request.progress.percent));
+  const StatusIcon = request.status === "success" ? CheckCircle2 : request.status === "failed" ? XCircle : Clock3;
 
   return (
-    <div className="rounded-lg border border-info-border bg-info-subtle/40 p-4" aria-live="polite">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-xs font-medium text-text">{actionLabel(request.action)}</h3>
-            <span className={`ui-badge ${statusClassName}`}>{requestStatusLabel(request)}</span>
+    <motion.div
+      layout
+      initial={reduceMotion ? false : { opacity: 0, height: 0, y: -8 }}
+      animate={{ opacity: 1, height: "auto", y: 0 }}
+      exit={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, y: -8 }}
+      transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+      className="overflow-hidden rounded-xl border border-info-border bg-info-subtle/45 p-3.5"
+      aria-live="polite"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <StatusIcon className="h-3.5 w-3.5 text-info" aria-hidden="true" />
+            <h3 className="truncate text-xs font-semibold text-text">{actionLabel(request.action)}</h3>
+            <span className={`ui-badge text-[10px] ${statusClassName}`}>{requestStatusLabel(request)}</span>
           </div>
-          <p className="mt-1 text-xs text-text-subtle">
-            {isActive ? "Updates automatically while the Pi processes each UTC day." : `Requested by ${request.requested_by} · ${formatDateTime(request.completed_at ?? request.created_at)}`}
-          </p>
+          <p className="mt-1 text-[10px] text-text-subtle">{isActive ? "Auto-refreshing every 5 seconds" : formatDateTime(request.completed_at ?? request.created_at)}</p>
         </div>
-        <span className="font-mono text-lg font-semibold text-text">{percent}%</span>
+        <span className="font-mono text-xl font-semibold leading-none text-text">{percent}%</span>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-hover" aria-label={`Backup request progress ${percent}%`}>
-        <div className={`h-full rounded-full transition-[width] duration-500 ease-out ${request.status === "failed" ? "bg-danger" : request.status === "success" ? "bg-success" : "bg-info"}`} style={{ width: `${percent}%` }} />
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface" aria-label={`Backup request progress ${percent}%`}>
+        <motion.div
+          initial={{ width: 0 }}
+          animate={{ width: `${percent}%` }}
+          transition={{ duration: reduceMotion ? 0 : 0.5, ease: "easeOut" }}
+          className={`h-full rounded-full ${request.status === "failed" ? "bg-danger" : request.status === "success" ? "bg-success" : "bg-info"}`}
+        />
       </div>
-      <div className="mt-2 flex flex-wrap justify-between gap-2 text-[11px] text-text-subtle">
-        <span>{formatNumber(request.progress.completed_days)} / {formatNumber(request.progress.total_days)} days completed</span>
-        <span>{request.progress.current_day ? `Current day ${formatDay(request.progress.current_day)}` : request.status === "success" ? "No days required" : "Waiting for Pi"}</span>
+      <div className="mt-2 flex flex-wrap justify-between gap-2 text-[10px] text-text-subtle">
+        <span>{formatNumber(request.progress.completed_days)} / {formatNumber(request.progress.total_days)} days</span>
+        <span>{request.progress.current_day ? formatDay(request.progress.current_day) : request.status === "success" ? "No days required" : "Waiting for Pi"}</span>
       </div>
-      {request.error && <p className="mt-3 break-words text-xs text-danger">{request.error}</p>}
-    </div>
+      {request.error && <p className="mt-2 break-words text-[11px] leading-4 text-danger">{request.error}</p>}
+    </motion.div>
   );
 }
 
-function BackupStat({ icon: Icon, label, value, detail }: { icon: typeof Archive; label: string; value: string; detail: string }) {
+function BackupStat({ icon: Icon, label, value, detail, tone }: { icon: LucideIcon; label: string; value: string; detail: string; tone: StatTone }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface-subtle p-3 transition-colors duration-200 hover:border-border-strong hover:bg-surface-hover">
-      <div className="flex items-center gap-2">
-        <span className="rounded-md bg-primary-subtle p-2 text-primary"><Icon className="h-4 w-4" aria-hidden="true" /></span>
-        <span className="min-w-0">
-          <span className="block text-xs font-medium text-text-muted">{label}</span>
-          <span className="block truncate font-mono text-base text-text" title={value}>{value}</span>
-        </span>
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ duration: 0.16 }}
+      className="group min-w-0 rounded-xl border border-border bg-surface p-3.5 shadow-sm transition-colors duration-200 hover:border-border-strong hover:shadow-md"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${toneClasses[tone]}`}><Icon className="h-4 w-4" aria-hidden="true" /></span>
+        <ArrowUpRight className="h-3.5 w-3.5 text-text-subtle opacity-0 transition-opacity duration-200 group-hover:opacity-100" aria-hidden="true" />
       </div>
-      <p className="mt-2 truncate text-[11px] text-text-subtle" title={detail}>{detail}</p>
+      <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.12em] text-text-subtle">{label}</p>
+      <p className="mt-1 truncate font-mono text-lg font-semibold leading-6 tracking-tight text-text" title={value}>{value}</p>
+      <p className="mt-1 truncate text-[11px] text-text-muted" title={detail}>{detail}</p>
+    </motion.div>
+  );
+}
+
+function MiniFact({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface px-2.5 py-2">
+      <div className="flex items-center gap-1.5 text-[10px] text-text-subtle"><Icon className="h-3 w-3 text-primary" aria-hidden="true" />{label}</div>
+      <p className="mt-1 font-mono text-[11px] font-medium text-text">{value}</p>
     </div>
   );
 }
 
 function LegendDot({ className, label }: { className: string; label: string }) {
-  return <span className="inline-flex items-center gap-1"><span className={`h-2 w-2 rounded-full ${className}`} aria-hidden="true" />{label}</span>;
+  return <span className="inline-flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${className}`} aria-hidden="true" />{label}</span>;
 }
