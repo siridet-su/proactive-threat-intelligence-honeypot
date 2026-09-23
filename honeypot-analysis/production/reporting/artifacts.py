@@ -2326,6 +2326,46 @@ def write_pdf_report(
     else:
         story.append(_p("No deduplicated command-level Model1 advisory is available.", body))
 
+    story.append(_p("Model2 exact-session shadow evidence", h2))
+    model2 = ensemble.get("model2") if isinstance(ensemble, dict) else None
+    model2 = model2 if isinstance(model2, dict) else {}
+    binding = model2.get("binding") if isinstance(model2.get("binding"), dict) else {}
+    model2_bound = (
+        model2.get("available") is True
+        and str(binding.get("session_id") or "") == str(session_id)
+        and all(str(binding.get(key) or "").strip()
+                for key in ("run_id", "measurement_id", "episode_id"))
+    )
+    if model2_bound:
+        story.append(_p(
+            "A Model2 shadow result is bound to this session. It is corroboration context only; "
+            "it does not create an observed finding or authorize response.", body,
+        ))
+        model2_rows = [["Field", "Stored value"]]
+        for label, selected in (
+            ("Availability", model2.get("availability")),
+            ("Status", model2.get("status")),
+            ("Artifact SHA-256", model2.get("artifact_sha256")),
+            ("Run ID", binding.get("run_id")),
+            ("Measurement ID", binding.get("measurement_id")),
+            ("Episode ID", binding.get("episode_id")),
+        ):
+            model2_rows.append([label, _value(selected, limit=128)])
+        story.append(_table(model2_rows, [5.0 * cm, 12.0 * cm]))
+        unavailable_heads = model2.get("unavailable_heads")
+        if isinstance(unavailable_heads, dict) and unavailable_heads:
+            for technique, reason in list(sorted(unavailable_heads.items()))[:8]:
+                story.append(_p(
+                    f"Unavailable Model2 head {str(technique)[:32]}: {str(reason)[:128]}",
+                    small,
+                ))
+    else:
+        story.append(_p(
+            "No complete exact-session Model2 binding was available for this report. "
+            "Model1 remains the primary classifier; Model2 corroboration is not claimed.",
+            body,
+        ))
+
     story.append(_p(f"2.{4 + cwd_section_offset} Trusted Technique Mappings", h2))
     sources = session_payload.get("ttp_sources", {})
     technique_rows = [[

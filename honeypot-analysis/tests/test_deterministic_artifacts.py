@@ -151,6 +151,49 @@ def test_pdf_is_byte_deterministic(tmp_path: Path) -> None:
     or importlib.util.find_spec("pypdf") is None,
     reason="optional PDF renderer/parser unavailable",
 )
+def test_pdf_shows_only_exact_session_model2_binding(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    model2 = {
+        "available": True,
+        "availability": "PARTIAL",
+        "status": "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE_SHADOW",
+        "artifact_sha256": "a" * 64,
+        "binding": {
+            "session_id": session["session_id"],
+            "run_id": "run-fixture-1",
+            "measurement_id": "measurement-fixture-1",
+            "episode_id": "episode-fixture-1",
+        },
+        "unavailable_heads": {"T1046": "t1046_not_observed"},
+    }
+    session["ensemble_evidence"] = {
+        "session_id": session["session_id"], "model2": model2,
+    }
+    bound_dir = tmp_path / "bound"
+    bound_dir.mkdir(mode=0o700)
+    bound_pdf = Path(write_pdf_report(report, session, bound_dir))
+    bound_text = "\n".join(page.extract_text() or "" for page in PdfReader(bound_pdf).pages)
+    assert "Model2 exact-session shadow evidence" in bound_text
+    assert "PARTIAL" in bound_text
+    assert "run-fixture-1" in bound_text
+    assert "T1046" in bound_text
+
+    model2["binding"]["session_id"] = "another-session"
+    unbound_dir = tmp_path / "unbound"
+    unbound_dir.mkdir(mode=0o700)
+    unbound_pdf = Path(write_pdf_report(report, session, unbound_dir))
+    unbound_text = "\n".join(page.extract_text() or "" for page in PdfReader(unbound_pdf).pages)
+    assert "No complete exact-session Model2 binding" in unbound_text
+    assert "run-fixture-1" not in unbound_text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
 def test_pdf_keeps_bounded_cwd_and_otx_pulse_context(tmp_path: Path) -> None:
     from pypdf import PdfReader
 
