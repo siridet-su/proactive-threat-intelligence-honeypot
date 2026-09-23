@@ -132,6 +132,77 @@ export interface HardwareHistoryResponse {
   series: HardwareHistorySeries[];
 }
 
+export type HardwareBackupDayStatus = "success" | "failed" | "running" | "missing";
+
+export interface HardwareBackupDay {
+  day: string;
+  status: HardwareBackupDayStatus;
+  document_count: number | null;
+  archive_bytes: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  object_name: string | null;
+  error: string | null;
+}
+
+export interface HardwareBackupStatus {
+  collection: string;
+  generated_at: string;
+  expected_window: { from: string; to: string; days: number };
+  summary: {
+    expected_days: number;
+    successful_days: number;
+    failed_days: number;
+    running_days: number;
+    missing_days: number;
+    archived_documents: number;
+    archive_bytes: number;
+    latest_success_day: string | null;
+    last_started_at: string | null;
+    last_completed_at: string | null;
+    latest_run_status: HardwareBackupDayStatus | null;
+  };
+  days: HardwareBackupDay[];
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || (typeof value === "number" && Number.isFinite(value));
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
+}
+
+function isHardwareBackupDay(value: unknown): value is HardwareBackupDay {
+  if (!isRecord(value)) return false;
+  return typeof value.day === "string" &&
+    (value.status === "success" || value.status === "failed" || value.status === "running" || value.status === "missing") &&
+    isNullableNumber(value.document_count) && isNullableNumber(value.archive_bytes) &&
+    isNullableString(value.started_at) && isNullableString(value.completed_at) &&
+    isNullableString(value.object_name) && isNullableString(value.error);
+}
+
+export function isHardwareBackupStatus(value: unknown): value is HardwareBackupStatus {
+  if (!isRecord(value) || typeof value.collection !== "string" || typeof value.generated_at !== "string" || !isRecord(value.expected_window) || !isRecord(value.summary) || !Array.isArray(value.days)) {
+    return false;
+  }
+  const expectedWindow = value.expected_window;
+  const summary = value.summary;
+  return typeof expectedWindow.from === "string" && typeof expectedWindow.to === "string" &&
+    typeof expectedWindow.days === "number" && Number.isFinite(expectedWindow.days) &&
+    typeof summary.expected_days === "number" && Number.isFinite(summary.expected_days) &&
+    typeof summary.successful_days === "number" && Number.isFinite(summary.successful_days) &&
+    typeof summary.failed_days === "number" && Number.isFinite(summary.failed_days) &&
+    typeof summary.running_days === "number" && Number.isFinite(summary.running_days) &&
+    typeof summary.missing_days === "number" && Number.isFinite(summary.missing_days) &&
+    typeof summary.archived_documents === "number" && Number.isFinite(summary.archived_documents) &&
+    typeof summary.archive_bytes === "number" && Number.isFinite(summary.archive_bytes) &&
+    isNullableString(summary.latest_success_day) && isNullableString(summary.last_started_at) &&
+    isNullableString(summary.last_completed_at) &&
+    (summary.latest_run_status === null || summary.latest_run_status === "success" || summary.latest_run_status === "failed" || summary.latest_run_status === "running" || summary.latest_run_status === "missing") &&
+    value.days.every(isHardwareBackupDay);
+}
+
 function isHardwareHistoryMetric(value: unknown): value is HardwareHistoryMetric {
   if (!isRecord(value)) return false;
   return ["min", "avg", "max"].every((key) => (
