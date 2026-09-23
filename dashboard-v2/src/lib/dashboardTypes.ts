@@ -77,17 +77,97 @@ export interface HardwareTelemetry extends JsonRecord {
   cpu_percent?: number | string | null;
   /** Current percentage per logical CPU, ordered by core index. */
   cpu_core_percent?: number[] | null;
+  /** Canonical memory pressure percentage: (total - available) / total. */
+  mem_pressure_percent?: number | string | null;
+  /** @deprecated Kept only so older hardware_live.v2 documents remain readable. */
   mem_percent?: number | string | null;
   mem_total_bytes?: number | string | null;
   mem_available_bytes?: number | string | null;
+  /** @deprecated Kept only so older hardware_live.v2 documents remain readable. */
   mem_used_bytes?: number | string | null;
   disk_percent?: number | string | null;
   disk_total_bytes?: number | string | null;
   disk_free_bytes?: number | string | null;
+  /** @deprecated Derived from disk_total_bytes - disk_free_bytes in new live data. */
   disk_used_bytes?: number | string | null;
   temperature?: number | string | null;
   net_wlan0_rx_mbps?: number | string | null;
   net_wlan0_tx_mbps?: number | string | null;
+}
+
+export const hardwareHistoryMetricNames = [
+  "cpu_percent",
+  "mem_pressure_percent",
+  "disk_percent",
+  "temperature",
+  "net_wlan0_rx_mbps",
+  "net_wlan0_tx_mbps",
+] as const;
+
+export type HardwareHistoryMetricName = typeof hardwareHistoryMetricNames[number];
+
+export interface HardwareHistoryMetric {
+  min: number;
+  avg: number;
+  max: number;
+}
+
+export type HardwareHistoryMetrics = Partial<Record<HardwareHistoryMetricName, HardwareHistoryMetric>>;
+
+export interface HardwareHistoryPoint {
+  timestamp: string;
+  sample_count: number;
+  metrics: HardwareHistoryMetrics;
+}
+
+export interface HardwareHistorySeries {
+  sensor_id: string;
+  points: HardwareHistoryPoint[];
+}
+
+export interface HardwareHistoryResponse {
+  from: string;
+  to: string;
+  bucket_seconds: number;
+  series: HardwareHistorySeries[];
+}
+
+function isHardwareHistoryMetric(value: unknown): value is HardwareHistoryMetric {
+  if (!isRecord(value)) return false;
+  return ["min", "avg", "max"].every((key) => (
+    typeof value[key] === "number" && Number.isFinite(value[key])
+  ));
+}
+
+export function isHardwareHistoryResponse(value: unknown): value is HardwareHistoryResponse {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.from !== "string" ||
+    typeof value.to !== "string" ||
+    typeof value.bucket_seconds !== "number" ||
+    !Number.isFinite(value.bucket_seconds) ||
+    !Array.isArray(value.series)
+  ) {
+    return false;
+  }
+
+  return value.series.every((series) => {
+    if (!isRecord(series) || typeof series.sensor_id !== "string" || !Array.isArray(series.points)) {
+      return false;
+    }
+    return series.points.every((point) => {
+      if (
+        !isRecord(point) ||
+        typeof point.timestamp !== "string" ||
+        typeof point.sample_count !== "number" ||
+        !Number.isFinite(point.sample_count) ||
+        !isRecord(point.metrics)
+      ) {
+        return false;
+      }
+      return Object.values(point.metrics).every(isHardwareHistoryMetric);
+    });
+  });
 }
 
 export interface HardwareChartRecord extends HardwareTelemetry {
@@ -388,6 +468,7 @@ export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry 
   if (!isRecord(value)) return false;
   return hardwareTimestampEpoch(value.timestamp) !== null && isHardwareMetric(value.cpu_percent) &&
     isHardwareMetricList(value.cpu_core_percent) &&
+    isHardwareMetric(value.mem_pressure_percent) &&
     isHardwareMetric(value.mem_percent) && isHardwareMetric(value.disk_percent) &&
     isHardwareMetric(value.mem_total_bytes) && isHardwareMetric(value.mem_available_bytes) && isHardwareMetric(value.mem_used_bytes) &&
     isHardwareMetric(value.disk_total_bytes) && isHardwareMetric(value.disk_free_bytes) && isHardwareMetric(value.disk_used_bytes) &&
@@ -448,6 +529,7 @@ export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRe
     ...metric,
     cpu_percent: numericHardwareMetric(metric.cpu_percent),
     cpu_core_percent: numericHardwareMetricList(metric.cpu_core_percent),
+    mem_pressure_percent: numericHardwareMetric(metric.mem_pressure_percent),
     mem_percent: numericHardwareMetric(metric.mem_percent),
     mem_total_bytes: numericHardwareMetric(metric.mem_total_bytes),
     mem_available_bytes: numericHardwareMetric(metric.mem_available_bytes),

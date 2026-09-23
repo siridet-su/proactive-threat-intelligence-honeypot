@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   calculateTwoDimensionalFit,
@@ -86,6 +93,7 @@ export interface UseTopologyViewportReturn {
   zoomIn: (delta?: number) => void;
   zoomOut: (delta?: number) => void;
   markUserAdjusted: () => void;
+  holdViewportSteady: (durationMs?: number) => void;
   centerMapOn: (position: LabelPosition) => void;
   calculateFitViewport: (
     surface: HTMLDivElement,
@@ -131,6 +139,23 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
   const hasUserManuallyAdjustedViewRef = useRef(false);
   const prevSurfaceSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const viewportLockUntilRef = useRef(0);
+  const fitMeasurementRef = useRef({
+    automaticCalloutPositions,
+    nodeElementBounds,
+    calloutElementBounds,
+  });
+
+  // Intrinsic card measurements change when a source disclosure opens or closes.
+  // Keep those measurements current for explicit Fit and real surface resizes without
+  // changing calculateFitViewport's identity and restarting the auto-fit effect.
+  useLayoutEffect(() => {
+    fitMeasurementRef.current = {
+      automaticCalloutPositions,
+      nodeElementBounds,
+      calloutElementBounds,
+    };
+  }, [automaticCalloutPositions, calloutElementBounds, nodeElementBounds]);
 
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = clampZoom(value);
@@ -145,6 +170,11 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
 
   const markUserAdjusted = useCallback(() => {
     hasUserManuallyAdjustedViewRef.current = true;
+  }, []);
+
+  const holdViewportSteady = useCallback((durationMs = 350) => {
+    hasUserManuallyAdjustedViewRef.current = true;
+    viewportLockUntilRef.current = Math.max(viewportLockUntilRef.current, Date.now() + durationMs);
   }, []);
 
   const zoomIn = useCallback((delta = 0.1) => {
@@ -172,15 +202,16 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       const baseHeight = plane.offsetHeight || 500;
       const effectiveNodes = overrideNodes ?? nodePositions;
       const effectiveLabels = overrideLabels ?? labelPositions;
+      const fitMeasurements = fitMeasurementRef.current;
 
       const bounds = calculateWorldBounds(
         automaticGraphNodes,
         graphCallouts,
         effectiveNodes,
         effectiveLabels,
-        automaticCalloutPositions,
-        nodeElementBounds,
-        calloutElementBounds,
+        fitMeasurements.automaticCalloutPositions,
+        fitMeasurements.nodeElementBounds,
+        fitMeasurements.calloutElementBounds,
       );
 
       return calculateTwoDimensionalFit(bounds, {
@@ -196,12 +227,9 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       });
     },
     [
-      automaticCalloutPositions,
       automaticGraphNodes,
-      calloutElementBounds,
       graphCallouts,
       labelPositions,
-      nodeElementBounds,
       nodePositions,
       reserveMinimapSpace,
     ],
@@ -378,7 +406,8 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       const fit = calculateFitViewport(surface, plane);
       setFitZoom(fit?.zoom ?? null);
 
-      if (!hasUserManuallyAdjustedViewRef.current) {
+      const viewportIsLocked = Date.now() < viewportLockUntilRef.current;
+      if (!viewportIsLocked && !hasUserManuallyAdjustedViewRef.current) {
         if (fit) {
           if (
             Math.abs(panRef.current.x - fit.pan.x) > 1 ||
@@ -391,7 +420,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
             setZoom(fit.zoom);
           }
         }
-      } else if (prevSurfaceSizeRef.current) {
+      } else if (!viewportIsLocked && prevSurfaceSizeRef.current) {
         const deltaW = currentW - prevSurfaceSizeRef.current.w;
         const deltaH = currentH - prevSurfaceSizeRef.current.h;
         if (Math.abs(deltaW) > 0 || Math.abs(deltaH) > 0) {
@@ -425,6 +454,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
     zoomIn,
     zoomOut,
     markUserAdjusted,
+    holdViewportSteady,
     centerMapOn,
     calculateFitViewport,
     resetViewport,

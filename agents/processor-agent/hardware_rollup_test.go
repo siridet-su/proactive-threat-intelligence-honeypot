@@ -12,28 +12,29 @@ func hardwareMessage(id string, timestamp int64, sensorID string, cpu string) re
 	return redis.XMessage{
 		ID: id,
 		Values: map[string]any{
-			"timestamp":           timestamp,
-			"sensor_id":           sensorID,
-			"cpu_percent":         cpu,
-			"cpu_core_percent":    "[12.5,25.0]",
-			"mem_percent":         "25.0",
-			"mem_total_bytes":     "8000",
-			"mem_available_bytes": "6000",
-			"mem_used_bytes":      "2000",
-			"disk_percent":        "40.0",
-			"disk_total_bytes":    "10000",
-			"disk_free_bytes":     "6000",
-			"disk_used_bytes":     "4000",
-			"temperature":         "52.0",
-			"net_wlan0_rx_mbps":   "0.5",
-			"net_wlan0_tx_mbps":   "0.25",
-			"net_bytes_recv":      "1000",
-			"network_interfaces":  "wlan0",
+			"timestamp":            timestamp,
+			"sensor_id":            sensorID,
+			"cpu_percent":          cpu,
+			"cpu_core_percent":     "[12.5,25.0]",
+			"mem_total_bytes":      "8000",
+			"mem_available_bytes":  "6000",
+			"mem_pressure_percent": "25.0",
+			"disk_percent":         "40.0",
+			"disk_total_bytes":     "10000",
+			"disk_free_bytes":      "6000",
+			"disk_used_bytes":      "4000",
+			"temperature":          "52.0",
+			"net_wlan0_rx_mbps":    "0.5",
+			"net_wlan0_tx_mbps":    "0.25",
+			"net_tailscale0_mbps":  "99",
+			"net_zerotier0_mbps":   "88",
+			"net_bytes_recv":       "1000",
+			"network_interfaces":   "wlan0",
 		},
 	}
 }
 
-func TestBuildHardwareMinuteRollupsAggregatesAndKeepsLatest(t *testing.T) {
+func TestBuildHardwareMinuteRollupsAggregatesCanonicalFields(t *testing.T) {
 	bucket := time.Date(2026, 9, 10, 1, 2, 0, 0, time.UTC)
 	messages := []redis.XMessage{
 		hardwareMessage("1-0", bucket.Add(5*time.Second).Unix(), "pi-1", "10"),
@@ -52,14 +53,22 @@ func TestBuildHardwareMinuteRollupsAggregatesAndKeepsLatest(t *testing.T) {
 	if document["sample_count"] != int64(2) {
 		t.Fatalf("sample_count = %#v, want 2", document["sample_count"])
 	}
-	if document["cpu_percent"] != float64(30) {
-		t.Fatalf("latest cpu_percent = %#v, want 30", document["cpu_percent"])
+	if _, exists := document["cpu_percent"]; exists {
+		t.Fatal("minute rollup must not copy latest raw fields to the top level")
 	}
-	if document["timestamp"] != bucket || document["bucket_end"] != bucket.Add(time.Minute) {
+	if document["timestamp"] != bucket {
 		t.Fatalf("bucket timestamps are incorrect: %#v", document)
+	}
+	for _, key := range []string{"bucket_end", "resolution_seconds"} {
+		if _, exists := document[key]; exists {
+			t.Fatalf("redundant bucket metadata %q should not be stored: %#v", key, document)
+		}
 	}
 	if document["expires_at"] != bucket.Add(30*24*time.Hour) {
 		t.Fatalf("expires_at = %#v", document["expires_at"])
+	}
+	if document["schema_version"] != "hardware_metrics_1m.v2" {
+		t.Fatalf("schema version = %#v", document["schema_version"])
 	}
 
 	summary, ok := document["rollup"].(bson.M)
@@ -75,6 +84,12 @@ func TestBuildHardwareMinuteRollupsAggregatesAndKeepsLatest(t *testing.T) {
 	}
 	if _, exists := summary["net_bytes_recv"]; exists {
 		t.Fatal("monotonic counters must not be averaged")
+	}
+	if _, exists := summary["net_tailscale0_mbps"]; exists {
+		t.Fatal("virtual-interface rates must not be stored in the canonical rollup")
+	}
+	if _, exists := summary["net_zerotier0_mbps"]; exists {
+		t.Fatal("virtual-interface rates must not be stored in the canonical rollup")
 	}
 }
 
@@ -119,21 +134,29 @@ func TestBuildHardwareLiveDocumentUsesFixedRingSlot(t *testing.T) {
 	if document["_id"] != "pi-1:5" || document["slot"] != int64(5) {
 		t.Fatalf("unexpected ring identity: %#v", document)
 	}
-	if document["timestamp"] != at || document["sample_unix"] != at.Unix() {
+	if document["timestamp"] != at {
 		t.Fatalf("unexpected sample time: %#v", document)
+	}
+	if _, exists := document["sample_unix"]; exists {
+		t.Fatal("sample_unix duplicates timestamp and must not be stored")
 	}
 	if document["cpu_percent"] != float64(12.5) {
 		t.Fatalf("cpu_percent = %#v, want 12.5", document["cpu_percent"])
 	}
-	if document["schema_version"] != "hardware_live.v2" {
+	if document["schema_version"] != "hardware_live.v3" {
 		t.Fatalf("schema version = %#v", document["schema_version"])
 	}
 	cores, ok := document["cpu_core_percent"].([]float64)
 	if !ok || len(cores) != 2 || cores[0] != 12.5 || cores[1] != 25 {
 		t.Fatalf("per-core CPU payload = %#v", document["cpu_core_percent"])
 	}
-	if document["mem_total_bytes"] != float64(8000) || document["mem_available_bytes"] != float64(6000) || document["disk_total_bytes"] != float64(10000) || document["disk_free_bytes"] != float64(6000) {
+	if document["mem_total_bytes"] != float64(8000) || document["mem_available_bytes"] != float64(6000) || document["mem_pressure_percent"] != float64(25) || document["disk_total_bytes"] != float64(10000) || document["disk_free_bytes"] != float64(6000) {
 		t.Fatalf("realtime capacity fields missing: %#v", document)
+	}
+	for _, key := range []string{"mem_percent", "mem_used_bytes", "disk_used_bytes"} {
+		if _, exists := document[key]; exists {
+			t.Fatalf("redundant live field %q should not be stored: %#v", key, document)
+		}
 	}
 	if _, exists := document["net_bytes_recv"]; exists {
 		t.Fatal("raw network counters must not be copied to hardware_live")
@@ -148,5 +171,25 @@ func TestBuildHardwareLiveDocumentUsesFixedRingSlot(t *testing.T) {
 	)
 	if !ok || next["_id"] != document["_id"] {
 		t.Fatalf("ring slot was not reused after 30 seconds: %#v", next)
+	}
+}
+
+func TestBuildHardwareLiveDocumentDerivesPressureForOlderSamples(t *testing.T) {
+	at := time.Unix(1_789_002_125, 0).UTC()
+	message := hardwareMessage("1-0", at.Unix(), "pi-1", "12.5")
+	delete(message.Values, "mem_pressure_used_bytes")
+	delete(message.Values, "mem_pressure_percent")
+	message.Values["mem_percent"] = "99.0"
+	message.Values["mem_used_bytes"] = "1234"
+
+	document, ok := buildHardwareLiveDocument(message, 30)
+	if !ok {
+		t.Fatal("valid older hardware sample was rejected")
+	}
+	if document["mem_pressure_percent"] != float64(25) {
+		t.Fatalf("memory pressure fallback = %#v", document)
+	}
+	if _, exists := document["mem_percent"]; exists {
+		t.Fatal("legacy memory percentage must not enter the live projection")
 	}
 }

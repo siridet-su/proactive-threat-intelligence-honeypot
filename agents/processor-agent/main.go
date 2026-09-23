@@ -45,7 +45,6 @@ type Config struct {
 	MongoURI                      string
 	MongoDB                       string
 	EventRetention                time.Duration
-	HardwareMetricsRetention      time.Duration
 	HardwareLiveSlots             int
 	HardwareRollupRetention       time.Duration
 	HardwareRollupBackfillMinutes int
@@ -128,6 +127,13 @@ func main() {
 }
 
 func auditProjectionReconciliationLoop(ctx context.Context, mw *MongoWriter, retention time.Duration) {
+	reconcile := func() {
+		if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+			log.Printf("CWD audit projection reconciliation deferred: %v", err)
+		}
+	}
+	reconcile()
+
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -135,9 +141,7 @@ func auditProjectionReconciliationLoop(ctx context.Context, mw *MongoWriter, ret
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
-				log.Printf("CWD audit projection reconciliation deferred: %v", err)
-			}
+			reconcile()
 		}
 	}
 }
@@ -146,7 +150,6 @@ func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
 	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
 	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
-	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
 	hardwareLiveSlots := getenvPositiveInt("HARDWARE_LIVE_SLOTS", defaultHardwareLiveSlots)
 	hardwareRollupRetention := getenvPositiveDuration("HARDWARE_ROLLUP_RETENTION", defaultHardwareRollupRetention)
 	hardwareRollupBackfillMinutes := getenvPositiveInt("HARDWARE_ROLLUP_BACKFILL_MINUTES", defaultHardwareRollupBackfillMinutes)
@@ -165,7 +168,6 @@ func loadConfig() Config {
 		MongoURI:                      getenv("MONGO_URI", ""),
 		MongoDB:                       getenv("MONGO_DATABASE", "honeypot_db"),
 		EventRetention:                eventRetention,
-		HardwareMetricsRetention:      hardwareMetricsRetention,
 		HardwareLiveSlots:             hardwareLiveSlots,
 		HardwareRollupRetention:       hardwareRollupRetention,
 		HardwareRollupBackfillMinutes: hardwareRollupBackfillMinutes,
@@ -889,9 +891,6 @@ func newMongoWriter(ctx context.Context, cfg Config) (*MongoWriter, error) {
 	if err := mw.ensureIndexes(ctx); err != nil {
 		return nil, fmt.Errorf("ensure mongo indexes: %w", err)
 	}
-	if err := mw.backfillCwdAuditProjection(ctx, cfg.EventRetention); err != nil {
-		return nil, fmt.Errorf("backfill CWD audit projection: %w", err)
-	}
 	return mw, nil
 }
 
@@ -919,14 +918,6 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 	if err := ensureIndexModels(ctx, mw.db.Collection("events"), indexes); err != nil {
-		return err
-	}
-
-	hardwareIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
-		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
-	}
-	if err := ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes); err != nil {
 		return err
 	}
 

@@ -72,6 +72,7 @@ export async function assertNoBrowserFailures(page) {
 
 export async function installApiFixtures(page, {
   deferDirectLookup = false,
+  multiSessionLive = false,
   transitionReplay = false,
 } = {}) {
   await page.context().addCookies([{
@@ -82,6 +83,24 @@ export async function installApiFixtures(page, {
   }]);
 
   const liveSession = activeSession();
+  const clusteredLiveSessions = multiSessionLive
+    ? [
+        { ...liveSession, cwdState: { ...liveSession.cwdState, path: "/etc" }, auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 2 } },
+        {
+          ...liveSession,
+          sessionId: "live-session-two",
+          cwdState: { ...liveSession.cwdState, path: "/tmp", sourceEventId: "live-session-two-cwd" },
+          auditSummary: { visitedPaths: ["/tmp"], homeOnly: false, eventCount: 2 },
+        },
+        {
+          ...liveSession,
+          sessionId: "live-other-source",
+          sourceIp: "192.0.2.1",
+          cwdState: { ...liveSession.cwdState, path: "/test", sourceEventId: "live-other-source-cwd" },
+          auditSummary: { visitedPaths: ["/test"], homeOnly: false, eventCount: 1 },
+        },
+      ]
+    : [liveSession];
   const defaultClosedSession = closedSession("closed-session");
   const deepHop = {
     id: "deep-hop",
@@ -163,8 +182,15 @@ export async function installApiFixtures(page, {
     },
   ];
   const snapshot = {
-    nodes: [],
-    sessions: [liveSession],
+    nodes: multiSessionLive
+      ? [
+          { path: "/", parentPath: null, depth: 0, sessionIds: clusteredLiveSessions.map((session) => session.sessionId), observedAt: liveSession.cwdState.observedAt },
+          { path: "/etc", parentPath: "/", depth: 1, sessionIds: [liveSession.sessionId], observedAt: liveSession.cwdState.observedAt },
+          { path: "/tmp", parentPath: "/", depth: 1, sessionIds: ["live-session-two"], observedAt: liveSession.cwdState.observedAt },
+          { path: "/test", parentPath: "/", depth: 1, sessionIds: ["live-other-source"], observedAt: liveSession.cwdState.observedAt },
+        ]
+      : [],
+    sessions: clusteredLiveSessions,
     recentClosedSessions: [defaultClosedSession],
     truncated: false,
     generatedAt: "2026-09-19T00:00:00.000Z",

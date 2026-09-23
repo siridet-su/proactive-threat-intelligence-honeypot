@@ -73,6 +73,18 @@ describe("dashboardTypes.ts - Type Guards", () => {
       expect(typeof formatted.time).toBe("string"); // "19:00:00" (ขึ้นอยู่กับ Timezone)
       expect(formatted.timestampEpoch).toBeGreaterThan(0);
     });
+
+    it("ควรรองรับ canonical memory fields ของ hardware_live.v3", () => {
+      const canonicalTelemetry = {
+        timestamp: "2026-09-16T12:00:00Z",
+        mem_total_bytes: "8000",
+        mem_available_bytes: "6000",
+        mem_pressure_percent: "25.0",
+      };
+      expect(isHardwareTelemetry(canonicalTelemetry)).toBe(true);
+      const formatted = formatHardwareMetric(canonicalTelemetry);
+      expect(formatted.mem_pressure_percent).toBe(25);
+    });
   });
 
   describe("Stream Message Parsers", () => {

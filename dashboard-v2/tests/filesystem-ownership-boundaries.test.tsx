@@ -131,6 +131,7 @@ describe("FA-012 ownership boundaries", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     act(() => root.unmount());
     container.remove();
   });
@@ -274,5 +275,72 @@ describe("FA-012 ownership boundaries", () => {
 
     expect(container.textContent).toContain("No active honeypot sessions");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("observes rendered nodes and source callouts so connector bounds follow disclosure resizing", async () => {
+    const observedElements: Element[] = [];
+    class TrackingResizeObserver {
+      constructor() {}
+      observe(target: Element) { observedElements.push(target); }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", TrackingResizeObserver);
+    const sessions: FilesystemTopologySession[] = [
+      {
+        ...session,
+        sessionId: "cluster-one",
+        sourceIp: "192.0.2.44",
+        cwdState: { ...session.cwdState, path: "/etc" },
+      },
+      {
+        ...session,
+        sessionId: "cluster-two",
+        sourceIp: "192.0.2.44",
+        cwdState: { ...session.cwdState, path: "/tmp" },
+      },
+    ];
+
+    await act(async () => {
+      root.render(createElement(TopologyCanvas, {
+        snapshot: {
+          nodes: [
+            { path: "/", parentPath: null, depth: 0, sessionIds: ["cluster-one", "cluster-two"], observedAt: null },
+            { path: "/etc", parentPath: "/", depth: 1, sessionIds: ["cluster-one"], observedAt: null },
+            { path: "/tmp", parentPath: "/", depth: 1, sessionIds: ["cluster-two"], observedAt: null },
+          ],
+          sessions,
+          recentClosedSessions: [],
+          truncated: false,
+          generatedAt: "2026-09-19T00:00:00.000Z",
+          latestTelemetryAt: "2026-09-19T00:00:00.000Z",
+        },
+        regionStatus: "ready",
+        streamState: "live",
+        freshnessState: {
+          classification: "fresh",
+          label: "Live",
+          detail: "Authoritative telemetry is current.",
+          badgeClass: "",
+          dotClass: "",
+          isDegraded: false,
+          isStale: false,
+          telemetryAgeMs: 0,
+          snapshotReceiptAgeMs: 0,
+          retrievalAgeMs: 0,
+          telemetryStatus: "valid",
+        },
+        selectedSessionId: "cluster-one",
+        selectedPath: "/etc",
+        onSelectSession: () => {},
+        onSelectPath: () => {},
+        staleThresholdMs: 30_000,
+        presentationContext: { mode: "live" },
+      }));
+      await Promise.resolve();
+    });
+
+    expect(observedElements.some((element) => element.matches('button[aria-label^="Inspect directory"]'))).toBe(true);
+    expect(observedElements.some((element) => element.querySelector('button[aria-haspopup="listbox"]'))).toBe(true);
   });
 });

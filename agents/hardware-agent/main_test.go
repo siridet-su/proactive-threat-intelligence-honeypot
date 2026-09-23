@@ -39,7 +39,18 @@ func TestHardwareSensorIDPrefersConfiguredValue(t *testing.T) {
 	}
 }
 
-func TestAddMemoryMetricsPreservesLegacyAndDefinesPressureSemantics(t *testing.T) {
+func TestParseTemperatureOmitsInvalidSensorValues(t *testing.T) {
+	if got, ok := parseTemperature([]byte("42000\n")); !ok || got != 42 {
+		t.Fatalf("temperature = %v, ok=%v; want 42, true", got, ok)
+	}
+	for _, input := range [][]byte{nil, []byte(""), []byte("not-a-temperature")} {
+		if got, ok := parseTemperature(input); ok {
+			t.Fatalf("invalid temperature %q returned %v, want missing", input, got)
+		}
+	}
+}
+
+func TestAddMemoryMetricsUsesCanonicalPressureSemantics(t *testing.T) {
 	values := map[string]interface{}{}
 	memory := &mem.VirtualMemoryStat{
 		Total:       1000,
@@ -50,17 +61,16 @@ func TestAddMemoryMetricsPreservesLegacyAndDefinesPressureSemantics(t *testing.T
 
 	addMemoryMetrics(values, memory)
 
-	if values["mem_used_bytes"] != uint64(200) || values["mem_percent"] != "20.00" {
-		t.Fatalf("legacy metrics changed: %#v", values)
-	}
-	if values["mem_pressure_used_bytes"] != uint64(300) {
-		t.Fatalf("pressure used mismatch: %#v", values)
+	if values["mem_total_bytes"] != uint64(1000) || values["mem_available_bytes"] != uint64(700) {
+		t.Fatalf("capacity metrics changed: %#v", values)
 	}
 	if values["mem_pressure_percent"] != "30.00" {
 		t.Fatalf("pressure percent mismatch: %#v", values)
 	}
-	if values["mem_pressure_semantics"] != "total_minus_available" {
-		t.Fatalf("pressure semantics missing: %#v", values)
+	for _, key := range []string{"mem_used_bytes", "mem_percent", "mem_used_semantics", "mem_pressure_used_bytes", "mem_pressure_semantics"} {
+		if _, exists := values[key]; exists {
+			t.Fatalf("legacy/semantic field %q should not be emitted: %#v", key, values)
+		}
 	}
 }
 
@@ -82,12 +92,15 @@ func TestAddDiskMetricsIncludesCapacityAndFreeSpace(t *testing.T) {
 
 	addDiskMetrics(values, &disk.UsageStat{Total: 1_000, Free: 600, Used: 400, UsedPercent: 40})
 
-	if values["disk_total_bytes"] != uint64(1_000) || values["disk_free_bytes"] != uint64(600) || values["disk_used_bytes"] != uint64(400) || values["disk_percent"] != "40.00" {
+	if values["disk_total_bytes"] != uint64(1_000) || values["disk_free_bytes"] != uint64(600) || values["disk_percent"] != "40.00" {
 		t.Fatalf("disk metrics = %#v", values)
+	}
+	if _, exists := values["disk_used_bytes"]; exists {
+		t.Fatal("disk_used_bytes is derived and should not be emitted")
 	}
 }
 
-func TestAddInterfaceMetricsIncludesDocumentedCountersAndRates(t *testing.T) {
+func TestAddInterfaceMetricsIncludesCanonicalRates(t *testing.T) {
 	previous := psnet.IOCountersStat{
 		BytesRecv:   1000,
 		BytesSent:   2000,
@@ -109,16 +122,6 @@ func TestAddInterfaceMetricsIncludesDocumentedCountersAndRates(t *testing.T) {
 	addInterfaceMetrics(values, "net_wlan0_", current, &previous, 2)
 
 	want := map[string]interface{}{
-		"net_wlan0_rx_bytes_total":        uint64(1300),
-		"net_wlan0_tx_bytes_total":        uint64(2600),
-		"net_wlan0_rx_packets_total":      uint64(16),
-		"net_wlan0_tx_packets_total":      uint64(28),
-		"net_wlan0_rx_errors_total":       uint64(1),
-		"net_wlan0_tx_errors_total":       uint64(2),
-		"net_wlan0_rx_dropped_total":      uint64(3),
-		"net_wlan0_tx_dropped_total":      uint64(4),
-		"net_wlan0_rx_bytes_per_second":   "150.000",
-		"net_wlan0_tx_bytes_per_second":   "300.000",
 		"net_wlan0_rx_packets_per_second": "3.000",
 		"net_wlan0_tx_packets_per_second": "4.000",
 		"net_wlan0_rx_mbps":               "0.001200",
@@ -127,6 +130,22 @@ func TestAddInterfaceMetricsIncludesDocumentedCountersAndRates(t *testing.T) {
 	for key, expected := range want {
 		if observed, exists := values[key]; !exists || observed != expected {
 			t.Errorf("%s: got %#v, want %#v", key, observed, expected)
+		}
+	}
+	for _, key := range []string{
+		"net_wlan0_rx_bytes_total",
+		"net_wlan0_tx_bytes_total",
+		"net_wlan0_rx_packets_total",
+		"net_wlan0_tx_packets_total",
+		"net_wlan0_rx_errors_total",
+		"net_wlan0_tx_errors_total",
+		"net_wlan0_rx_dropped_total",
+		"net_wlan0_tx_dropped_total",
+		"net_wlan0_rx_bytes_per_second",
+		"net_wlan0_tx_bytes_per_second",
+	} {
+		if _, exists := values[key]; exists {
+			t.Fatalf("redundant network field %q should not be emitted: %#v", key, values)
 		}
 	}
 }

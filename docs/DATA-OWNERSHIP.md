@@ -14,7 +14,7 @@ last_verified: 2026-09-10
 | Redis streams | Go telemetry plane | processor and workers | transient, bounded queue |
 | Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | durable project record |
 | Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
-| Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard fallback and reporting | one upserted row per sensor/minute, 30-day TTL |
+| Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard history endpoint and reporting | one compact upserted row per sensor/minute, 30-day TTL |
 | Threat-intelligence results | Atlas enrichment records/projections | dashboard, cloud analysis | cache-aware with expiry |
 | Session analysis and report output | Atlas analysis/report records | dashboard and report export | evidence-linked, versioned |
 | Raw malware artifact | none by default | no runtime consumer | delete after hash/metadata capture unless explicitly quarantined |

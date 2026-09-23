@@ -1,5 +1,13 @@
 import { MongoClient } from "mongodb";
 
+export const DEFAULT_MONGODB_DATABASE = "honeypot_db";
+
+export function getMongoDatabaseName(): string {
+  return process.env.MONGODB_DATABASE?.trim()
+    || process.env.MONGO_DATABASE?.trim()
+    || DEFAULT_MONGODB_DATABASE;
+}
+
 const options = {
   // Atlas may need more than a few seconds to complete TLS across the current
   // network path. This remains bounded, while avoiding false failures at 5s.

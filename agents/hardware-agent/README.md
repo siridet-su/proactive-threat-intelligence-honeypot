@@ -9,14 +9,17 @@ compact min/avg/max document per sensor and minute into
 
 ## Network metrics
 
-Network counters and throughput are collected per interface. The production
-defaults are:
+Network availability and throughput are collected per configured interface. The
+recommended production configuration is:
 
 - `wlan0`: primary physical/uplink interface
-- `tailscale0`: private overlay used by management and external services
+- optional `tailscale0` or `zt*`: diagnostic-only overlay interface when it is
+  explicitly needed
 
-The two interfaces must not be summed. Tailscale traffic is carried by
-`wlan0`, so adding both would double-count that traffic.
+Overlay traffic is carried by the physical uplink, so overlay and `wlan0`
+throughput must not be summed. The live ring and minute history store only
+`wlan0` throughput; overlay fields are useful only for a short local
+diagnostic window.
 
 Loopback, Docker bridges, and veth interfaces are not collected by default.
 ZeroTier can be added temporarily during migration through configuration, but
@@ -27,7 +30,7 @@ is not part of the production defaults.
 The agent reads these optional environment variables:
 
 ```ini
-NETWORK_INTERFACES=wlan0,tailscale0
+NETWORK_INTERFACES=wlan0
 NETWORK_PRIMARY_INTERFACE=wlan0
 NETWORK_SAMPLE_SECONDS=1
 HARDWARE_SENSOR_ID=ubuntu-pi-server
@@ -47,38 +50,19 @@ For each configured interface, the agent emits:
 
 ```text
 net_<interface>_up
-net_<interface>_rx_bytes_total
-net_<interface>_tx_bytes_total
-net_<interface>_rx_packets_total
-net_<interface>_tx_packets_total
-net_<interface>_rx_errors_total
-net_<interface>_tx_errors_total
-net_<interface>_rx_dropped_total
-net_<interface>_tx_dropped_total
-net_<interface>_rx_bytes_per_second
-net_<interface>_tx_bytes_per_second
 net_<interface>_rx_mbps
 net_<interface>_tx_mbps
 net_<interface>_rx_packets_per_second
 net_<interface>_tx_packets_per_second
 ```
 
-Sample metadata:
-
-```text
-network_primary_interface
-network_interfaces
-network_sample_interval_seconds
-```
-
-The legacy fields `net_bytes_sent`, `net_bytes_recv`,
-`net_packets_sent`, and `net_packets_recv` remain available. They now
-represent only the configured primary physical interface instead of a sum of
-all interfaces.
-
-The first sample after process startup contains counters but no rates. A rate
-requires two samples. If a counter decreases because an interface restarted or
-wrapped, one rate sample is skipped rather than emitting an invalid spike.
+The agent keeps kernel counters only in process memory to calculate rates; it
+does not write monotonic counters, duplicate byte-per-second fields, interface
+configuration metadata, or the legacy unqualified network aliases to Redis.
+The first sample after process startup contains availability but no rates. A
+rate requires two samples. If a counter decreases because an interface
+restarted or wrapped, that rate family is skipped rather than emitting an
+invalid spike.
 
 Rates use the actual elapsed time between samples:
 
@@ -89,28 +73,19 @@ Mbps             = bytes_per_second * 8 / 1,000,000
 
 ## Memory semantics
 
-Existing dashboard fields are preserved to avoid silently changing production charts:
-
-```text
-mem_used_bytes
-mem_percent
-mem_used_semantics=legacy_total_minus_free_buffers_cached
-```
-
-For training and collector parity, use the explicit pressure fields instead:
+New samples use one explicit memory definition:
 
 ```text
 mem_total_bytes
 mem_available_bytes
-mem_pressure_used_bytes
 mem_pressure_percent
-mem_pressure_semantics=total_minus_available
 ```
 
-`gopsutil.VirtualMemory().Used` and Python `psutil.virtual_memory().used` do not have
-the same Linux semantics. The pressure fields deliberately calculate
-`total - available`, matching the experimental Python collector. Do not mix the
-legacy and pressure fields in one feature definition.
+The pressure percentage deliberately calculates `(total - available) / total`.
+Used bytes are derived from the capacity fields. Older live
+documents may still contain `mem_percent` and `mem_used_bytes`; the processor
+and dashboard can read those documents, but new writes do not emit the
+ambiguous legacy pair.
 
 ## Bounded live dashboard projection
 
@@ -121,14 +96,12 @@ current projection includes:
 ```text
 cpu_percent
 cpu_core_percent
-mem_percent
 mem_total_bytes
 mem_available_bytes
-mem_used_bytes
+mem_pressure_percent
 disk_percent
 disk_total_bytes
 disk_free_bytes
-disk_used_bytes
 temperature
 net_wlan0_rx_mbps
 net_wlan0_tx_mbps
@@ -137,7 +110,21 @@ net_wlan0_tx_mbps
 `cpu_core_percent` is one current percentage per logical CPU. Capacity fields
 are retained so the dashboard can reveal exact current values behind compact
 percentage cards. Raw counters and audit-oriented collector fields are not
-copied into `hardware_live`.
+copied into `hardware_live`. New documents use `hardware_live.v3`; the fixed
+ring identity and timestamp are sufficient to derive the slot time, so a
+duplicate `sample_unix` field is not written.
+
+## Minute history projection
+
+The processor also reads the bounded `raw:hardware` stream and upserts one
+`hardware_metrics_1m` document per sensor and completed minute. New documents
+use `hardware_metrics_1m.v2` and keep only min/avg/max summaries for
+`cpu_percent`, `mem_pressure_percent`, `disk_percent`, `temperature`, and
+`wlan0` RX/TX Mbps. The history path intentionally excludes raw counters,
+per-core values, capacity fields, and virtual-interface rates such as
+Tailscale or ZeroTier. The bucket timestamp identifies the one-minute bucket;
+redundant `bucket_end` and `resolution_seconds` fields are not written. Existing
+rollups remain readable; no migration is required.
 
 ## Read-only parity snapshot
 
@@ -148,7 +135,7 @@ or writing to Redis, MongoDB, or Atlas:
 ./hardware-agent \
   --snapshot-json \
   --snapshot-interval 2s \
-  --snapshot-interfaces wlan0,tailscale0,lo \
+  --snapshot-interfaces wlan0 \
   --snapshot-primary-interface wlan0
 ```
 

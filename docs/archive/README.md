@@ -11,6 +11,7 @@ current architecture and service catalog.
 | `maintenance/pi-cleanup-audit/` | Archive | Point-in-time machine inventory and resource snapshots. |
 | `maintenance/maintenance-log-2026-07-22.md` | Archive | Historical migration and firewall narrative; not a current runbook. |
 | `docs/logs/` | Archive | Change/optimization history, including superseded network and schema details. |
+| `honeypot-analysis/production/archive/` | Archive tooling | Explicit legacy `hardware_metrics` retention/archive utilities; not an active telemetry path. |
 | `docs/CHANGELOG-2026-07-22.md` | Archive | Useful Go-pipeline migration evidence; not a current service-status source. |
 | `docs/HAILO_LLM_TEST_GUIDE.md` | Superseded | Uses an administrative SSH port as a test target and includes prohibited payload-execution steps. |
 | `updates/hailo10h_report_20260722_123643.md` | Evidence | Hardware/driver snapshot, not a runtime guarantee. |

@@ -24,6 +24,7 @@ import { ComposableMap, Geographies, Geography, Marker } from "react-simple-maps
 import { SessionAnalysisPanels, type SessionAnalysisLoadState } from "@/components/threat/SessionAnalysisPanels";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState } from "@/components/ui/RegionState";
+import { TerminalStreamLoader } from "@/components/ui/loaders";
 import { isDeceptionDecision, type DeceptionDecision, type DeceptionLure } from "@/lib/dashboardTypes";
 import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
 import {
@@ -1134,6 +1135,13 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                       );
                     })}
                   </ol>
+                </div>
+              ) : currentCommandView.state === "loading" ? (
+                <div className="mt-4">
+                  <TerminalStreamLoader
+                    title="Decrypting Admin-only Command Stream..."
+                    subtitle="Intercepting and decoding attacker commands against MITRE ATT&CK database"
+                  />
                 </div>
               ) : (
                 <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 text-[11px] text-orange-800 font-medium flex items-center gap-2 mt-4">

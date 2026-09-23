@@ -35,9 +35,15 @@ Admin session view --GET /api/sessions/{id}/commands + cookie--> dedicated Next 
 Hardware telemetry uses two dedicated authenticated Next routes outside the
 generic BFF. One process-shared MongoDB change stream watches insert/replace
 events in the fixed-size `hardware_live` ring and fans them out to SSE clients.
-`GET /api/hardware` reads the same 30 slots for a snapshot, falling back to
-`hardware_metrics_1m` and then legacy `hardware_metrics`. The cloud
-dashboard does not connect to Pi Redis.
+`GET /api/hardware` reads the same 30 slots for a realtime snapshot. Historical
+queries use `hardware_metrics_1m` through the dedicated history endpoint. The
+legacy `hardware_metrics` collection is not part of the runtime dashboard path;
+the cloud dashboard does not connect to Pi Redis.
+
+New live documents use the compact `hardware_live.v3` projection. The browser
+uses canonical memory-pressure fields and keeps compatibility fallbacks for
+older v2 live documents; raw network counters and overlay-interface rates are
+not part of the browser projection.
 
 The BFF is implemented by `src/app/api/[...path]/route.ts`. Its `ROUTES` object is the source of truth for the 34 browser-visible GET mappings. The route is a dispatch boundary, not a datastore adapter: it forwards JSON and does not interpret Mongo documents.
 
