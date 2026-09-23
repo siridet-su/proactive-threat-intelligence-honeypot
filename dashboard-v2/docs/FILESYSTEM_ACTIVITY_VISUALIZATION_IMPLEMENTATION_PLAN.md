@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-008 — Align search wording**
+Current focus: **FSV-009 — Simplify workspace controls**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -860,7 +860,7 @@ Verification:
   outside filesystem scope.
 - `npm run build -- --webpack`: **PASSED** (18/18 static pages generated).
 
-#### `FSV-008` Align search wording
+#### `FSV-008` Align search wording — **DONE (2026-09-23)**
 
 เลือกหนึ่งแนวทางโดยไม่ผสม semantics:
 
@@ -868,6 +868,26 @@ Verification:
 2. เพิ่ม authoritative visited-path search ที่ audit projection และทดสอบ overflow/completeness ก่อนใช้คำว่า `path`
 
 ค่าเริ่มต้นที่ปลอดภัยสำหรับ phase นี้คือแนวทางที่ 1 เพราะไม่ขยาย backend contract
+
+Implemented behavior:
+
+- Chose the safe copy-only option without changing the server query contract. The audit combobox
+  now says `Search IP, session ID, or current/last CWD...`, matching the authoritative searchable
+  fields exposed by the retained-session projection.
+- Removed the broad `or path` promise; the UI does not imply that arbitrary historical visited paths
+  are searchable. Search pagination, scope propagation, and result-count semantics are unchanged.
+
+Verification:
+
+- Test-first component assertion: **FAILED as expected** with received placeholder
+  `Search IP, session ID, or path...` before the production copy change.
+- `npx vitest run tests/filesystem-retained-semantics.test.tsx tests/filesystem-audit-directory.test.ts tests/combobox-popover.test.ts`:
+  **PASSED** (147/147 tests).
+- Focused real-browser scoped pagination/search case: **PASSED** (1/1).
+- `npm test`: **PASSED** (737 passed, 2 expected failures, 14 skipped).
+- `npm run lint`: **PASSED** with 0 errors; 4 pre-existing warnings from merged `origin/main` remain
+  outside filesystem scope.
+- `npm run build -- --webpack`: **PASSED** (18/18 static pages generated).
 
 #### `FSV-009` Simplify workspace controls
 

@@ -476,7 +476,7 @@ export function AuditSessionSelect({
           onClear={handleClearSearch}
           onKeyDown={handleInputKeyDown}
           onFocus={handleSearchInputFocus}
-          placeholder="Search IP, session ID, or path..."
+          placeholder="Search IP, session ID, or current/last CWD..."
           isLoading={effectiveIsLoading}
           ariaControls={listboxId}
         />

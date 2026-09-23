@@ -797,6 +797,8 @@ function fireInputChange(input: HTMLInputElement, value: string) {
       // Type a search query into input
       const searchInput = container.querySelector('input[type="text"]') as HTMLInputElement;
       expect(searchInput).not.toBeNull();
+      expect(searchInput.placeholder).toBe("Search IP, session ID, or current/last CWD...");
+      expect(searchInput.placeholder).not.toContain("or path");
       await act(async () => {
         fireInputChange(searchInput, "test");
       });

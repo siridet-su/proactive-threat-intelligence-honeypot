@@ -49,7 +49,7 @@ test.describe("FA-013 real-browser evidence", () => {
     await page.getByRole("button", { name: /Exclude home-only/ }).click();
     await selectTargetPath(page);
     await page.getByRole("combobox").first().click();
-    const search = page.getByPlaceholder("Search IP, session ID, or path...");
+    const search = page.getByPlaceholder("Search IP, session ID, or current/last CWD...");
     await search.pressSequentially("complete-query");
     await expect(search).toHaveValue("complete-query");
     await expect.poll(() => fixtures.requests.at(-1)?.query).toBe("complete-query");
