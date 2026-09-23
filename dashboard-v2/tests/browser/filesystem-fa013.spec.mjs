@@ -792,4 +792,30 @@ test.describe("FA-013 real-browser evidence", () => {
       await assertNoBrowserFailures(page);
     }
   });
+
+  test("O: audit selection and node arrangement keep overlay identities unique", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    monitorBrowserFailures(page);
+    await installApiFixtures(page, { transitionReplay: true });
+    await page.goto("/filesystem-activity?view=audit&sessionId=closed-session&hop=replay-change");
+    await expect(page.getByTestId("verified-transition-overlay")).toBeVisible({ timeout: 15_000 });
+
+    const inspectedDirectory = page.getByRole("button", { name: /^Inspect directory \/home\/cowrie / });
+    await inspectedDirectory.click();
+    await expect(inspectedDirectory).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByText("Inspecting directory", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: "View settings" }).click();
+    await page.getByRole("button", { name: "Arrange", exact: true }).click();
+    await expect(page.getByText("Arrange mode", { exact: true })).toBeVisible();
+
+    const nodeBounds = await inspectedDirectory.boundingBox();
+    expect(nodeBounds).not.toBeNull();
+    await page.mouse.move(nodeBounds.x + nodeBounds.width / 2, nodeBounds.y + nodeBounds.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(nodeBounds.x + nodeBounds.width / 2 + 24, nodeBounds.y + nodeBounds.height / 2 + 18);
+    await page.mouse.up();
+
+    await assertNoBrowserFailures(page);
+  });
 });

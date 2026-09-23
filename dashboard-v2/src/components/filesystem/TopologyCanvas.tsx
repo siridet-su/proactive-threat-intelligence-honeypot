@@ -948,6 +948,7 @@ export function TopologyCanvas({
                   )}
                   {isArrangeMode && (
                     <motion.div
+                      key="arrange-mode-banner"
                       role="status"
                       initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -965,6 +966,7 @@ export function TopologyCanvas({
                   )}
                   {activeHopCanvasSemantics.verifiedTargetPath && selectedPath && selectedPath !== activeHopCanvasSemantics.verifiedTargetPath && (
                     <motion.div
+                      key="inspection-context-banner"
                       role="status"
                       initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
