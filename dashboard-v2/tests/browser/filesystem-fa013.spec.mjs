@@ -842,6 +842,7 @@ test.describe("FA-013 real-browser evidence", () => {
     const expandedCalloutBounds = await sourceCallout.boundingBox();
     const expandedRootBounds = await rootDirectory.boundingBox();
     const expandedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
+    await expect(page.getByLabel("Overlapping position with another node")).toHaveCount(0);
     const expandedViewportTransform = await sourceRoutes.first().evaluate((path) => {
       const plane = path.ownerSVGElement?.parentElement;
       return plane ? getComputedStyle(plane).transform : null;

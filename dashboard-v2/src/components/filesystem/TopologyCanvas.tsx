@@ -633,7 +633,14 @@ export function TopologyCanvas({
       const bounds = calloutElementBounds[callout.sourceIp];
       const hw = bounds?.width ? bounds.width / 2 : 8.35;
       const hh = bounds?.height ? bounds.height / 2 : 5.2;
-      boxes.push({ id: callout.sourceIp, type: "callout", x: pos.x, y: pos.y, hw, hh });
+      boxes.push({
+        id: callout.sourceIp,
+        type: "callout",
+        x: bounds?.x ?? pos.x,
+        y: bounds?.y ?? pos.y,
+        hw,
+        hh,
+      });
     }
 
     // Compare all pairs for AABB intersection
