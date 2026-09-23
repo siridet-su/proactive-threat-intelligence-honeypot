@@ -52,6 +52,7 @@ describe("FSV-011 pointer-capable timeline splitter", () => {
   let root: Root;
 
   beforeEach(async () => {
+    localStorage.clear();
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
