@@ -90,3 +90,30 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   loopback; review interface, port, firewall, and router path before doing so.
 - Related ADR/runbook: [ADR-0004](adr/ADR-0004-opencanary-http-login.md) and
   [OpenCanary runbook](../integrations/opencanary/README.md).
+
+### 2026-09-24 — Renovate backup control-room UI
+
+- Status: prepared; dashboard source updated locally and ready for review.
+- Scope and intent: make the Backup & Retention workspace easier to scan by
+  consolidating coverage, archive totals, Pi actions, request progress, B2
+  destination, and retention facts into a single control-room layout.
+- Repository branch and commit/PR: `feat/backup-data`; applied as the backup
+  dashboard renovation commit on the Pi worktree.
+- Repository changes: rebuilt the Backup & Retention page and
+  `HardwareBackupStatus` component with compact hierarchy, coverage map,
+  restrained transitions, reduced-motion handling, and the existing API,
+  action, polling, and role-control behavior preserved.
+- Host/environment changes actually applied: none; the Pi backup worker and
+  systemd services were not modified or restarted.
+- Runtime/exposure state: the renovated dashboard remains available from the
+  local backup worktree on port `3001` for review; Pi deployment is deferred.
+- Validation performed and outcome: `npx tsc --noEmit`, `npm test`, and
+  `npm run build` passed; `npm run lint` passed with one pre-existing warning
+  in the threat-intel detail page about `detailData` effect dependencies.
+- Not performed / deferred: authenticated browser screenshot review and
+  production dashboard deployment remain deferred.
+- Risks and data handling: no new data fields, credentials, raw payloads, or
+  backup contents were added to the UI change.
+- Rollback: revert the dashboard renovation commit on `feat/backup-data`.
+- Follow-up: review the authenticated page at `http://localhost:3001` and
+  push/deploy only after the Pi branch is verified.
