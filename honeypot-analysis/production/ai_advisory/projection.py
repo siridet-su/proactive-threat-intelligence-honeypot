@@ -770,7 +770,16 @@ def build_ai_advisory_projection(
         if not isinstance(hypothesis_set, Mapping):
             continue
         set_relationship_refs = _strings(hypothesis_set.get("relationship_refs"))
-        if set(set_relationship_refs) - relationship_ids:
+        # In session_assessment.v4 this field may identify the bounded
+        # behavior-chain question rather than a semantic relationship edge.
+        # The report validator above verifies that ID against the hypothesis
+        # IDs.  It is not an edge and must not be sent to the provider as one.
+        chain_refs = [
+            ref for ref in set_relationship_refs
+            if re.fullmatch(r"behavior_chain_[0-9a-f]{32}", ref)
+        ]
+        edge_refs = [ref for ref in set_relationship_refs if ref not in chain_refs]
+        if len(chain_refs) > 1 or set(edge_refs) - relationship_ids:
             raise AIAdvisoryContractError("hypothesis relationship references do not resolve")
         for item in hypothesis_set.get("hypotheses") or []:
             if not isinstance(item, Mapping):
@@ -784,7 +793,7 @@ def build_ai_advisory_projection(
                     "hypothesis_set_id": _clean(hypothesis_set.get("hypothesis_set_id")),
                     "status": _clean(item.get("status")),
                     "evidence_refs": refs,
-                    "relationship_refs": set_relationship_refs,
+                    "relationship_refs": edge_refs,
                     "limitation_codes": ["canonical_scope_limitation"],
                     "falsifier_codes": (
                         ["alternative_explanation_supported"]
