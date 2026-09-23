@@ -29,14 +29,14 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **Checkpoint 2 browser verification — managed Chromium unavailable**
+Current focus: **FSV-010A — Single workspace across page/fullscreen**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
 | 0 | Baseline and characterization | `DONE` |
 | 1 | Evidence semantics | `DONE` |
-| 2 | Verified transition model/rendering | `IN_PROGRESS` |
-| 3 | Workspace structure | `BLOCKED_BY_2` |
+| 2 | Verified transition model/rendering | `DONE` |
+| 3 | Workspace structure | `IN_PROGRESS` |
 | 4 | Accessibility/responsive interaction | `BLOCKED_BY_3` |
 | 5 | Final verification/documentation | `BLOCKED_BY_4` |
 
@@ -790,13 +790,17 @@ Verification:
 - `npm test`: **PASSED** (640 tests passed, 2 expected failures, 14 skipped)
 - `npm run lint`: **PASSED** (0 errors, 0 warnings)
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
-- Browser gate: **NOT RUN**. `npm run test:browser` started the configured web server, but all six
-  cases stopped before browser execution because Playwright-managed
-  `chromium_headless_shell-1243` is not installed. No browser was downloaded and no desktop/mobile
-  visual pass is claimed.
+- Browser gate: **PASSED (2026-09-23)** with the installed system Chromium via
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser` (7/7 cases).
+  A dedicated real-browser fixture exercises `entered → changed → failed_change → revisit` at
+  375×900 and 1440×900. It verifies chronological accessibility, exact directed routes, entry and
+  failed-origin markers, absence of the unverified failed destination from the rendered DOM,
+  revisit selection, no horizontal page overflow, and explicit minimap visibility on both widths.
+  The existing Live → Audit → Back regression was corrected to assert the active source supplied by
+  its fixture instead of the stale contradictory `No active honeypot sessions` copy.
 
-FSV-007C implementation is complete. Checkpoint 2 remains **IN_PROGRESS** because its required
-desktop/mobile browser replay gate is still `NOT RUN`; Checkpoint 3 remains `BLOCKED_BY_2`.
+FSV-007C implementation and the required desktop/mobile browser replay gate are complete.
+Checkpoint 2 is **DONE**; Checkpoint 3 is **IN_PROGRESS** with `FSV-010A` as the current focus.
 
 Checkpoint 2 gate:
 
@@ -809,7 +813,8 @@ npm run lint
 npm run build
 ```
 
-Browser gate: replay entered/changed/failed/revisit fixtures at desktop and mobile. If Chromium is unavailable, record `NOT RUN` and do not close Checkpoint 2 visual acceptance.
+Browser gate: **PASSED** — replay entered/changed/failed/revisit fixtures at desktop and mobile run
+against `/usr/bin/chromium` without installing a managed browser.
 
 ---
 

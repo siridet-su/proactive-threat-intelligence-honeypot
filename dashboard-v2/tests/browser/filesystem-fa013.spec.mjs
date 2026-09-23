@@ -37,7 +37,7 @@ test.describe("FA-013 real-browser evidence", () => {
     expect(writesAfterBack.filter(({ method, url }) => method === "replaceState" && url !== "/filesystem-activity")).toEqual([]);
     await expect(page.getByRole("toolbar", { name: "Global filesystem controls" })).toBeVisible();
     await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toHaveCount(0);
-    await expect(page.getByText("No active honeypot sessions", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Inspect source 192\.0\.2\.10; 1 session/ })).toBeVisible();
     await page.goForward();
     await expect(page.getByRole("tab", { name: "Session Audit & Replay", selected: true })).toBeVisible();
     await expect(page).toHaveURL("/filesystem-activity?view=audit&sessionId=live-session");
@@ -396,5 +396,65 @@ test.describe("FA-013 real-browser evidence", () => {
     expect(transitionDurations.every((duration) => duration === "0s")).toBe(true);
     expect(await page.evaluate(() => document.getAnimations().filter((animation) => animation.playState === "running").length)).toBe(0);
     await assertNoBrowserFailures(page);
+  });
+
+  test("I: verified entered, changed, failed, and revisit transitions remain truthful at desktop and mobile widths", async ({ page }) => {
+    for (const viewport of [{ width: 375, height: 900 }, { width: 1440, height: 900 }]) {
+      await page.setViewportSize(viewport);
+      monitorBrowserFailures(page);
+      await installApiFixtures(page, { transitionReplay: true });
+      await page.goto("/filesystem-activity?view=audit&sessionId=closed-session");
+
+      const overlay = page.getByTestId("verified-transition-overlay");
+      const sequence = page.getByRole("list", { name: "Verified CWD transition sequence" });
+      const route = page.getByRole("list", { name: "Verified directory route" });
+      await expect(overlay).toBeVisible({ timeout: 15_000 });
+      await expect(sequence.getByRole("listitem")).toHaveCount(4);
+      await expect(sequence).toContainText("entry at /home/cowrie");
+      await expect(sequence).toContainText("transition from /home/cowrie to /tmp");
+      await expect(sequence).toContainText("failed change at origin /tmp; destination unavailable or unverified");
+      await expect(sequence).toContainText("transition from /tmp to /home/cowrie");
+
+      const revisit = overlay.locator('[data-transition-event-id="replay-revisit"][data-transition-state="current"][data-transition-kind="directed"]');
+      await expect(revisit).toHaveAttribute("data-transition-kind", "directed");
+      await expect(revisit).toHaveAttribute("data-transition-route", "/tmp→/home/cowrie");
+
+      const timelineViewButton = page.getByRole("button", { name: "Timeline", exact: true });
+      const mapViewButton = page.getByRole("button", { name: "Map", exact: true });
+      if (await timelineViewButton.isVisible()) await timelineViewButton.click();
+      const routeEvents = route.getByRole("button");
+      await expect(routeEvents).toHaveCount(4);
+      await routeEvents.nth(2).click();
+      if (await mapViewButton.isVisible()) await mapViewButton.click();
+      const failed = overlay.locator('[data-transition-event-id="replay-failed"][data-transition-state="current"][data-transition-kind="failed-origin"]');
+      await expect(failed).toHaveAttribute("data-transition-kind", "failed-origin");
+      await expect(failed).toHaveAttribute("data-transition-marker-path", "/tmp");
+      await expect(overlay.locator('[data-transition-event-id="replay-failed"][data-transition-kind="directed"]')).toHaveCount(0);
+      expect(await page.evaluate(() => document.documentElement.outerHTML.includes("/unverified-hostile-destination"))).toBe(false);
+
+      if (await timelineViewButton.isVisible()) await timelineViewButton.click();
+      await routeEvents.nth(1).click();
+      if (await mapViewButton.isVisible()) await mapViewButton.click();
+      const changed = overlay.locator('[data-transition-event-id="replay-change"][data-transition-state="current"][data-transition-kind="directed"]');
+      await expect(changed).toHaveAttribute("data-transition-route", "/home/cowrie→/tmp");
+
+      if (await timelineViewButton.isVisible()) await timelineViewButton.click();
+      await routeEvents.nth(0).click();
+      if (await mapViewButton.isVisible()) await mapViewButton.click();
+      const entered = overlay.locator('[data-transition-event-id="replay-entered"][data-transition-state="current"][data-transition-kind="entry"]');
+      await expect(entered).toHaveAttribute("data-transition-kind", "entry");
+      await expect(entered).toHaveAttribute("data-transition-marker-path", "/home/cowrie");
+
+      if (await timelineViewButton.isVisible()) await timelineViewButton.click();
+      await routeEvents.nth(3).click();
+      if (await mapViewButton.isVisible()) await mapViewButton.click();
+      await expect(revisit).toHaveAttribute("data-transition-state", "current");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+      await page.getByRole("button", { name: "View settings" }).click();
+      await page.getByRole("group", { name: "Minimap visibility" }).getByRole("button", { name: "Show" }).click();
+      await expect(page.getByTestId("topology-minimap")).toBeVisible();
+      await assertNoBrowserFailures(page);
+    }
   });
 });
