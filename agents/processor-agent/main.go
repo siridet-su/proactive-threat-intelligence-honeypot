@@ -45,7 +45,6 @@ type Config struct {
 	MongoURI                      string
 	MongoDB                       string
 	EventRetention                time.Duration
-	HardwareMetricsRetention      time.Duration
 	HardwareLiveSlots             int
 	HardwareRollupRetention       time.Duration
 	HardwareRollupBackfillMinutes int
@@ -146,7 +145,6 @@ func loadConfig() Config {
 	redisDB, _ := strconv.Atoi(getenv("REDIS_DB", "0"))
 	tiJobsMaxLen, _ := strconv.ParseInt(getenv("TI_JOBS_STREAM_MAXLEN", "5000"), 10, 64)
 	eventRetention := getenvPositiveDuration("EVENT_RETENTION", defaultEventRetention)
-	hardwareMetricsRetention := getenvPositiveDuration("HARDWARE_METRICS_RETENTION", defaultHardwareMetricsRetention)
 	hardwareLiveSlots := getenvPositiveInt("HARDWARE_LIVE_SLOTS", defaultHardwareLiveSlots)
 	hardwareRollupRetention := getenvPositiveDuration("HARDWARE_ROLLUP_RETENTION", defaultHardwareRollupRetention)
 	hardwareRollupBackfillMinutes := getenvPositiveInt("HARDWARE_ROLLUP_BACKFILL_MINUTES", defaultHardwareRollupBackfillMinutes)
@@ -165,7 +163,6 @@ func loadConfig() Config {
 		MongoURI:                      getenv("MONGO_URI", ""),
 		MongoDB:                       getenv("MONGO_DATABASE", "honeypot_db"),
 		EventRetention:                eventRetention,
-		HardwareMetricsRetention:      hardwareMetricsRetention,
 		HardwareLiveSlots:             hardwareLiveSlots,
 		HardwareRollupRetention:       hardwareRollupRetention,
 		HardwareRollupBackfillMinutes: hardwareRollupBackfillMinutes,
@@ -919,14 +916,6 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}
 	if err := ensureIndexModels(ctx, mw.db.Collection("events"), indexes); err != nil {
-		return err
-	}
-
-	hardwareIndexes := []mongo.IndexModel{
-		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
-		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
-	}
-	if err := ensureIndexModels(ctx, mw.db.Collection("hardware_metrics"), hardwareIndexes); err != nil {
 		return err
 	}
 

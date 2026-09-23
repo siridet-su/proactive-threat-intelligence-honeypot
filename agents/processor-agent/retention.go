@@ -7,7 +7,6 @@ import (
 
 const (
 	defaultEventRetention                = 30 * 24 * time.Hour
-	defaultHardwareMetricsRetention      = 48 * time.Hour
 	defaultHardwareLiveSlots             = 30
 	defaultHardwareRollupRetention       = 30 * 24 * time.Hour
 	defaultHardwareRollupBackfillMinutes = 10

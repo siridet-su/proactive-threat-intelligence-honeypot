@@ -94,6 +94,7 @@ Authentication errors are `503` when server auth configuration is incomplete, `4
 | GET | `/api/events-table` | `/events` | Generic event rows | `events`; `{items,limit,table,timestamp}` | None |
 | GET | `/api/sessions-table` | `/sessions` | Generic session rows | `sessions`; `{items,limit,table,timestamp}` | None |
 | GET | `/api/alerts` | `/alerts` | Stored alert rows | `alerts`; generic table response | Dashboard, Threat Intel |
+| GET | `/api/malware` | local BFF | Hash-only artifact intelligence | `threat_intel` + bounded `events` projection, with legacy `enrichment_records`/event fallback; paginated `{success,items,total,page,limit,hasMore,...}` | Artifact Intelligence |
 | GET | `/api/jobs` | `/jobs` | Analysis job rows | `analysis_jobs`; generic table response | Dashboard fetch; not currently rendered |
 | GET | `/api/reports` | `/reports` | Report rows | `reports`; generic table response | None |
 | GET | `/api/feed-status` | `/feed-status` | Feed status rows | `feed_status`; generic table response | None |
@@ -334,6 +335,15 @@ The detailed entries below use synthetic examples. They contain no production id
 - Response: `{items,limit,table:"enrichment_records",timestamp}` with observable identity, first/last seen, expiry, sighting count, stale, and provider status fields.
 - Important fields and authority: enrichment is contextual/third-party derived metadata; stale/provider status must remain visible. Errors: backend/BFF errors; pagination/filter: limit only; frontend consumer: none.
 - Source: table map and `api_row_view()`.
+
+### GET `/api/malware`
+
+- Purpose: show SHA-256 artifact observations and provider status without exposing raw binaries, raw event payloads, or the legacy `payload_sha256` (which is a hash of serialized enrichment JSON, not the artifact).
+- Authentication: dashboard session; response is private and non-cacheable.
+- Parameters: `page` (1-based, max 1000), `limit` (default 25, max 50), and `q` (optional SHA-256 prefix/search, max 128 characters).
+- Data source: `honeypot_db.threat_intel` from the Pi Go TI worker, linked to a bounded projection of `events`; falls back to hash-only `enrichment_records`, then event hash discovery when no persisted TI record exists.
+- Response: `{success:true,items,total,page,limit,hasMore,totalIsApproximate,asOf,scope:"sha256_observations",dataSource}`. Items contain `artifactSha256`, observation metadata, linked source/session identifiers, provider status, and `retention:{bytesRetained:false,mode:"hash_only"}`.
+- Important semantics: `unknown_to_provider`, `pending`, `disabled`, `failed`, and `stale` are distinct from `known_malicious`; “no malicious detections” is not a clean verdict. Raw payload fields are selected only for internal hash discovery and are never returned.
 
 ### GET `/api/enrichment-jobs`
 
