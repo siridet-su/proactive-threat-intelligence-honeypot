@@ -1,4 +1,4 @@
-import { formatTimestamp, formatUpdateAge, GRAPH_CALLOUT_LIMIT } from "./filesystemUtils";
+import { deriveForensicTimestamp, formatTimestamp, formatUpdateAge, GRAPH_CALLOUT_LIMIT } from "./filesystemUtils";
 import type { FreshnessState, TopologyDensityPreference } from "./filesystemUtils";
 import type { TopologyPresentationContext } from "./TopologyCanvas";
 
@@ -43,10 +43,7 @@ function isLiveSummaryBarProps(
 }
 
 function formatEvidenceTimestamp(value: string | null | undefined): string {
-  if (!value || typeof value !== "string" || !value.trim()) return "unavailable";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "unavailable";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  return deriveForensicTimestamp("Observed", value).absolute;
 }
 
 export function TopologySummaryBar(props: TopologySummaryBarProps) {

@@ -25,6 +25,7 @@ import {
   useComboboxNavigation,
 } from "./ComboboxPopover";
 import { getPaginationRenderState, type RetainedCountStatus } from "./useAuditDirectory";
+import { deriveForensicTimestamp } from "./filesystemUtils";
 
 import type { TimeRangeFilter } from "./AuditFilterControls";
 
@@ -49,29 +50,11 @@ export function formatSessionMetadata(s: FilesystemTopologySession | FilesystemC
 
   const isClosed = "lifecycle" in s && Boolean(s.lifecycle);
   const rawDateStr = isClosed ? s.lifecycle?.closedAt : s.cwdState?.observedAt;
-
-  let timeStr = isClosed ? "Closed time unavailable" : "Last observed unavailable";
-
-  if (rawDateStr) {
-    const dateToFormat = new Date(rawDateStr);
-    const ts = dateToFormat.getTime();
-    if (!Number.isNaN(ts) && ts > 0) {
-      const now = new Date();
-      const isToday =
-        dateToFormat.getDate() === now.getDate() &&
-        dateToFormat.getMonth() === now.getMonth() &&
-        dateToFormat.getFullYear() === now.getFullYear();
-
-      let formattedDate = "";
-      if (isToday) {
-        formattedDate = dateToFormat.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      } else {
-        formattedDate = dateToFormat.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      }
-
-      timeStr = isClosed ? `Closed ${formattedDate}` : `Last observed ${formattedDate}`;
-    }
-  }
+  const label = isClosed ? "Closed" : "Observed";
+  const timestamp = deriveForensicTimestamp(label, rawDateStr);
+  const timeStr = timestamp.available
+    ? `${label} ${timestamp.absolute}`
+    : `${label} time unavailable`;
 
   return { timeStr, eventsStr };
 }

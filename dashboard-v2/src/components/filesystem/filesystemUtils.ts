@@ -319,7 +319,45 @@ export function formatTimestamp(value: string | null): string {
   if (!value) return "No timestamp";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "No timestamp";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+export type ForensicTimestampLabel = "Observed" | "Started" | "Closed";
+
+export interface ForensicTimestampPresentation {
+  label: ForensicTimestampLabel;
+  zone: "UTC";
+  iso: string | null;
+  absolute: string;
+  available: boolean;
+}
+
+export function deriveForensicTimestamp(
+  label: ForensicTimestampLabel,
+  value: string | null | undefined,
+): ForensicTimestampPresentation {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  const parsed = rawValue ? new Date(rawValue) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return { label, zone: "UTC", iso: null, absolute: "unavailable", available: false };
+  }
+  return {
+    label,
+    zone: "UTC",
+    iso: rawValue,
+    absolute: formatTimestamp(rawValue),
+    available: true,
+  };
 }
 
 /**

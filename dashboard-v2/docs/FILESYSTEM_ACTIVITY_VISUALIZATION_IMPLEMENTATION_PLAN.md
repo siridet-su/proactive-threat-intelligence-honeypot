@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-013 — Forensic time presentation**
+Current focus: **Checkpoint 5 — Final verification and documentation**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -37,8 +37,8 @@ Current focus: **FSV-013 — Forensic time presentation**
 | 1 | Evidence semantics | `DONE` |
 | 2 | Verified transition model/rendering | `DONE` |
 | 3 | Workspace structure | `DONE` |
-| 4 | Accessibility/responsive interaction | `IN_PROGRESS` |
-| 5 | Final verification/documentation | `BLOCKED_BY_4` |
+| 4 | Accessibility/responsive interaction | `DONE` |
+| 5 | Final verification/documentation | `IN_PROGRESS` |
 
 ## 2. Non-negotiable data contracts
 
@@ -1057,12 +1057,44 @@ Verification:
 
 Checkpoint 4 remains **IN_PROGRESS** with `FSV-013` as the current focus.
 
-#### `FSV-013` Forensic time presentation
+#### `FSV-013` Forensic time presentation — `DONE` (2026-09-23)
 
 - label เวลาเป็น `Observed`, `Started` หรือ `Closed`
 - แสดง timezone (`UTC` หรือ local zone) อย่าง explicit
 - detail view มี copy ISO timestamp
 - relative time เป็น secondary และไม่แทน absolute evidence time
+
+Implementation and acceptance evidence:
+
+- Filesystem evidence timestamps now use one deterministic UTC formatter with an explicit `UTC`
+  suffix. Session picker metadata labels active evidence as `Observed` and retained lifecycle evidence
+  as `Closed`; invalid or absent values remain explicitly unavailable and never render `Invalid Date`.
+- Added a structured forensic timestamp presentation model that preserves the original valid ISO
+  string separately from its human-readable UTC value. Formatting never substitutes client time or
+  relative age for the authoritative evidence instant.
+- Retained-session details now expose separate `Observed`, `Started`, and `Closed` rows. Each valid
+  value uses semantic `<time dateTime="…">` markup and a keyboard-accessible copy action that writes
+  the exact retained ISO string. Missing values show `unavailable` and do not expose a copy action.
+- Existing relative telemetry age remains secondary to the absolute snapshot timestamp, which now
+  also carries the explicit UTC zone. Timeline and route-event absolute timestamps inherit the same
+  UTC formatter.
+- Test-first execution failed at module resolution before the timestamp model/component existed.
+  The final focused suite verifies stable UTC output, labels, unavailable behavior, exact ISO copy,
+  and retained inspector wiring for all three evidence fields.
+
+Verification:
+
+- Focused forensic/retained/evidence suites: **PASSED** (55/55 tests).
+- All filesystem suites: **PASSED** (502 passed, 14 skipped).
+- Full Vitest suite: **PASSED** (759 passed, 2 expected failures, 14 skipped).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (11/11 real-browser tests). The first two launch attempts were blocked by a stale,
+  generated `.next/dev/lock` referencing an exited PID; after validating the PID was absent and
+  removing only that ignored lock file, the unchanged browser gate passed.
+- ESLint: **PASSED** with 0 errors and 4 unrelated upstream warnings.
+- Webpack production build: **PASSED**, 18/18 static pages generated.
+
+Checkpoint 4 is **DONE**. Checkpoint 5 is **IN_PROGRESS**.
 
 Checkpoint 4 gate:
 

@@ -538,14 +538,16 @@ describe("FSV-004: Retained time and count semantics", () => {
       });
       const meta = formatSessionMetadata(session);
       expect(meta.timeStr).toMatch(/^Closed /);
-      expect(meta.timeStr).not.toContain("Sep 18");
-      expect(meta.timeStr).toContain("Sep 19");
+      expect(meta.timeStr).not.toContain("18 Sept 2026");
+      expect(meta.timeStr).toContain("19 Sept 2026");
+      expect(meta.timeStr).toContain("UTC");
     });
 
-    it("active session uses observedAt with 'Last observed ' prefix", () => {
+    it("active session uses observedAt with an explicit Observed label and UTC zone", () => {
       const active = createActiveSession("active-1", "2026-09-20T08:15:00.000Z");
       const meta = formatSessionMetadata(active);
-      expect(meta.timeStr).toMatch(/^Last observed /);
+      expect(meta.timeStr).toMatch(/^Observed /);
+      expect(meta.timeStr).toContain("UTC");
     });
 
     it("missing or invalid timestamp produces explicit unavailable wording and never Invalid Date", () => {
@@ -561,7 +563,7 @@ describe("FSV-004: Retained time and count semantics", () => {
 
       const nullActive = createActiveSession("act-null", null);
       const metaActNull = formatSessionMetadata(nullActive);
-      expect(metaActNull.timeStr).toBe("Last observed unavailable");
+      expect(metaActNull.timeStr).toBe("Observed time unavailable");
       expect(metaActNull.timeStr).not.toContain("Invalid Date");
     });
   });

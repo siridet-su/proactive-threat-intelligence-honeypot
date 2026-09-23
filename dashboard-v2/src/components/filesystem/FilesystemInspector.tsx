@@ -26,6 +26,7 @@ import {
   statusLabel,
 } from "./filesystemUtils";
 import { handleRovingTabKey } from "./tabSemantics";
+import { ForensicTimestampRow } from "./ForensicTimestamp";
 
 interface FilesystemInspectorProps {
   embedded?: boolean;
@@ -293,10 +294,11 @@ export function FilesystemInspector({
                 </dd>
               </div>
 
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-xs text-text-subtle">Observed at</dt>
-                <dd className="text-xs text-text-muted">{formatTimestamp(selectedSession.cwdState.observedAt)}</dd>
-              </div>
+              <ForensicTimestampRow
+                label="Observed"
+                value={selectedSession.cwdState.observedAt}
+                copyable
+              />
 
               {selectedClosedSession && (
                 <>
@@ -308,12 +310,16 @@ export function FilesystemInspector({
                       </span>
                     </dd>
                   </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <dt className="text-xs text-text-subtle">Closed at</dt>
-                    <dd className="text-xs text-text-muted">
-                      {formatTimestamp(selectedClosedSession.lifecycle.closedAt)}
-                    </dd>
-                  </div>
+                  <ForensicTimestampRow
+                    label="Started"
+                    value={selectedClosedSession.lifecycle.startedAt}
+                    copyable
+                  />
+                  <ForensicTimestampRow
+                    label="Closed"
+                    value={selectedClosedSession.lifecycle.closedAt}
+                    copyable
+                  />
                 </>
               )}
 
