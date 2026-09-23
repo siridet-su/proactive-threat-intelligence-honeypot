@@ -15,7 +15,6 @@ import {
   ShieldCheck,
   Globe2,
   Ghost,
-  Sparkles,
 } from "lucide-react";
 import AttackRateChart, { type ActivityPoint } from "@/components/dashboard/AttackRateChart";
 import RegionalMap from "@/components/dashboard/RegionalMap";
@@ -62,22 +61,6 @@ export default function DashboardPage() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [summary, setSummary] = useState<ThreatDashboardSummary | null>(null);
   const [summaryStatus, setSummaryStatus] = useState<RequestStatus>("loading");
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const demoTimerRef = useRef<number | null>(null);
-
-  const triggerDemoLoading = useCallback(() => {
-    if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    setIsDemoLoading(true);
-    demoTimerRef.current = window.setTimeout(() => {
-      setIsDemoLoading(false);
-    }, 3500);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setIsHydrated(true));
@@ -172,8 +155,8 @@ export default function DashboardPage() {
       description: summary ? `In last ${summary.windowHours} hours` : "Awaiting summary",
       icon: ActivitySquare,
       tone: "info" as const,
-      isLoading: summaryStatus === "loading" || isDemoLoading,
-      isError: summaryStatus === "error" && !summary && !isDemoLoading,
+      isLoading: summaryStatus === "loading",
+      isError: summaryStatus === "error" && !summary,
     },
     {
       title: "Distinct sources",
@@ -181,8 +164,8 @@ export default function DashboardPage() {
       description: summary ? "Unique origin IPs" : "Awaiting summary",
       icon: Globe,
       tone: "info" as const,
-      isLoading: summaryStatus === "loading" || isDemoLoading,
-      isError: summaryStatus === "error" && !summary && !isDemoLoading,
+      isLoading: summaryStatus === "loading",
+      isError: summaryStatus === "error" && !summary,
     },
     {
       title: "Active deceptions",
@@ -190,15 +173,15 @@ export default function DashboardPage() {
       description: "Live interactive decoys",
       icon: Ghost,
       tone: "warning" as const,
-      isLoading: renderedStatus === "loading" || isDemoLoading,
-      isError: renderedStatus === "error" && !isDemoLoading,
+      isLoading: renderedStatus === "loading",
+      isError: renderedStatus === "error",
     },
     {
       title: "Feed status",
-      value: isDemoLoading ? "Testing" : feedState.metric,
-      description: isDemoLoading ? "Simulating full loading suite" : formatUpdatedAt(renderedLastUpdated),
-      icon: isDemoLoading ? Sparkles : Radio,
-      tone: isDemoLoading ? "warning" : feedState.tone,
+      value: feedState.metric,
+      description: formatUpdatedAt(renderedLastUpdated),
+      icon: Radio,
+      tone: feedState.tone,
       isLoading: false,
       isError: false,
     },
@@ -221,27 +204,15 @@ export default function DashboardPage() {
           <p className="text-sm text-text-muted">Real-time telemetry and honeypot intrusion activity.</p>
         </div>
         <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
-          <span role="status" aria-live="polite" className={cn("ui-badge text-xs font-medium", isDemoLoading ? "border-warning-border bg-warning-subtle text-warning" : feedState.className)}>
-            {isDemoLoading ? (
-              <Sparkles className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-            ) : renderedStatus === "refreshing" ? (
+          <span role="status" aria-live="polite" className={cn("ui-badge text-xs font-medium", feedState.className)}>
+            {renderedStatus === "refreshing" ? (
               <RefreshCw className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
             ) : (
               <Radio className="h-3.5 w-3.5" aria-hidden="true" />
             )}
-            {isDemoLoading ? "Testing Loaders" : feedState.label}
+            {feedState.label}
           </span>
           <RefreshStatus status={renderedStatus} />
-          <button
-            type="button"
-            onClick={triggerDemoLoading}
-            disabled={isDemoLoading}
-            className="ui-button min-h-9 px-3 text-xs font-medium border-primary-border bg-primary-subtle text-primary hover:bg-primary-subtle/80"
-            title="Simulate all UI loading states for 3.5 seconds to preview animations"
-          >
-            <Sparkles className={cn("h-3.5 w-3.5", isDemoLoading ? "animate-spin" : "text-primary")} aria-hidden="true" />
-            {isDemoLoading ? "Testing Loaders…" : "Test Loaders"}
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -259,7 +230,7 @@ export default function DashboardPage() {
       </header>
 
       {/* KPI Cards */}
-      <section aria-label="Situation summary" aria-busy={summaryStatus === "loading" || isUpdating || isDemoLoading} className="ui-panel overflow-hidden border border-border bg-surface">
+      <section aria-label="Situation summary" aria-busy={summaryStatus === "loading" || isUpdating} className="ui-panel overflow-hidden border border-border bg-surface">
         <dl className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-4 xl:divide-x">
           {metrics.map(({ title, value, description, icon: Icon, tone, isLoading, isError }) => (
             <div key={title} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-surface-hover/40">
@@ -351,12 +322,12 @@ export default function DashboardPage() {
             </div>
             <div className={cn("relative flex items-center justify-center overflow-hidden bg-surface-subtle", isFullScreen ? "min-h-0 flex-1" : "flex-1 min-h-0")}>
               <div className="relative h-full w-full overflow-hidden">
-                <RegionalMap isLoading={isDemoLoading} />
+                <RegionalMap />
               </div>
             </div>
           </div>
 
-          <AttackVectorSummaryPanel sessions={renderedSessions} status={isDemoLoading ? "loading" : renderedStatus} className="xl:col-span-4 h-[420px]" />
+          <AttackVectorSummaryPanel sessions={renderedSessions} status={renderedStatus} className="xl:col-span-4 h-[420px]" />
         </div>
       </section>
 
@@ -379,7 +350,7 @@ export default function DashboardPage() {
               </span>
             </div>
             <div className="mt-3 flex-1 min-h-0">
-              <AttackRateChart data={activityData} isLoading={isDemoLoading || summaryStatus === "loading"} />
+              <AttackRateChart data={activityData} isLoading={summaryStatus === "loading"} />
             </div>
           </article>
 
@@ -412,7 +383,7 @@ export default function DashboardPage() {
 
           {/* ปรับลดลงเป็น xl:col-span-3 */}
           <div className="p-5 xl:col-span-3 flex flex-col justify-between bg-surface-subtle/30 h-[300px]">
-            <AnalystInsightPanel summary={summary} status={isDemoLoading ? "loading" : summaryStatus} feedState={feedState} activeDeceptions={activeDeceptions} embedded />
+            <AnalystInsightPanel summary={summary} status={summaryStatus} feedState={feedState} activeDeceptions={activeDeceptions} embedded />
           </div>
         </div>
       </section>

@@ -27,7 +27,6 @@ import {
   Database,
   Globe,
   Activity,
-  Sparkles,
 } from "lucide-react";
 import { TableStreamSkeleton } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
@@ -75,22 +74,6 @@ export default function ThreatIntelPage() {
   const [isPageChanging, setIsPageChanging] = useState(false);
   const [exportStatus, setExportStatus] = useState<string>("");
   const [isExporting, setIsExporting] = useState(false);
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const demoTimerRef = useRef<number | null>(null);
-
-  const triggerDemoLoading = useCallback(() => {
-    if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    setIsDemoLoading(true);
-    demoTimerRef.current = window.setTimeout(() => {
-      setIsDemoLoading(false);
-    }, 3500);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     directoryRef.current = directory;
@@ -141,8 +124,8 @@ export default function ThreatIntelPage() {
   const directoryItems = directory?.items ?? [];
   const directoryTotal = directory?.total ?? 0;
   const directoryTotalPages = directory?.totalPages ?? 1;
-  const isDirectoryInitialLoad = (directoryStatus === "loading" && !directory) || isPageChanging || isDemoLoading;
-  const isDirectoryUnavailable = directoryStatus === "error" && !directory && !isDemoLoading;
+  const isDirectoryInitialLoad = (directoryStatus === "loading" && !directory) || isPageChanging;
+  const isDirectoryUnavailable = directoryStatus === "error" && !directory;
   const hasDirectoryRefreshError = directoryStatus === "error" && Boolean(directory);
 
   const stats = useMemo(() => {
@@ -189,8 +172,8 @@ export default function ThreatIntelPage() {
     }
   };
 
-  const isInitialLoad = status === "loading" || isDemoLoading;
-  const isUnavailable = status === "error" && !isDemoLoading;
+  const isInitialLoad = status === "loading";
+  const isUnavailable = status === "error";
 
   return (
     <div className="space-y-6 pb-12 font-sans">
@@ -210,16 +193,6 @@ export default function ThreatIntelPage() {
         </div>
         <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
           <RefreshStatus status={status} />
-          <button
-            type="button"
-            onClick={triggerDemoLoading}
-            disabled={isDemoLoading}
-            className="ui-button min-h-9 px-3 text-xs font-medium border-primary-border bg-primary-subtle text-primary hover:bg-primary-subtle/80"
-            title="Simulate loading state to preview the table scanline skeleton"
-          >
-            <Sparkles className={cn("h-3.5 w-3.5", isDemoLoading ? "animate-spin" : "text-primary")} aria-hidden="true" />
-            {isDemoLoading ? "Testing Loaders…" : "Test Loaders"}
-          </button>
           <button
             type="button"
             onClick={() => {
@@ -356,7 +329,7 @@ export default function ThreatIntelPage() {
 
         {/* Scanning Laser Bar when loading / refreshing / page changing */}
         <div className="h-0.5 w-full bg-border/40 overflow-hidden relative">
-          {(directoryRefreshing || isPageChanging || isDemoLoading || isDirectoryInitialLoad) && (
+          {(directoryRefreshing || isPageChanging || isDirectoryInitialLoad) && (
             <div
               className="absolute inset-y-0 w-56 bg-gradient-to-r from-transparent via-primary to-transparent"
               style={{
@@ -397,7 +370,7 @@ export default function ThreatIntelPage() {
               <p className="text-text-muted">
                 Page <strong className="text-text">{currentPage}</strong> of <strong className="text-text">{directoryTotalPages}</strong> ({directoryTotal.toLocaleString()} sessions)
               </p>
-              {(directoryRefreshing || isPageChanging || isDemoLoading) && (
+              {(directoryRefreshing || isPageChanging) && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-border bg-primary-subtle px-2.5 py-0.5 font-mono text-[11px] font-semibold text-primary">
                   <RefreshCw className="h-3 w-3 animate-spin text-primary" aria-hidden="true" />
                   Loading page {currentPage}…
@@ -409,7 +382,7 @@ export default function ThreatIntelPage() {
                 <select
                   id="rows-per-page"
                   value={pageSize}
-                  disabled={directoryRefreshing || isPageChanging || isDemoLoading}
+                  disabled={directoryRefreshing || isPageChanging}
                   onChange={(e) => {
                     setIsPageChanging(true);
                     setPageSize(Number(e.target.value));
@@ -428,7 +401,7 @@ export default function ThreatIntelPage() {
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                disabled={currentPage === 1 || directoryRefreshing || isPageChanging || isDemoLoading}
+                disabled={currentPage === 1 || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
                   setCurrentPage(1);
@@ -440,7 +413,7 @@ export default function ThreatIntelPage() {
               </button>
               <button
                 type="button"
-                disabled={currentPage === 1 || directoryRefreshing || isPageChanging || isDemoLoading}
+                disabled={currentPage === 1 || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
                   setCurrentPage((page) => page - 1);
@@ -454,7 +427,7 @@ export default function ThreatIntelPage() {
                 <button
                   type="button"
                   key={pageNumber}
-                  disabled={directoryRefreshing || isPageChanging || isDemoLoading}
+                  disabled={directoryRefreshing || isPageChanging}
                   onClick={() => {
                     setIsPageChanging(true);
                     setCurrentPage(pageNumber);
@@ -470,7 +443,7 @@ export default function ThreatIntelPage() {
               ))}
               <button
                 type="button"
-                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging || isDemoLoading}
+                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
                   setCurrentPage((page) => page + 1);
@@ -482,7 +455,7 @@ export default function ThreatIntelPage() {
               </button>
               <button
                 type="button"
-                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging || isDemoLoading}
+                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
                   setCurrentPage(directoryTotalPages);
