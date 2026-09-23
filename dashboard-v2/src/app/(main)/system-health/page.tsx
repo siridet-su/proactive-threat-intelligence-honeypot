@@ -1,5 +1,6 @@
 "use client";
 import { AttackerTable } from "@/components/dashboard/AttackerTable";
+import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
 import { HardwareMonitor } from "@/components/dashboard/HardwareMonitor";
 
 export default function SystemHealthPage() {
@@ -19,6 +20,9 @@ export default function SystemHealthPage() {
             <HardwareMonitor />
           </div>
        </section>
+
+       {/* ---------------- Hardware Backup ---------------- */}
+       <HardwareBackupStatus />
 
        {/* ---------------- Top Source Summary ---------------- */}
        <div className="grid grid-cols-1 gap-6">
