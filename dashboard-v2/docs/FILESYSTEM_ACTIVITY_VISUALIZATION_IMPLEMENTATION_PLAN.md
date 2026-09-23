@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-007C` — Density and minimap behavior**
+Current focus: **Checkpoint 2 browser verification — managed Chromium unavailable**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -740,12 +740,63 @@ Verification:
 
 Checkpoint 2 remains **IN_PROGRESS**; current focus is `FSV-007C`.
 
-#### `FSV-007C` Density and minimap behavior
+#### `FSV-007C` Density and minimap behavior — **DONE (2026-09-23)**
 
 - sparse graph uses fit-to-content
 - minimap appears only above density threshold, when zoom differs from fit, or by user preference
 - density aggregation never hides the current transition endpoints without an explicit aggregate indicator
 - zoom/fit/locate remain direct controls; layout/density/grid/reset move under `View`
+
+Implemented behavior:
+
+- The existing responsive viewport owner now records the current fitted zoom even after manual
+  interaction. Sparse topology continues to auto-fit while the user has not adjusted the camera,
+  and `Fit topology in view` resets the camera to that authoritative content fit.
+- Minimap visibility is derived by a pure policy with three preferences: `auto`, `show`, and `hide`.
+  `auto` renders only when node/source totals exceed the detailed-density threshold or current zoom
+  differs from fitted zoom by more than the numerical tolerance. `show` explicitly renders and
+  reserves fit clearance; `hide` overrides density and zoom. An unavailable fit does not fabricate a
+  zoom difference.
+- Minimap visibility preference lives under `View → Appearance`. The minimap is no longer always
+  mounted and no longer carries a blanket mobile `hidden` class when its policy says it is visible.
+- `pointForGraph` accepts verified required paths. `TopologyCanvas` supplies both verified endpoints
+  of the current directed transition, the entry destination, or the failed origin. Those paths and
+  their ancestors remain rendered through clustered/aggregated density. The presentation-safe failed
+  destination remains `null` and can never enter the required-path list.
+- Endpoint coverage is evaluated against the loaded topology and rendered graph. If a verified path
+  cannot be drawn, the canvas names either its nearest visible aggregate or the truthful unavailable
+  loaded-topology state; it never silently redirects a transition.
+- Aggregated nodes retain an explicit `+N` badge with aggregate path semantics. Density and layout
+  actions, grid visibility, minimap policy, and reset remain under `View`; Zoom, Fit, and Locate remain
+  direct controls. The summary bar is informational and no longer exposes separate density or
+  auto-arrange actions. Its base legend now labels hierarchy, source connections, and active sources
+  without duplicating or contradicting the verified-transition legend.
+
+Minimap policy:
+
+| Preference | Sparse at fitted zoom | Above density threshold | Zoom differs from fit |
+| --- | --- | --- | --- |
+| `auto` | hidden | visible | visible |
+| `show` | visible | visible | visible |
+| `hide` | hidden | hidden | hidden |
+
+Verification:
+
+- Test-first failure: the focused suite initially failed to resolve the new `topologyDensity` policy
+  module; the mobile visibility assertion then reproduced the legacy `hidden sm:block` behavior.
+- `npx vitest run tests/filesystem-density-minimap.test.tsx`: **PASSED** (6/6 tests)
+- `npx vitest run tests/filesystem-density-minimap.test.tsx tests/filesystem-hooks.test.ts tests/filesystem-layout.test.ts tests/filesystem-replay-scrubber.test.ts tests/filesystem-transition-model.test.tsx tests/filesystem-transition-overlay.test.tsx tests/filesystem-failed-change-visualization.test.tsx tests/filesystem-ownership-boundaries.test.tsx`: **PASSED** (165/165 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (479 tests passed, 14 skipped)
+- `npm test`: **PASSED** (640 tests passed, 2 expected failures, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate: **NOT RUN**. `npm run test:browser` started the configured web server, but all six
+  cases stopped before browser execution because Playwright-managed
+  `chromium_headless_shell-1243` is not installed. No browser was downloaded and no desktop/mobile
+  visual pass is claimed.
+
+FSV-007C implementation is complete. Checkpoint 2 remains **IN_PROGRESS** because its required
+desktop/mobile browser replay gate is still `NOT RUN`; Checkpoint 3 remains `BLOCKED_BY_2`.
 
 Checkpoint 2 gate:
 

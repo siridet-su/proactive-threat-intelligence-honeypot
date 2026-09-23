@@ -18,6 +18,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { GraphCallout, TopologyDensityMode, TopologyDensityPreference } from "./filesystemUtils";
+import type { MinimapVisibilityPreference } from "./topologyDensity";
 
 interface TopologyToolbarProps {
   zoom: number;
@@ -36,6 +37,9 @@ interface TopologyToolbarProps {
   resetMapWorkspace: () => void;
   densityPreference: TopologyDensityPreference;
   setDensityPreference: (pref: TopologyDensityPreference) => void;
+  minimapPreference: MinimapVisibilityPreference;
+  setMinimapPreference: (pref: MinimapVisibilityPreference) => void;
+  minimapVisible: boolean;
   showGrid: boolean;
   setShowGrid: (show: boolean) => void;
   effectiveDensityMode: TopologyDensityMode;
@@ -62,6 +66,9 @@ export function TopologyToolbar({
   resetMapWorkspace,
   densityPreference,
   setDensityPreference,
+  minimapPreference,
+  setMinimapPreference,
+  minimapVisible,
   showGrid,
   setShowGrid,
   effectiveDensityMode,
@@ -275,6 +282,33 @@ export function TopologyToolbar({
               <div className="my-1 h-px bg-border" aria-hidden="true" />
               <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
                 Appearance
+              </div>
+              <div className="px-2.5 pb-1 pt-0.5 text-[11px] text-text-subtle">
+                Minimap {minimapVisible ? "visible" : "hidden"}
+              </div>
+              <div
+                role="group"
+                aria-label="Minimap visibility"
+                className="grid grid-cols-3 gap-1 px-1 pb-1"
+              >
+                {(["auto", "show", "hide"] as const).map((preference) => {
+                  const selected = minimapPreference === preference;
+                  return (
+                    <button
+                      key={preference}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setMinimapPreference(preference)}
+                      className={`min-h-8 rounded-md px-2 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                        selected
+                          ? "border border-primary-border bg-primary-subtle text-primary"
+                          : "border border-transparent text-text-muted hover:bg-surface-hover hover:text-text"
+                      }`}
+                    >
+                      {preference}
+                    </button>
+                  );
+                })}
               </div>
               <button
                 type="button"

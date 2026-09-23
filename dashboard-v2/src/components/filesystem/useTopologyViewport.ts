@@ -60,7 +60,7 @@ export interface UseTopologyViewportOptions {
   mapSurfaceRef: React.RefObject<HTMLDivElement | null>;
   graphPlaneRef: React.RefObject<HTMLDivElement | null>;
   isTopologyExpanded: boolean;
-  showMinimap: boolean;
+  reserveMinimapSpace: boolean;
   automaticGraphNodes: GraphNode[];
   graphCallouts: GraphCallout[];
   nodePositions: Record<string, LabelPosition>;
@@ -76,6 +76,7 @@ export interface UseTopologyViewportReturn {
   setPan: React.Dispatch<React.SetStateAction<Pan>>;
   zoom: number;
   setZoom: React.Dispatch<React.SetStateAction<number>>;
+  fitZoom: number | null;
   panRef: React.MutableRefObject<Pan>;
   zoomRef: React.MutableRefObject<number>;
   isDraggingSurface: boolean;
@@ -108,7 +109,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
     mapSurfaceRef,
     graphPlaneRef,
     isTopologyExpanded,
-    showMinimap,
+    reserveMinimapSpace,
     automaticGraphNodes,
     graphCallouts,
     nodePositions,
@@ -121,6 +122,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
 
   const [pan, setPan] = useState<Pan>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [fitZoom, setFitZoom] = useState<number | null>(null);
   const [isDraggingSurface, setIsDraggingSurface] = useState(false);
   const [mapMetrics, setMapMetrics] = useState<MapMetrics | null>(null);
 
@@ -188,7 +190,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
         planeHeight: baseHeight,
         planeOffsetLeft: plane.offsetLeft,
         planeOffsetTop: plane.offsetTop,
-        hasMinimap: showMinimap,
+        hasMinimap: reserveMinimapSpace,
         isMinimapCollapsed: false,
         minPadding: 24,
       });
@@ -201,7 +203,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       labelPositions,
       nodeElementBounds,
       nodePositions,
-      showMinimap,
+      reserveMinimapSpace,
     ],
   );
 
@@ -213,6 +215,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       if (surface && plane) {
         const fit = calculateFitViewport(surface, plane, overrideLabels, overrideNodes);
         if (fit) {
+          setFitZoom(fit.zoom);
           panRef.current = fit.pan;
           zoomRef.current = fit.zoom;
           setPan(fit.pan);
@@ -222,6 +225,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       }
       panRef.current = { x: 0, y: 0 };
       zoomRef.current = 1;
+      setFitZoom(null);
       setPan(panRef.current);
       setZoom(zoomRef.current);
     },
@@ -371,8 +375,10 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
         planeTop: plane.offsetTop,
       });
 
+      const fit = calculateFitViewport(surface, plane);
+      setFitZoom(fit?.zoom ?? null);
+
       if (!hasUserManuallyAdjustedViewRef.current) {
-        const fit = calculateFitViewport(surface, plane);
         if (fit) {
           if (
             Math.abs(panRef.current.x - fit.pan.x) > 1 ||
@@ -409,6 +415,7 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
     setPan,
     zoom,
     setZoom,
+    fitZoom,
     panRef,
     zoomRef,
     isDraggingSurface,

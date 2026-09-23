@@ -1,5 +1,3 @@
-import { AlertTriangle } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
 import { formatTimestamp, formatUpdateAge, GRAPH_CALLOUT_LIMIT } from "./filesystemUtils";
 import type { FreshnessState, TopologyDensityPreference } from "./filesystemUtils";
 import type { TopologyPresentationContext } from "./TopologyCanvas";
@@ -9,8 +7,6 @@ interface BaseTopologySummaryBarProps {
   densityAnalysisRenderedNodes: number;
   densityAnalysisTotalNodes: number;
   densityPreference: TopologyDensityPreference;
-  setDensityPreference: (pref: TopologyDensityPreference) => void;
-  setIsPathsExpanded: (val: boolean) => void;
   effectiveSessionsLength: number;
   isSourcesTruncated: boolean;
   renderedSourcesCount: number;
@@ -18,8 +14,6 @@ interface BaseTopologySummaryBarProps {
   isSourcesExpanded: boolean;
   setIsSourcesExpanded: (val: boolean | ((prev: boolean) => boolean)) => void;
   totalOverlaps: number;
-  autoArrangeTopology: () => void;
-  reducedMotion: boolean | null;
 }
 
 export type TopologySummaryBarProps = BaseTopologySummaryBarProps & (
@@ -61,8 +55,6 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
     densityAnalysisRenderedNodes,
     densityAnalysisTotalNodes,
     densityPreference,
-    setDensityPreference,
-    setIsPathsExpanded,
     effectiveSessionsLength,
     isSourcesTruncated,
     renderedSourcesCount,
@@ -70,65 +62,23 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
     isSourcesExpanded,
     setIsSourcesExpanded,
     totalOverlaps,
-    autoArrangeTopology,
-    reducedMotion,
     presentationContext,
   } = props;
   return (
     <div className="flex min-h-11 shrink-0 flex-col items-start justify-between gap-2 border-t border-border px-4 py-3 text-xs text-text-muted select-none sm:min-h-11 sm:h-auto 2xl:h-11 sm:flex-row sm:items-center sm:px-5 sm:py-2 2xl:py-0">
       <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs 2xl:flex-nowrap sm:gap-3">
         {densityAnalysisHiddenNodes > 0 ? (
-          <span className="shrink-0 flex items-center gap-1.5">
-            <span>
-              <strong className="font-medium text-text">{densityAnalysisRenderedNodes}</strong> of{" "}
-              <strong className="font-medium text-text">{densityAnalysisTotalNodes}</strong> paths{" "}
-              <span className="text-text-subtle font-normal">
-                ({densityAnalysisHiddenNodes} aggregated in branches)
-              </span>
+          <span className="shrink-0">
+            <strong className="font-medium text-text">{densityAnalysisRenderedNodes}</strong> of{" "}
+            <strong className="font-medium text-text">{densityAnalysisTotalNodes}</strong> paths{" "}
+            <span className="text-text-subtle font-normal">
+              ({densityAnalysisHiddenNodes} aggregated in branches; change density under View)
             </span>
-            {densityPreference !== "detailed" ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setDensityPreference("detailed");
-                  setIsPathsExpanded(true);
-                }}
-                className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
-                title="Switch to detailed density mode to render all paths"
-              >
-                Expand all
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => {
-                  setDensityPreference("auto");
-                  setIsPathsExpanded(false);
-                }}
-                className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
-                title="Reset density mode to Auto"
-              >
-                Reset to auto
-              </button>
-            )}
           </span>
         ) : densityPreference !== "auto" ? (
-          <span className="shrink-0 flex items-center gap-1.5">
-            <span>
-              All <strong className="font-medium text-text">{densityAnalysisRenderedNodes}</strong> paths rendered
-              <span className="text-text-subtle font-normal"> ({densityPreference} mode)</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setDensityPreference("auto");
-                setIsPathsExpanded(false);
-              }}
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
-              title="Reset density mode to Auto"
-            >
-              Reset to auto
-            </button>
+          <span className="shrink-0">
+            All <strong className="font-medium text-text">{densityAnalysisRenderedNodes}</strong> paths rendered
+            <span className="text-text-subtle font-normal"> ({densityPreference} mode)</span>
           </span>
         ) : (
           <span className="shrink-0">
@@ -234,30 +184,11 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
       </div>
 
       <div className="flex max-w-full shrink-0 flex-wrap items-center gap-3.5">
-        <AnimatePresence>
-          {totalOverlaps > 0 && (
-            <motion.div
-              key="overlap-badge-group"
-              initial={reducedMotion ? false : { opacity: 0, scale: 0.92, x: 8 }}
-              animate={{ opacity: 1, scale: 1, x: 0 }}
-              exit={reducedMotion ? undefined : { opacity: 0, scale: 0.92, x: 8 }}
-              transition={{ duration: 0.18, ease: "easeOut" }}
-              className="flex items-center gap-3"
-            >
-              <button
-                type="button"
-                onClick={autoArrangeTopology}
-                className="flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2.5 py-1 text-xs font-medium text-warning transition-all hover:border-warning/60 hover:bg-warning/20 active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning"
-                title="Click to automatically arrange overlapping elements"
-                aria-label={`${totalOverlaps} elements overlapping. Click to auto arrange.`}
-              >
-                <AlertTriangle className="h-3 w-3 shrink-0 text-warning" aria-hidden="true" />
-                <span>{totalOverlaps} overlapping · Auto arrange</span>
-              </button>
-              <div className="hidden h-3.5 w-px bg-border sm:block" aria-hidden="true" />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {totalOverlaps > 0 && (
+          <span role="status" className="text-warning">
+            {totalOverlaps} overlapping · use View → Auto arrange
+          </span>
+        )}
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Topology map legend">
           <span className="flex items-center gap-1.5">
@@ -266,15 +197,11 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-3 rounded-full bg-primary" aria-hidden="true" />
-            <span>Attacker transition</span>
+            <span>Source connection</span>
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-success" aria-hidden="true" />
-            <span>Entry points</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="flex h-3.5 w-3.5 items-center justify-center rounded bg-primary font-mono text-[8px] font-bold text-surface shadow-xs" aria-hidden="true">H</span>
-            <span>Current hop</span>
+            <span>Active source</span>
           </span>
         </div>
       </div>

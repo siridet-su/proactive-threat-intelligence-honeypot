@@ -37,6 +37,13 @@ import { TopologyMinimap } from "./TopologyMinimap";
 import { TransitionLegend, TransitionOverlay } from "./TransitionOverlay";
 import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import {
+  deriveMinimapVisibility,
+  deriveTransitionEndpointCoverage,
+  requiredTransitionEndpointPaths,
+  topologyExceedsMinimapDensityThreshold,
+  type MinimapVisibilityPreference,
+} from "./topologyDensity";
+import {
   analyzeTopologyDensity,
   calloutsForGraph,
   classifyRuleBasedPathInterest,
@@ -358,9 +365,9 @@ export function TopologyCanvas({
   });
 
   const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
+  const [minimapPreference, setMinimapPreference] = useState<MinimapVisibilityPreference>("auto");
 
   // Render limits state
-  const [isPathsExpanded, setIsPathsExpanded] = useState(false);
   const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
 
   // Derived graph layout
@@ -384,6 +391,10 @@ export function TopologyCanvas({
   }, [densityPreference, snapshot?.nodes.length, snapshot?.sessions]);
 
   const focusedGraphPath = selectedPath ?? activeHopCanvasSemantics.layoutFocusPath;
+  const transitionEndpointPaths = useMemo(
+    () => requiredTransitionEndpointPaths(currentTransition),
+    [currentTransition],
+  );
 
   const automaticGraphNodes = useMemo(
     () =>
@@ -393,22 +404,23 @@ export function TopologyCanvas({
         selectedPath,
         isAuditMode,
         {
-          nodeLimit: isPathsExpanded || densityPreference === "detailed" || isAuditMode ? null : GRAPH_NODE_LIMIT,
+          nodeLimit: densityPreference === "detailed" || isAuditMode ? null : GRAPH_NODE_LIMIT,
           selectedSessionId,
           densityMode: effectiveDensityMode,
           focusedPath: focusedGraphPath,
+          requiredPaths: transitionEndpointPaths,
         },
       ),
     [
       effectiveDensityMode,
       focusedGraphPath,
       isAuditMode,
-      isPathsExpanded,
       densityPreference,
       selectedPath,
       selectedSessionId,
       snapshot?.nodes,
       snapshot?.sessions,
+      transitionEndpointPaths,
     ],
   );
   const graphNodes = useMemo(
@@ -416,6 +428,18 @@ export function TopologyCanvas({
     [automaticGraphNodes, nodePositions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
+  const transitionEndpointCoverage = useMemo(
+    () => deriveTransitionEndpointCoverage(
+      transitionEndpointPaths,
+      snapshot?.nodes ?? [],
+      graphNodes,
+    ),
+    [graphNodes, snapshot?.nodes, transitionEndpointPaths],
+  );
+  const obscuredTransitionEndpoints = useMemo(
+    () => transitionEndpointCoverage.filter((endpoint) => endpoint.status !== "visible"),
+    [transitionEndpointCoverage],
+  );
   const failedAnnotationNode = activeHopCanvasSemantics.failedAnnotationPath
     ? graphNodeByPath.get(activeHopCanvasSemantics.failedAnnotationPath) ?? null
     : null;
@@ -622,13 +646,17 @@ export function TopologyCanvas({
   }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
   const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
-  const showMinimap = true;
+  const reserveMinimapSpace = minimapPreference === "show" || (
+    minimapPreference === "auto" &&
+    topologyExceedsMinimapDensityThreshold(densityAnalysis.totalNodes, densityAnalysis.totalSources)
+  );
 
   const {
     pan,
     setPan,
     zoom,
     setZoom,
+    fitZoom,
     panRef,
     zoomRef,
     isDraggingSurface,
@@ -647,7 +675,7 @@ export function TopologyCanvas({
     mapSurfaceRef,
     graphPlaneRef,
     isTopologyExpanded,
-    showMinimap,
+    reserveMinimapSpace,
     automaticGraphNodes,
     graphCallouts,
     nodePositions,
@@ -656,6 +684,13 @@ export function TopologyCanvas({
     nodeElementBounds,
     calloutElementBounds,
     nodesCount: snapshot?.nodes.length ?? 0,
+  });
+  const showMinimap = deriveMinimapVisibility({
+    preference: minimapPreference,
+    totalNodes: densityAnalysis.totalNodes,
+    totalSources: densityAnalysis.totalSources,
+    currentZoom: zoom,
+    fitZoom,
   });
 
   useEffect(() => {
@@ -777,6 +812,9 @@ export function TopologyCanvas({
           resetMapWorkspace={resetMapWorkspace}
           densityPreference={densityPreference}
           setDensityPreference={setDensityPreference}
+          minimapPreference={minimapPreference}
+          setMinimapPreference={setMinimapPreference}
+          minimapVisible={showMinimap}
           showGrid={showGrid}
           setShowGrid={setShowGrid}
           effectiveDensityMode={effectiveDensityMode}
@@ -957,6 +995,24 @@ export function TopologyCanvas({
                   >
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                     <span>{failedHopMessage}</span>
+                  </div>
+                )}
+
+                {obscuredTransitionEndpoints.length > 0 && (
+                  <div
+                    role="status"
+                    data-testid="transition-endpoint-coverage"
+                    className="pointer-events-none absolute right-4 top-16 z-40 max-w-[min(30rem,calc(100%-2rem))] rounded-lg border border-border bg-surface-raised/95 px-3 py-2 text-xs text-text-muted shadow-sm"
+                  >
+                    {obscuredTransitionEndpoints.map((endpoint) => (
+                      <div key={endpoint.path} data-transition-endpoint-status={endpoint.status}>
+                        {endpoint.status === "aggregated" ? (
+                          <>Current transition endpoint <span className="font-mono text-text">{endpoint.path}</span> is represented by aggregate <span className="font-mono text-text">{endpoint.aggregatePath}</span>.</>
+                        ) : (
+                          <>Current transition endpoint <span className="font-mono text-text">{endpoint.path}</span> is unavailable in the loaded topology.</>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
 
@@ -1269,6 +1325,8 @@ export function TopologyCanvas({
                           ) : null}
                           {(node.hiddenChildCount ?? 0) > 0 && (
                             <span
+                              data-testid="topology-aggregate-indicator"
+                              data-aggregate-path={node.path}
                               className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary"
                               title={`${node.hiddenChildCount} child ${node.hiddenChildCount === 1 ? "directory" : "directories"} aggregated under this path. Click to expand.`}
                             >
@@ -1519,7 +1577,7 @@ export function TopologyCanvas({
                 </motion.div>
 
                 <AnimatePresence>
-                  {(showMinimap || zoom !== 1) && (
+                  {showMinimap && (
                     <TopologyMinimap
                       graphNodes={graphNodes}
                       graphNodeByPath={graphNodeByPath}
@@ -1539,8 +1597,6 @@ export function TopologyCanvas({
                 densityAnalysisRenderedNodes={densityAnalysis.renderedNodes}
                 densityAnalysisTotalNodes={densityAnalysis.totalNodes}
                 densityPreference={densityPreference}
-                setDensityPreference={setDensityPreference}
-                setIsPathsExpanded={setIsPathsExpanded}
                 effectiveSessionsLength={effectiveSessions.length}
                 isSourcesTruncated={totalLiveSources > renderedSourcesCount}
                 renderedSourcesCount={renderedSourcesCount}
@@ -1548,8 +1604,6 @@ export function TopologyCanvas({
                 isSourcesExpanded={isSourcesExpanded}
                 setIsSourcesExpanded={setIsSourcesExpanded}
                 totalOverlaps={totalOverlaps}
-                autoArrangeTopology={autoArrangeTopology}
-                reducedMotion={reducedMotion}
                 {...(presentationContext.mode === "live"
                   ? {
                       presentationContext,

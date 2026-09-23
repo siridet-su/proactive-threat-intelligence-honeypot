@@ -886,6 +886,7 @@ export interface PointForGraphOptions {
   selectedSessionId?: string | null;
   densityMode?: TopologyDensityMode;
   focusedPath?: string | null;
+  requiredPaths?: readonly string[];
 }
 
 export function pointForGraph(
@@ -933,6 +934,7 @@ export function pointForGraph(
   };
   for (const session of recentSessions) includePath(session.cwdState.path);
   includePath(selectedPath);
+  for (const requiredPath of options?.requiredPaths ?? []) includePath(requiredPath);
   if (options?.selectedSessionId) {
     const selectedSession = sessions.find((session) => session.sessionId === options.selectedSessionId);
     if (selectedSession?.cwdState?.path) {
