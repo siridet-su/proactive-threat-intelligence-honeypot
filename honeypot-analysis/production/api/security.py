@@ -517,8 +517,17 @@ def count_command_events(rows: Iterable[Mapping[str, Any]]) -> int:
     for row in rows:
         if not isinstance(row, Mapping):
             continue
-        if _is_command_event_row(row):
-            count += 1
+        if not _is_command_event_row(row):
+            continue
+        payload = _row_payload(row)
+        # Cowrie can emit an input event for an empty submitted line.  Such a
+        # row is useful terminal telemetry, but it is not a command and is
+        # omitted by both the private command projection and report builder.
+        # Keep historical rows countable when their payload did not retain an
+        # input key; only exclude an explicitly recorded blank input.
+        if "input" in payload and not str(payload.get("input") or "").strip():
+            continue
+        count += 1
     return count
 
 

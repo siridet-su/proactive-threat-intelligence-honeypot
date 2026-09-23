@@ -379,7 +379,7 @@ def test_malformed_or_invented_output_is_rejected_and_never_canonical(
     assert row["payload"]["shadow_candidates"]["candidates"] == []
 
 
-def test_malformed_provider_json_fails_closed_without_an_advisory(
+def test_malformed_provider_json_persists_a_rejected_advisory(
     tmp_path: Path,
 ) -> None:
     storage, _report, report_id = _storage_with_report(tmp_path, enqueue=True)
@@ -388,12 +388,19 @@ def test_malformed_provider_json_fails_closed_without_an_advisory(
     fixture.write_text('{"not": "closed"', encoding="utf-8")
     worker = AIAdvisoryWorker(_config(tmp_path, fixture), storage=storage)
 
-    assert worker.process_once() == 0
+    assert worker.process_once() == 1
     assert storage.get_report_by_id(report_id)["payload_json"] == before_json
-    row = storage.list_rows("ai_advisory_outbox")[0]
-    assert row["status"] == "failed"
-    assert row["last_error_code"] == "ai_job_invalid"
-    assert storage.get_ai_advisory_for_session("ai-worker-session") is None
+    outbox = storage.list_rows("ai_advisory_outbox")[0]
+    assert outbox["status"] == "succeeded"
+    row = storage.get_ai_advisory_for_session("ai-worker-session")
+    assert row["status"] == "rejected"
+    assert row["response_sha256"] == "0" * 64
+    assert row["payload"]["validation"] == {
+        "status": "rejected",
+        "reason_code": "provider_response_malformed",
+    }
+    assert row["payload"]["validated_advisory"] == {}
+    assert row["payload"]["shadow_candidates"]["candidates"] == []
 
 
 class _NeverCalledProvider:

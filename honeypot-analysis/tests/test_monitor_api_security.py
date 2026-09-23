@@ -846,6 +846,35 @@ def test_internal_view_preserves_benign_command_after_short_login_credentials() 
     assert "ls -al" not in json.dumps(public, sort_keys=True)
 
 
+def test_internal_view_excludes_blank_terminal_submissions() -> None:
+    rows = [
+        _canonical_command_event_row(
+            f"event-{index}",
+            "cowrie.command.input",
+            f"2026-08-05T00:00:0{index}Z",
+            {"input": value},
+        )
+        for index, value in enumerate(("id", "", "   ", "uname -a"), start=1)
+    ]
+
+    class RawStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
+            if table == "events":
+                return rows
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        _COMMAND_TEST_SESSION_ID,
+        _storage=RawStorage(),
+    )
+
+    assert internal["ok"] is True
+    assert [command["input"] for command in internal["commands"]] == ["id", "uname -a"]
+
+
 def test_internal_view_accepts_integrity_bound_sqlite_command_row() -> None:
     bound = bind_authenticated_sensor_identity(
         {
@@ -1030,6 +1059,33 @@ def test_monitor_command_count_accepts_privacy_redacted_historical_input_events(
         False,
     ]
     assert '"input"' not in json.dumps(view, sort_keys=True)
+
+
+def test_monitor_command_count_excludes_only_explicit_blank_command_inputs() -> None:
+    rows = [
+        {
+            "event_id": f"event-{index}",
+            "eventid": "cowrie.command.input",
+            "session_id": "session-events",
+            **({"payload_json": json.dumps({"input": value})} if value is not None else {}),
+        }
+        for index, value in enumerate(("id", "", "   ", None))
+    ]
+
+    view = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-events",
+            "overview": {"session_id": "session-events", "command_count": 99},
+            "session_payload": {"session_id": "session-events", "commands": []},
+            "events_table_rows": rows,
+        }
+    )
+
+    # The row without an input key remains countable for historical storage;
+    # rows that explicitly recorded an empty submission are not commands.
+    assert view["overview"]["command_count"] == 2
+    assert view["session"]["command_count"] == 2
 
 
 def test_monitor_request_log_sanitizes_sensitive_query_values(

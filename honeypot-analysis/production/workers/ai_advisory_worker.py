@@ -51,6 +51,13 @@ _PROVIDER_USAGE_INTEGER_KEYS = frozenset(
         "tool_use_prompt_token_count",
     }
 )
+_PERSISTABLE_PROVIDER_RESPONSE_ERRORS = frozenset(
+    {
+        "provider_response_empty",
+        "provider_response_malformed",
+        "provider_response_too_large",
+    }
+)
 
 
 def _identity_text(value: Any, label: str, *, allow_empty: bool = False) -> str:
@@ -111,6 +118,8 @@ def _safe_log(payload: Mapping[str, Any]) -> None:
         "status",
         "error_code",
         "error_type",
+        "validation_stage",
+        "validation_reason_code",
         "attempts",
         "latency_ms",
         "cache_hit",
@@ -454,6 +463,65 @@ class AIAdvisoryWorker:
             "metrics": dict(metrics),
         }
 
+    def _complete_rejected_advisory(
+        self,
+        *,
+        job: Mapping[str, Any],
+        task: Mapping[str, str],
+        identity: Mapping[str, str],
+        projection: Mapping[str, Any],
+        reason_code: str,
+        response_sha256: str = ZERO_SHA256,
+        provider_usage: Optional[Mapping[str, Any]] = None,
+        renew_claim: Callable[[], None],
+    ) -> str:
+        """Persist a fail-closed provider/validator outcome for the UI and PDF.
+
+        A malformed or contract-invalid provider response is not an advisory,
+        but dropping the whole row made a healthy worker look absent.  Store a
+        bounded rejected result so operators can distinguish this state from
+        capability unavailability without retaining provider text.
+        """
+
+        payload = {
+            "schema_version": "ai_advisory_record.v1",
+            "status": "rejected",
+            "authority": "non_authoritative_rejected_output",
+            "validation": {"status": "rejected", "reason_code": reason_code},
+            "validated_advisory": {},
+            "rendered_advisory": {},
+            "shadow_candidates": {
+                "schema_version": "ai_shadow_candidate_set.v1",
+                "candidates": [],
+            },
+        }
+        record = self._record(
+            task=task,
+            identity=identity,
+            projection=projection,
+            status="rejected",
+            response_sha256=response_sha256,
+            payload=payload,
+            metrics={
+                "schema_valid": False,
+                "validator_accepted": False,
+                "validator_reason_code": reason_code,
+                "cache_hit": False,
+                **dict(provider_usage or {}),
+            },
+        )
+        renew_claim()
+        completed = self.storage.complete_ai_advisory_job(
+            job["job_id"],
+            job["claim_owner"],
+            job["claim_token"],
+            record,
+            completion_code="rejected",
+        )
+        if not completed:
+            raise RuntimeError("AI advisory rejection lost its claim")
+        return "rejected"
+
     def _process_claim(
         self,
         job: Mapping[str, Any],
@@ -493,7 +561,23 @@ class AIAdvisoryWorker:
                 raise RuntimeError("AI advisory cache completion lost its claim")
             return "cache_replayed"
 
-        response = self._call_provider_with_deadline(projection, identity)
+        try:
+            response = self._call_provider_with_deadline(projection, identity)
+        except AIAdvisoryContractError as exc:
+            # Authentication, authorization, transport, and request failures
+            # mean the capability itself is unavailable and remain failed
+            # jobs.  Only a provider response that arrived but failed the
+            # bounded output contract becomes an inspectable rejected row.
+            if exc.code not in _PERSISTABLE_PROVIDER_RESPONSE_ERRORS:
+                raise
+            return self._complete_rejected_advisory(
+                job=job,
+                task=task,
+                identity=identity,
+                projection=projection,
+                reason_code=exc.code,
+                renew_claim=renew_claim,
+            )
         provider_usage = _provider_usage_metrics(response)
         try:
             computed_response_sha256 = sha256_json(response.structured_output)
@@ -553,44 +637,16 @@ class AIAdvisoryWorker:
                 policy=self.policy,
             )
         except AIAdvisoryContractError as exc:
-            payload = {
-                "schema_version": "ai_advisory_record.v1",
-                "status": "rejected",
-                "authority": "non_authoritative_rejected_output",
-                "validation": {"status": "rejected", "reason_code": exc.code},
-                "validated_advisory": {},
-                "rendered_advisory": {},
-                "shadow_candidates": {
-                    "schema_version": "ai_shadow_candidate_set.v1",
-                    "candidates": [],
-                },
-            }
-            record = self._record(
+            return self._complete_rejected_advisory(
+                job=job,
                 task=task,
                 identity=identity,
                 projection=projection,
-                status="rejected",
+                reason_code=exc.code,
                 response_sha256=computed_response_sha256,
-                payload=payload,
-                metrics={
-                    "schema_valid": False,
-                    "validator_accepted": False,
-                    "validator_reason_code": exc.code,
-                    "cache_hit": False,
-                    **provider_usage,
-                },
+                provider_usage=provider_usage,
+                renew_claim=renew_claim,
             )
-            renew_claim()
-            completed = self.storage.complete_ai_advisory_job(
-                job["job_id"],
-                job["claim_owner"],
-                job["claim_token"],
-                record,
-                completion_code="rejected",
-            )
-            if not completed:
-                raise RuntimeError("AI advisory rejection lost its claim")
-            return "rejected"
 
         normalized_advisory = validated["validated_advisory"]
         shadow = validated["shadow_candidates"]
@@ -803,6 +859,12 @@ class AIAdvisoryWorker:
                             "status": transition,
                             "error_code": error_code,
                             "error_type": error_type,
+                            "validation_stage": "job_contract",
+                            "validation_reason_code": (
+                                exc.code
+                                if isinstance(exc, AIAdvisoryContractError)
+                                else ""
+                            ),
                             "attempts": job["attempts"],
                             "latency_ms": round((time.monotonic() - started) * 1000, 3),
                             "timestamp": utc_now(),
