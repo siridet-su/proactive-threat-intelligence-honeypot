@@ -1,7 +1,7 @@
 ---
 title: Threat-intelligence enrichment design
 status: current
-last_verified: 2026-08-27
+last_verified: 2026-09-24
 related_adr: ADR-0002, ADR-0003
 ---
 
@@ -13,6 +13,16 @@ Enrich observed attacker IPs and payload hashes without slowing Cowrie, Zeek,
 Redis ingestion, or canonical Atlas persistence. The design supports dashboard
 triage and post-session analysis; it does not block attackers or execute
 payloads.
+
+## Runtime status
+
+As verified on the Pi on 2026-09-24, processor-side TI enqueueing is enabled
+and `honeypot-ti-worker.service` is enabled and running. This is a deployment
+setting rather than the code default: `THREAT_INTEL_ENABLED` defaults to
+`false` unless explicitly set. The worker consumes only validated jobs from
+the bounded `ti:jobs` stream and applies cache and provider-quota controls
+before making external requests. The September 9–10 validation notes describe
+the previous disabled posture and remain historical records.
 
 ## Non-goals
 

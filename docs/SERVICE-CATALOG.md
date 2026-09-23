@@ -1,7 +1,7 @@
 ---
 title: Honeypot service catalog
 status: current
-last_verified: 2026-09-10
+last_verified: 2026-09-24
 ---
 
 # Honeypot service catalog
@@ -23,9 +23,9 @@ an operational change.
 | SMTP sink | SMTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | PostgreSQL/Odoo/deception-core | loopback/internal | Current | current project | internal application logs | Supporting decoy infrastructure, not public database services. |
 | Zeek | sensor | Current, active | current project | Go collector | Interface workers feed Redis with zero observed pending lag at verification. |
-| Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. Processor TI enqueueing is disabled. |
+| Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true` and bounds the Redis queue. |
 | Hardware agent | local telemetry | Current, active | current project | Redis `raw:hardware` → MongoDB `hardware_live` + `hardware_metrics_1m` | One-second samples replace 30 fixed live slots; history receives one rollup per sensor/minute. |
-| TI worker | outbound enrichment | Current, intentionally disabled | current project | Redis `ti:jobs` | Must remain disabled until explicitly approved; new jobs are not enqueued and no TI queue currently remains. |
+| TI worker | outbound enrichment | Current, active on Pi (verified 2026-09-24) | current project | Redis `ti:jobs` → provider cache/quota → Atlas `threat_intel` | Enabled service; only validated public IP/SHA-256 jobs are processed, with provider credentials kept in the private worker environment. |
 | Artifact hash retention | local maintenance | Current, active timer | operations | SHA-256 ledger only | Removes artifact bytes after a stability window; legacy artifacts were swept on 2026-09-09. |
 | Legacy sensor forwarder | cloud forwarding | Legacy, currently active | previous team | separate legacy path | Maintain only until an approved migration/parity check. |
 | Post-session/cloud analysis | cloud/internal | Target | current project | reads Atlas canonical events | Production workstream under development. |
