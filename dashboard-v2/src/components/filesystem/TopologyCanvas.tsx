@@ -34,7 +34,8 @@ import type {
 import { TopologyToolbar } from "./TopologyToolbar";
 import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
-import { HopEnergy } from "./HopEnergy";
+import { TransitionLegend, TransitionOverlay } from "./TransitionOverlay";
+import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import {
   analyzeTopologyDensity,
   calloutsForGraph,
@@ -210,6 +211,8 @@ export interface TopologyCanvasProps {
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
+  displayedTransitions?: readonly VerifiedCwdTransition[];
+  currentTransition?: VerifiedCwdTransition | null;
   hopDurationMs?: number;
   title?: string;
   subtitle?: string;
@@ -233,6 +236,8 @@ export function TopologyCanvas({
   selectedSessionId,
   selectedPath,
   activeHop,
+  displayedTransitions = [],
+  currentTransition = null,
   hopDurationMs = 1400,
   title,
   subtitle,
@@ -955,6 +960,8 @@ export function TopologyCanvas({
                   </div>
                 )}
 
+                {(displayedTransitions.length > 0 || currentTransition) && <TransitionLegend />}
+
                 <motion.div
                   ref={graphPlaneRef}
                   className="absolute origin-top-left overflow-visible"
@@ -975,11 +982,6 @@ export function TopologyCanvas({
                   }
                 >
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute h-full w-full overflow-visible" aria-hidden="true">
-                    <defs>
-                      <marker id="arrowhead-primary" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
-                        <polygon points="0 0, 4 2, 0 4" fill="var(--primary)" opacity="0.6" />
-                      </marker>
-                    </defs>
                     <AnimatePresence initial={false}>
                       {graphNodes.map((node) => {
                         const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
@@ -989,21 +991,6 @@ export function TopologyCanvas({
                         const cp2Y = parent.y <= node.y ? node.y - cpOffset : node.y + cpOffset;
                         const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${cp1Y}, ${node.x} ${cp2Y}, ${node.x} ${node.y}`;
 
-                        const isActiveHopEdge = Boolean(
-                          activeHop && activeHopCanvasSemantics.verifiedTargetPath && (
-                            (activeHop.fromPath === parent.path && activeHopCanvasSemantics.verifiedTargetPath === node.path) ||
-                            (activeHop.fromPath === node.path && activeHopCanvasSemantics.verifiedTargetPath === parent.path)
-                          )
-                        );
-
-                        const isTrailEdge = Boolean(
-                          activeHop &&
-                          activeHop.visitedPaths.includes(node.path) &&
-                          activeHop.visitedPaths.includes(parent.path)
-                        );
-
-                        const hopColor = activeHop?.isFailedAttempt ? "var(--warning)" : "var(--primary)";
-
                         return (
                           <motion.g
                             key={`${parent.path}-${node.path}`}
@@ -1012,7 +999,6 @@ export function TopologyCanvas({
                             exit={reducedMotion ? undefined : { opacity: 0 }}
                             transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
                           >
-                            {/* The active connector is drawn with its packet in HopEnergy. */}
                             <motion.path
                               initial={false}
                               animate={{ d: filesystemRoute }}
@@ -1022,36 +1008,13 @@ export function TopologyCanvas({
                                   : TOPOLOGY_TRANSITION
                               }
                               fill="none"
-                              stroke={
-                                isActiveHopEdge
-                                  ? hopColor
-                                  : isTrailEdge
-                                    ? "var(--primary)"
-                                    : "var(--border-strong)"
-                              }
-                              strokeWidth={
-                                isActiveHopEdge
-                                  ? "0.55"
-                                  : isTrailEdge
-                                    ? "0.24"
-                                    : "0.35"
-                              }
-                              strokeOpacity={
-                                isActiveHopEdge
-                                  ? 0
-                                  : isTrailEdge
-                                    ? 0.42
-                                    : 0.4
-                              }
-                              strokeDasharray={
-                                isActiveHopEdge
-                                  ? "none"
-                                  : isTrailEdge
-                                    ? "1.2 0.8"
-                                    : "none"
-                              }
-                              markerEnd={isTrailEdge ? "url(#arrowhead-primary)" : undefined}
-                              data-active-hop-connector={isActiveHopEdge ? "true" : undefined}
+                              stroke="var(--border-strong)"
+                              strokeWidth="0.35"
+                              strokeOpacity="0.4"
+                              strokeDasharray="none"
+                              data-edge-kind="hierarchy"
+                              data-parent-path={parent.path}
+                              data-child-path={node.path}
                             />
                           </motion.g>
                         );
@@ -1126,16 +1089,20 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
-                  {activeHop && activeHopCanvasSemantics.verifiedTargetPath && graphNodeByPath.has(activeHopCanvasSemantics.verifiedTargetPath) && (
-                    <HopEnergy
-                      key={`${selectedSessionId}:${activeHop.eventId}`}
-                      from={activeHop.fromPath ? graphNodeByPath.get(activeHop.fromPath) : undefined}
-                      to={graphNodeByPath.get(activeHopCanvasSemantics.verifiedTargetPath)!}
-                      fromBounds={activeHop.fromPath ? nodeElementBounds[activeHop.fromPath] : undefined}
-                      toBounds={nodeElementBounds[activeHopCanvasSemantics.verifiedTargetPath]}
+                  {(displayedTransitions.length > 0 || currentTransition) && (
+                    <TransitionOverlay
+                      transitions={displayedTransitions}
+                      currentTransition={currentTransition}
+                      nodes={graphNodes}
+                      nodeBounds={nodeElementBounds}
                       durationMs={hopDurationMs}
                       reducedMotion={Boolean(reducedMotion)}
-                      transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
+                      layoutTransition={
+                        reducedMotion || Boolean(draggedNodePath)
+                          ? { duration: 0 }
+                          : TOPOLOGY_TRANSITION
+                      }
+                      showLegend={false}
                     />
                   )}
                   {failedHopMessage && failedAnnotationNode && (

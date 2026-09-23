@@ -77,6 +77,8 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
           selectedSessionId={props.selectedSessionId}
           selectedPath={props.selectedPath}
           activeHop={props.activeHop}
+          displayedTransitions={props.displayedTransitions}
+          currentTransition={props.currentTransition}
           hopDurationMs={props.playbackSpeed}
           title={props.auditCanvasTitle}
           subtitle={props.auditCanvasSubtitle}

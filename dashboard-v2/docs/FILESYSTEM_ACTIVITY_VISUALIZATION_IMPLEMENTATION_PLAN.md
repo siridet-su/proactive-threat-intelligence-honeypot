@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-007B` — Add a separate transition overlay**
+Current focus: **`FSV-007C` — Density and minimap behavior**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -670,7 +670,7 @@ Verification:
 - `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
 - Browser gate: **NOT RUN**; this phase exposes data only and makes no visual change.
 
-#### `FSV-007B` Add a separate transition overlay
+#### `FSV-007B` Add a separate transition overlay — **DONE (2026-09-23)**
 
 Primary files:
 
@@ -698,6 +698,47 @@ Acceptance:
 - revisits remain visible/inspectable in chronological order
 - legend matches renderer in every state
 - reduced-motion removes travel/pulse without removing state information
+
+Implemented behavior:
+
+- `TopologyCanvas` now renders filesystem parent/child structure only as thin neutral solid lines.
+  Hierarchy paths have no arrowheads, replay state, visited-path recoloring, or transition identity.
+- `TransitionOverlay` consumes only the `VerifiedCwdTransition` models exposed by `useAuditReplay`.
+  The audit workspace passes `displayedTransitions` and `currentTransition` through the existing
+  context boundary; live topology remains unchanged and has no synthesized transition sequence.
+- Directed transitions render on a separate SVG layer with arrowheads and absolute hop labels.
+  Non-parent transitions are drawn directly between their verified endpoints. Repeated routes,
+  reverse routes, and self-transitions retain separate elements keyed by event identity; repeated
+  routes use separate lanes rather than being collapsed into one hierarchy edge.
+- Previous, current, and future events use distinct renderer states. The current event retains a
+  static strong line/ring and label in reduced-motion mode; travel and pulse elements are omitted
+  when reduced motion is requested.
+- `entered` events render an entry marker at the verified destination. `failed_change` events render
+  a warning marker at the verified origin and never render a destination edge. Unavailable endpoints
+  remain in the accessible chronological sequence without a fabricated drawable endpoint.
+- A current anchored event outside the loaded window is rendered separately without appending it to
+  `displayedTransitions`. A dashed `Unloaded history gap` disclosure explicitly states that no
+  intermediate transitions were inferred.
+- The visible legend uses the same six encodings as the renderer: filesystem hierarchy, previous,
+  current, future, entry, and failed-at-origin. A screen-reader-only ordered sequence exposes every
+  displayed event in chronological order, including revisits and unavailable endpoints.
+
+Verification:
+
+- Test-first failure: the focused suite initially failed to resolve the not-yet-created
+  `TransitionOverlay` module.
+- `npx vitest run tests/filesystem-transition-overlay.test.tsx`: **PASSED** (8/8 tests)
+- `npx vitest run tests/filesystem-transition-overlay.test.tsx tests/filesystem-transition-model.test.tsx tests/filesystem-failed-change-visualization.test.tsx tests/filesystem-hooks.test.ts tests/filesystem-replay-scrubber.test.ts tests/filesystem-layout.test.ts tests/filesystem-ownership-boundaries.test.tsx`: **PASSED** (159/159 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (473 tests passed, 14 skipped)
+- `npm test`: **PASSED** (634 tests passed, 2 expected failures, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate: **NOT RUN**. `npm run test:browser` started the configured web server, but all six
+  Playwright cases stopped before browser execution because the managed Chromium executable
+  `chromium_headless_shell-1243` is not installed. No browser was downloaded and no responsive visual
+  pass is claimed.
+
+Checkpoint 2 remains **IN_PROGRESS**; current focus is `FSV-007C`.
 
 #### `FSV-007C` Density and minimap behavior
 

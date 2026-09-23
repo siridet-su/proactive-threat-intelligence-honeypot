@@ -28,6 +28,7 @@ import {
   filterDisplayedHistory,
   useAuditReplay,
 } from "../src/components/filesystem/useAuditReplay";
+import { deriveVerifiedCwdTransitions } from "../src/components/filesystem/filesystemTransitions";
 
 // @ts-expect-error React act environment flag
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -622,6 +623,7 @@ describe("FSV-005 failed-change visualization", () => {
       0,
       getHistoryWindowMetrics(1, 1, 0),
     );
+    const successfulTransitions = deriveVerifiedCwdTransitions([successfulAdjacentEvent], 1);
     await act(async () => {
       root.render(createElement(TopologyCanvas, {
         snapshot,
@@ -631,6 +633,8 @@ describe("FSV-005 failed-change visualization", () => {
         selectedSessionId: session.sessionId,
         selectedPath: null,
         activeHop: successfulRoute,
+        displayedTransitions: successfulTransitions,
+        currentTransition: successfulTransitions[0],
         onSelectSession: () => {},
         onSelectPath: () => {},
         staleThresholdMs: 30_000,
@@ -640,7 +644,8 @@ describe("FSV-005 failed-change visualization", () => {
     });
 
     expect(container.querySelector('[data-testid="active-hop-target-badge"]')).not.toBeNull();
-    expect(container.querySelector('[data-active-hop-connector="true"]')).not.toBeNull();
+    expect(container.querySelector('[data-transition-event-id="adjacent-changed-hop"][data-transition-kind="directed"]')).not.toBeNull();
+    expect(container.querySelector('[data-edge-kind="hierarchy"][marker-end]')).toBeNull();
   });
 
   it("keeps a truthful canvas-level warning when the failed origin is outside a partial graph", async () => {
