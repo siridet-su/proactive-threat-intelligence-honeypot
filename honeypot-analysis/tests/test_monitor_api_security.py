@@ -366,6 +366,39 @@ def test_threat_stream_sends_headers_and_ready_before_storage_poll(
     assert handler.wfile.getvalue().startswith(b"event: ready\n")
 
 
+def test_threat_stream_ignores_poll_timestamp_but_emits_changed_session(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler, _, _ = _handler(_config(tmp_path), "/api/threats/stream")
+    handler.send_response = lambda *_args: None
+    handler.send_header = lambda *_args: None
+    handler.end_headers = lambda: None
+    handler.wfile = io.BytesIO()
+    calls = 0
+
+    def snapshot(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return {
+            "ok": True,
+            "timestamp": f"2026-09-23T00:00:{calls:02d}Z",
+            "summary": {"total_sessions": 1},
+            "sessions": [{"session_id": _COMMAND_TEST_SESSION_ID, "command_count": 1 if calls < 3 else 2}],
+        }
+
+    monkeypatch.setattr(monitor_web, "load_snapshot", snapshot)
+    monkeypatch.setattr(monitor_web, "_session_overview", lambda row: row)
+    monkeypatch.setattr(monitor_web, "SSE_MAX_CONNECTION_SECONDS", 0.035)
+    monkeypatch.setattr(monitor_web, "SSE_POLL_SECONDS", 0.01)
+    handler._send_threat_stream()
+
+    frames = handler.wfile.getvalue()
+    assert calls >= 3
+    assert frames.count(b"event: snapshot\n") == 2
+    assert frames.startswith(b"event: ready\n")
+
+
 def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

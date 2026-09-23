@@ -6479,8 +6479,12 @@ class MonitorHandler(BaseHTTPRequestHandler):
                     "sessions": sessions,
                     "error": snapshot.get("error") or "",
                 }
+                # A fresh response timestamp is not a new threat snapshot.
+                # Keep the stream quiet until a session or summary changes;
+                # heartbeat frames provide liveness between updates.
+                snapshot_identity = {key: value for key, value in payload.items() if key != "timestamp"}
                 encoded = json.dumps(
-                    public_payload(payload),
+                    public_payload(snapshot_identity),
                     ensure_ascii=False,
                     sort_keys=True,
                 ).encode("utf-8")
