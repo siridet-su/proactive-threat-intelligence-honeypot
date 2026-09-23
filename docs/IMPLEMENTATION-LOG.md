@@ -131,4 +131,31 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   its static endpoint ring while preserving the reduced-motion fallback.
 - Related ADR/runbook: filesystem semantics and validation evidence are recorded
   in
-  [`dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md`](../dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md).
+[`dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md`](../dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md).
+
+### 2026-09-24 — Refine backup worktree dashboard UI
+
+- Status: prepared for review; not deployed to a host.
+- Scope and intent: preserve the backup control-room feature while improving
+  the System Health information hierarchy and custom history range interaction.
+- Repository branch and commit/PR: `feat/dashboard-backup-status`; UI work is
+  based on commits `cd84a77` and `51182f6` and is being reconciled with the
+  current `main` branch.
+- Repository changes: renovated live hardware telemetry, moved Source activity
+  to a full-width section, kept retained history as a separate region, made the
+  custom date range highlight continuous across start/middle/end days, and
+  retained the backup action/progress and B2 status surfaces.
+- Host/environment changes actually applied: none. No Pi service, systemd unit,
+  database, reverse proxy, or network exposure was changed.
+- Runtime/exposure state: available only from the local dashboard worktree on
+  port `3001` for authenticated review.
+- Validation performed and outcome: `npx tsc --noEmit`, `npm run lint`,
+  `npm test`, `npm run build`, and `git diff --check` passed after the
+  main-branch reconciliation. The test suite reported 797 passing tests, 2
+  expected failures, and 14 skipped; ESLint has no new errors.
+- Not performed / deferred: no host deployment or external exposure test was
+  performed.
+- Rollback: revert the merge/feature commit on this branch; no host rollback is
+  required.
+- Follow-up: push the resolved branch for PR review and visually review the
+  authenticated dashboard at local port `3001`.
