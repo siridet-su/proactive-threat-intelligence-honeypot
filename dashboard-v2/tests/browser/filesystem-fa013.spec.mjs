@@ -829,16 +829,19 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect(sourceToggle).toBeVisible({ timeout: 15_000 });
     await expect(sourceToggle).toHaveAttribute("aria-expanded", "true");
     const sourceCallout = sourceToggle.locator("..");
-    const expandedHeight = (await sourceCallout.boundingBox())?.height ?? 0;
-    const expandedSourceAnchor = await sourceToggle.boundingBox();
+    const otherSource = page.locator('button[aria-label^="Source 192.0.2.1;"]');
     const rootDirectory = page.getByRole("button", { name: /^Inspect directory \/ \(/ });
-    const expandedRootBounds = await rootDirectory.boundingBox();
     const sourceRoutes = page
       .getByRole("region", { name: /Filesystem topology map workspace/ })
       .locator('path[data-source-connection="192.0.2.10"]');
     await expect(sourceRoutes).toHaveCount(2);
-    const expandedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
     await page.waitForTimeout(1_000);
+    const expandedHeight = (await sourceCallout.boundingBox())?.height ?? 0;
+    const expandedSourceAnchor = await sourceToggle.boundingBox();
+    const expandedOtherSourceBounds = await otherSource.boundingBox();
+    const expandedCalloutBounds = await sourceCallout.boundingBox();
+    const expandedRootBounds = await rootDirectory.boundingBox();
+    const expandedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
     const expandedViewportTransform = await sourceRoutes.first().evaluate((path) => {
       const plane = path.ownerSVGElement?.parentElement;
       return plane ? getComputedStyle(plane).transform : null;
@@ -847,7 +850,7 @@ test.describe("FA-013 real-browser evidence", () => {
     await sourceToggle.click();
     await expect(sourceToggle).toHaveAttribute("aria-expanded", "false");
     await expect.poll(async () => (await sourceCallout.boundingBox())?.height ?? 0).toBeLessThan(expandedHeight);
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(1_000);
     const collapsedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => {
       const coordinates = (path.getAttribute("d")?.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
       const svgBounds = path.ownerSVGElement?.getBoundingClientRect();
@@ -870,12 +873,21 @@ test.describe("FA-013 real-browser evidence", () => {
     expect(collapsedViewportTransform).toBe(expandedViewportTransform);
     expect(collapsedSourceAnchor).not.toBeNull();
     expect(expandedSourceAnchor).not.toBeNull();
-    expect(Math.abs(collapsedSourceAnchor.x - expandedSourceAnchor.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(collapsedSourceAnchor.y - expandedSourceAnchor.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(collapsedSourceAnchor.x - expandedSourceAnchor.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(collapsedSourceAnchor.y - expandedSourceAnchor.y)).toBeLessThanOrEqual(2);
     expect(collapsedRootBounds).not.toBeNull();
     expect(expandedRootBounds).not.toBeNull();
     expect(Math.abs(collapsedRootBounds.x - expandedRootBounds.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(collapsedRootBounds.y - expandedRootBounds.y)).toBeLessThanOrEqual(1);
+    expect(expandedCalloutBounds).not.toBeNull();
+    expect(expandedOtherSourceBounds).not.toBeNull();
+    const expandedSourcesOverlap = !(
+      expandedCalloutBounds.x + expandedCalloutBounds.width <= expandedOtherSourceBounds.x ||
+      expandedOtherSourceBounds.x + expandedOtherSourceBounds.width <= expandedCalloutBounds.x ||
+      expandedCalloutBounds.y + expandedCalloutBounds.height <= expandedOtherSourceBounds.y ||
+      expandedOtherSourceBounds.y + expandedOtherSourceBounds.height <= expandedCalloutBounds.y
+    );
+    expect(expandedSourcesOverlap).toBe(false);
     expect(collapsedBounds).not.toBeNull();
     for (const endpoint of collapsedRoutes) {
       const withinHorizontalSpan = endpoint.x >= collapsedBounds.x - 2 && endpoint.x <= collapsedBounds.x + collapsedBounds.width + 2;

@@ -903,7 +903,24 @@ export type GraphNode = FilesystemTopologyNode & {
   isAggregated?: boolean;
 };
 export type GraphElementSize = { width: number; height: number };
-export type GraphElementBounds = GraphElementSize & { x: number; y: number };
+export type GraphElementBounds = GraphElementSize & {
+  x: number;
+  y: number;
+  /** Offset from the stable interaction anchor to the visual footprint centre. */
+  anchorOffsetX?: number;
+  anchorOffsetY?: number;
+};
+
+export function estimateExpandedCalloutDisclosureHeight(sessionCount: number): number {
+  if (sessionCount <= 1) return 0;
+  const rowHeight = 30;
+  const rowGap = 4;
+  const panelPadding = 12;
+  const panelBorder = 1;
+  const measurementGutter = 8;
+  const contentHeight = panelPadding + sessionCount * rowHeight + (sessionCount - 1) * rowGap;
+  return panelBorder + Math.min(192, contentHeight) + measurementGutter;
+}
 
 export interface GraphCalloutSession {
   sessionId: string;
@@ -1426,6 +1443,12 @@ export function clearAutomaticCalloutCollisions(
   calloutElementBounds: Record<string, GraphElementBounds> = {},
 ): Map<string, LabelPosition> {
   const cleared = new Map<string, LabelPosition>();
+  const clearedBoxes: Array<{
+    centerX: number;
+    centerY: number;
+    halfWidth: number;
+    halfHeight: number;
+  }> = [];
   const nodeBoxes = nodes.map((node) => {
     const bounds = nodeElementBounds[node.path];
     return {
@@ -1442,33 +1465,50 @@ export function clearAutomaticCalloutCollisions(
     const bounds = calloutElementBounds[callout.sourceIp];
     const hw = (bounds?.width ?? 17) / 2;
     const hh = (bounds?.height ?? 10) / 2;
+    const offsetX = bounds?.anchorOffsetX ?? 0;
+    const offsetY = bounds?.anchorOffsetY ?? 0;
     let x = initial.x;
     let y = initial.y;
 
     for (const node of nodeBoxes) {
-      const overlaps = Math.abs(x - node.x) < hw + node.hw && Math.abs(y - node.y) < hh + node.hh;
+      const centerX = x + offsetX;
+      const centerY = y + offsetY;
+      const overlaps = Math.abs(centerX - node.x) < hw + node.hw && Math.abs(centerY - node.y) < hh + node.hh;
       if (!overlaps) continue;
       // Preserve the chosen rail: sources on the right move farther right and
       // vice versa. A generous 3.5% gutter prevents visually touching borders or shadows.
       // Crucially, ONLY push the callout outward. Never pull it inward if it was already further away.
-      if (x >= node.x) {
+      if (centerX >= node.x) {
         const requiredX = node.x + node.hw + hw + 3.5;
-        x = Math.max(x, Math.min(94, requiredX));
+        x = Math.max(x, Math.min(94, requiredX - offsetX));
       } else {
         const requiredX = node.x - node.hw - hw - 3.5;
-        x = Math.min(x, Math.max(6, requiredX));
+        x = Math.min(x, Math.max(6, requiredX - offsetX));
       }
     }
 
     // Keep cards on the same rail from covering one another after a horizontal
     // correction. Prefer moving down, then up if the lower canvas edge wins.
-    for (const existing of cleared.values()) {
-      const overlaps = Math.abs(x - existing.x) < hw * 2 && Math.abs(y - existing.y) < hh * 2;
+    for (const existing of clearedBoxes) {
+      const centerX = x + offsetX;
+      const centerY = y + offsetY;
+      const overlaps =
+        Math.abs(centerX - existing.centerX) < hw + existing.halfWidth &&
+        Math.abs(centerY - existing.centerY) < hh + existing.halfHeight;
       if (!overlaps) continue;
-      const downward = existing.y + hh * 2 + 1.5;
-      y = downward <= 82 ? downward : Math.max(18, existing.y - hh * 2 - 1.5);
+      const downwardCenter = existing.centerY + existing.halfHeight + hh + 1.5;
+      const upwardCenter = existing.centerY - existing.halfHeight - hh - 1.5;
+      y = downwardCenter + hh <= 94
+        ? downwardCenter - offsetY
+        : Math.max(18, upwardCenter - offsetY);
     }
     cleared.set(callout.sourceIp, { x, y });
+    clearedBoxes.push({
+      centerX: x + offsetX,
+      centerY: y + offsetY,
+      halfWidth: hw,
+      halfHeight: hh,
+    });
   }
   return cleared;
 }
@@ -1559,8 +1599,8 @@ export function calculateWorldBounds(
     const halfWidth = bounds?.width ? bounds.width / 2 : 8.5;
     const halfHeight = bounds?.height ? bounds.height / 2 : 5;
     const pos = manualLabels[callout.sourceIp] ?? automaticCalloutPositions.get(callout.sourceIp) ?? { x: 90, y: 50 };
-    const posX = pos.x;
-    const posY = pos.y;
+    const posX = pos.x + (bounds?.anchorOffsetX ?? 0);
+    const posY = pos.y + (bounds?.anchorOffsetY ?? 0);
 
     const left = posX - halfWidth;
     const right = posX + halfWidth;

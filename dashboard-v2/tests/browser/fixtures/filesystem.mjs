@@ -96,8 +96,8 @@ export async function installApiFixtures(page, {
           ...liveSession,
           sessionId: "live-other-source",
           sourceIp: "192.0.2.1",
-          cwdState: { ...liveSession.cwdState, path: "/etc", sourceEventId: "live-other-source-cwd" },
-          auditSummary: { visitedPaths: ["/etc"], homeOnly: false, eventCount: 1 },
+          cwdState: { ...liveSession.cwdState, path: "/test", sourceEventId: "live-other-source-cwd" },
+          auditSummary: { visitedPaths: ["/test"], homeOnly: false, eventCount: 1 },
         },
       ]
     : [liveSession];
@@ -185,8 +185,9 @@ export async function installApiFixtures(page, {
     nodes: multiSessionLive
       ? [
           { path: "/", parentPath: null, depth: 0, sessionIds: clusteredLiveSessions.map((session) => session.sessionId), observedAt: liveSession.cwdState.observedAt },
-          { path: "/etc", parentPath: "/", depth: 1, sessionIds: [liveSession.sessionId, "live-other-source"], observedAt: liveSession.cwdState.observedAt },
+          { path: "/etc", parentPath: "/", depth: 1, sessionIds: [liveSession.sessionId], observedAt: liveSession.cwdState.observedAt },
           { path: "/tmp", parentPath: "/", depth: 1, sessionIds: ["live-session-two"], observedAt: liveSession.cwdState.observedAt },
+          { path: "/test", parentPath: "/", depth: 1, sessionIds: ["live-other-source"], observedAt: liveSession.cwdState.observedAt },
         ]
       : [],
     sessions: clusteredLiveSessions,

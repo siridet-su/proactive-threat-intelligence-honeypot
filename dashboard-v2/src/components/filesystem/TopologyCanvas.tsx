@@ -52,6 +52,7 @@ import {
   DEFAULT_DENSITY_THRESHOLDS,
   deriveActiveHopCanvasSemantics,
   directorySegment,
+  estimateExpandedCalloutDisclosureHeight,
   formatUpdateAge,
   formatFailedChangeMessage,
   formatRuleBasedPathInterestDescription,
@@ -91,7 +92,9 @@ function sameElementBounds(
       Math.abs(next.x - current.x) < 0.01 &&
       Math.abs(next.y - current.y) < 0.01 &&
       Math.abs(next.width - current.width) < 0.01 &&
-      Math.abs(next.height - current.height) < 0.01;
+      Math.abs(next.height - current.height) < 0.01 &&
+      Math.abs((next.anchorOffsetX ?? 0) - (current.anchorOffsetX ?? 0)) < 0.01 &&
+      Math.abs((next.anchorOffsetY ?? 0) - (current.anchorOffsetY ?? 0)) < 0.01;
   });
 }
 
@@ -566,13 +569,27 @@ export function TopologyCanvas({
     const measuredCallouts = Object.fromEntries(
       [...calloutElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
     );
+    const calloutBySourceIp = new Map(graphCallouts.map((callout) => [callout.sourceIp, callout]));
     const measuredCalloutAnchors = Object.fromEntries(
-      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
+      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => {
+        const anchorBounds = toRelativeBounds(element);
+        const callout = calloutBySourceIp.get(sourceIp);
+        const reservedDisclosureHeight = estimateExpandedCalloutDisclosureHeight(callout?.sessions.length ?? 1);
+        const reservedDisclosurePercent = (reservedDisclosureHeight / plane.offsetHeight) * 100;
+        const visibleHeight = measuredCallouts[sourceIp]?.height ?? anchorBounds.height;
+        const fullHeight = Math.max(anchorBounds.height + reservedDisclosurePercent, visibleHeight);
+        const disclosureHeight = Math.max(0, fullHeight - anchorBounds.height);
+        return [sourceIp, {
+          ...anchorBounds,
+          height: fullHeight,
+          anchorOffsetY: disclosureHeight / 2,
+        }];
+      }),
     );
     setNodeElementBounds((current) => sameElementBounds(current, measuredNodes) ? current : measuredNodes);
     setCalloutElementBounds((current) => sameElementBounds(current, measuredCallouts) ? current : measuredCallouts);
     setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
-  }, []);
+  }, [graphCallouts]);
 
   // Connector endpoints use rendered bounds, including their actual centers. This keeps a line
   // attached to the same visual edge in compact, expanded, zoomed, and manually arranged views.

@@ -14,6 +14,7 @@ import {
   calloutsForGraph,
   DEFAULT_DENSITY_THRESHOLDS,
   DEFAULT_STALE_THRESHOLD_MS,
+  estimateExpandedCalloutDisclosureHeight,
   formatUpdateAge,
   getDirectorySessionCounts,
   getFreshnessState,
@@ -79,6 +80,32 @@ function makeSession(
 }
 
 describe("filesystem source layout", () => {
+  it("reserves the complete bounded disclosure height before a source cluster opens", () => {
+    expect(estimateExpandedCalloutDisclosureHeight(1)).toBe(0);
+    expect(estimateExpandedCalloutDisclosureHeight(2)).toBe(85);
+    expect(estimateExpandedCalloutDisclosureHeight(20)).toBe(201);
+  });
+
+  it("separates source cards using asymmetric expanded disclosure footprints", () => {
+    const sources = [callout("10.0.0.8", "/etc"), callout("10.0.0.9", "/test")];
+    const positions = clearAutomaticCalloutCollisions(
+      [],
+      sources,
+      new Map([
+        ["10.0.0.8", { x: 28, y: 50 }],
+        ["10.0.0.9", { x: 28, y: 65 }],
+      ]),
+      {},
+      {
+        "10.0.0.8": { x: 28, y: 60, width: 20, height: 30, anchorOffsetY: 10 },
+        "10.0.0.9": { x: 28, y: 65, width: 20, height: 10 },
+      },
+    );
+
+    expect(positions.get("10.0.0.8")).toEqual({ x: 28, y: 50 });
+    expect(positions.get("10.0.0.9")).toEqual({ x: 28, y: 81.5 });
+  });
+
   it("clears an automatic source card from a measured directory card", () => {
     const nodes = [graphNode("/tmp", 50, 50, 1)];
     const sources = [callout("10.0.0.8", "/tmp")];
