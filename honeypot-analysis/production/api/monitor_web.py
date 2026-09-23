@@ -50,6 +50,7 @@ from production.enrichment.external_ti_session import (
     build_session_ti_projection,
 )
 from production.correlation.session_ttp_correlation import build_observed_tactic_path
+from production.ai_advisory.presentation import advisory_presentation
 from production.utils.config import ProductionConfig
 from production.prediction_next_distinct_poc.dashboard_adapter import (
     LABEL_ORDER as NEXT_DISTINCT_LABEL_ORDER,
@@ -3920,6 +3921,17 @@ def load_ai_advisory_detail(
         "selected_relationship_ids": selected_refs("selected_relationship_ids"),
         "ranked_action_ids": selected_refs("ranked_action_ids"),
     } if stored_selection else {}
+    try:
+        display_report = _complete_report_payload(report_payload, config.reports_dir)
+    except (OSError, ValueError):
+        # An unreadable artifact cannot grant a canonical label. The display
+        # projection will mark selected references unresolved instead.
+        display_report = report_payload
+    presentation = advisory_presentation(
+        payload.get("rendered_advisory") or {},
+        public_selection,
+        display_report,
+    )
     shadow = payload.get("shadow_candidates")
     shadow = shadow if isinstance(shadow, dict) else {}
     raw_candidates = shadow.get("candidates")
@@ -3990,6 +4002,7 @@ def load_ai_advisory_detail(
             "validation": payload.get("validation") or {},
             "validated_advisory": public_selection,
             "rendered_advisory": payload.get("rendered_advisory") or {},
+            "presentation": presentation,
             "shadow_candidates": shadow or {
                 "schema_version": "ai_shadow_candidate_set.v1",
                 "candidates": [],

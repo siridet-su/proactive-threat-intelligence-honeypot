@@ -28,6 +28,7 @@ from production.reporting.response_guidance_v3 import validate_response_guidance
 from production.reporting.artifact_privacy import sanitize_artifact_boundary
 from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
 from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
+from production.ai_advisory.presentation import advisory_presentation
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -1787,8 +1788,13 @@ def write_pdf_report(
         if validation_status not in {"accepted", "valid"}:
             return []
         rendered = advisory.get("rendered_advisory") if isinstance(advisory.get("rendered_advisory"), dict) else {}
+        presentation = advisory_presentation(
+            rendered,
+            advisory.get("validated_advisory") or {},
+            report,
+        )
         texts: List[str] = []
-        for item in rendered.get("paragraphs") or []:
+        for item in presentation.get("paragraphs") or []:
             if isinstance(item, dict) and str(item.get("text") or "").strip():
                 texts.append(str(item.get("text")).strip())
         for item in rendered.get("sections") or []:
