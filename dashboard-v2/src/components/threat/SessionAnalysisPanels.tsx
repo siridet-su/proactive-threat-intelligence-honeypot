@@ -30,6 +30,7 @@ import {
 } from "@/lib/external-ti-presentation";
 import { projectAdminCommandRecords } from "@/lib/session-command-projection";
 import { projectContextualHypotheses } from "@/lib/contextual-hypothesis-presentation";
+import { hasRankableModel2, rankTtpRecommendations } from "@/lib/model-ttp-ranking";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -1418,6 +1419,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const binding = record(model2.binding);
   const results = list(ensemble.results).map(record);
   const model1Only = list(ensemble.model1_only_labels).map(record);
+  const recommendations = rankTtpRecommendations(data);
 
   if (!hasMeaningfulRecord(ensemble)) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
@@ -1439,7 +1441,27 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
         ["Comparisons", String(results.length)],
       ]} />
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 only adds a comparison when its result is bound to this session; model scores are not combined.</p>
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
+      {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
+            <p className="mt-1 text-xs leading-5 text-text-muted">Rank-based advisory priority from Model1, with an extra vote only for session-bound Model2 agreement. This is not a confidence percentage, trusted finding, or response authorization.</p>
+          </div>
+          <span className="ui-badge text-[10px]">RRF · k=60</span>
+        </div>
+        <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+          {recommendations.map((item) => <li key={item.techniqueId} className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-text">#{item.rank} <span className="font-mono">{item.techniqueId}</span></span>
+              <span className="ui-badge text-[10px]">{item.model2Support === "corroborates" ? "Both models" : item.model2Support === "contradicts" ? "Models disagree" : "Model1 only"}</span>
+            </div>
+            <p className="mt-1 text-xs text-text-muted">Model1 rank {item.model1Rank} · priority score {item.score.toFixed(4)}</p>
+            {item.model2Support === "contradicts" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT; review the disagreement before drawing a conclusion.</p>}
+          </li>)}
+        </ol>
+        <p className="mt-2 text-[11px] text-text-subtle">Formula: 1/(60 + Model1 rank) + 1/61 when Model2 also reports PRESENT. Model2 raw scores are not ranked across technique heads; missing results are not negative votes.</p>
+      </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No Model1-present TTP is available to rank for this session.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">
           {results.map((item, index) => (
@@ -1481,14 +1503,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
 }
 
 export function hasBoundAvailableModel2(data: JsonRecord): boolean {
-  const ensemble = record(data.ensemble_evidence);
-  const model2 = record(ensemble.model2);
-  const binding = record(model2.binding);
-  const sessionId = label(data.session_id || record(data.overview).session_id, "");
-  return model2.available === true
-    && Boolean(sessionId)
-    && label(binding.session_id, "") === sessionId
-    && Boolean(label(binding.run_id || ensemble.run_id, ""));
+  return hasRankableModel2(data);
 }
 
 export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {

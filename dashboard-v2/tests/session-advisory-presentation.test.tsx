@@ -22,8 +22,8 @@ describe("session assessment presentation", () => {
     />);
     expect(html).toContain("Observed SSH interaction");
     expect(html).toContain("Check authorised authentication logs");
-    expect(html).toContain("selected ID belongs to response guidance");
-    expect(html).toContain("Existing action selected for review");
+    expect(html).toContain("the linked evidence is a response-guidance finding");
+    expect(html).toContain("Existing manual action");
   });
 
   it("does not imply that an unavailable Model2 corroborated the session", () => {
