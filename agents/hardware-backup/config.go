@@ -8,41 +8,46 @@ import (
 )
 
 const (
-	defaultMongoDatabase = "honeypot_db"
-	defaultCollection    = "hardware_metrics_1m"
-	defaultBackupRoot    = "/var/lib/honeypot/hardware-backups"
-	defaultLookbackDays  = 30
-	defaultSafetyDays    = 2
+	defaultMongoDatabase      = "honeypot_db"
+	defaultCollection         = "hardware_metrics_1m"
+	defaultBackupRoot         = "/var/lib/honeypot/hardware-backups"
+	defaultLookbackDays       = 30
+	defaultSafetyDays         = 2
+	defaultControlPollSeconds = 15
 )
 
 type Config struct {
+	Mode          string
 	MongoURI      string
 	MongoDatabase string
 	Collection    string
 
-	B2Bucket         string
-	B2Endpoint       string
-	B2KeyID          string
-	B2ApplicationKey string
-	BackupRoot       string
-	LookbackDays     int
-	SafetyDays       int
-	Force            bool
+	B2Bucket           string
+	B2Endpoint         string
+	B2KeyID            string
+	B2ApplicationKey   string
+	BackupRoot         string
+	LookbackDays       int
+	SafetyDays         int
+	ControlPollSeconds int
+	Force              bool
 }
 
 func loadConfig() (Config, error) {
 	cfg := Config{
-		MongoURI:         strings.TrimSpace(os.Getenv("MONGO_URI")),
-		MongoDatabase:    getenv("MONGO_DATABASE", defaultMongoDatabase),
-		Collection:       getenv("BACKUP_COLLECTION", defaultCollection),
-		B2Bucket:         strings.TrimSpace(os.Getenv("B2_BUCKET")),
-		B2Endpoint:       strings.TrimSpace(os.Getenv("B2_ENDPOINT")),
-		B2KeyID:          strings.TrimSpace(os.Getenv("B2_KEY_ID")),
-		B2ApplicationKey: strings.TrimSpace(os.Getenv("B2_APPLICATION_KEY")),
-		BackupRoot:       getenv("BACKUP_ROOT", defaultBackupRoot),
-		LookbackDays:     getenvPositiveInt("BACKUP_LOOKBACK_DAYS", defaultLookbackDays),
-		SafetyDays:       getenvNonNegativeInt("BACKUP_SAFETY_DAYS", defaultSafetyDays),
-		Force:            strings.EqualFold(strings.TrimSpace(os.Getenv("BACKUP_FORCE")), "true"),
+		Mode:               getenv("BACKUP_MODE", "scheduled"),
+		MongoURI:           strings.TrimSpace(os.Getenv("MONGO_URI")),
+		MongoDatabase:      getenv("MONGO_DATABASE", defaultMongoDatabase),
+		Collection:         getenv("BACKUP_COLLECTION", defaultCollection),
+		B2Bucket:           strings.TrimSpace(os.Getenv("B2_BUCKET")),
+		B2Endpoint:         strings.TrimSpace(os.Getenv("B2_ENDPOINT")),
+		B2KeyID:            strings.TrimSpace(os.Getenv("B2_KEY_ID")),
+		B2ApplicationKey:   strings.TrimSpace(os.Getenv("B2_APPLICATION_KEY")),
+		BackupRoot:         getenv("BACKUP_ROOT", defaultBackupRoot),
+		LookbackDays:       getenvPositiveInt("BACKUP_LOOKBACK_DAYS", defaultLookbackDays),
+		SafetyDays:         getenvNonNegativeInt("BACKUP_SAFETY_DAYS", defaultSafetyDays),
+		ControlPollSeconds: getenvPositiveInt("BACKUP_CONTROL_POLL_SECONDS", defaultControlPollSeconds),
+		Force:              strings.EqualFold(strings.TrimSpace(os.Getenv("BACKUP_FORCE")), "true"),
 	}
 
 	for name, value := range map[string]string{
@@ -54,6 +59,9 @@ func loadConfig() (Config, error) {
 		if value == "" {
 			return Config{}, fmt.Errorf("%s is required", name)
 		}
+	}
+	if cfg.Mode != "scheduled" && cfg.Mode != "control" {
+		return Config{}, fmt.Errorf("BACKUP_MODE must be scheduled or control")
 	}
 	if cfg.LookbackDays < cfg.SafetyDays+1 {
 		return Config{}, fmt.Errorf("BACKUP_LOOKBACK_DAYS must be greater than BACKUP_SAFETY_DAYS")

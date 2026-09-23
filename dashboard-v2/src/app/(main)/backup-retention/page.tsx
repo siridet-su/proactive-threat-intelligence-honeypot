@@ -10,7 +10,7 @@ const sourceCards = [
     title: "Hardware rollups",
     description: "Minute-level hardware history used by the System Health charts.",
     collection: "hardware_metrics_1m",
-    cadence: "Daily archive",
+    cadence: "Daily + on demand",
     state: "Active",
     stateClassName: "border-success-border bg-success-subtle text-success",
     icon: Archive,
@@ -86,7 +86,7 @@ export default function BackupRetentionPage() {
             <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
             <h2 id="backup-policy-title" className="text-base font-semibold">Automation &amp; policy</h2>
           </div>
-          <p className="mt-1 text-xs text-text-muted">Current worker behavior is visible here before manual control actions are introduced.</p>
+          <p className="mt-1 text-xs text-text-muted">Scheduled coverage and on-demand requests share the same Pi worker and archive policy.</p>
         </div>
         <div className="grid gap-px bg-border sm:grid-cols-3">
           <PolicyItem icon={CalendarClock} label="Schedule" value="Daily · 03:30 local time" detail="Persistent systemd timer on the Pi" />
@@ -94,7 +94,7 @@ export default function BackupRetentionPage() {
           <PolicyItem icon={Archive} label="Archive policy" value="30-day lookback" detail="Compressed JSONL uploaded to private B2" />
         </div>
         <div className="border-t border-border bg-surface-subtle/50 px-5 py-4 text-xs text-text-muted sm:px-6">
-          Manual run, retry, and restore actions will be connected through the Pi control plane. The browser will create an audited request; it will not execute SSH or shell commands directly.
+          Manual run and retry create an audited request in MongoDB. The Pi control worker claims it, keeps B2 credentials local, and writes progress back after each UTC day; the browser never executes SSH or shell commands directly.
         </div>
       </section>
     </div>

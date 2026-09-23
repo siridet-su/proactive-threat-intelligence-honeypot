@@ -33,3 +33,23 @@ worker uses the Backblaze Native API and follows the API URL returned during
 authorization.
 
 The systemd service and timer are in `systemd-services/`.
+
+## Dashboard-triggered runs
+
+The `honeypot-hardware-backup-control.service` unit runs the same binary in
+`BACKUP_MODE=control`. It polls the `hardware_backup_requests` collection every
+15 seconds, atomically claims the oldest pending request, and keeps the B2
+credentials on the Pi. The dashboard only inserts an audited request; it never
+opens SSH or talks to B2 directly.
+
+Supported actions are:
+
+- `run_missing`: archive days in the backup window that have no manifest;
+- `retry_failed`: retry days whose manifest is currently marked `failed`.
+
+While a request is running, the worker updates `progress` and `heartbeat_at`
+after each UTC day. The request document contains `status`, `completed_at`,
+`worker_id`, and an error message when the run fails. A stale running request
+can be reclaimed after 30 minutes without a heartbeat. The scheduled service
+and control service share a local file lock so they cannot upload the same
+archive concurrently.
