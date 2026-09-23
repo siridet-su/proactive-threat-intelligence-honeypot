@@ -308,6 +308,64 @@ def test_monitor_sensitive_reads_require_bearer_when_configured(
     assert session["command_count"] == 1
 
 
+def test_threat_stream_requires_read_auth_and_dispatches_after_authorization(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, read_token="read-secret")
+
+    denied, denied_responses, _ = _handler(config, "/api/threats/stream")
+    denied._send_threat_stream = lambda: pytest.fail("denied stream must not start")
+    monitor_web.MonitorHandler.do_GET(denied)
+
+    allowed, _, _ = _handler(
+        config,
+        "/api/threats/stream",
+        authorization="Bearer read-secret",
+    )
+    dispatched: list[bool] = []
+    allowed._send_threat_stream = lambda: dispatched.append(True)
+    monitor_web.MonitorHandler.do_GET(allowed)
+
+    assert denied_responses[0][0] == HTTPStatus.UNAUTHORIZED
+    assert dispatched == [True]
+
+
+def test_sse_frame_is_public_json_and_sanitizes_event_name() -> None:
+    frame = monitor_web._sse_frame(
+        "snapshot\ninjected",
+        {"ok": True, "password": "must-not-render", "sessions": []},
+    ).decode("utf-8")
+
+    assert frame.startswith("event: snapshotinjected\n")
+    assert "must-not-render" not in frame
+    assert frame.endswith("\n\n")
+
+
+def test_threat_stream_sends_headers_and_ready_before_storage_poll(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    handler, _, _ = _handler(_config(tmp_path), "/api/threats/stream")
+    statuses: list[int] = []
+    headers: list[tuple[str, str]] = []
+    handler.send_response = lambda status: statuses.append(status)
+    handler.send_header = lambda name, value: headers.append((name, value))
+    handler.end_headers = lambda: None
+    handler.wfile = io.BytesIO()
+    monkeypatch.setattr(monitor_web, "SSE_MAX_CONNECTION_SECONDS", 0.0)
+    monkeypatch.setattr(
+        monitor_web,
+        "load_snapshot",
+        lambda *_args, **_kwargs: pytest.fail("zero-window stream must not poll storage"),
+    )
+
+    handler._send_threat_stream()
+
+    assert statuses == [HTTPStatus.OK.value]
+    assert ("Content-Type", "text/event-stream; charset=utf-8") in headers
+    assert handler.wfile.getvalue().startswith(b"event: ready\n")
+
+
 def test_internal_command_view_requires_loopback_and_dedicated_admin_token(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -873,6 +931,40 @@ def test_internal_view_excludes_blank_terminal_submissions() -> None:
 
     assert internal["ok"] is True
     assert [command["input"] for command in internal["commands"]] == ["id", "uname -a"]
+
+
+def test_internal_view_does_not_duplicate_command_outcome_events() -> None:
+    rows = [
+        _canonical_command_event_row(
+            "event-input",
+            "cowrie.command.input",
+            "2026-08-05T00:00:01Z",
+            {"input": "/tmp/not-executable"},
+        ),
+        _canonical_command_event_row(
+            "event-failed",
+            "cowrie.command.failed",
+            "2026-08-05T00:00:01.100000Z",
+            {"input": "/tmp/not-executable"},
+        ),
+    ]
+
+    class RawStorage:
+        def list_rows_for_session(self, table: str, session_id: str, limit: int = 100):
+            if table == "sessions":
+                return [{"session_id": session_id, "payload_json": json.dumps({"session_id": session_id})}]
+            if table == "events":
+                return rows
+            return []
+
+    internal = monitor_web.load_internal_command_detail(
+        _config(Path(".")),
+        _COMMAND_TEST_SESSION_ID,
+        _storage=RawStorage(),
+    )
+
+    assert internal["ok"] is True
+    assert [command["event_id"] for command in internal["commands"]] == ["event-input"]
 
 
 def test_internal_view_accepts_integrity_bound_sqlite_command_row() -> None:
