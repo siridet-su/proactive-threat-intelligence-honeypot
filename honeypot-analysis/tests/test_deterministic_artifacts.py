@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -179,7 +180,8 @@ def test_pdf_keeps_bounded_cwd_and_otx_pulse_context(tmp_path: Path) -> None:
     assert "Filesystem Activity / Working Directory" in text
     assert "/home/test" in text
     assert "/tmp" in text
-    assert "Example botnet pulse" in text
+    # ReportLab may wrap this table cell between "Example" and "botnet".
+    assert "Example botnet pulse" in re.sub(r"\s+", " ", text)
     assert "MUST_NOT_APPEAR_IN_PDF" not in text
 
 

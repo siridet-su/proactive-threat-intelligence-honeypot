@@ -30,6 +30,7 @@ import {
 } from "@/lib/external-ti-presentation";
 import { projectAdminCommandRecords } from "@/lib/session-command-projection";
 import { projectContextualHypotheses } from "@/lib/contextual-hypothesis-presentation";
+import { hasBoundModel2, rankTtpRecommendations } from "@/lib/model-ttp-ranking";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -1419,7 +1420,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const results = list(ensemble.results).map(record);
   const model1Only = list(ensemble.model1_only_labels).map(record);
 
-  if (!hasMeaningfulRecord(ensemble)) {
+  if (!hasMeaningfulRecord(ensemble) && recommendations.length === 0) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
   }
 
@@ -1435,11 +1436,32 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         {hasBoundAvailableModel2(data) ? "A session-bound Model2 result is available for comparison with Model1." : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
       </Insight>
       <MetricStrip fields={[
-        ["Model1", model1.applicable === true ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
+        ["Model1", model1.applicable === true || recommendations.length > 0 ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
         ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
         ["Comparisons", String(results.length)],
       ]} />
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 only adds a comparison when its result is bound to this session; model scores are not combined.</p>
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
+      {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
+            <p className="mt-1 text-xs leading-5 text-text-muted">Model1's selected TTP per command, grouped by distinct command event. More supporting commands appear first. This is not a confidence percentage, trusted finding, or response authorization.</p>
+          </div>
+          <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
+        </div>
+        <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+          {recommendations.map((item) => <li key={item.techniqueId} className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-text">#{item.rank} <span className="font-mono">{item.techniqueId}</span></span>
+              <span className="ui-badge text-[10px]">{item.model2Support === "corroborates" ? "Model2 supports" : item.model2Support === "does_not_support" ? "Model2 does not support" : item.model2Support === "not_supported" ? "Model2 does not cover this TTP" : "Model2 unavailable"}</span>
+            </div>
+            <p className="mt-1 text-xs text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support this Model1 suggestion.</p>
+            {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command refs: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
+            {item.model2Support === "does_not_support" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT for its independent head; review before drawing a conclusion.</p>}
+          </li>)}
+        </ol>
+        <p className="mt-2 text-[11px] text-text-subtle">Method: count distinct command events by selected Model1 TTP. Repeated classifications for one command count once. Model2 is a separate bound-session comparison; no RRF or score fusion is applied.</p>
+      </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">
           {results.map((item, index) => (
@@ -1481,14 +1503,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
 }
 
 export function hasBoundAvailableModel2(data: JsonRecord): boolean {
-  const ensemble = record(data.ensemble_evidence);
-  const model2 = record(ensemble.model2);
-  const binding = record(model2.binding);
-  const sessionId = label(data.session_id || record(data.overview).session_id, "");
-  return model2.available === true
-    && Boolean(sessionId)
-    && label(binding.session_id, "") === sessionId
-    && Boolean(label(binding.run_id || ensemble.run_id, ""));
+  return hasBoundModel2(data);
 }
 
 export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {

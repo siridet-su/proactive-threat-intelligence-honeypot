@@ -40,6 +40,7 @@ from production.api.security import (
 )
 from production.classification.classification_evaluation import classification_metrics
 from production.ensemble.evidence import build_ensemble_from_session_payload
+from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
 from production.enrichment.external_ti_session import (
     OBSERVABLE_TI_SCHEMA,
     SESSION_TI_SCHEMA,
@@ -2965,6 +2966,9 @@ def load_dashboard_session_detail(
         "commands": payload.get("commands") or [],
         "authentication_activity": authentication_activity,
         "classification_events": payload.get("classification_events") or [],
+        "session_ttp_advisory": summarize_session_model1_ttp(
+            payload.get("classification_events"), session_id=clean_session_id
+        ),
         "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],

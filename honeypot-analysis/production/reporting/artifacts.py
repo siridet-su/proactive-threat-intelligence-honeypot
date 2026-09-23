@@ -27,6 +27,7 @@ from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 from production.reporting.artifact_privacy import sanitize_artifact_boundary
 from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
+from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -2297,6 +2298,28 @@ def write_pdf_report(
         story.append(_table(layer_rows, [5.0 * cm, 2.2 * cm, 9.8 * cm]))
     else:
         story.append(_p("No evidence-layer summary was recorded for this session.", body))
+
+    model1_advisory = summarize_session_model1_ttp(
+        session_payload.get("classification_events"), session_id=str(session_id)
+    )
+    story.append(_p("Model1 command-level advisory (not an observed finding)", h2))
+    story.append(_p(
+        f"{model1_advisory['assessed_command_events']} distinct command event(s) with usable Model1 predictions. "
+        "Counts rank items for manual investigation only; they are not confidence or ATT&CK findings. "
+        "Model2 binary heads are not ranked or numerically fused here.",
+        body,
+    ))
+    model1_rows = [["Technique", "Supporting commands", "Command references"]]
+    for item in model1_advisory["techniques"][:20]:
+        model1_rows.append([
+            item["technique_id"],
+            str(item["supporting_command_events"]),
+            ", ".join(ref["command_ref"] for ref in item["evidence_refs"][:8]),
+        ])
+    if len(model1_rows) > 1:
+        story.append(_table(model1_rows, [3.0 * cm, 4.0 * cm, 10.0 * cm]))
+    else:
+        story.append(_p("No deduplicated command-level Model1 advisory is available.", body))
 
     story.append(_p(f"2.{4 + cwd_section_offset} Trusted Technique Mappings", h2))
     sources = session_payload.get("ttp_sources", {})

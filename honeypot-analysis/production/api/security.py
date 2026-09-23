@@ -1226,6 +1226,7 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "enrichment_status": detail.get("enrichment_status") or {},
         "authentication_activity": authentication_view,
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "session_ttp_advisory": detail.get("session_ttp_advisory") or {},
         "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
@@ -1348,6 +1349,7 @@ def session_detail_view(
         ),
         "enrichment_status": detail.get("enrichment_status") or {},
         "ensemble_evidence": detail.get("ensemble_evidence") or {},
+        "session_ttp_advisory": detail.get("session_ttp_advisory") or {},
         "next_distinct_prediction": detail.get("next_distinct_prediction") or {},
         "session": {
             "session_id": session_payload.get("session_id"),
