@@ -290,6 +290,7 @@ export function TopologyCanvas({
 
   const [nodeElementBounds, setNodeElementBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutElementBounds, setCalloutElementBounds] = useState<Record<string, GraphElementBounds>>({});
+  const [calloutAnchorBounds, setCalloutAnchorBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutLayoutBounds, setCalloutLayoutBounds] = useState<Record<string, GraphElementBounds>>({});
 
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
@@ -348,6 +349,8 @@ export function TopologyCanvas({
     onClearElementBounds: () => {
       setNodeElementBounds({});
       setCalloutElementBounds({});
+      setCalloutAnchorBounds({});
+      setCalloutLayoutBounds({});
     },
   });
 
@@ -570,9 +573,11 @@ export function TopologyCanvas({
       [...calloutElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
     );
     const calloutBySourceIp = new Map(graphCallouts.map((callout) => [callout.sourceIp, callout]));
-    const measuredCalloutAnchors = Object.fromEntries(
-      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => {
-        const anchorBounds = toRelativeBounds(element);
+    const measuredCalloutAnchors: Record<string, GraphElementBounds> = Object.fromEntries(
+      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
+    );
+    const measuredCalloutLayouts: Record<string, GraphElementBounds> = Object.fromEntries(
+      Object.entries(measuredCalloutAnchors).map(([sourceIp, anchorBounds]) => {
         const callout = calloutBySourceIp.get(sourceIp);
         const reservedDisclosureHeight = estimateExpandedCalloutDisclosureHeight(callout?.sessions.length ?? 1);
         const reservedDisclosurePercent = (reservedDisclosureHeight / plane.offsetHeight) * 100;
@@ -588,11 +593,12 @@ export function TopologyCanvas({
     );
     setNodeElementBounds((current) => sameElementBounds(current, measuredNodes) ? current : measuredNodes);
     setCalloutElementBounds((current) => sameElementBounds(current, measuredCallouts) ? current : measuredCallouts);
-    setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
+    setCalloutAnchorBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
+    setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutLayouts) ? current : measuredCalloutLayouts);
   }, [graphCallouts]);
 
-  // Connector endpoints use rendered bounds, including their actual centers. This keeps a line
-  // attached to the same visual edge in compact, expanded, zoomed, and manually arranged views.
+  // Source connectors use the stable header bounds. The full-card bounds remain
+  // separate for overlap detection, while layout bounds reserve disclosure space.
   useLayoutEffect(() => {
     measureElementBounds();
     const plane = graphPlaneRef.current;
@@ -1154,7 +1160,7 @@ export function TopologyCanvas({
                                 node,
                                 position,
                                 nodeElementBounds[node.path],
-                                calloutElementBounds[callout.sourceIp],
+                                calloutAnchorBounds[callout.sourceIp],
                               );
                               const controlX = (endpoint.startX + endpoint.endX) / 2;
                               const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;

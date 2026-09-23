@@ -878,14 +878,13 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect.poll(async () => (await sourceCallout.boundingBox())?.height ?? 0).toBeLessThan(expandedHeight);
     await page.waitForTimeout(1_000);
     const collapsedRoutes = await readSourceRouteEndpoints();
-    const collapsedBounds = await sourceCallout.boundingBox();
     const collapsedSourceAnchor = await sourceToggle.boundingBox();
     const collapsedRootBounds = await rootDirectory.boundingBox();
     const collapsedViewportTransform = await sourceRoutes.first().evaluate((path) => {
       const plane = path.ownerSVGElement?.parentElement;
       return plane ? getComputedStyle(plane).transform : null;
     });
-    expect(collapsedRoutes.map(({ d }) => d)).not.toEqual(expandedRoutes.map(({ d }) => d));
+    expect(collapsedRoutes.map(({ d }) => d)).toEqual(expandedRoutes.map(({ d }) => d));
     expect(collapsedViewportTransform).toBe(expandedViewportTransform);
     expect(collapsedSourceAnchor).not.toBeNull();
     expect(expandedSourceAnchor).not.toBeNull();
@@ -904,8 +903,8 @@ test.describe("FA-013 real-browser evidence", () => {
       expandedOtherSourceBounds.y + expandedOtherSourceBounds.height <= expandedCalloutBounds.y
     );
     expect(expandedSourcesOverlap).toBe(false);
-    expectRoutesTouchBounds(expandedRoutes, expandedCalloutBounds);
-    expectRoutesTouchBounds(collapsedRoutes, collapsedBounds);
+    expectRoutesTouchBounds(expandedRoutes, expandedSourceAnchor);
+    expectRoutesTouchBounds(collapsedRoutes, collapsedSourceAnchor);
 
     await assertNoBrowserFailures(page);
   });
