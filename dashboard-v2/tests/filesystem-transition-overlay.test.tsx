@@ -258,6 +258,8 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(directed).toHaveLength(4);
     expect(container.querySelectorAll('[data-transition-route="/home/a→/tmp"]')).toHaveLength(2);
     expect(container.querySelector('[data-transition-event-id="reverse"][data-transition-route="/tmp→/home/a"]')).not.toBeNull();
+    expect(container.querySelector('[data-transition-event-id="cross-two"]')?.getAttribute("marker-end")).toBeNull();
+    expect(container.querySelector('[data-transition-event-id="reverse"]')?.getAttribute("marker-end")).toContain("future-transition-arrow");
     expect(container.querySelector('[data-transition-event-id="self"][data-transition-self-loop="true"]')).not.toBeNull();
     expect(container.querySelectorAll('[data-transition-hop-label]')).toHaveLength(events.length);
   });
@@ -296,7 +298,9 @@ describe("FSV-007B: separate verified transition overlay", () => {
     });
 
     expect(container.querySelectorAll('[data-transition-kind="directed"]')).toHaveLength(1);
-    expect(container.querySelector('[data-transition-event-id="cross-two"][data-transition-state="current"]')).not.toBeNull();
+    const focusedTransition = container.querySelector('[data-transition-event-id="cross-two"][data-transition-state="current"]');
+    expect(focusedTransition).not.toBeNull();
+    expect(focusedTransition?.getAttribute("marker-end")).toBeNull();
     expect(container.querySelector('[data-transition-event-id="cross-one"]')).toBeNull();
     expect(container.querySelector('[data-transition-event-id="reverse"]')).toBeNull();
     expect(container.querySelectorAll('[data-transition-hop-label]')).toHaveLength(0);
@@ -338,6 +342,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
     });
 
     expect(container.querySelector('[data-transition-event-id="cross-two"][data-transition-state="current"]')).not.toBeNull();
+    expect(container.querySelector('[data-transition-event-id="cross-two"]')?.getAttribute("marker-end")).toBeNull();
     expect(container.querySelector('[data-testid="current-transition-indicator"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="transition-travel-packet"]')).toBeNull();
     expect(container.querySelector('[data-testid="transition-current-pulse"]')).toBeNull();

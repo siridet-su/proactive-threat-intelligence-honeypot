@@ -438,7 +438,7 @@ export function TransitionOverlay({
       >
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 z-[1] h-full w-full overflow-visible" aria-hidden="true">
           <defs>
-            {(["previous", "current", "future"] as const).map((state) => {
+            {(["previous", "future"] as const).map((state) => {
               const style = stateStyle(state);
               return (
                 <marker
@@ -492,9 +492,9 @@ export function TransitionOverlay({
                     strokeOpacity={style.opacity}
                     strokeWidth={style.width}
                     strokeLinecap="round"
-                    markerEnd={displayMode === "trail" && state === "previous"
-                      ? undefined
-                      : `url(#${markerNamespace}-${state}-transition-arrow)`}
+                    markerEnd={displayMode === "all" && state !== "current"
+                      ? `url(#${markerNamespace}-${state}-transition-arrow)`
+                      : undefined}
                     data-transition-event-id={transition.eventId}
                     data-transition-kind="directed"
                     data-transition-state={state}

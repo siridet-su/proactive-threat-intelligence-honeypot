@@ -418,6 +418,7 @@ test.describe("FA-013 real-browser evidence", () => {
       const revisit = overlay.locator('[data-transition-event-id="replay-revisit"][data-transition-state="current"][data-transition-kind="directed"]');
       await expect(revisit).toHaveAttribute("data-transition-kind", "directed");
       await expect(revisit).toHaveAttribute("data-transition-route", "/tmp→/home/cowrie");
+      await expect(revisit).not.toHaveAttribute("marker-end", /.+/);
       await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(1);
       await expect(overlay.locator('[data-transition-hop-label="true"]')).toHaveCount(0);
       await expect(overlay.locator('[data-testid="transition-impact-wave"]')).toHaveCount(1);
@@ -472,6 +473,8 @@ test.describe("FA-013 real-browser evidence", () => {
       await page.getByRole("button", { name: "View settings" }).click();
       await page.getByRole("group", { name: "Transition visibility" }).getByRole("button", { name: "All transitions" }).click();
       await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(2);
+      await expect(overlay.locator('[data-transition-event-id="replay-change"][data-transition-kind="directed"]')).toHaveAttribute("marker-end", /previous-transition-arrow/);
+      await expect(revisit).not.toHaveAttribute("marker-end", /.+/);
       const transitionLaneMidpoints = await page.evaluate(() => {
         const screenMidpoint = (selector) => {
           const path = document.querySelector(selector);

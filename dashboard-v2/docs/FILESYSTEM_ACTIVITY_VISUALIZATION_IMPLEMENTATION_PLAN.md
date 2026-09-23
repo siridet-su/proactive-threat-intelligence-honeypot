@@ -1285,7 +1285,10 @@ capsule-shaped radiation wave expands from the destination on the same animation
 mode keeps the static directed evidence while suppressing both packet travel and impact radiation.
 Audit source connectors remain visible but are deliberately dimmed while a replay hop is focused, and
 default mode omits redundant floating hop-number labels because the target badge and timeline already
-carry that information.
+carry that information. The oversized current-hop arrowhead is also omitted: packet travel communicates
+direction during animation, while the persistent endpoint ring, target Hop badge, and forensic from/to
+text preserve the destination when animation is paused or reduced. Historical and future lines retain
+directional arrowheads only in the opt-in `All transitions` comparison mode.
 
 Regression coverage proves the one-route default, arrowless historical trail, opt-in full route set,
 complete accessible sequence, restored synchronized packet/wave CSS animations, reduced-motion
