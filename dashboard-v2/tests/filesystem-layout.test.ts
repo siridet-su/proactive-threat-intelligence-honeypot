@@ -21,6 +21,7 @@ import {
   getToolbarGroupContract,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
+  leaderEndpoints,
   pointForGraph,
   sourceRailPositions,
 } from "../src/components/filesystem/filesystemUtils";
@@ -80,6 +81,18 @@ function makeSession(
 }
 
 describe("filesystem source layout", () => {
+  it("anchors a connector to the rendered edge of a downward-expanding source card", () => {
+    const endpoints = leaderEndpoints(
+      graphNode("/etc", 50, 20, 1),
+      { x: 50, y: 40 },
+      { x: 50, y: 20, width: 12, height: 6 },
+      { x: 50, y: 45, width: 20, height: 14 },
+    );
+
+    expect(endpoints.endX).toBe(50);
+    expect(endpoints.endY).toBe(38);
+  });
+
   it("reserves the complete bounded disclosure height before a source cluster opens", () => {
     expect(estimateExpandedCalloutDisclosureHeight(1)).toBe(0);
     expect(estimateExpandedCalloutDisclosureHeight(2)).toBe(85);

@@ -1793,11 +1793,14 @@ export function leaderEndpoints(
   nodeBounds?: GraphElementBounds,
   sourceBounds?: GraphElementBounds,
 ): { startX: number; startY: number; endX: number; endY: number } {
-  // Always anchor to the exact mathematical center of node and label
+  // The interaction anchor remains fixed at the centre of the source header,
+  // while an expanded cluster grows below it. Use the rendered card centre
+  // with its rendered dimensions so the connector intersects the visible
+  // border instead of the reserved/header-centred layout footprint.
   const nodeCenterX = node.x;
   const nodeCenterY = node.y;
-  const sourceCenterX = label.x;
-  const sourceCenterY = label.y;
+  const sourceCenterX = sourceBounds?.x ?? label.x;
+  const sourceCenterY = sourceBounds?.y ?? label.y;
   const deltaX = sourceCenterX - nodeCenterX;
   const deltaY = sourceCenterY - nodeCenterY;
   if (deltaX === 0 && deltaY === 0) {
