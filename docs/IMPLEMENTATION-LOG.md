@@ -175,3 +175,26 @@ verification. Current-state documents remain authoritative for operating rules.
   detail page (`detailData` effect dependencies).
 - `git diff --check` passed.
 - Dev server compiled the updated System Health route on port `3001`.
+
+## 2026-09-24 — Connect custom history range highlight
+
+### Repository changes
+
+- Made each custom calendar day button fill its entire date cell so the selected range renders as one continuous highlighted band.
+- Kept the rounded treatment only on the range start and end while preserving the selected-day contrast and hover states.
+
+### Host changes
+
+- None. This is dashboard source only; Pi services and hardware agents were not modified or restarted.
+
+### Currently active
+
+- The connected range highlight is available from the backup worktree on local port `3001` for review.
+
+### Validation
+
+- `npx tsc --noEmit` passed.
+- `npm run lint` passed with one pre-existing warning in the threat-intel
+  detail page (`detailData` effect dependencies).
+- `git diff --check` passed.
+- Dev server compiled the updated range picker.

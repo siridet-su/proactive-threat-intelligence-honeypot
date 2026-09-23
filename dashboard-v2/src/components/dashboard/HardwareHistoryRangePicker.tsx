@@ -206,8 +206,9 @@ export function HardwareHistoryRangePicker({
                     head_row: "flex w-full justify-between",
                     head_cell: "flex-1 text-center font-mono text-[10px] font-semibold uppercase text-text-subtle",
                     row: "mt-0.5 flex w-full justify-between",
-                    cell: "h-8 flex-1 p-0 text-center",
-                    day: "mx-auto h-8 w-9 rounded-md p-0 font-mono text-[11px] text-text hover:bg-surface-hover hover:text-text",
+                    cell: "relative h-8 flex-1 p-0 text-center",
+                    // Let range modifiers fill the entire cell so adjacent days form one continuous band.
+                    day: "mx-0 h-8 w-full rounded-md p-0 font-mono text-[11px] text-text hover:bg-surface-hover hover:text-text",
                   }}
                 />
               </div>
