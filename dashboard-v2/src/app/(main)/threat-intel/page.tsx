@@ -7,7 +7,6 @@ import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
 import type {
   DashboardThreatEvent,
   ThreatDirectoryPage,
-  ThreatSeverityFilter,
 } from "@/lib/dashboardTypes";
 import { severityDotClass } from "@/lib/presentation";
 import {
@@ -28,21 +27,11 @@ import {
   Activity,
   Lock,
 } from "lucide-react";
-import { TableStreamSkeleton } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
 
 type AttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
 
 type RequestStatus = "loading" | "ready" | "error";
-
-const getSeverityFromAttackerType = (type: AttackerTypeFilter): ThreatSeverityFilter => {
-  switch (type) {
-    case "APT": return "Critical";
-    case "Bot": return "High";
-    case "ScriptKiddie": return "Medium";
-    default: return "All";
-  }
-};
 
 // คอมโพเนนต์ดึงข้อมูล Attacker แบบแยก 2 คอลัมน์ (Type, Cmds)
 function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string }) {
@@ -70,7 +59,7 @@ function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string
             });
           }
         }
-      } catch (error) {
+      } catch {
         // หากดึงไม่ได้ ให้ใช้ fallback
       } finally {
         window.clearTimeout(timeout);

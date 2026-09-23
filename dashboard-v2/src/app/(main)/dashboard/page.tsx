@@ -56,17 +56,30 @@ function buildActivityData(events: DashboardThreatEvent[], windowHours: number |
   }));
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+interface CustomTooltipEntry {
+  dataKey: string;
+  name: string;
+  value: number;
+  color?: string;
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: CustomTooltipEntry[];
+  label?: string;
+}
+
+const CustomTooltip = ({ active, payload, label }: CustomTooltipProps) => {
   if (active && payload && payload.length) {
     const sortedPayload = [...payload].sort((a, b) => {
       const order: Record<string, number> = { "APT": 1, "ScriptKiddie": 2, "Bot": 3 };
-      return order[a.dataKey] - order[b.dataKey];
+      return (order[a.dataKey] ?? 99) - (order[b.dataKey] ?? 99);
     });
 
     return (
       <div className="bg-surface-raised border border-border rounded-lg shadow-lg p-3 text-xs text-text min-w-[150px]">
         <p className="font-bold mb-2 pb-2 border-b border-border/50">{label}</p>
-        {sortedPayload.map((entry: any, index: number) => (
+        {sortedPayload.map((entry, index) => (
           <div key={index} className="flex justify-between items-center gap-4 py-1">
              <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }}></span>
@@ -77,7 +90,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
         ))}
         <div className="flex justify-between items-center gap-4 pt-2 mt-2 border-t border-border/50 font-bold">
            <span>Total</span>
-           <span>{payload.reduce((acc: number, curr: any) => acc + curr.value, 0)}</span>
+           <span>{payload.reduce((acc, curr) => acc + curr.value, 0)}</span>
         </div>
       </div>
     );
@@ -85,10 +98,18 @@ const CustomTooltip = ({ active, payload, label }: any) => {
   return null;
 };
 
-const CustomXAxisTick = (props: any) => {
-  const { x, y, payload, data } = props;
-  const dataPoint = data.find((d: any) => d.time === payload.value);
-  const isToday = payload.value === "Today";
+interface CustomXAxisTickProps {
+  x?: string | number;
+  y?: string | number;
+  payload?: { value: string };
+  data?: Array<{ time: string; total?: number; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+const CustomXAxisTick = (props: CustomXAxisTickProps) => {
+  const { x = 0, y = 0, payload, data = [] } = props;
+  const dataPoint = payload ? data.find((d) => d.time === payload.value) : undefined;
+  const isToday = payload?.value === "Today";
 
   return (
     <g transform={`translate(${x},${y})`}>
@@ -96,7 +117,7 @@ const CustomXAxisTick = (props: any) => {
         <rect x={-20} y={4} width={40} height={20} rx={4} fill="var(--surface-hover)" />
       )}
       <text x={0} y={0} dy={18} textAnchor="middle" fill={isToday ? "var(--success)" : "var(--text)"} fontSize={12} fontWeight="600">
-        {payload.value}
+        {payload?.value}
       </text>
       <text x={0} y={0} dy={34} textAnchor="middle" fill="var(--text-subtle)" fontSize={11}>
         {dataPoint ? `${dataPoint.total} sess.` : "0 sess."}
@@ -668,13 +689,13 @@ function TopTTPsPanel({ sessions, className }: { sessions: DashboardThreatEvent[
           if (res.ok) {
             const data = await res.json();
             if (data.commands && Array.isArray(data.commands)) {
-              data.commands.forEach((cmd: any) => {
+              data.commands.forEach((cmd: Record<string, unknown>) => {
                 const ttp = cmd.classification_technique;
                 if (ttp && typeof ttp === "string") {
                   counts.set(ttp, (counts.get(ttp) || 0) + 1);
                   totalFound++;
                 } else if (Array.isArray(cmd.classification)) {
-                  cmd.classification.forEach((c: any) => {
+                  cmd.classification.forEach((c: Record<string, unknown>) => {
                     if (c.ttp && typeof c.ttp === "string") {
                       counts.set(c.ttp, (counts.get(c.ttp) || 0) + 1);
                       totalFound++;
@@ -684,7 +705,7 @@ function TopTTPsPanel({ sessions, className }: { sessions: DashboardThreatEvent[
               });
             }
           }
-        } catch (e) {
+        } catch {
           // Ignore fetch errors
         }
       }));

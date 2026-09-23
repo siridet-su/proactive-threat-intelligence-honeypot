@@ -131,7 +131,7 @@ async function applyAttackerTypeFilter(client: MongoClient, baseQuery: Filter<Do
   if (attackerType === "All") return baseQuery;
 
   const deceptionDb = client.db("honeypot_db").collection("deception_decisions");
-  let condition: any = null;
+  let condition: Filter<Document> | null = null;
 
   if (attackerType === "ScriptKiddie") {
     const nonKiddieDocs = await deceptionDb.find(
