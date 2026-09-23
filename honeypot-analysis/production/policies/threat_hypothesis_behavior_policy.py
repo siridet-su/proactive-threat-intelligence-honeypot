@@ -356,6 +356,8 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             "supporting_relationship_types",
             "required_transitions",
             "same_entity_required",
+            "allow_unconfirmed_incomplete_hypothesis",
+            "attempt_incomplete_text",
         }
         if not expected.issubset(set(rule)) or not set(rule).issubset(expected | optional):
             errors.append(f"{path}: typed connected rule shape is invalid")
@@ -379,6 +381,20 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             rule.get("same_entity_required"), bool
         ):
             errors.append(f"{path}.same_entity_required: must be boolean")
+        if "allow_unconfirmed_incomplete_hypothesis" in rule and not isinstance(
+            rule.get("allow_unconfirmed_incomplete_hypothesis"), bool
+        ):
+            errors.append(
+                f"{path}.allow_unconfirmed_incomplete_hypothesis: must be boolean"
+            )
+        if rule.get("allow_unconfirmed_incomplete_hypothesis") is True and (
+            rule.get("same_entity_required") is False
+            or not str(rule.get("attempt_incomplete_text") or "").strip()
+        ):
+            errors.append(
+                f"{path}: observed-attempt hypothesis requires same entity "
+                "and an explicit attempt_incomplete_text"
+            )
         if "required_transitions" in rule:
             transitions = rule.get("required_transitions")
             if not isinstance(transitions, list):

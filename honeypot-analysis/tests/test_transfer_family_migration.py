@@ -71,7 +71,11 @@ def _command_event(
         "eventid": (
             "cowrie.command.failed"
             if outcome == "failure"
-            else "cowrie.command.success"
+            else (
+                "cowrie.command.input"
+                if outcome == "unknown"
+                else "cowrie.command.success"
+            )
         ),
         "input": command,
     }
