@@ -1,7 +1,7 @@
 ---
 title: Honeypot service catalog
 status: current
-last_verified: 2026-09-10
+last_verified: 2026-09-24
 ---
 
 # Honeypot service catalog
@@ -18,18 +18,19 @@ an operational change.
 | Admin SSH | Tailscale/ZeroTier only, port 2222 | Current | operations | host audit logs + fail2ban | Key-only, root-disabled; X11 and TCP/agent forwarding disabled. |
 | Web middleware/Odoo facade | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | Corporate web decoy | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
+| OpenCanary HTTP login decoy | HTTP, loopback staging | Prepared, stopped | current project | local rotating JSONL at `/var/log/opencanary/events.jsonl` | HTTP-only `basicLogin`; remote exposure and Redis/Atlas adapter are not enabled. Login fields may contain submitted credentials or SQL payloads. |
 | FTP decoy | FTP + passive range | Current | current project | service-event adapter required | Docker decoy stack. |
 | SMTP sink | SMTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | PostgreSQL/Odoo/deception-core | loopback/internal | Current | current project | internal application logs | Supporting decoy infrastructure, not public database services. |
 | Zeek | sensor | Current, active | current project | Go collector | Interface workers feed Redis with zero observed pending lag at verification. |
-| Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. Processor TI enqueueing is disabled. |
+| Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true` and bounds the Redis queue. |
 | Hardware agent | local telemetry | Current, active | current project | Redis `raw:hardware` → MongoDB `hardware_live` + `hardware_metrics_1m` | One-second samples replace 30 fixed live slots; history receives one rollup per sensor/minute. |
-| TI worker | outbound enrichment | Current, intentionally disabled | current project | Redis `ti:jobs` | Must remain disabled until explicitly approved; new jobs are not enqueued and no TI queue currently remains. |
+| TI worker | outbound enrichment | Current, active on Pi (verified 2026-09-24) | current project | Redis `ti:jobs` → provider cache/quota → Atlas `threat_intel` | Enabled service; only validated public IP/SHA-256 jobs are processed, with provider credentials kept in the private worker environment. |
 | Artifact hash retention | local maintenance | Current, active timer | operations | SHA-256 ledger only | Removes artifact bytes after a stability window; legacy artifacts were swept on 2026-09-09. |
 | Legacy sensor forwarder | cloud forwarding | Legacy, currently active | previous team | separate legacy path | Maintain only until an approved migration/parity check. |
 | Post-session/cloud analysis | cloud/internal | Target | current project | reads Atlas canonical events | Production workstream under development. |
 | Hailo/Ollama | local inference | Experiment | inherited/candidate | no approved Cowrie data path | Re-adopt only through an ADR and safe staging tests. |
-| OpenCanary, SQLite dashboard, MySQL LLM | legacy | Archive | previous team | none in target path | Do not use as current runbooks. |
+| SQLite dashboard, MySQL LLM | legacy | Archive | previous team | none in target path | Do not use as current runbooks. |
 
 ## Required catalog fields for every new fake service
 

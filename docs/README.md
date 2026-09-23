@@ -16,7 +16,9 @@ and historical material inherited from the previous team.
 6. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
    artifact handling, and threat-intelligence boundaries.
 7. [Architecture decisions](adr/) — durable decisions and their rationale.
-8. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
+8. [Implementation log](IMPLEMENTATION-LOG.md) — dated record of repository
+   implementations and deployment/audit evidence.
+9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 
 ## Document status labels
 
@@ -32,6 +34,11 @@ and historical material inherited from the previous team.
 
 - Each concern has one canonical document in this directory.
 - `CURRENT-ARCHITECTURE.md` is a snapshot, not a chronological log.
+- For every implementation, append a dated entry to
+  `IMPLEMENTATION-LOG.md` in the same change. Record repository edits and
+  deployed state separately; label changes that are prepared but not active.
+- Keep the log factual and append-only. Correct prior entries with a dated
+  addendum instead of silently rewriting audit history.
 - Record decisions in an ADR before a cross-component change is implemented.
 - Put reproducible test results in `validation/evidence/`; promote only their
   conclusion to a design or ADR.
