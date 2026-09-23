@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Archive, AlertTriangle, CalendarDays, CheckCircle2, Clock3, Database, Play, RefreshCw, RotateCcw } from "lucide-react";
+import { Archive, AlertTriangle, CalendarDays, CheckCircle2, Cloud, Clock3, Database, Play, RefreshCw, RotateCcw } from "lucide-react";
 
 import { RegionState } from "@/components/ui/RegionState";
 import {
@@ -9,6 +9,7 @@ import {
   type HardwareBackupDay,
   type HardwareBackupRequestAction,
   type HardwareBackupRequestView,
+  type HardwareBackupStorageStatus,
   type HardwareBackupStatus as HardwareBackupStatusData,
 } from "@/lib/dashboardTypes";
 
@@ -237,6 +238,8 @@ export function HardwareBackupStatus() {
             <BackupStat icon={Clock3} label="Last completed" value={formatDateTime(data.summary.last_completed_at)} detail={`Window ends ${formatDay(data.expected_window.to.slice(0, 10))}`} />
           </div>
 
+          <CloudStorageSummary storage={data.storage} />
+
           <div className="rounded-lg border border-border bg-surface-subtle p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
@@ -286,6 +289,34 @@ export function HardwareBackupStatus() {
         <div className="pt-4"><RegionState kind="empty" title="No hardware backup status" description="The backup worker has not written a manifest yet." /></div>
       )}
     </section>
+  );
+}
+
+function CloudStorageSummary({ storage }: { storage: HardwareBackupStorageStatus | null }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-subtle p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Cloud className="h-4 w-4 text-primary" aria-hidden="true" />
+            <h3 className="text-xs font-medium text-text">Backblaze B2 storage</h3>
+          </div>
+          <p className="mt-1 text-xs text-text-subtle">Usage reported by the Pi from retained file versions. B2 capacity is unlimited unless an account cap is configured.</p>
+        </div>
+        <span className={`ui-badge ${storage ? "border-success-border bg-success-subtle text-success" : "border-border bg-surface text-text-subtle"}`}>
+          {storage ? "Reported" : "Waiting for Pi"}
+        </span>
+      </div>
+      {storage ? (
+        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+          <BackupStat icon={Cloud} label="Storage used" value={formatBytes(storage.storage_bytes)} detail="All retained B2 versions" />
+          <BackupStat icon={Archive} label="File versions" value={formatNumber(storage.file_versions)} detail={`Bucket ${storage.bucket}`} />
+          <BackupStat icon={Clock3} label="Last checked" value={formatDateTime(storage.checked_at)} detail="Pi → B2 API" />
+        </div>
+      ) : (
+        <p className="mt-4 rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-subtle">The next scheduled or on-demand backup run will write the first storage snapshot.</p>
+      )}
+    </div>
   );
 }
 

@@ -48,10 +48,11 @@ func run() error {
 	database := mongoClient.Database(cfg.MongoDatabase)
 	collection := database.Collection(cfg.Collection)
 	manifests := database.Collection(manifestCollection)
+	snapshots := database.Collection(storageSnapshotCollection)
 	if cfg.Mode == "control" {
-		return runControlLoop(ctx, mongoClient, cfg, collection, manifests)
+		return runControlLoop(ctx, mongoClient, cfg, collection, manifests, snapshots)
 	}
-	return runScheduledBackup(ctx, cfg, collection, manifests)
+	return runScheduledBackup(ctx, cfg, collection, manifests, snapshots)
 }
 
 func runScheduledBackup(
@@ -59,6 +60,7 @@ func runScheduledBackup(
 	cfg Config,
 	collection *mongo.Collection,
 	manifests *mongo.Collection,
+	snapshots *mongo.Collection,
 ) error {
 	b2Ctx, cancelB2 := context.WithTimeout(ctx, 2*time.Minute)
 	b2, err := NewB2Client(b2Ctx, cfg)
@@ -84,6 +86,11 @@ func runScheduledBackup(
 	})
 	if err != nil {
 		return err
+	}
+	if err := refreshStorageSnapshot(ctx, snapshots, cfg, b2); err != nil {
+		log.Printf("B2 storage snapshot failed: %v", err)
+	} else {
+		log.Printf("B2 storage snapshot updated bucket=%s", cfg.B2Bucket)
 	}
 	log.Printf("hardware backup completed")
 	return nil

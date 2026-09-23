@@ -60,6 +60,22 @@ type b2UploadResponse struct {
 	ContentSize int64  `json:"contentLength"`
 }
 
+type b2FileVersion struct {
+	Action        string `json:"action"`
+	ContentLength int64  `json:"contentLength"`
+}
+
+type b2ListFileVersionsResponse struct {
+	Files        []b2FileVersion `json:"files"`
+	NextFileName string          `json:"nextFileName"`
+	NextFileID   string          `json:"nextFileId"`
+}
+
+type b2StorageUsage struct {
+	StorageBytes int64
+	FileVersions int64
+}
+
 func NewB2Client(ctx context.Context, cfg Config) (*B2Client, error) {
 	client := &http.Client{Timeout: 30 * time.Minute}
 	authorization, err := authorizeB2(ctx, client, cfg.B2KeyID, cfg.B2ApplicationKey)
@@ -186,6 +202,92 @@ func (client *B2Client) Upload(ctx context.Context, path, objectName, contentTyp
 		return b2UploadResponse{}, fmt.Errorf("B2 upload response failed integrity check")
 	}
 	return uploaded, nil
+}
+
+func (client *B2Client) StorageUsage(ctx context.Context) (b2StorageUsage, error) {
+	usage := b2StorageUsage{}
+	startFileName := ""
+	startFileID := ""
+
+	for {
+		page, err := client.listFileVersions(ctx, startFileName, startFileID)
+		if err != nil {
+			return b2StorageUsage{}, err
+		}
+		for _, file := range page.Files {
+			if file.Action != "upload" {
+				continue
+			}
+			if file.ContentLength < 0 {
+				return b2StorageUsage{}, fmt.Errorf("B2 returned a negative file size")
+			}
+			usage.StorageBytes += file.ContentLength
+			usage.FileVersions++
+		}
+
+		if page.NextFileName == "" && page.NextFileID == "" {
+			return usage, nil
+		}
+		if page.NextFileName == startFileName && page.NextFileID == startFileID {
+			return b2StorageUsage{}, fmt.Errorf("B2 file version pagination did not advance")
+		}
+		startFileName = page.NextFileName
+		startFileID = page.NextFileID
+	}
+}
+
+func (client *B2Client) listFileVersions(ctx context.Context, startFileName, startFileID string) (b2ListFileVersionsResponse, error) {
+	payload, err := json.Marshal(struct {
+		BucketID      string `json:"bucketId"`
+		StartFileName string `json:"startFileName,omitempty"`
+		StartFileID   string `json:"startFileId,omitempty"`
+		MaxFileCount  int    `json:"maxFileCount"`
+	}{
+		BucketID:      client.bucketID,
+		StartFileName: startFileName,
+		StartFileID:   startFileID,
+		MaxFileCount:  1000,
+	})
+	if err != nil {
+		return b2ListFileVersionsResponse{}, fmt.Errorf("encode B2 storage usage request: %w", err)
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= b2RequestAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiURL+"/b2api/v2/b2_list_file_versions", bytes.NewReader(payload))
+		if err != nil {
+			return b2ListFileVersionsResponse{}, fmt.Errorf("create B2 storage usage request: %w", err)
+		}
+		request.Header.Set("Authorization", client.authToken)
+		request.Header.Set("Content-Type", "application/json")
+		response, err := client.httpClient.Do(request)
+		if err != nil {
+			lastErr = fmt.Errorf("list B2 file versions: %w", err)
+		} else if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+			lastErr = b2HTTPError("list B2 file versions", response)
+			_ = response.Body.Close()
+			if !retryableB2Status(response.StatusCode) {
+				return b2ListFileVersionsResponse{}, lastErr
+			}
+		} else {
+			var page b2ListFileVersionsResponse
+			decodeErr := json.NewDecoder(response.Body).Decode(&page)
+			_ = response.Body.Close()
+			if decodeErr != nil {
+				lastErr = fmt.Errorf("decode B2 storage usage response: %w", decodeErr)
+			} else {
+				return page, nil
+			}
+		}
+
+		if attempt == b2RequestAttempts {
+			return b2ListFileVersionsResponse{}, lastErr
+		}
+		if err := waitForB2Retry(ctx, attempt); err != nil {
+			return b2ListFileVersionsResponse{}, err
+		}
+	}
+	return b2ListFileVersionsResponse{}, lastErr
 }
 
 func (client *B2Client) getUploadURL(ctx context.Context) (string, string, error) {

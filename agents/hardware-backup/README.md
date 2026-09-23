@@ -10,7 +10,8 @@ Each run:
 2. skips days already marked successful in `hardware_backup_manifests`;
 3. writes BSON documents as canonical Extended JSON Lines in a gzip archive;
 4. uploads the archive to `hardware_metrics_1m/YYYY/MM/DD/rollup.jsonl.gz`;
-5. records counts, hashes, object name, and status in MongoDB.
+5. records counts, hashes, object name, and status in MongoDB;
+6. refreshes the retained B2 storage snapshot in `b2_storage_snapshots`.
 
 The default window is the previous 28 completed days (`BACKUP_LOOKBACK_DAYS=30`
 and `BACKUP_SAFETY_DAYS=2`). The current and immediately previous day are left
@@ -25,6 +26,10 @@ B2_BUCKET=pti-hardware-backups
 B2_KEY_ID=...
 B2_APPLICATION_KEY=...
 ```
+
+The B2 application key must also include the `listFiles` capability so the
+worker can report retained storage usage. The storage snapshot sums all
+uploaded file versions, including older versions retained by the bucket.
 
 Optional environment includes `MONGO_DATABASE`, `BACKUP_COLLECTION`,
 `BACKUP_ROOT`, `BACKUP_LOOKBACK_DAYS`, `BACKUP_SAFETY_DAYS`, and `BACKUP_FORCE`.

@@ -55,6 +55,7 @@ func runControlLoop(
 	cfg Config,
 	collection *mongo.Collection,
 	manifests *mongo.Collection,
+	snapshots *mongo.Collection,
 ) error {
 	requests := mongoClient.Database(cfg.MongoDatabase).Collection(requestCollection)
 	hostname, _ := os.Hostname()
@@ -69,7 +70,7 @@ func runControlLoop(
 		if err != nil {
 			log.Printf("hardware backup request claim failed: %v", err)
 		} else if request != nil {
-			if err := processBackupRequest(ctx, requests, collection, manifests, cfg, *request); err != nil {
+			if err := processBackupRequest(ctx, requests, collection, manifests, cfg, *request, snapshots); err != nil {
 				log.Printf("hardware backup request id=%s failed: %v", request.ID, err)
 			}
 			continue
@@ -122,6 +123,7 @@ func processBackupRequest(
 	manifests *mongo.Collection,
 	cfg Config,
 	request backupRequest,
+	snapshots *mongo.Collection,
 ) error {
 	days, err := selectBackupRequestDays(ctx, manifests, cfg, request.Action)
 	if err != nil {
@@ -158,6 +160,9 @@ func processBackupRequest(
 			return updateBackupRequestProgress(ctx, requests, request.ID, progress)
 		})
 	})
+	if storageErr := refreshStorageSnapshot(ctx, snapshots, cfg, b2); storageErr != nil {
+		log.Printf("B2 storage snapshot failed for request id=%s: %v", request.ID, storageErr)
+	}
 	return completeBackupRequest(ctx, requests, request.ID, progress, err)
 }
 
