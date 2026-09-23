@@ -593,6 +593,7 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(viewMenu).toContainText("Show background grid");
       await expect(viewMenu).toContainText("Restore default layout");
       await expect(page.getByRole("group", { name: "Minimap visibility" })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
       await assertNoBrowserFailures(page);
     }
   });
@@ -655,5 +656,68 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect(liveDetailsTab).toHaveAttribute("aria-selected", "true");
     await expect(page.locator("#live-details-panel")).toBeVisible();
     await assertNoBrowserFailures(page);
+  });
+
+  test("M: coarse-pointer workspace controls keep readable touch targets and accessible icon names", async ({ browser }) => {
+    const context = await browser.newContext({
+      hasTouch: true,
+      viewport: { width: 390, height: 844 },
+    });
+    const page = await context.newPage();
+    try {
+      monitorBrowserFailures(page);
+      await installApiFixtures(page, { transitionReplay: true });
+      await page.goto("/filesystem-activity?view=audit&sessionId=closed-session&hop=replay-change");
+      await expect(page.getByRole("tablist", { name: "Audit workspace views" })).toBeVisible({ timeout: 15_000 });
+
+      const inspectTargets = async () => page.locator(".filesystem-activity-scope button").evaluateAll((buttons) =>
+        buttons
+          .filter((button) => {
+            const style = getComputedStyle(button);
+            const rect = button.getBoundingClientRect();
+            return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+          })
+          .map((button) => {
+            const rect = button.getBoundingClientRect();
+            const iconOnly = (button.textContent ?? "").trim().length === 0;
+            return {
+              name: button.getAttribute("aria-label") ?? button.getAttribute("title") ?? "unnamed",
+              width: rect.width,
+              height: rect.height,
+              iconOnly,
+              hasAccessibleName: Boolean(
+                button.getAttribute("aria-label") ||
+                button.getAttribute("aria-labelledby") ||
+                (button.textContent ?? "").trim(),
+              ),
+              hasKeyboardTooltip: button.hasAttribute("data-keyboard-tooltip"),
+            };
+          }),
+      );
+
+      const mapTargets = await inspectTargets();
+      expect(mapTargets.length).toBeGreaterThan(0);
+      expect(mapTargets.filter((target) => target.height < 40)).toEqual([]);
+      expect(mapTargets.filter((target) => target.iconOnly && target.width < 40)).toEqual([]);
+      expect(mapTargets.filter((target) => target.iconOnly && !target.hasAccessibleName)).toEqual([]);
+      expect(mapTargets.filter((target) => target.iconOnly && !target.hasKeyboardTooltip)).toEqual([]);
+      const zoomOut = page.getByRole("button", { name: "Zoom out" });
+      await zoomOut.focus();
+      await expect.poll(() => zoomOut.evaluate((button) => ({
+        content: getComputedStyle(button, "::after").content,
+        opacity: getComputedStyle(button, "::after").opacity,
+      }))).toEqual({ content: '"Zoom out"', opacity: "1" });
+
+      await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+      const timelineTargets = await inspectTargets();
+      expect(timelineTargets.filter((target) => target.height < 40)).toEqual([]);
+      expect(timelineTargets.filter((target) => target.iconOnly && target.width < 40)).toEqual([]);
+      expect(timelineTargets.filter((target) => target.iconOnly && !target.hasAccessibleName)).toEqual([]);
+      expect(timelineTargets.filter((target) => target.iconOnly && !target.hasKeyboardTooltip)).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).toBe(true);
+      await assertNoBrowserFailures(page);
+    } finally {
+      await context.close();
+    }
   });
 });

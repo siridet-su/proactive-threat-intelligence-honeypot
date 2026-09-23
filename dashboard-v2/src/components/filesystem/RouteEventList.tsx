@@ -94,9 +94,9 @@ export function RouteEventList({
             return (
               <li key={event.id} className="relative pb-2.5 last:pb-0">
                 {index > 0 && isPauseDetected && (
-                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-mono text-warning select-none">
+                  <div className="mb-1.5 flex items-center gap-1.5 text-xs font-mono text-warning select-none">
                     <div className="h-px w-3 bg-warning/40" aria-hidden="true" />
-                    <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-[10px] font-medium">
+                    <span className="inline-flex items-center gap-1 rounded border border-warning-border bg-warning-subtle px-1.5 py-0.5 text-xs font-medium">
                       <Clock className="h-2.5 w-2.5" aria-hidden="true" />
                       Attacker pause: +{hopMetric?.formattedDelta}
                     </span>
@@ -137,7 +137,7 @@ export function RouteEventList({
                     </p>
                     <time className="shrink-0 font-mono text-xs text-text-subtle whitespace-nowrap ml-1 flex items-center gap-1.5">
                       <span>{formatTimestamp(event.at)}</span>
-                      <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-[10px] text-text-muted">
+                      <span className="rounded bg-surface px-1 py-0.2 border border-border/60 text-xs text-text-muted">
                         {hopMetric?.formattedElapsed ?? "+00:00"}
                       </span>
                     </time>
@@ -207,7 +207,7 @@ export function RouteEventList({
                     </div>
 
                     <span
-                      className={`inline-flex shrink-0 items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded ${
+                      className={`inline-flex shrink-0 items-center gap-1 font-mono text-xs px-1.5 py-0.5 rounded ${
                         isPauseDetected
                           ? "bg-warning-subtle text-warning border border-warning-border font-medium"
                           : "text-text-subtle bg-surface border border-border/50"
@@ -236,7 +236,7 @@ export function RouteEventList({
                     <button
                       type="button"
                       onClick={onLoadEarlier}
-                      className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-[11px]"
+                      className="rounded bg-amber-500/20 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-500/30 transition-colors text-xs"
                     >
                       Load earlier
                     </button>
@@ -270,7 +270,7 @@ export function RouteEventList({
                         {String((showFailedAttempts ? anchoredHop.hopNumber : anchoredHop.successfulHopNumber ?? anchoredHop.hopNumber) ?? 1).padStart(2, "0")}
                       </span>
                       {actionLabel(anchoredHop)}
-                      <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-[10px] text-amber-300 font-sans">
+                      <span className="ml-1.5 rounded bg-amber-500/20 px-1 py-0.2 text-xs text-amber-300 font-sans">
                         Anchored
                       </span>
                     </p>

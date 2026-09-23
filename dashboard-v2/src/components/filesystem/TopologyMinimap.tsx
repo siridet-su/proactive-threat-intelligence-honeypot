@@ -132,7 +132,7 @@ export function TopologyMinimap({
         >
           <div className="flex items-center gap-2">
             <Map className="h-3 w-3 text-primary" aria-hidden="true" />
-            <span className="text-[11px] font-bold uppercase tracking-[0.14em]">Overview</span>
+            <span className="text-xs font-bold uppercase tracking-[0.14em]">Overview</span>
           </div>
           <motion.span
             animate={{ rotate: isCollapsed ? 0 : 180 }}

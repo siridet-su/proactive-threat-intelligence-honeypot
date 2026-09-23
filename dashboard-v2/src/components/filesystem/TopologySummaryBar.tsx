@@ -107,7 +107,7 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
             <button
               type="button"
               onClick={() => setIsSourcesExpanded(true)}
-              className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-[10px] font-semibold text-primary hover:bg-primary/20 transition-colors"
+              className="rounded border border-primary-border bg-primary-subtle px-1.5 py-0.5 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
               title="Show all live source callouts on the map"
             >
               Show all
@@ -121,7 +121,7 @@ export function TopologySummaryBar(props: TopologySummaryBarProps) {
             <button
               type="button"
               onClick={() => setIsSourcesExpanded(false)}
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-[10px] text-text-muted hover:text-text transition-colors"
+              className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs text-text-muted hover:text-text transition-colors"
               title={`Limit to ${GRAPH_CALLOUT_LIMIT} source callouts`}
             >
               Compact ({GRAPH_CALLOUT_LIMIT})

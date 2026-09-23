@@ -70,7 +70,7 @@ function DirectorySessionRow({ session, selected, onSelect, isExact }: Directory
           <span>{session.sourceIp}</span>
           {isExact !== undefined && (
             <span
-              className={`rounded px-1.5 py-0.2 text-[10px] font-semibold ${
+              className={`rounded px-1.5 py-0.2 text-xs font-semibold ${
                 isExact
                   ? "bg-primary-subtle text-primary border border-primary-border/50"
                   : "bg-surface-subtle text-text-subtle border border-border"
@@ -323,7 +323,7 @@ export function FilesystemInspector({
                     <span className="text-xs font-semibold text-text">
                       Other active sessions from this IP ({siblingSessions.length})
                     </span>
-                    <span className="text-[11px] text-text-subtle">Concurrent routes</span>
+                    <span className="text-xs text-text-subtle">Concurrent routes</span>
                   </div>
                   <div className="space-y-1.5 max-h-40 overflow-y-auto overscroll-contain pr-1">
                     {siblingSessions.map((sibling) => (
@@ -348,7 +348,7 @@ export function FilesystemInspector({
                               {sibling.cwdState.path ? compactDirectoryPath(sibling.cwdState.path) : "Unknown path"}
                             </span>
                           </div>
-                          <span className="text-[10px] text-text-subtle shrink-0">
+                          <span className="text-xs text-text-subtle shrink-0">
                             {formatTimestamp(sibling.cwdState.observedAt)}
                           </span>
                         </button>
@@ -453,15 +453,15 @@ export function FilesystemInspector({
 
               <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs select-none">
                 <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">Exact path</div>
+                  <div className="text-xs font-medium uppercase tracking-wider text-text-subtle">Exact path</div>
                   <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.exactCount}</div>
                 </div>
                 <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">In subdirs</div>
+                  <div className="text-xs font-medium uppercase tracking-wider text-text-subtle">In subdirs</div>
                   <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.descendantCount}</div>
                 </div>
                 <div className="rounded-lg border border-border bg-surface-subtle/60 p-2">
-                  <div className="text-[10px] font-medium uppercase tracking-wider text-text-subtle">Unique sources</div>
+                  <div className="text-xs font-medium uppercase tracking-wider text-text-subtle">Unique sources</div>
                   <div className="mt-0.5 font-mono text-sm font-semibold text-text">{nodeCounts.uniqueSourcesCount}</div>
                 </div>
               </div>

@@ -268,7 +268,7 @@ export function SessionSourceList({
                             <span className="font-mono text-xs font-semibold text-text truncate">
                               {source.sourceIp}
                             </span>
-                            <span className="rounded-full bg-surface px-1.5 py-0.2 text-[10px] font-bold text-primary border border-primary-border/40">
+                            <span className="rounded-full bg-surface px-1.5 py-0.2 text-xs font-bold text-primary border border-primary-border/40">
                               {source.sessions.length} sessions
                             </span>
                           </div>
@@ -280,7 +280,7 @@ export function SessionSourceList({
                           </div>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[11px] font-medium text-text-muted">
+                          <span className="text-xs font-medium text-text-muted">
                             {isExpanded ? "Collapse" : "Expand"}
                           </span>
                           <ChevronDown
@@ -337,9 +337,9 @@ export function SessionSourceList({
                                 </div>
                                 <div className="text-right shrink-0">
                                   {isSelected ? (
-                                    <span className="text-[11px] font-bold text-primary">Selected</span>
+                                    <span className="text-xs font-bold text-primary">Selected</span>
                                   ) : (
-                                    <span className="text-[10px] text-text-subtle">
+                                    <span className="text-xs text-text-subtle">
                                       {formatTimestamp(session.cwdState.observedAt)}
                                     </span>
                                   )}

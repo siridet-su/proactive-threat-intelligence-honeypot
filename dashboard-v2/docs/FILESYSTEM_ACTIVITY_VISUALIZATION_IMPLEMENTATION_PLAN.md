@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-012B — Readability and touch targets**
+Current focus: **FSV-013 — Forensic time presentation**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -1015,13 +1015,47 @@ Verification:
 
 Checkpoint 4 remains **IN_PROGRESS** with `FSV-012B` as the current focus.
 
-#### `FSV-012B` Readability and touch targets
+#### `FSV-012B` Readability and touch targets — `DONE` (2026-09-23)
 
 - meaningful labels อย่างน้อย 12 px
 - interactive target 40–44 px บนอุปกรณ์ touch
 - icon-only control มี accessible name และ keyboard tooltip
 - ตรวจ contrast ใน light/dark
 - 200% zoom ไม่มี horizontal page scroll หรือ control overlap
+
+Implementation and acceptance evidence:
+
+- Established a source-enforced 12px floor for filesystem presentation text. All 41 former
+  `text-[10px]`/`text-[11px]` occurrences now use `text-xs`, including replay timing, route badges,
+  topology annotations, inspector metrics, session metadata, filter steps, and view-menu guidance.
+- Added coarse-pointer CSS scoped to the filesystem page: interactive controls use a 44px minimum
+  block size and icon/separator targets use a 44px minimum inline size. Topology directory nodes use
+  a larger pre-transform minimum so their rendered hit boxes remain at least 40px after fit/zoom.
+- Icon-only canvas/replay controls retain explicit accessible names and now opt into a shared
+  `data-keyboard-tooltip` contract. The tooltip is rendered from the same `aria-label` on hover and
+  `:focus-visible`, keeping pointer and keyboard wording synchronized.
+- Light/dark core `text`, `text-muted`, and `text-subtle` tokens are tested against canvas and
+  surface backgrounds at WCAG AA normal-text contrast. The light subtle token was minimally darkened
+  from `#64748B` to `#607086` to raise its canvas contrast from 4.43:1 to 4.70:1.
+- Browser coverage now asserts no document-level horizontal overflow at 1280px, 768px, and simulated
+  200% zoom. A real coarse-pointer Chromium context checks visible Map and Timeline controls for
+  minimum hit area, icon-only accessible names, focus tooltip visibility, and mobile overflow.
+- Test-first evidence found 41 sub-12px classes, no filesystem touch-target scope, and seven visible
+  Map controls without keyboard tooltip contracts. The first full browser run additionally exposed
+  transformed topology node hit boxes at 39.2px; the coarse-pointer node minimum now compensates for
+  canvas scale and the repeated full browser gate passes.
+
+Verification:
+
+- Readability/contrast contract: **PASSED** (3/3 tests).
+- All filesystem suites: **PASSED** (498 passed, 14 skipped).
+- Full Vitest suite: **PASSED** (755 passed, 2 expected failures, 14 skipped).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (11/11 real-browser tests).
+- ESLint: **PASSED** with 0 errors and 4 unrelated upstream warnings.
+- Webpack production build: **PASSED**, 18/18 static pages generated.
+
+Checkpoint 4 remains **IN_PROGRESS** with `FSV-013` as the current focus.
 
 #### `FSV-013` Forensic time presentation
 

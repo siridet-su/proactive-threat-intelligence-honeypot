@@ -882,7 +882,7 @@ export function FilesystemActivity() {
 
   return (
     <FilesystemContext.Provider value={contextValue as FilesystemContextType}>
-    <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
+    <div className="filesystem-activity-scope min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
 
       {navigationApplicationError ? (
         <div
@@ -1132,6 +1132,7 @@ export function FilesystemActivity() {
                             className="ui-button h-9 min-h-9 w-9 p-0"
                             title="Previous hop (←)"
                             aria-label="Previous hop"
+                            data-keyboard-tooltip
                           >
                             <ChevronLeft className="h-3.5 w-3.5" />
                           </button>
@@ -1154,6 +1155,7 @@ export function FilesystemActivity() {
                             className="ui-button h-9 min-h-9 w-9 p-0"
                             title="Next hop (→)"
                             aria-label="Next hop"
+                            data-keyboard-tooltip
                           >
                             <ChevronRight className="h-3.5 w-3.5" />
                           </button>
@@ -1301,6 +1303,7 @@ export function FilesystemActivity() {
                     className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Previous hop (←)"
                     aria-label="Previous hop"
+                    data-keyboard-tooltip
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </button>
@@ -1323,6 +1326,7 @@ export function FilesystemActivity() {
                     className="ui-button h-9 min-h-9 w-9 p-0"
                     title="Next hop (→)"
                     aria-label="Next hop"
+                    data-keyboard-tooltip
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>

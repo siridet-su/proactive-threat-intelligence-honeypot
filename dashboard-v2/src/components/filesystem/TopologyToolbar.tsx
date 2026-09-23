@@ -129,6 +129,7 @@ export function TopologyToolbar({
           className="ui-button h-8 min-h-8 w-8 p-0"
           title="Zoom out"
           aria-label="Zoom out"
+          data-keyboard-tooltip
           onClick={() => zoomOut()}
         >
           <ZoomOut className="h-3.5 w-3.5" />
@@ -145,6 +146,7 @@ export function TopologyToolbar({
           className="ui-button h-8 min-h-8 w-8 p-0"
           title="Zoom in"
           aria-label="Zoom in"
+          data-keyboard-tooltip
           onClick={() => zoomIn()}
         >
           <ZoomIn className="h-3.5 w-3.5" />
@@ -157,6 +159,7 @@ export function TopologyToolbar({
           className="ui-button h-8 min-h-8 w-8 p-0"
           title="Fit topology in view"
           aria-label="Fit topology in view"
+          data-keyboard-tooltip
           onClick={fitTopology}
         >
           <ScanLine className="h-3.5 w-3.5" />
@@ -166,6 +169,7 @@ export function TopologyToolbar({
           className="ui-button h-8 min-h-8 w-8 p-0"
           title="Center selected IP"
           aria-label="Center selected IP"
+          data-keyboard-tooltip
           onClick={() => {
             // Selection is supplied by the live client stream and can differ
             // from the SSR snapshot. The callback is already a safe no-op
@@ -215,7 +219,7 @@ export function TopologyToolbar({
                 aria-label="View settings"
                 className="absolute right-0 top-[calc(100%+6px)] z-50 w-64 origin-top-right rounded-xl border border-border bg-surface-raised p-1.5 text-xs shadow-lg"
               >
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Interaction Mode
               </div>
               <div className="flex p-1 gap-1">
@@ -248,7 +252,7 @@ export function TopologyToolbar({
               </div>
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Density Mode
               </div>
               {(["auto", "detailed", "clustered", "aggregated"] as const).map((pref) => {
@@ -274,16 +278,16 @@ export function TopologyToolbar({
                 );
               })}
               {densityAnalysisHiddenNodes > 0 && (
-                <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-[11px] text-text-subtle">
+                <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-xs text-text-subtle">
                   {densityAnalysisHiddenNodes} {densityAnalysisHiddenNodes === 1 ? "path" : "paths"} aggregated
                 </div>
               )}
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Appearance
               </div>
-              <div className="px-2.5 pb-1 pt-0.5 text-[11px] text-text-subtle">
+              <div className="px-2.5 pb-1 pt-0.5 text-xs text-text-subtle">
                 Minimap {minimapVisible ? "visible" : "hidden"}
               </div>
               <div
@@ -320,7 +324,7 @@ export function TopologyToolbar({
               </button>
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />
-              <div className="px-2 py-1 text-[11px] font-medium text-text-muted">
+              <div className="px-2 py-1 text-xs font-medium text-text-muted">
                 Layout Actions
               </div>
               {canUndoLayout && (
@@ -385,6 +389,7 @@ export function TopologyToolbar({
                 : "Expand map workspace"
           }
           aria-pressed={isTopologyExpanded}
+          data-keyboard-tooltip
           onClick={handleToggleExpand}
         >
           {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}

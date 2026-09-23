@@ -923,7 +923,7 @@ export function TopologyCanvas({
                         <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot (received{" "}
                         {formatUpdateAge(freshnessState.snapshotReceiptAgeMs)}).
                       </span>
-                      <span className="hidden sm:inline text-text-subtle text-[11px]">
+                      <span className="hidden sm:inline text-text-subtle text-xs">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
                       </span>
                       {onRefresh && (
@@ -1327,7 +1327,7 @@ export function TopologyCanvas({
                             <span
                               data-testid="topology-aggregate-indicator"
                               data-aggregate-path={node.path}
-                              className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary"
+                              className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-bold text-primary"
                               title={`${node.hiddenChildCount} child ${node.hiddenChildCount === 1 ? "directory" : "directories"} aggregated under this path. Click to expand.`}
                             >
                               +{node.hiddenChildCount}
@@ -1461,7 +1461,7 @@ export function TopologyCanvas({
                                 <span className="block truncate font-mono text-xs font-semibold text-text" title={callout.sourceIp}>
                                   {callout.sourceIp}
                                 </span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-text-subtle">
+                                <span className="mt-0.5 flex items-center gap-1 text-xs text-text-subtle">
                                   <span>
                                     {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
                                   </span>
@@ -1550,7 +1550,7 @@ export function TopologyCanvas({
                                       />
                                       <span className="truncate text-text-muted">{sess.sessionId.slice(0, 8)}…</span>
                                       <span
-                                        className={`truncate px-1 py-0.2 rounded text-[10px] border ${
+                                        className={`truncate px-1 py-0.2 rounded text-xs border ${
                                           isSessSelected
                                             ? "bg-surface text-primary border-primary-border"
                                             : "bg-surface text-text-subtle border-border/50"
@@ -1702,7 +1702,7 @@ export function TopologyCanvas({
                           <span className="font-mono text-xs text-text">{callout.sourceIp}</span>
                           <div className="flex items-center gap-1.5">
                             {!isRendered && (
-                              <span className="ui-badge border-warning-border bg-warning-subtle text-[10px] text-warning">
+                              <span className="ui-badge border-warning-border bg-warning-subtle text-xs text-warning">
                                 Omitted (limit)
                               </span>
                             )}

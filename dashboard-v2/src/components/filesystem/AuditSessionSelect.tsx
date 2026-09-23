@@ -544,7 +544,7 @@ export function AuditSessionSelect({
                   Active Sessions ({filteredActiveSessions.length})
                 </div>
                 {timeRange && timeRange !== "all" ? (
-                  <span className="text-[10px] font-sans font-normal text-text-subtle normal-case">
+                  <span className="text-xs font-sans font-normal text-text-subtle normal-case">
                     Not filtered by Closed at
                   </span>
                 ) : (
@@ -747,7 +747,7 @@ export function AuditSessionSelect({
 
           if (paginationState === "completed") {
             return (
-              <div className="pt-2 pb-1 text-center font-mono text-[11px] text-text-subtle">
+              <div className="pt-2 pb-1 text-center font-mono text-xs text-text-subtle">
                 {isSearchActive
                   ? `All matching search results loaded (${filteredClosedSessions.length})`
                   : `All matching directory sessions loaded (${filteredClosedSessions.length})`}

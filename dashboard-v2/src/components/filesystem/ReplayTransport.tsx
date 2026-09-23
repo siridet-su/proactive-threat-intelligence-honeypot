@@ -114,7 +114,7 @@ export function ReplayTransport({
 
       {/* Scrubber Area */}
       <div className="space-y-1">
-        <div className="flex items-center justify-between text-[11px] font-mono text-text-muted px-1">
+        <div className="flex items-center justify-between text-xs font-mono text-text-muted px-1">
           <span>{timeMetrics.summary.formattedCurrentElapsed}</span>
           <span className="text-text-subtle font-sans font-medium px-2 truncate">
             {selectedHistoryIndex === 0
@@ -168,6 +168,7 @@ export function ReplayTransport({
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
               title="Jump to first hop"
               aria-label="First hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(0)}
             >
@@ -178,6 +179,7 @@ export function ReplayTransport({
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
               title="Previous hop"
               aria-label="Previous hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === 0}
               onClick={() => selectDisplayedHistoryIndex(Math.max(0, selectedHistoryIndex - 1))}
             >
@@ -217,6 +219,7 @@ export function ReplayTransport({
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
               title="Next hop"
               aria-label="Next hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(Math.min(displayedHistoryLength - 1, selectedHistoryIndex + 1))}
             >
@@ -227,6 +230,7 @@ export function ReplayTransport({
               className="h-8 w-10 flex items-center justify-center shrink-0 text-text-muted hover:text-text hover:bg-surface-hover rounded-md transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
               title="Jump to latest hop"
               aria-label="Latest hop"
+              data-keyboard-tooltip
               disabled={!isAnchoredSelected && selectedHistoryIndex === displayedHistoryLength - 1}
               onClick={() => selectDisplayedHistoryIndex(displayedHistoryLength - 1)}
             >
@@ -266,7 +270,7 @@ export function ReplayTransport({
 
           <div className="flex items-center gap-2 pl-2 shrink-0">
             {failedCount > 0 && (
-              <label className="flex items-center gap-1.5 text-[11px] text-text-subtle cursor-pointer select-none border border-transparent hover:border-border/50 px-1.5 py-1 rounded transition-colors">
+              <label className="flex items-center gap-1.5 text-xs text-text-subtle cursor-pointer select-none border border-transparent hover:border-border/50 px-1.5 py-1 rounded transition-colors">
                 <input
                   type="checkbox"
                   checked={showFailedAttempts}
@@ -277,7 +281,7 @@ export function ReplayTransport({
               </label>
             )}
 
-            <div className="text-[11px] font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2.5 py-1 rounded-md shadow-xs">
+            <div className="text-xs font-mono text-text-subtle bg-surface-subtle border border-border/50 px-2.5 py-1 rounded-md shadow-xs">
               Hop <span className="text-text font-medium">{displayedHistoryMetrics.selectedNumber}</span>/{displayedHistoryMetrics.totalItems}
             </div>
           </div>

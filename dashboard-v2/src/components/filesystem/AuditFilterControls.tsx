@@ -647,7 +647,7 @@ export function AuditFilterControls({
                               key={p.key}
                               type="button"
                               onClick={() => handleSelectPreset(p.key as TimeRangeFilter)}
-                              className={`h-7 flex items-center justify-center rounded-md text-[11px] font-sans transition-all cursor-pointer text-center tracking-tight ${
+                              className={`h-7 flex items-center justify-center rounded-md text-xs font-sans transition-all cursor-pointer text-center tracking-tight ${
                                 isSelected
                                   ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                                   : "bg-surface hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"
@@ -678,7 +678,7 @@ export function AuditFilterControls({
                       </div>
 
                       {/* Selected Date Summary */}
-                      <div className="px-3 py-1.5 flex items-center justify-center text-[11px] font-mono text-text-muted border-t border-border/40 bg-surface-subtle/30">
+                      <div className="px-3 py-1.5 flex items-center justify-center text-xs font-mono text-text-muted border-t border-border/40 bg-surface-subtle/30">
                         {draftTimeRange === "all" ? (
                           <span className="text-text-subtle">All time</span>
                         ) : draftRange?.from ? (
@@ -720,7 +720,7 @@ export function AuditFilterControls({
                           </span>
                         </div>
                         {formatDuration(draftRange?.from, draftRange?.to) && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-subtle border border-border/70 text-text-muted">
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-surface-subtle border border-border/70 text-text-muted">
                             {formatDuration(draftRange?.from, draftRange?.to)}
                           </span>
                         )}
