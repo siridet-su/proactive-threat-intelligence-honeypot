@@ -287,11 +287,13 @@ export function TopologyCanvas({
 
   const [nodeElementBounds, setNodeElementBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutElementBounds, setCalloutElementBounds] = useState<Record<string, GraphElementBounds>>({});
+  const [calloutLayoutBounds, setCalloutLayoutBounds] = useState<Record<string, GraphElementBounds>>({});
 
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
   const graphPlaneRef = useRef<HTMLDivElement>(null);
   const nodeElementRefs = useRef(new Map<string, HTMLButtonElement>());
   const calloutElementRefs = useRef(new Map<string, HTMLElement>());
+  const calloutAnchorElementRefs = useRef(new Map<string, HTMLButtonElement>());
   const clusterSessionRefs = useRef(new Map<string, HTMLButtonElement>());
   const [userCollapsedIps, setUserCollapsedIps] = useState<Set<string>>(new Set());
   const [userExpandedIps, setUserExpandedIps] = useState<Set<string>>(new Set());
@@ -306,24 +308,6 @@ export function TopologyCanvas({
     },
     [selectedSessionId, userCollapsedIps, userExpandedIps],
   );
-
-  const toggleClusterExpand = useCallback((sourceIp: string, isCurrentlyExpanded: boolean) => {
-    if (isCurrentlyExpanded) {
-      setUserCollapsedIps((prev) => new Set(prev).add(sourceIp));
-      setUserExpandedIps((prev) => {
-        const next = new Set(prev);
-        next.delete(sourceIp);
-        return next;
-      });
-    } else {
-      setUserExpandedIps((prev) => new Set(prev).add(sourceIp));
-      setUserCollapsedIps((prev) => {
-        const next = new Set(prev);
-        next.delete(sourceIp);
-        return next;
-      });
-    }
-  }, []);
 
   const getViewportSnapshotRef = useRef<(() => { pan: Pan; zoom: number }) | null>(null);
   const restoreViewportRef = useRef<((snapshot: { pan: Pan; zoom: number }) => void) | null>(null);
@@ -519,9 +503,9 @@ export function TopologyCanvas({
       graphCallouts,
       sourceRailCalloutPositions,
       nodeElementBounds,
-      calloutElementBounds,
+      calloutLayoutBounds,
     ),
-    [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, sourceRailCalloutPositions],
+    [calloutLayoutBounds, graphCallouts, graphNodes, nodeElementBounds, sourceRailCalloutPositions],
   );
   const effectiveCalloutPositions = useMemo(
     () => resolveCalloutPositions(graphCallouts, automaticCalloutPositions, labelPositions),
@@ -582,8 +566,12 @@ export function TopologyCanvas({
     const measuredCallouts = Object.fromEntries(
       [...calloutElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
     );
+    const measuredCalloutAnchors = Object.fromEntries(
+      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
+    );
     setNodeElementBounds((current) => sameElementBounds(current, measuredNodes) ? current : measuredNodes);
     setCalloutElementBounds((current) => sameElementBounds(current, measuredCallouts) ? current : measuredCallouts);
+    setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
   }, []);
 
   // Connector endpoints use rendered bounds, including their actual centers. This keeps a line
@@ -598,6 +586,9 @@ export function TopologyCanvas({
       observer.observe(element);
     }
     for (const element of calloutElementRefs.current.values()) {
+      observer.observe(element);
+    }
+    for (const element of calloutAnchorElementRefs.current.values()) {
       observer.observe(element);
     }
     return () => observer.disconnect();
@@ -670,6 +661,7 @@ export function TopologyCanvas({
     zoomIn,
     zoomOut,
     markUserAdjusted,
+    holdViewportSteady,
     centerMapOn,
     resetViewport,
     fitTopology,
@@ -688,9 +680,29 @@ export function TopologyCanvas({
     labelPositions,
     automaticCalloutPositions,
     nodeElementBounds,
-    calloutElementBounds,
+    calloutElementBounds: calloutLayoutBounds,
     nodesCount: snapshot?.nodes.length ?? 0,
   });
+  const toggleClusterExpand = useCallback((sourceIp: string, isCurrentlyExpanded: boolean) => {
+    // Disclosure is an explicit viewport interaction. Keep the current camera while
+    // ResizeObserver updates connector geometry and the disclosure animates.
+    holdViewportSteady();
+    if (isCurrentlyExpanded) {
+      setUserCollapsedIps((prev) => new Set(prev).add(sourceIp));
+      setUserExpandedIps((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceIp);
+        return next;
+      });
+    } else {
+      setUserExpandedIps((prev) => new Set(prev).add(sourceIp));
+      setUserCollapsedIps((prev) => {
+        const next = new Set(prev);
+        next.delete(sourceIp);
+        return next;
+      });
+    }
+  }, [holdViewportSteady]);
   const showMinimap = deriveMinimapVisibility({
     preference: minimapPreference,
     totalNodes: densityAnalysis.totalNodes,
@@ -1399,7 +1411,7 @@ export function TopologyCanvas({
                           onPointerMove={onCalloutPointerMove}
                           onPointerUp={onCalloutPointerEnd}
                           onPointerCancel={onCalloutPointerEnd}
-                          className={`absolute z-40 flex flex-col -translate-x-1/2 -translate-y-1/2 touch-none rounded-xl border text-left shadow-sm transition-colors duration-200 ${
+                          className={`absolute z-40 flex flex-col -translate-x-1/2 -translate-y-6 touch-none rounded-xl border text-left shadow-sm transition-colors duration-200 ${
                             isMulti ? "w-44 sm:w-52" : "w-36"
                           } ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : ""} ${
                             isOverlapping
@@ -1421,6 +1433,10 @@ export function TopologyCanvas({
 
                           {/* Main Callout Trigger */}
                           <button
+                            ref={(element) => {
+                              if (element) calloutAnchorElementRefs.current.set(callout.sourceIp, element);
+                              else calloutAnchorElementRefs.current.delete(callout.sourceIp);
+                            }}
                             type="button"
                             aria-pressed={isClusterSelected}
                             aria-expanded={isMulti ? expanded : undefined}
@@ -1435,6 +1451,7 @@ export function TopologyCanvas({
                                 onSelectSession(callout.sessionIds[0]);
                               } else {
                                 if (!isClusterSelected) {
+                                  holdViewportSteady();
                                   onSelectSession(callout.sessions[0].sessionId);
                                   setUserCollapsedIps((prev) => {
                                     const next = new Set(prev);
