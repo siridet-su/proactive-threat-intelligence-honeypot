@@ -1,0 +1,38 @@
+[Unit]
+Description=OpenCanary HTTP login honeypot
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/opencanaryd/opencanary.conf
+
+[Service]
+Type=simple
+User=opencanary
+Group=opencanary
+WorkingDirectory=/var/lib/opencanary
+EnvironmentFile=/etc/opencanaryd/opencanary.env
+RuntimeDirectory=opencanary
+RuntimeDirectoryMode=0750
+StateDirectory=opencanary
+StateDirectoryMode=0750
+LogsDirectory=opencanary
+LogsDirectoryMode=0750
+ExecStart=/opt/opencanary/venv/bin/twistd -noy /opt/opencanary/venv/bin/opencanary.tac --pidfile /run/opencanary/opencanaryd.pid
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+UMask=0027
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target
