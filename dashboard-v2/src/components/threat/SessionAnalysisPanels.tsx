@@ -82,6 +82,28 @@ function display(value: unknown, fallback = "Unavailable"): string {
   return fallback;
 }
 
+function Insight({ title, children, tone = "primary" }: { title: string; children: ReactNode; tone?: "primary" | "warning" }) {
+  return (
+    <div className={`rounded-xl border p-4 ${tone === "warning" ? "border-warning-border bg-warning-subtle" : "border-primary-border bg-primary-subtle"}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">{title}</p>
+      <div className="mt-1 text-sm leading-6 text-text">{children}</div>
+    </div>
+  );
+}
+
+function MoreDetails({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-border bg-surface">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text marker:text-primary">{title}</summary>
+      <div className="border-t border-border px-4 py-4">{children}</div>
+    </details>
+  );
+}
+
+function readableCode(value: unknown): string {
+  return label(value, "not recorded").replaceAll("_", " ").toLowerCase();
+}
+
 // Allow the bounded server projection to finish over the local SSH tunnel.
 // The previous 2.5/7-second client cutoffs hid healthy session evidence.
 const CLIENT_TIMEOUT_MS = 45_000;
@@ -502,7 +524,8 @@ function TimelineList({ items }: { items: unknown[] }) {
   }
   return (
     <div className="space-y-3">
-      <p className="text-xs text-text-muted">Transport, authentication, and lifecycle events. Command input is shown once in Command activity.</p>
+      <Insight title="Activity at a glance">{orderedItems.length} connection, authentication, or lifecycle event{orderedItems.length === 1 ? "" : "s"} were recorded. Commands are shown separately in Command activity.</Insight>
+      <MoreDetails title={`Explore ${Math.min(orderedItems.length, 100)} timeline events`}>
       <ol className="space-y-2">
         {orderedItems.slice(0, 100).map((event, index) => {
         const eventName = summaryValue(event.eventid || event.event_id || event.event_type, "event");
@@ -524,6 +547,7 @@ function TimelineList({ items }: { items: unknown[] }) {
         );
         })}
       </ol>
+      </MoreDetails>
     </div>
   );
 }
@@ -560,6 +584,9 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
   );
   return (
     <div className="space-y-3">
+      <Insight title="Trusted classification">{trustedMappings.length} trusted mapping{trustedMappings.length === 1 ? "" : "s"} across {uniqueAttackTechniques.size} ATT&amp;CK technique{uniqueAttackTechniques.size === 1 ? "" : "s"}, from {classificationRecords.length} command-level record{classificationRecords.length === 1 ? "" : "s"}. Model1 is advisory; Model2 has its own panel.</Insight>
+      {uniqueAttackTechniques.size > 0 && <div className="flex flex-wrap gap-2">{[...uniqueAttackTechniques].map((technique) => <span key={technique} className="rounded-md border border-primary-border bg-primary-subtle px-2.5 py-1 font-mono text-xs text-text">{technique}</span>)}</div>}
+      <MoreDetails title="Inspect classification records and evidence anchors">
       <SummaryGrid fields={[
         ["Classification records", String(classificationRecords.length)],
         ["Classified command events", String(classifiedCommandKeys.size)],
@@ -617,6 +644,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
           </ol>
         ) : <p className="mt-2 text-xs text-text-muted">No trusted mapping was established.</p>}
       </div>
+      </MoreDetails>
     </div>
   );
 }
@@ -1035,6 +1063,8 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
   ));
   return (
     <>
+      <Insight title="Observed access">{countOf(data.attempt_count)} login attempt{Number(data.attempt_count) === 1 ? "" : "s"}; {countOf(data.success_count)} succeeded and {countOf(data.failure_count)} failed. {visibleUsernames.length ? `Observed account: ${visibleUsernames.join(", ")}.` : "The account name was not retained."}</Insight>
+      <div className="mt-3"><MoreDetails title="Authentication timestamps and evidence">
       <SummaryGrid fields={[
         ["Attempts", countOf(data.attempt_count)],
         ["Successful", countOf(data.success_count)],
@@ -1057,6 +1087,7 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
         </ol>
       )}
       <p className="mt-3 text-xs text-text-subtle">Attacker-entered usernames are shown only when safely retained. Password values are never projected or rendered.</p>
+      </MoreDetails></div>
     </>
   );
 }
@@ -1066,6 +1097,8 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
   const sessions = list(data.sessions).map(record);
   return (
     <>
+      <Insight title="Source-IP recurrence">{summaryValue(record(data.observable).value, "This source")} appears in {countOf(counts.sessions_found)} recorded session{Number(counts.sessions_found) === 1 ? "" : "s"}. This is repeated source context, not attribution.</Insight>
+      <div className="mt-3"><MoreDetails title="Inspect source sessions and sighting metadata">
       <SummaryGrid fields={[
         ["Authority", summaryValue(data.authority, "Contextual only")],
         ["Observable", summaryValue(record(data.observable).value, "Source IP unavailable")],
@@ -1102,6 +1135,7 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
         </ol>
       )}
       <p className="mt-3 text-xs text-text-subtle">Contextual source repetition only; it does not establish attribution, intent, or classification.</p>
+      </MoreDetails></div>
     </>
   );
 }
@@ -1138,6 +1172,10 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   });
   return (
     <>
+      <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
+        {evidence.length || cache.length ? `${evidence.length} stored provider finding${evidence.length === 1 ? "" : "s"} and ${cache.length} source-IP cache result${cache.length === 1 ? "" : "s"}. Check freshness before using this context.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+      </Insight>
+      <div className="mt-3"><MoreDetails title="Provider status, freshness and evidence details">
       <SummaryGrid fields={[
         ["Status", summaryValue(sessionData.status || freshness.state, "TI_PENDING")],
         ["Observable", summaryValue(observable.value, "No eligible observable")],
@@ -1171,6 +1209,7 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this exact session. The read model is {summaryValue(summary.uncertainty, "context-only")}; unavailable evidence is not inferred.</p>
       )}
       <p className="mt-3 text-xs font-medium text-text-subtle">NON_AUTHORITATIVE_CONTEXT_ONLY · provider claims remain attributed and never authorize classification or response.</p>
+      </MoreDetails></div>
     </>
   );
 }
@@ -1188,6 +1227,10 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
   const reports = list(data.reports);
   return (
     <>
+      <Insight title="Assessment outcome" tone={hypothesisSets.length ? "primary" : "warning"}>
+        {hypothesisSets.length ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded.` : "No evidence-bounded hypothesis was established for this session."} {contextualHypotheses.length} TTP correlation{contextualHypotheses.length === 1 ? " is" : "s are"} context only, not validated findings.
+      </Insight>
+      <div className="mt-3"><MoreDetails title="Why a hypothesis was or was not established">
       <SummaryGrid fields={[
         ["Authority", summaryValue(data.authority, "Contextual only")],
         ["Correlated hypotheses", countOf(hypotheses.length || counts.correlations)],
@@ -1275,6 +1318,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
       )}
       {hypotheses.length === 0 && hypothesisSets.length === 0 && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs font-semibold text-text-muted">NO_CORRELATED_HYPOTHESIS</p>}
       <p className="mt-3 text-xs text-text-subtle">Evidence-bounded context only; no attacker identity, intent, or authoritative TTP promotion is inferred.</p>
+      </MoreDetails></div>
     </>
   );
 }
@@ -1291,6 +1335,8 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
   const unmatchedFindingCount = Math.max(0, findingCount - actions.length);
   return (
     <>
+      <Insight title="What an analyst can do">{actions.length ? `${actions.length} manual action${actions.length === 1 ? " is" : "s are"} available from reviewed policy. AI did not invent or execute ${actions.length === 1 ? "it" : "them"}.` : "No policy-approved response action is available for this evidence."}</Insight>
+      <div className="mt-3"><MoreDetails title="Guidance status and policy binding">
       <SummaryGrid fields={[
         ["Status", summaryValue(guidance.status, "Unavailable")],
         ["Authority", summaryValue(guidance.authority, "Policy-bounded")],
@@ -1300,16 +1346,19 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
         ["Validation", summaryValue(validation.status, "Not recorded")],
         ["Manual approval", guidance.requires_manual_approval === false ? "No" : "Required"],
       ]} />
+      </MoreDetails></div>
       {actions.length > 0 ? (
         <ol className="mt-3 space-y-2">
           {actions.slice(0, 20).map((action, index) => (
             <li key={`${index}-${summaryValue(action.action_id, "action")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <p className="font-semibold text-text">{summaryValue(action.description || action.action_id, "Stored analyst action")}</p>
-              {hasMeaningfulValue(action.rationale) && <p className="mt-1 text-text-muted">Rationale: {summaryValue(action.rationale)}</p>}
-              {list(action.preconditions).length > 0 && <p className="mt-1 text-text-muted">Preconditions: {list(action.preconditions).map((value) => display(value)).join(" ")}</p>}
-              {list(action.verification_steps).length > 0 && <p className="mt-1 text-text-muted">Verification: {list(action.verification_steps).map((value) => display(value)).join(" ")}</p>}
-              <p className="mt-1 text-text-muted">Manual approval: {action.requires_manual_approval === false ? "not required" : "required"} · automatic execution: {action.safe_to_auto_execute === true ? "allowed" : "disabled"}</p>
-              <GuidanceTraceability action={action} guidance={guidance} />
+              <p className="mt-1 text-text-muted">{summaryValue(action.rationale, "Review the cited evidence before acting.")}</p>
+              <div className="mt-2"><MoreDetails title="Preconditions, verification and evidence references">
+                {list(action.preconditions).length > 0 && <p className="text-xs text-text-muted">Preconditions: {list(action.preconditions).map((value) => display(value)).join(" ")}</p>}
+                {list(action.verification_steps).length > 0 && <p className="mt-1 text-xs text-text-muted">Verification: {list(action.verification_steps).map((value) => display(value)).join(" ")}</p>}
+                <p className="mt-1 text-xs text-text-muted">Manual approval: {action.requires_manual_approval === false ? "not required" : "required"} · automatic execution: {action.safe_to_auto_execute === true ? "allowed" : "disabled"}</p>
+                <GuidanceTraceability action={action} guidance={guidance} />
+              </MoreDetails></div>
             </li>
           ))}
         </ol>
@@ -1351,6 +1400,10 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
 
   return (
     <>
+      <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
+        {hasBoundAvailableModel2(data) ? "A session-bound Model2 result is available for comparison with Model1." : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
+      </Insight>
+      <div className="mt-3"><MoreDetails title="Model status, provenance and per-technique results">
       <SummaryGrid fields={[
         ["Authority", summaryValue(ensemble.ensemble_authority, "ADVISORY_ONLY")],
         ["Model1", model1.applicable === true ? "APPLICABLE" : model1.applicable === false ? "NOT_APPLICABLE" : "Not reported"],
@@ -1365,9 +1418,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         ["Numeric score fusion", ensemble.fused_score === null ? "NONE" : display(ensemble.fused_score)],
         ["Computed at", summaryValue(ensemble.ensemble_computed_at, "Not reported")],
       ]} />
-      <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">
-        Model2 is one unified multi-output shadow model used for corroboration. Model1 remains the primary classifier; native scores are shown separately and are not numerically fused.
-      </p>
+      <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">Model2 is configured as a unified shadow model; this does not mean it ran for this session. Model1 remains primary and scores are never numerically fused.</p>
       {results.length > 0 && (
         <ol className="mt-3 space-y-2">
           {results.map((item, index) => (
@@ -1386,6 +1437,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         </ol>
       )}
       {model1Only.length > 0 && <p className="mt-3 text-xs text-text-muted">Model1-only labels: {model1Only.map((item) => summaryValue(item.technique_id, "unknown")).join(", ")}</p>}
+      </MoreDetails></div>
     </>
   );
 }
@@ -1401,34 +1453,52 @@ export function hasBoundAvailableModel2(data: JsonRecord): boolean {
     && Boolean(label(binding.run_id || ensemble.run_id, ""));
 }
 
-function AiAdvisorySummary({ data }: { data: JsonRecord }) {
+export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
   const provenance = record(advisory.provenance);
   const safety = record(advisory.safety);
   const rendered = record(advisory.rendered_advisory);
   const paragraphs = list(rendered.paragraphs).map(record);
+  const guidance = record(guidanceData.response_guidance);
+  const guidanceFindings = list(guidance.findings).map(record);
+  const guidanceActions = list(guidance.advisory_actions).map(record);
+  const selectedFindingIds = new Set(paragraphs.flatMap((item) => list(item.finding_ids).map((id) => label(id, ""))).filter(Boolean));
+  const selectedActionIds = new Set(paragraphs.flatMap((item) => list(item.action_ids).map((id) => label(id, ""))).filter(Boolean));
+  const selectedFindings = guidanceFindings.filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
+  const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
+  const inaccurateNarrative = selectedFindings.length > 0 && paragraphs.some((item) => label(item.text, "").includes("canonical finding"));
+  const hasSelection = selectedFindingIds.size > 0 || selectedActionIds.size > 0;
   return (
     <>
-      <SummaryGrid fields={[
-        ["Status", summaryValue(data.status, "Unavailable")],
-        ["Authority", summaryValue(advisory.authority, "Non-authoritative")],
-        ["Validation", summaryValue(validation.status, "Not recorded")],
-        ["Provider", summaryValue(provenance.provider_id, "Not recorded")],
-        ["Model", summaryValue(provenance.model_id, "Not recorded")],
-        ["Manual approval", safety.requires_manual_approval === false ? "No" : "Required"],
-      ]} />
-      {paragraphs.length > 0 ? (
-        <ol className="mt-3 space-y-2">
-          {paragraphs.slice(0, 8).map((paragraph, index) => (
-            <li key={`${index}-${summaryValue(paragraph.template_id, "advisory")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
-              {summaryValue(paragraph.text, "No policy-authored advisory text stored.")}
-            </li>
-          ))}
-        </ol>
-      ) : <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No policy-authored advisory text is stored.</p>}
-      <p className="mt-3 text-xs font-semibold text-text">AI ADVISORY · ADVISORY_ONLY · NON_AUTHORITATIVE</p>
-      <p className="mt-1 text-xs text-text-subtle">This explanation can select existing evidence for review. It cannot create canonical findings, overwrite trusted mappings, select authoritative response actions, or execute a response.</p>
+      <Insight title="What AI actually did" tone={hasSelection ? "primary" : "warning"}>
+        {hasSelection ? `AI referenced ${selectedFindingIds.size} existing finding${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for analyst review.` : "No selected finding or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
+      </Insight>
+      {selectedFindings.length > 0 && <div className="mt-3 space-y-2">
+        <p className="text-xs font-semibold text-text">Selected evidence</p>
+        {selectedFindings.map((item) => <div key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
+          <span className="ui-badge mr-2 text-[11px]">Response-guidance finding</span>{summaryValue(item.statement, "Statement unavailable")}
+        </div>)}
+      </div>}
+      {selectedActions.length > 0 && <div className="mt-3 space-y-2">
+        <p className="text-xs font-semibold text-text">Existing action selected for review · not a new AI action</p>
+        {selectedActions.map((item) => <div key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle p-3 text-sm text-text">
+          {summaryValue(item.description, "Action description unavailable")}
+        </div>)}
+      </div>}
+      {(selectedFindingIds.size > selectedFindings.length || selectedActionIds.size > selectedActions.length) && <p className="mt-2 text-xs text-warning">Some AI selections cannot be matched to the stored response guidance; no missing evidence is inferred.</p>}
+      {inaccurateNarrative && <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored AI sentence calls this a canonical finding, but its selected ID belongs to response guidance. The verified selection above takes precedence.</p>}
+      <div className="mt-3"><MoreDetails title="AI provenance and original stored wording">
+        <SummaryGrid fields={[
+          ["Status", summaryValue(data.status, "Unavailable")],
+          ["Authority", summaryValue(advisory.authority, "Non-authoritative")],
+          ["Validation", summaryValue(validation.status, "Not recorded")],
+          ["Provider", summaryValue(provenance.provider_id, "Not recorded")],
+          ["Model", summaryValue(provenance.model_id, "Not recorded")],
+          ["Manual approval", safety.requires_manual_approval === false ? "No" : "Required"],
+        ]} />
+        {paragraphs.map((paragraph, index) => <p key={`${index}-${label(paragraph.template_id)}`} className="mt-2 text-xs text-text-muted">{summaryValue(paragraph.text, "No stored narrative")}</p>)}
+      </MoreDetails></div>
     </>
   );
 }
@@ -1439,9 +1509,15 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
   return (
     <article className="rounded-lg border border-warning-border bg-warning-subtle p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-warning">AI proposed analysis · Policy gap proposal</p>
-        <span className="ui-badge text-[11px]">{summaryValue(gap.status, "IMPLEMENTATION_GAP")}</span>
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-warning">AI proposal for review</p>
+        <span className="ui-badge text-[11px]">Not approved policy</span>
       </div>
+      <p className="mt-2 text-sm text-text">{proposals.length ? `AI proposed ${proposals.length} possible pattern${proposals.length === 1 ? "" : "s"} to investigate. These are not verified findings or new response actions.` : "AI did not propose a new pattern for this session."}</p>
+      {proposals.map((proposal, index) => <div key={`${index}-${label(proposal.proposal_id)}`} className="mt-3 rounded-lg border border-warning-border bg-surface p-3 text-sm text-text">
+        <p className="font-semibold capitalize">{readableCode(proposal.candidate_type)}</p>
+        <p className="mt-1 text-xs text-text-muted">Needs review · limitations: {(list(proposal.missing_evidence).length ? list(proposal.missing_evidence) : list(proposal.limitations)).length ? (list(proposal.missing_evidence).length ? list(proposal.missing_evidence) : list(proposal.limitations)).map(readableCode).join(", ") : "see technical details"}.</p>
+      </div>)}
+      <div className="mt-3"><MoreDetails title="Proposal conditions, falsifiers and provenance">
       <SummaryGrid fields={[
         ["Mode", summaryValue(gap.mode, "Read-only")],
         ["Proposals", countOf(proposals.length)],
@@ -1475,6 +1551,7 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
         </ol>
       ) : <p className="mt-3 text-xs text-text-muted">No policy-gap candidate was proposed for this session.</p>}
       <p className="mt-3 text-xs text-text-subtle">Review-only candidate namespace. Policy writes, trusted promotion, response selection, and automatic execution are disabled.</p>
+      </MoreDetails></div>
     </article>
   );
 }
@@ -1512,6 +1589,10 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
   const nonEmptyErrors = Object.values(errors).filter(hasMeaningfulValue).length;
   return (
     <>
+      <Insight title="Evidence trail" tone={nonEmptyErrors ? "warning" : "primary"}>
+        {list(value.analysis_jobs).length} analysis job{list(value.analysis_jobs).length === 1 ? "" : "s"} recorded; {hasMeaningfulRecord(reportSummary) ? "a report summary is available" : "no report summary is stored"}. {nonEmptyErrors ? `${nonEmptyErrors} error field${nonEmptyErrors === 1 ? " needs" : "s need"} review.` : "No stored error is reported."}
+      </Insight>
+      <div className="mt-3"><MoreDetails title="Schema, session ID and processing details">
       <SummaryGrid fields={[
         ["Schema", summaryValue(value.schema_version, "Not recorded")],
         ["Session", summaryValue(value.session_id, "Unknown")],
@@ -1519,6 +1600,7 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
         ["Report summary", hasMeaningfulRecord(reportSummary) ? "Present" : "Empty"],
         ["Errors", countOf(nonEmptyErrors)],
       ]} />
+      </MoreDetails></div>
     </>
   );
 }
@@ -1816,7 +1898,7 @@ export function SessionAnalysisPanels({
 
           <div className="mt-5 grid grid-cols-1 items-start gap-5 border-t border-border pt-5 xl:grid-cols-2">
             <Panel eyebrow="Stored AI advisory" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} variant="embedded">
-              <AiAdvisorySummary data={aiAdvisory.data} />
+              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} />
             </Panel>
             {aiAdvisory.state === "ready" || aiAdvisory.state === "limited" ? (
               <PolicyGapSummary data={aiAdvisory.data} />
