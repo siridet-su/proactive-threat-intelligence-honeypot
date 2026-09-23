@@ -1419,6 +1419,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const binding = record(model2.binding);
   const results = list(ensemble.results).map(record);
   const model1Only = list(ensemble.model1_only_labels).map(record);
+  const recommendations = rankTtpRecommendations(data);
 
   if (!hasMeaningfulRecord(ensemble) && recommendations.length === 0) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
