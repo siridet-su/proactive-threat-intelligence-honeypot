@@ -952,17 +952,21 @@ export function FilesystemActivity() {
             />
           </div>
         </div>
-      ) : isAuditFullscreen ? (
-        /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
+      ) : (
         <div
-          ref={auditDialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Audit Replay Studio Fullscreen"
-          tabIndex={-1}
-          className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+          ref={isAuditFullscreen ? auditDialogRef : undefined}
+          role={isAuditFullscreen ? "dialog" : undefined}
+          aria-modal={isAuditFullscreen ? true : undefined}
+          aria-label={isAuditFullscreen ? "Audit Replay Studio Fullscreen" : undefined}
+          tabIndex={isAuditFullscreen ? -1 : undefined}
+          className={
+            isAuditFullscreen
+              ? "fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+              : "space-y-4"
+          }
         >
-          {/* Studio Top Navigation Bar */}
+          {isAuditFullscreen ? (
+          /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
           <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
             <div
               className="flex min-w-0 flex-wrap items-center gap-1.5"
@@ -1143,14 +1147,8 @@ export function FilesystemActivity() {
               </div>
             </div>
           </header>
-
-          {/* Main Studio Workspace */}
-          <AuditFilesystemWorkspace isFullscreen={true} onToggleFullscreen={() => setIsAuditFullscreen(false)} />
-        </div>
-      ) : (
-        /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
-        <div className="space-y-4">
-          {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
+          ) : (
+          /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
           <div
             className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
@@ -1300,9 +1298,13 @@ export function FilesystemActivity() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* Side-by-Side Audit Layout */}
-          <AuditFilesystemWorkspace isFullscreen={false} onToggleFullscreen={enterAuditFullscreen} />
+          {/* A single stateful workspace changes layout props without remounting. */}
+          <AuditFilesystemWorkspace
+            isFullscreen={isAuditFullscreen}
+            onToggleFullscreen={isAuditFullscreen ? () => setIsAuditFullscreen(false) : enterAuditFullscreen}
+          />
         </div>
       )}
     </div>

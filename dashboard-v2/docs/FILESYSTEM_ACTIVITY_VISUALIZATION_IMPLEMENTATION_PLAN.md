@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-010A — Single workspace across page/fullscreen**
+Current focus: **FSV-008 — Align search wording**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -822,13 +822,43 @@ against `/usr/bin/chromium` without installing a managed browser.
 
 Goal: ลด duplicated state/markup หลัง semantic และ transition behavior คงที่แล้ว
 
-#### `FSV-010A` Single workspace across page/fullscreen
+#### `FSV-010A` Single workspace across page/fullscreen — **DONE (2026-09-23)**
 
 - render `AuditFilesystemWorkspace` เป็น stateful instance เดียว
 - ใช้ shell/portal/layout variant สำหรับ fullscreen
 - preserve canvas viewport, selected directory, selected hop, minimap state, rail width และ mobile tab
 - focus trap, Escape และ focus restoration ต้องคงอยู่
 - network/replay/response owners ต้องไม่เพิ่มเมื่อ toggle fullscreen
+
+Implemented behavior:
+
+- `FilesystemActivity` now contains exactly one `AuditFilesystemWorkspace` invocation. The stable
+  workspace receives `isFullscreen` as a layout prop while the surrounding page/fullscreen header
+  shell changes in place, so `TopologyCanvas`, timeline, and their local state are never replaced by
+  a second branch instance.
+- The fullscreen shell retains `role="dialog"`, modal semantics, initial focus, Tab trapping, Escape
+  exit, body-scroll locking, and focus restoration to the page trigger. Page mode retains its audit
+  toolbar and existing URL/session/filter ownership.
+- A real-browser continuity case toggles fullscreen ten times and proves there is still one verified
+  transition overlay, with zoom, explicit minimap preference, selected directory, selected hop,
+  timeline rail width, and request count unchanged. The same mounted workspace also preserves the
+  mobile Timeline panel while entering and exiting fullscreen.
+- History/replay/response/stream hooks remain owned by `FilesystemActivity`; the refactor only
+  consolidates presentation branches and adds no request, timer, SSE, or polling owner.
+
+Verification:
+
+- Test-first ownership assertion: **FAILED as expected** before production refactor because source
+  contained two `<AuditFilesystemWorkspace>` invocations (expected 1, received 2).
+- `npx vitest run tests/filesystem-ownership-boundaries.test.tsx tests/filesystem-layout.test.ts tests/filesystem-replay-scrubber.test.ts tests/filesystem-navigation-history.test.ts tests/fa013-component-evidence.test.tsx`:
+  **PASSED** (119/119 tests).
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (480 passed, 14 skipped).
+- `npm test`: **PASSED** (737 passed, 2 expected failures, 14 skipped).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (8/8 real-browser tests).
+- `npm run lint`: **PASSED** with 0 errors; 4 pre-existing warnings from merged `origin/main` remain
+  outside filesystem scope.
+- `npm run build -- --webpack`: **PASSED** (18/18 static pages generated).
 
 #### `FSV-008` Align search wording
 

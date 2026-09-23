@@ -457,4 +457,75 @@ test.describe("FA-013 real-browser evidence", () => {
       await assertNoBrowserFailures(page);
     }
   });
+
+  test("J: one audit workspace preserves local canvas and mobile-panel state across fullscreen toggles", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    monitorBrowserFailures(page);
+    const fixtures = await installApiFixtures(page, { transitionReplay: true });
+    await page.goto("/filesystem-activity?view=audit&sessionId=closed-session&hop=replay-change");
+    await expect(page.getByTestId("verified-transition-overlay")).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole("button", { name: "View settings" }).click();
+    await page.getByRole("group", { name: "Minimap visibility" }).getByRole("button", { name: "Show" }).click();
+    const zoomStatus = page.locator('[aria-live="polite"][aria-label^="Zoom "]');
+    const fittedZoomLabel = await zoomStatus.getAttribute("aria-label");
+    await page.getByRole("button", { name: "Zoom in" }).click();
+    await expect(zoomStatus).not.toHaveAttribute("aria-label", fittedZoomLabel ?? "");
+    const adjustedZoomLabel = await zoomStatus.getAttribute("aria-label");
+    expect(adjustedZoomLabel).not.toBeNull();
+    await expect(page.getByTestId("topology-minimap")).toBeVisible();
+    const selectedDirectory = page.getByRole("button", { name: /^Inspect directory \/tmp / });
+    await selectedDirectory.click();
+    await expect(selectedDirectory).toHaveAttribute("aria-pressed", "true");
+    const splitter = page.getByRole("separator", { name: /Resize timeline panel/ });
+    const initialTimelineWidth = Number(await splitter.getAttribute("aria-valuenow"));
+    const splitterBox = await splitter.boundingBox();
+    expect(splitterBox).not.toBeNull();
+    await page.mouse.move(splitterBox.x + splitterBox.width / 2, splitterBox.y + splitterBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(splitterBox.x - 24, splitterBox.y + splitterBox.height / 2);
+    await page.mouse.up();
+    await expect(splitter).not.toHaveAttribute("aria-valuenow", String(initialTimelineWidth));
+    const adjustedTimelineWidth = await splitter.getAttribute("aria-valuenow");
+    expect(adjustedTimelineWidth).not.toBeNull();
+    await expect(page).toHaveURL(/hop=replay-change/);
+    const historyRequestCount = fixtures.historyRequests.length;
+
+    for (let iteration = 0; iteration < 10; iteration += 1) {
+      await page.getByRole("button", { name: "Enter Fullscreen Audit Studio" }).click();
+      const dialog = page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" });
+      await expect(dialog).toBeVisible();
+      expect(await dialog.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+      await expect(page.getByTestId("verified-transition-overlay")).toHaveCount(1);
+      await expect(page.getByTestId("topology-minimap")).toBeVisible();
+      await expect(zoomStatus).toHaveAttribute("aria-label", adjustedZoomLabel ?? "");
+      await expect(selectedDirectory).toHaveAttribute("aria-pressed", "true");
+      await expect(splitter).toHaveAttribute("aria-valuenow", adjustedTimelineWidth ?? "");
+      await expect(page).toHaveURL(/hop=replay-change/);
+
+      if (iteration === 9) {
+        await page.keyboard.press("Escape");
+      } else {
+        await page.getByRole("button", { name: "Exit Fullscreen Studio" }).click();
+      }
+      await expect(page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" })).toHaveCount(0);
+      await expect(page.getByTestId("verified-transition-overlay")).toHaveCount(1);
+      await expect(page.getByTestId("topology-minimap")).toBeVisible();
+      await expect(zoomStatus).toHaveAttribute("aria-label", adjustedZoomLabel ?? "");
+      await expect(selectedDirectory).toHaveAttribute("aria-pressed", "true");
+      await expect(splitter).toHaveAttribute("aria-valuenow", adjustedTimelineWidth ?? "");
+      await expect(page.getByRole("button", { name: "Enter Fullscreen Audit Studio" })).toBeFocused();
+    }
+    expect(fixtures.historyRequests).toHaveLength(historyRequestCount);
+
+    await page.setViewportSize({ width: 375, height: 900 });
+    await page.getByRole("button", { name: "Timeline", exact: true }).click();
+    await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
+    await page.getByRole("button", { name: "Enter Fullscreen Audit Studio" }).click();
+    await expect(page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" })).toBeVisible();
+    await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
+    await page.getByRole("button", { name: "Exit Fullscreen Studio" }).click();
+    await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
+    await assertNoBrowserFailures(page);
+  });
 });

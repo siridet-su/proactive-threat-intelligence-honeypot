@@ -2,6 +2,8 @@
 import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MotionGlobalConfig } from "framer-motion";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "../src/lib/dashboardTypes";
@@ -145,6 +147,16 @@ describe("FA-012 ownership boundaries", () => {
     expect(container.querySelector('[aria-label="Replay timeline scrubber"]')).not.toBeNull();
     expect(container.querySelector('[aria-label="Forensic studio views"]')).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("FSV-010A renders exactly one stateful AuditFilesystemWorkspace across page and fullscreen shells", () => {
+    const source = readFileSync(
+      resolve(process.cwd(), "src/components/filesystem/FilesystemActivity.tsx"),
+      "utf8",
+    );
+
+    expect(source.match(/<AuditFilesystemWorkspace\b/g) ?? []).toHaveLength(1);
+    expect(source).toContain("isFullscreen={isAuditFullscreen}");
   });
 
   it("keeps response capability request, abort, and reopen lifecycles on the controlled production tab", async () => {
