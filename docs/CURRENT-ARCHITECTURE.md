@@ -45,7 +45,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | --- | --- | --- |
 | Cowrie SSH/Telnet | Active | Attacker-facing deception service with manifest-bound sanitized output and hash-only artifact retention. |
 | Docker decoy stack | Active | Web, FTP, SMTP, Odoo/PostgreSQL, and deception-core services. |
-| OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `basicLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
+| OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |

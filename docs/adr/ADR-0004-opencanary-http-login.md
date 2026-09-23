@@ -15,7 +15,9 @@ staging port until its eventual exposure path is reviewed.
 
 - Use the upstream OpenCanary package pinned to `0.9.10` in a dedicated Python
   virtual environment on the Pi.
-- Enable only OpenCanary's HTTP module with the built-in `basicLogin` skin.
+- Enable only OpenCanary's HTTP module with the built-in `nasLogin` skin. The
+  packaged `basicLogin` lacks the redirect asset expected by the root route in
+  OpenCanary `0.9.10`, so it returns HTTP 500 at `/`.
 - Bind the staged service to `127.0.0.1:8081`; do not add firewall or router
   exposure as part of this preparation.
 - Run the foreground Twisted service as a dedicated unprivileged system user.

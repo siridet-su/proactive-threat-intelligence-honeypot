@@ -18,7 +18,7 @@ an operational change.
 | Admin SSH | Tailscale/ZeroTier only, port 2222 | Current | operations | host audit logs + fail2ban | Key-only, root-disabled; X11 and TCP/agent forwarding disabled. |
 | Web middleware/Odoo facade | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | Corporate web decoy | HTTP | Current | current project | service-event adapter required | Docker decoy stack. |
-| OpenCanary HTTP login decoy | HTTP, loopback staging | Prepared, stopped | current project | local rotating JSONL at `/var/log/opencanary/events.jsonl` | HTTP-only `basicLogin`; remote exposure and Redis/Atlas adapter are not enabled. Login fields may contain submitted credentials or SQL payloads. |
+| OpenCanary HTTP login decoy | HTTP, loopback staging | Prepared, stopped | current project | local rotating JSONL at `/var/log/opencanary/events.jsonl` | HTTP-only `nasLogin`; remote exposure and Redis/Atlas adapter are not enabled. Login fields may contain submitted credentials or SQL payloads. |
 | FTP decoy | FTP + passive range | Current | current project | service-event adapter required | Docker decoy stack. |
 | SMTP sink | SMTP | Current | current project | service-event adapter required | Docker decoy stack. |
 | PostgreSQL/Odoo/deception-core | loopback/internal | Current | current project | internal application logs | Supporting decoy infrastructure, not public database services. |

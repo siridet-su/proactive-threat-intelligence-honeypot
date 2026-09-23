@@ -90,3 +90,38 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   loopback; review interface, port, firewall, and router path before doing so.
 - Related ADR/runbook: [ADR-0004](adr/ADR-0004-opencanary-http-login.md) and
   [OpenCanary runbook](../integrations/opencanary/README.md).
+
+### 2026-09-24 — Correct the HTTP skin and verify local event capture
+
+- Status: corrected and locally verified; service returned to stopped/disabled.
+- Scope and intent: fix the root-page failure found during the first loopback
+  smoke check and verify that form submissions reach the login-attempt logger.
+- Repository branch: `feat/opencanary-web-login-honeypot`; this is a separate
+  follow-up implementation record from the initial staging entry.
+- Repository changes: changed the configured skin from `basicLogin` to
+  `nasLogin` in the config template, ADR-0004, service catalog, and current
+  architecture. Updated the runbook's GET example to follow the skin redirect.
+- Host/environment changes actually applied: backed up the immediately
+  preceding config on the Pi to
+  `/etc/opencanaryd/opencanary.conf.pre-naslogin-20260924` with mode `0600`,
+  then installed the corrected config with mode `0640` and owner `root:opencanary`.
+- Runtime/exposure state: `nasLogin` remains bound to `127.0.0.1:8081`; the
+  unit is again `inactive` and `disabled`, and the listener is closed. No
+  firewall or remote exposure changed.
+- Validation performed and outcome: the service was started only for a local
+  smoke check. Following `/` to the login page returned HTTP 200; two synthetic
+  POSTs to `/index.html` returned HTTP 200 and appeared as two HTTP
+  post-login-attempt events in `/var/log/opencanary/events.jsonl`. The service
+  was stopped after verification.
+- Not performed / deferred: no real credentials were submitted, no external
+  client or firewall path was tested, and no event-pipeline integration was
+  added.
+- Risks and data handling: the temporary smoke values are attacker-like test
+  data in the local log; retain the same sensitive-data handling rules as the
+  initial deployment. No raw event contents are stored in this record.
+- Rollback: restore the preceding config from the protected backup above or use
+  the original pre-setup backup described in the OpenCanary runbook.
+- Follow-up: decide separately whether and how to expose the loopback service
+  to an approved interface; review firewall and router paths first.
+- Related ADR/runbook: [ADR-0004](adr/ADR-0004-opencanary-http-login.md) and
+  [OpenCanary runbook](../integrations/opencanary/README.md).
