@@ -127,6 +127,13 @@ func main() {
 }
 
 func auditProjectionReconciliationLoop(ctx context.Context, mw *MongoWriter, retention time.Duration) {
+	reconcile := func() {
+		if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
+			log.Printf("CWD audit projection reconciliation deferred: %v", err)
+		}
+	}
+	reconcile()
+
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -134,9 +141,7 @@ func auditProjectionReconciliationLoop(ctx context.Context, mw *MongoWriter, ret
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := mw.backfillCwdAuditProjection(ctx, retention); err != nil {
-				log.Printf("CWD audit projection reconciliation deferred: %v", err)
-			}
+			reconcile()
 		}
 	}
 }
@@ -885,9 +890,6 @@ func newMongoWriter(ctx context.Context, cfg Config) (*MongoWriter, error) {
 	mw := &MongoWriter{enabled: true, db: client.Database(cfg.MongoDB)}
 	if err := mw.ensureIndexes(ctx); err != nil {
 		return nil, fmt.Errorf("ensure mongo indexes: %w", err)
-	}
-	if err := mw.backfillCwdAuditProjection(ctx, cfg.EventRetention); err != nil {
-		return nil, fmt.Errorf("backfill CWD audit projection: %w", err)
 	}
 	return mw, nil
 }
