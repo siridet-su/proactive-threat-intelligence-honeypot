@@ -22,7 +22,7 @@ describe("retired command shadow versus session-bound Model2", () => {
       trustedMappings: [],
     }));
 
-    expect(html).toContain("Model1 advisory");
+    expect(html).toContain("Model1: T1105");
     expect(html).toContain("T1105");
     expect(html).not.toContain("LEGACY_SHADOW_SENTINEL");
     expect(html).not.toContain("Model2 shadow");
@@ -54,7 +54,7 @@ describe("retired command shadow versus session-bound Model2", () => {
 
     expect(html).toContain("VALID_SHADOW");
     expect(html).toContain("UNIFIED_ONE_MODEL");
-    expect(html).toContain("CORROBORATED");
+    expect(html).toContain("corroborated");
     expect(html).toContain("ADVISORY_ONLY");
   });
 
@@ -66,7 +66,12 @@ describe("retired command shadow versus session-bound Model2", () => {
         run_id: "run-1",
         model2: {
           available: true,
-          binding: { session_id: sessionId, run_id: "run-1" },
+          status: "VALID_SHADOW",
+          measurement_id: "measurement-1",
+          episode_id: "episode-1",
+          artifact_sha256: "artifact-hash",
+          feature_contract_sha256: "contract-hash",
+          binding: { session_id: sessionId, run_id: "run-1", measurement_id: "measurement-1", episode_id: "episode-1" },
         },
       },
     })).toBe(true);
@@ -108,7 +113,7 @@ describe("retired command shadow versus session-bound Model2", () => {
 
     expect(hasClassificationEvidence([], [trustedMapping])).toBe(true);
     expect(hasClassificationEvidence([], [])).toBe(false);
-    expect(html).toContain("Trusted ATT&amp;CK mappings");
+    expect(html).toContain("Trusted ATT&amp;CK mapping details");
     expect(html).toContain("T1033");
     expect(html).not.toContain("No classification evidence is available");
   });
