@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CloudOff, Cpu, FlipHorizontal2, HardDrive, MemoryStick, Radio, RefreshCw, Sparkles, Thermometer, Wifi } from "lucide-react";
+import { CloudOff, Cpu, FlipHorizontal2, HardDrive, MemoryStick, Radio, RefreshCw, Thermometer, Wifi } from "lucide-react";
 
 import { formatHardwareMetric, isHardwareTelemetry, parseHardwareStreamMessage } from "@/lib/dashboardTypes";
 import type { HardwareChartRecord, HardwareTelemetry } from "@/lib/dashboardTypes";
@@ -59,24 +59,8 @@ export function HardwareMonitor() {
   const [fetchFailed, setFetchFailed] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>("connecting");
   const [manualRefreshing, setManualRefreshing] = useState(false);
-  const [isDemoLoading, setIsDemoLoading] = useState(false);
-  const demoTimerRef = useRef<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const refreshSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
-
-  const triggerDemoLoading = () => {
-    if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    setIsDemoLoading(true);
-    demoTimerRef.current = window.setTimeout(() => {
-      setIsDemoLoading(false);
-    }, 3500);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (demoTimerRef.current) window.clearTimeout(demoTimerRef.current);
-    };
-  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
@@ -188,23 +172,13 @@ export function HardwareMonitor() {
         <span className={`ui-badge ${statePresentation.className}`} aria-live="polite">
           {statePresentation.label}
         </span>
-        <button
-          type="button"
-          onClick={triggerDemoLoading}
-          disabled={isDemoLoading}
-          className="ui-button min-h-9 px-3 text-xs font-medium border-primary-border bg-primary-subtle text-primary hover:bg-primary-subtle/80"
-          title="Simulate hardware telemetry loading to preview the laser scan charts"
-        >
-          <Sparkles className={`h-3.5 w-3.5 ${isDemoLoading ? "animate-spin" : "text-primary"}`} aria-hidden="true" />
-          {isDemoLoading ? "Testing Loaders…" : "Test Loaders"}
-        </button>
         <button type="button" onClick={() => void refreshTelemetry()} disabled={manualRefreshing} className="ui-button min-h-9 px-3 text-xs">
           <RefreshCw className={`h-3.5 w-3.5 ${manualRefreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
           Refresh
         </button>
       </div>
     </div>
-    {(loading && metrics.length === 0) || isDemoLoading ? <HardwareSkeleton /> : metrics.length === 0 ? <RegionState kind={fetchFailed ? "error" : "empty"} title={fetchFailed ? "Hardware telemetry unavailable" : "No hardware telemetry"} description={fetchFailed ? "The hardware service could not be reached. You can retry now or wait for the next automatic refresh." : "No verified telemetry samples were returned from hardware_live."} /> : <div className="flex min-h-0 flex-1 flex-col gap-5">
+    {loading && metrics.length === 0 ? <HardwareSkeleton /> : metrics.length === 0 ? <RegionState kind={fetchFailed ? "error" : "empty"} title={fetchFailed ? "Hardware telemetry unavailable" : "No hardware telemetry"} description={fetchFailed ? "The hardware service could not be reached. You can retry now or wait for the next automatic refresh." : "No verified telemetry samples were returned from hardware_live."} /> : <div className="flex min-h-0 flex-1 flex-col gap-5">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <MetricCard icon={Cpu} label="CPU usage" value={formatPercent(latest?.cpu_percent)} details={latest?.cpu_core_percent?.map((percentage, index) => ({ label: `Core ${index + 1}`, value: formatPercent(percentage) })) ?? []} />
         <MetricCard icon={MemoryStick} label="Memory" value={formatPercent(memoryPercent(latest))} details={[{ label: "Used", value: formatBytes(memoryUsedBytes(latest)) }, { label: "Available", value: formatBytes(latest?.mem_available_bytes) }, { label: "Total", value: formatBytes(latest?.mem_total_bytes) }]} />
