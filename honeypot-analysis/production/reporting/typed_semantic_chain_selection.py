@@ -262,12 +262,28 @@ def _selection_for_rule(
             < int(rule.get("minimum_incomplete_operation_count") or 1)
         ):
             continue
-        if not selected or any(
-            operation.get("effect_status") != "reported_completed"
-            or (fact.get("outcome") or {}).get("status") != "reported_success"
-            or (fact.get("outcome") or {}).get("scope") != "fragment"
+        confirmed = all(
+            operation.get("effect_status") == "reported_completed"
+            and (fact.get("outcome") or {}).get("status") == "reported_success"
+            and (fact.get("outcome") or {}).get("scope") == "fragment"
             for _fact_ref, fact, operation in selected
-        ):
+        )
+        attempt_only = (
+            rule.get("allow_unconfirmed_incomplete_hypothesis") is True
+            and not complete
+            and all(
+                operation.get("effect_status") in {
+                    "reported_completed", "attempted_unconfirmed"
+                }
+                and (fact.get("outcome") or {}).get("status") in {
+                    "reported_success", "outcome_unknown"
+                }
+                and (fact.get("outcome") or {}).get("scope") == "fragment"
+                for _fact_ref, fact, operation in selected
+            )
+            and chronology["quality"] == "timestamp_supported"
+        )
+        if not selected or not (confirmed or attempt_only):
             continue
         chain_relationships = [
             relationships.get(_clean(reference)) or {}
@@ -332,7 +348,9 @@ def _selection_for_rule(
             supported = [
                 item
                 for item in candidates
-                if item.get("status") == "supported"
+                if item.get("status") in (
+                    {"supported", "partial"} if attempt_only else {"supported"}
+                )
                 and item.get("causality_semantics")
                 in {"", "evidence_link_not_causal_or_intent_proof"}
             ]
@@ -402,6 +420,7 @@ def _selection_for_rule(
             "rule_id": _clean(rule.get("rule_id")),
             "chain_id": _clean(chain.get("chain_id")),
             "status": "complete" if complete else "incomplete",
+            "unconfirmed_attempts": attempt_only and not confirmed,
             # These values are deliberately surfaced as local policy
             # provenance.  They are not externally validated sufficiency
             # thresholds and must not be read as calibrated evidence.
@@ -430,6 +449,7 @@ def _selection_for_rule(
             "limitations": [
                 "Same-entity chronology is an evidence link, not proof of causality or attacker intent.",
                 "Cowrie-reported command success does not prove transfer completion, payload identity, execution effects, compromise, or persistence on a real host.",
+                *(["At least one command was only observed as input; its completion and simulated-shell effect are unconfirmed."] if attempt_only and not confirmed else []),
             ],
         })
         matches[-1]["selector_provenance"] = {
