@@ -216,6 +216,7 @@ RELATIONSHIP_TYPES = {
 RELATIONSHIP_STATUSES = {
     "observed",
     "supported",
+    "partial",
     "partially_supported",
     "condition_satisfied",
     "condition_not_satisfied",
