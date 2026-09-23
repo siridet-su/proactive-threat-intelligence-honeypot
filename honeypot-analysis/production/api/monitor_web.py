@@ -103,7 +103,18 @@ MONITOR_DETAIL_SCAN_LIMIT = 10_000
 MAX_FEEDBACK_JSON_BYTES = 1_000_000
 MAX_FEEDBACK_FORM_BYTES = 100_000
 FEEDBACK_REQUEST_TIMEOUT_SECONDS = 15.0
+SSE_POLL_SECONDS = 1.0
+SSE_HEARTBEAT_SECONDS = 10.0
+SSE_MAX_CONNECTION_SECONDS = 30.0
 STATIC_MONITOR_HTML = Path(__file__).with_name("static") / "monitor.html"
+
+
+def _sse_frame(event: str, payload: Dict[str, Any]) -> bytes:
+    """Encode one bounded SSE event without permitting line injection."""
+
+    clean_event = re.sub(r"[^a-zA-Z0-9_.-]", "", str(event or "message")) or "message"
+    body = json.dumps(public_payload(payload), ensure_ascii=False, sort_keys=True)
+    return f"event: {clean_event}\ndata: {body}\n\n".encode("utf-8")
 
 
 @dataclass
@@ -508,6 +519,14 @@ def load_internal_command_detail(
             continue
         event_id = row.get("eventid") or payload.get("eventid")
         if not _is_persisted_command_event(event_id):
+            continue
+        if str(event_id or "").strip().lower() != "cowrie.command.input":
+            # Cowrie can persist both the submitted command and a subsequent
+            # success/failure outcome carrying the same input.  The private
+            # command list is a submission projection, matching session
+            # command_count and the report, so outcome events must not create
+            # duplicate command rows.  Their result remains represented by
+            # the classification bound to the canonical submission event.
             continue
         bounded_input = _bounded_command_input(payload.get("input"))
         if bounded_input is None or not bounded_input[0].strip():
@@ -6423,6 +6442,87 @@ class MonitorHandler(BaseHTTPRequestHandler):
             "application/json",
         )
 
+    def _send_threat_stream(self) -> None:
+        """Send an immediate snapshot stream with bounded polling fallback."""
+
+        self.send_response(HTTPStatus.OK.value)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "keep-alive")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Request-ID", self._request_id())
+        self.end_headers()
+        self.wfile.write(_sse_frame("ready", {"ok": True, "timestamp": utc_now()}))
+        self.wfile.flush()
+
+        started = time.monotonic()
+        last_heartbeat = started
+        previous_digest = ""
+        while time.monotonic() - started < SSE_MAX_CONNECTION_SECONDS:
+            try:
+                snapshot = load_snapshot(
+                    self.monitor_config,
+                    session_limit=DEFAULT_SESSION_LIMIT,
+                    session_offset=0,
+                    sessions_only=True,
+                )
+                sessions = [
+                    _session_overview(item)
+                    for item in snapshot.get("sessions") or []
+                    if isinstance(item, dict)
+                ]
+                payload = {
+                    "ok": bool(snapshot.get("ok")),
+                    "timestamp": snapshot.get("timestamp") or utc_now(),
+                    "summary": snapshot.get("summary") or {},
+                    "sessions": sessions,
+                    "error": snapshot.get("error") or "",
+                }
+                # A fresh response timestamp is not a new threat snapshot.
+                # Keep the stream quiet until a session or summary changes;
+                # heartbeat frames provide liveness between updates.
+                snapshot_identity = {key: value for key, value in payload.items() if key != "timestamp"}
+                encoded = json.dumps(
+                    public_payload(snapshot_identity),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode("utf-8")
+                digest = hashlib.sha256(encoded).hexdigest()
+                if digest != previous_digest:
+                    self.wfile.write(_sse_frame("snapshot", payload))
+                    self.wfile.flush()
+                    previous_digest = digest
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception as exc:
+                try:
+                    self.wfile.write(
+                        _sse_frame(
+                            "poll_error",
+                            {
+                                "ok": False,
+                                "error": _storage_error("threat stream polling", exc),
+                                "timestamp": utc_now(),
+                            },
+                        )
+                    )
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
+            now = time.monotonic()
+            if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
+                try:
+                    self.wfile.write(
+                        _sse_frame("heartbeat", {"ok": True, "timestamp": utc_now()})
+                    )
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                last_heartbeat = now
+            time.sleep(SSE_POLL_SECONDS)
+
     def _require_read(self) -> bool:
         read_token = _monitor_read_token(self.monitor_config)
         decision = authorize_read(
@@ -6683,6 +6783,9 @@ class MonitorHandler(BaseHTTPRequestHandler):
             )
             return
         if not self._require_read():
+            return
+        if parsed.path == "/api/threats/stream":
+            self._send_threat_stream()
             return
         if parsed.path == "/api/session-cwd-history":
             query = parse_qs(parsed.query)
