@@ -7,13 +7,24 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
+import { ChartLaserLoader } from "@/components/ui/loaders";
 
 export interface ActivityPoint {
   time: string;
   rate: number;
 }
 
-export default function AttackRateChart({ data }: { data: ActivityPoint[] }) {
+export default function AttackRateChart({
+  data,
+  isLoading = false,
+}: {
+  data: ActivityPoint[];
+  isLoading?: boolean;
+}) {
+  if (isLoading) {
+    return <ChartLaserLoader title="Calibrating attack rate telemetry..." />;
+  }
+
   if (!data.length) {
     return (
       <div className="h-full flex items-center justify-center text-center text-xs text-text-subtle">

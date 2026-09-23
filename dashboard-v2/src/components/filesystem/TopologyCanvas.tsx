@@ -841,7 +841,12 @@ export function TopologyCanvas({
         </div>
       ) : regionStatus === "loading" && !snapshot ? (
         <div className="p-5">
-          <RegionState kind="loading" title="Loading filesystem activity" />
+          <RegionState
+            kind="loading"
+            title="Mapping Decoy Filesystem Topology..."
+            description="Tracing attacker working directories, file hops, and touch events"
+            variant="topology"
+          />
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className="p-5">

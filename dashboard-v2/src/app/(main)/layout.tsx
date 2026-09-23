@@ -137,7 +137,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const getPageTitle = () => {
     if (pathname.includes('/profile')) return 'User Profile';
     if (pathname.includes('/system-health')) return 'System Health';
-    if (pathname.includes('/malware-vault')) return 'Malware Vault';
+    if (pathname.includes('/malware-vault')) return 'Artifact Intelligence';
     if (pathname.includes('/user-management')) return 'User Management';
     if (pathname.includes('/filesystem-activity')) return 'Filesystem Activity';
     if (pathname.includes('/threat-intel/')) return 'Session Analysis';
@@ -159,7 +159,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },
           { href: "/threat-intel", title: "Threat Intel", icon: Brain, active: pathname.includes("/threat-intel") },
           { href: "/filesystem-activity", title: "Filesystem Activity", icon: FolderTree, active: pathname.includes("/filesystem-activity") },
-          { href: "/malware-vault", title: "Malware Vault", icon: Bug, active: pathname.includes("/malware-vault") },
+          { href: "/malware-vault", title: "Artifact Intelligence", icon: Bug, active: pathname.includes("/malware-vault") },
           { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },
           ...((userRole === "Admin" || userRole === "admin") ? [{ href: "/user-management", title: "User Management", icon: Users, active: pathname.includes("/user-management") }] : []),
         ].map(({ href, title, icon: Icon, active }) => (

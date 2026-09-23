@@ -248,7 +248,35 @@
   .ui-badge { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--neutral-border); border-radius: 999px; padding: 3px 8px; font-size: 12px; line-height: 16px; font-weight: 500; color: var(--neutral); background: var(--neutral-subtle); }
   summary { cursor: pointer; }
   summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-  .ui-skeleton { background: var(--border); border-radius: 4px; animation: pti-skeleton-pulse 1.8s ease-in-out infinite; }
+  .ui-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--border) 60%, var(--surface-subtle));
+    border-radius: 6px;
+    isolation: isolate;
+  }
+  .ui-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      color-mix(in srgb, var(--primary) 14%, transparent) 35%,
+      color-mix(in srgb, var(--surface-raised) 45%, transparent) 50%,
+      color-mix(in srgb, var(--primary) 14%, transparent) 65%,
+      transparent 100%
+    );
+    animation: pti-shimmer-sweep 1.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  .ui-skeleton-amber {
+    background: color-mix(in srgb, var(--primary) 15%, var(--surface-subtle));
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+  }
+  .ui-skeleton-glow {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--primary) 22%, transparent);
+  }
   .ui-scroll-reveal { --scroll-reveal-delay: 0ms; transition: opacity 180ms ease-out, transform 180ms ease-out; transition-delay: var(--scroll-reveal-delay); }
   .ui-scroll-reveal-hidden { opacity: 0; transform: translateY(12px) scale(0.985); }
   .ui-scroll-reveal-visible { opacity: 1; transform: translateY(0); }
@@ -265,11 +293,42 @@
   .ui-drawer-layer.is-open .ui-drawer-panel { transform: translateX(0); }
   @media (prefers-reduced-motion: reduce) {
     .ui-drawer-scrim, .ui-drawer-panel { transition: none; }
+    .ui-skeleton::after { animation: none; display: none; }
+    .ui-skeleton { animation: pti-skeleton-pulse 3s ease-in-out infinite; }
   }
 }
 
 @keyframes pti-skeleton-pulse {
   50% { opacity: 0.55; }
+}
+
+@keyframes pti-shimmer-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes pti-radar-sweep {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pti-laser-scan {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateX(1000%);
+    opacity: 0.2;
+  }
 }
 
 @keyframes pti-fade-in {

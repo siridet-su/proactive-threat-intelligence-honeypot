@@ -6,6 +6,7 @@ import { LocateFixed } from "lucide-react";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 
 import { RefreshStatus } from "@/components/ui/RegionState";
+import { MapRadarLoader } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
 
 interface MapMarker {
@@ -23,7 +24,13 @@ interface MapPosition {
 const geoUrl = "https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json";
 const defaultPosition: MapPosition = { coordinates: [0, 20], zoom: 1 };
 
-export default function RegionalMap({ className }: { className?: string } = {}) {
+export default function RegionalMap({
+  className,
+  isLoading = false,
+}: {
+  className?: string;
+  isLoading?: boolean;
+} = {}) {
   const { threats, status } = useThreatFeed();
   const [isHydrated, setIsHydrated] = useState(false);
   const [activeMarkerId, setActiveMarkerId] = useState<string | null>(null);
@@ -187,7 +194,7 @@ export default function RegionalMap({ className }: { className?: string } = {}) 
       )}
 
       <div className="pointer-events-none absolute bottom-4 left-4 max-w-[calc(100%-88px)] rounded-lg border border-border bg-surface px-3 py-2 text-xs text-text-muted" role={renderedStatus === "error" ? "alert" : "status"}>
-        {renderedStatus === "loading" ? "Loading attack locations…" : renderedStatus === "error" ? <span className="text-danger">Attack locations unavailable. Retrying automatically.</span> : renderedStatus === "refreshing" || renderedStatus === "stale" ? <RefreshStatus status={renderedStatus} /> : markers.length === 0 ? "No attack locations in the last successful response." : "Drag to explore · scroll to zoom"}
+        {renderedStatus === "loading" || isLoading ? "Scanning global sensor perimeter…" : renderedStatus === "error" ? <span className="text-danger">Attack locations unavailable. Retrying automatically.</span> : renderedStatus === "refreshing" || renderedStatus === "stale" ? <RefreshStatus status={renderedStatus} /> : markers.length === 0 ? "No attack locations in the last successful response." : "Drag to explore · scroll to zoom"}
       </div>
       <div className="absolute bottom-4 right-4 flex flex-col gap-2">
         <button onClick={handleZoomIn} disabled={!isHydrated || position.zoom >= 8} aria-label="Zoom in" className="ui-button h-10 w-10 text-base">+</button>
@@ -196,6 +203,8 @@ export default function RegionalMap({ className }: { className?: string } = {}) 
           <LocateFixed className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
+
+      {(isLoading || renderedStatus === "loading") && <MapRadarLoader />}
     </div>
   );
 }
