@@ -13,7 +13,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    return NextResponse.json(await getHardwareBackupStatus(), {
+    const status = await getHardwareBackupStatus();
+    return NextResponse.json({ ...status, can_control: session.role === "Admin" }, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error: unknown) {

@@ -1,23 +1,29 @@
+import { randomUUID } from "crypto";
 import type { Document } from "mongodb";
 
 import { getMongoClient, getMongoDatabaseName } from "./mongodb";
 import type {
   HardwareBackupDay,
   HardwareBackupDayStatus,
+  HardwareBackupRequestAction,
+  HardwareBackupRequestProgress,
+  HardwareBackupRequestView,
   HardwareBackupStatus,
 } from "./dashboardTypes";
 
 const BACKUP_COLLECTION = "hardware_backup_manifests";
+const REQUEST_COLLECTION = "hardware_backup_requests";
+const REQUEST_SCHEMA_VERSION = "pti.hardware_backup_request.v1";
 const HARDWARE_COLLECTION = "hardware_metrics_1m";
 const LOOKBACK_DAYS = 30;
 const SAFETY_DAYS = 2;
 const MAX_MANIFESTS = 90;
 
 function asDate(value: unknown): Date | null {
-  if (value instanceof Date) return Number.isFinite(value.getTime()) ? value : null;
+  if (value instanceof Date) return Number.isFinite(value.getTime()) && value.getUTCFullYear() > 1 ? value : null;
   if (typeof value !== "string" && typeof value !== "number") return null;
   const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date : null;
+  return Number.isFinite(date.getTime()) && date.getUTCFullYear() > 1 ? date : null;
 }
 
 function asFiniteNumber(value: unknown): number | null {
@@ -96,6 +102,154 @@ function latestDate(days: HardwareBackupDay[], field: "started_at" | "completed_
     .at(-1) ?? null;
 }
 
+function requestActionValue(value: unknown): HardwareBackupRequestAction | null {
+  return value === "run_missing" || value === "retry_failed" ? value : null;
+}
+
+function requestStatusValue(value: unknown): HardwareBackupRequestView["status"] | null {
+  return value === "pending" || value === "running" || value === "success" || value === "failed" ? value : null;
+}
+
+function requestProgress(document: Document): HardwareBackupRequestProgress {
+  const value = document.progress && typeof document.progress === "object" ? document.progress as Document : {};
+  const totalDays = numberValue(value.total_days) ?? 0;
+  const completedDays = numberValue(value.completed_days) ?? 0;
+  const successfulDays = numberValue(value.successful_days) ?? 0;
+  const failedDays = numberValue(value.failed_days) ?? 0;
+  const percent = Math.min(100, Math.max(0, numberValue(value.percent) ?? 0));
+  return {
+    total_days: totalDays,
+    completed_days: completedDays,
+    successful_days: successfulDays,
+    failed_days: failedDays,
+    current_day: typeof value.current_day === "string" && value.current_day.trim() ? value.current_day : null,
+    percent,
+  };
+}
+
+function requestView(document: Document | null): HardwareBackupRequestView | null {
+  if (!document || typeof document._id !== "string") return null;
+  const action = requestActionValue(document.action);
+  const status = requestStatusValue(document.status);
+  const createdAt = dateValue(document.created_at);
+  if (!action || !status || !createdAt) return null;
+
+  return {
+    id: document._id,
+    source: typeof document.source === "string" ? document.source : HARDWARE_COLLECTION,
+    action,
+    requested_by: typeof document.requested_by === "string" ? document.requested_by : "unknown",
+    status,
+    created_at: createdAt,
+    started_at: dateValue(document.started_at),
+    completed_at: dateValue(document.completed_at),
+    heartbeat_at: dateValue(document.heartbeat_at),
+    progress: requestProgress(document),
+    error: typeof document.error === "string" ? document.error : null,
+  };
+}
+
+let requestIndexes: Promise<void> | null = null;
+
+async function ensureRequestIndexes() {
+  if (requestIndexes) return requestIndexes;
+  requestIndexes = (async () => {
+    const client = await getMongoClient();
+    const collection = client.db(getMongoDatabaseName()).collection(REQUEST_COLLECTION);
+    await Promise.all([
+      collection.createIndex({ source: 1, created_at: -1 }, { name: "hardware_backup_request_history" }),
+      collection.createIndex(
+        { active_key: 1 },
+        {
+          unique: true,
+          name: "hardware_backup_request_active_unique",
+          partialFilterExpression: { active_key: { $exists: true } },
+        },
+      ),
+    ]);
+  })();
+  return requestIndexes;
+}
+
+export type CreateHardwareBackupRequestResult =
+  | { conflict: false; request: HardwareBackupRequestView }
+  | { conflict: true; request: HardwareBackupRequestView };
+
+export async function createHardwareBackupRequest(
+  action: HardwareBackupRequestAction,
+  requestedBy: string,
+): Promise<CreateHardwareBackupRequestResult> {
+  await ensureRequestIndexes();
+  const client = await getMongoClient();
+  const collection = client.db(getMongoDatabaseName()).collection(REQUEST_COLLECTION);
+  const now = new Date();
+  const id = randomUUID();
+  const request: Document = {
+    _id: id,
+    schema_version: REQUEST_SCHEMA_VERSION,
+    source: HARDWARE_COLLECTION,
+    action,
+    requested_by: requestedBy,
+    status: "pending",
+    created_at: now,
+    started_at: null,
+    completed_at: null,
+    heartbeat_at: null,
+    updated_at: now,
+    active_key: HARDWARE_COLLECTION,
+    progress: {
+      total_days: 0,
+      completed_days: 0,
+      successful_days: 0,
+      failed_days: 0,
+      current_day: "",
+      percent: 0,
+    },
+    error: null,
+  };
+
+  try {
+    await collection.insertOne(request);
+  } catch (error: unknown) {
+    if (!isDuplicateKeyError(error)) throw error;
+    const active = await collection.findOne(
+      { source: HARDWARE_COLLECTION, status: { $in: ["pending", "running"] } },
+      { sort: { created_at: -1 } },
+    );
+    const activeView = requestView(active);
+    if (activeView) return { conflict: true, request: activeView };
+    throw new Error("Another hardware backup request is being finalized; retry shortly");
+  }
+
+  return {
+    conflict: false,
+    request: {
+      id,
+      source: HARDWARE_COLLECTION,
+      action,
+      requested_by: requestedBy,
+      status: "pending",
+      created_at: now.toISOString(),
+      started_at: null,
+      completed_at: null,
+      heartbeat_at: null,
+      progress: {
+        total_days: 0,
+        completed_days: 0,
+        successful_days: 0,
+        failed_days: 0,
+        current_day: null,
+        percent: 0,
+      },
+      error: null,
+    },
+  };
+}
+
+function isDuplicateKeyError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: unknown }).code === 11000);
+}
+
 export function getHardwareBackupWindow(now = new Date()) {
   const today = startOfUtcDay(now);
   const from = addUtcDays(today, -LOOKBACK_DAYS);
@@ -111,23 +265,44 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
     day_start: { $gte: window.from, $lte: window.to },
   };
   const client = await getMongoClient();
-  const documents = await client
-    .db(getMongoDatabaseName())
-    .collection(BACKUP_COLLECTION)
-    .find(query)
-    .project({
-      day_start: 1,
-      status: 1,
-      document_count: 1,
-      archive_bytes: 1,
-      started_at: 1,
-      completed_at: 1,
-      object_name: 1,
-      error: 1,
-    })
-    .sort({ day_start: 1 })
-    .limit(MAX_MANIFESTS)
-    .toArray();
+  const database = client.db(getMongoDatabaseName());
+  const [documents, latestRequest] = await Promise.all([
+    database
+      .collection(BACKUP_COLLECTION)
+      .find(query)
+      .project({
+        day_start: 1,
+        status: 1,
+        document_count: 1,
+        archive_bytes: 1,
+        started_at: 1,
+        completed_at: 1,
+        object_name: 1,
+        error: 1,
+      })
+      .sort({ day_start: 1 })
+      .limit(MAX_MANIFESTS)
+      .toArray(),
+    database.collection(REQUEST_COLLECTION).findOne(
+      { source: HARDWARE_COLLECTION },
+      {
+        projection: {
+          _id: 1,
+          source: 1,
+          action: 1,
+          requested_by: 1,
+          status: 1,
+          created_at: 1,
+          started_at: 1,
+          completed_at: 1,
+          heartbeat_at: 1,
+          progress: 1,
+          error: 1,
+        },
+        sort: { created_at: -1 },
+      },
+    ),
+  ]);
 
   const manifests = new Map<string, HardwareBackupDay>();
   for (const document of documents) {
@@ -150,6 +325,7 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
     .sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))[0] ?? null;
 
   return {
+    can_control: false,
     collection: HARDWARE_COLLECTION,
     generated_at: new Date().toISOString(),
     expected_window: {
@@ -171,5 +347,6 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
       latest_run_status: latestRun?.status ?? null,
     },
     days,
+    request: requestView(latestRequest),
   };
 }
