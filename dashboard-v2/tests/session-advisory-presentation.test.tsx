@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAdvisorySummary, Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { AiAdvisorySummary, ExternalTiSummary, Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("session assessment presentation", () => {
+  it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
+    const sourceIpCache = [
+      { provider: "abuseipdb", cache_key: "abuse-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { abuse_confidence_score: 100, total_reports: 1809, country_code: "SE" } },
+      { provider: "otx", cache_key: "otx-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { pulses: [{ pulse_id: "p1", name: "Observed SSH scanner feed" }], truncated: false } },
+      { provider: "shodan_official", cache_key: "shodan-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { ports: [22, 80], service_product_summary: ["ssh 22", "nginx 80"] } },
+    ];
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{ status: "TI_AVAILABLE", counts: { eligible_observables: 1 }, source_ip_cache: sourceIpCache }}
+      observableData={{ source_ip_cache: sourceIpCache, observable: { value: "203.0.113.9" } }}
+    />);
+    expect(html).toContain("AbuseIPDB score:");
+    expect(html).toContain("1809 community reports");
+    expect(html).toContain("OTX pulse matches: 1");
+    expect(html).toContain("Observed SSH scanner feed");
+    expect(html).toContain("ssh 22");
+    expect(html).toContain("3 source-IP provider lookup results");
+    expect(html).not.toContain("6 source-IP provider lookup results");
+  });
+
   it("shows the actual AI-selected response finding and manual action, not just the provider", () => {
     const html = renderToStaticMarkup(<AiAdvisorySummary
       data={{

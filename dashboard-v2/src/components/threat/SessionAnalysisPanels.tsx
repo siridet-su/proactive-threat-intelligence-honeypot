@@ -1073,7 +1073,9 @@ function ProviderContextRows({
         );
       })}
       {cache.slice(0, 20).map((item, index) => {
-        const context = selectedProviderFields(item.normalized_context);
+        const normalized = record(item.normalized_context);
+        const context = selectedProviderFields(normalized).filter(([key]) => key !== "pulses");
+        const pulses = list(normalized.pulses).map(record);
         const freshness = sourceIpCacheFreshness(item, asOf);
         return (
           <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
@@ -1097,7 +1099,24 @@ function ProviderContextRows({
                 ["Data age", dataAge(item.lookup_at)],
               ]}
             />
-            {context.length > 0 && <p className="mt-1 text-text-muted">normalized context: {context.map(([key, value]) => `${key.replaceAll("_", " ")}=${value}`).join(" · ")}</p>}
+            {item.provider === "abuseipdb" && hasMeaningfulValue(normalized.abuse_confidence_score) && (
+              <p className="mt-2 rounded-md border border-warning-border bg-warning-subtle p-2 text-text">
+                AbuseIPDB score: <strong>{display(normalized.abuse_confidence_score)}/100</strong> · {summaryValue(normalized.total_reports, "Unknown")} community reports. Provider reputation, not our model confidence or proof of activity in this session.
+              </p>
+            )}
+            {item.provider === "otx" && (
+              <div className="mt-2 rounded-md border border-border bg-surface p-2 text-text">
+                <p className="font-semibold">OTX pulse matches: {pulses.length}{normalized.truncated === true ? "+ (list truncated)" : ""}</p>
+                {pulses.length > 0 && <ul className="mt-1 list-inside list-disc space-y-1 text-text-muted">{pulses.slice(0, 3).map((pulse, pulseIndex) => <li key={`${pulseIndex}-${label(pulse.pulse_id)}`}>{summaryValue(pulse.name, "Unnamed pulse").slice(0, 120)}</li>)}</ul>}
+                <p className="mt-1 text-text-muted">Pulse matches are third-party context, not confirmed behavior by this source in our session.</p>
+              </div>
+            )}
+            {context.length > 0 && <dl className="mt-2 grid gap-2 sm:grid-cols-2">{context.slice(0, 12).map(([key, value]) => (
+              <div key={key} className="rounded-md border border-border bg-surface p-2">
+                <dt className="text-[10px] uppercase tracking-[0.08em] text-text-subtle">{readableCode(key)}</dt>
+                <dd className="mt-1 break-words font-medium text-text">{value}</dd>
+              </div>
+            ))}</dl>}
           </div>
         );
       })}
@@ -1188,13 +1207,17 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
   );
 }
 
-function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonRecord; observableData: JsonRecord }) {
+export function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonRecord; observableData: JsonRecord }) {
   const sessionCounts = record(sessionData.counts);
   const observableCounts = record(observableData.counts);
   const summary = { ...record(sessionData.external_ti_summary), ...record(observableData.external_ti_summary) };
   const entities = list(sessionData.shared_entities).map(record);
   const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
-  const cache = [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)].map(record);
+  const cache = Array.from(new Map(
+    [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)]
+      .map(record)
+      .map((item) => [`${label(item.provider)}:${label(item.cache_key)}:${label(item.lookup_at)}`, item] as const),
+  ).values());
   const providerStatus = { ...record(sessionData.provider_status), ...record(observableData.provider_status) };
   const jobSummary = record(sessionData.enrichment_job_summary);
   const jobStatusCounts = record(jobSummary.status_counts);
@@ -1221,7 +1244,7 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   return (
     <>
       <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
-        {evidence.length || cache.length ? `${evidence.length} stored provider finding${evidence.length === 1 ? "" : "s"} and ${cache.length} source-IP cache result${cache.length === 1 ? "" : "s"}. Check freshness before using this context.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+        {evidence.length || cache.length ? `${cache.length} source-IP provider lookup result${cache.length === 1 ? "" : "s"} and ${evidence.length} separately linked finding${evidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
       </Insight>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
@@ -1230,8 +1253,8 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
       </div>
       <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Provider findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
-        ["Cached results", countOf(cache.length)],
+        ["Linked findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Provider lookups", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
       ]} />
       {jobSummary.pending === true && (
@@ -1665,6 +1688,9 @@ export function SessionAnalysisPanels({
   useEffect(() => {
     let cancelled = false;
     let pollTimer: number | undefined;
+    let tiPollTimer: number | undefined;
+    let tiPollInFlight = false;
+    let tiPollAttempts = 0;
     let pollInFlight = false;
     let lastDetail: JsonRecord = {};
     const allCapabilities = [
@@ -1683,6 +1709,29 @@ export function SessionAnalysisPanels({
     ] as const;
     const primaryCapabilities = ["detail", "commands", "next-distinct", "session-ti"] as const;
     const pollCapabilities = ["detail", "commands", "next-distinct"] as const;
+
+    const stopTiPoll = () => {
+      if (tiPollTimer !== undefined) window.clearInterval(tiPollTimer);
+      tiPollTimer = undefined;
+    };
+    const startTiPoll = (initial: CapabilityResult | undefined) => {
+      if (label(initial?.data.status, "").toUpperCase() !== "TI_PENDING") return;
+      tiPollTimer = window.setInterval(async () => {
+        if (cancelled || tiPollInFlight) return;
+        tiPollInFlight = true;
+        try {
+          const refreshed = await fetchCapability("session-ti", sessionId);
+          if (cancelled) return;
+          apply([["session-ti", refreshed]]);
+          tiPollAttempts += 1;
+          if (label(refreshed.data.status, "").toUpperCase() !== "TI_PENDING" || tiPollAttempts >= 12) {
+            stopTiPoll();
+          }
+        } finally {
+          tiPollInFlight = false;
+        }
+      }, 5_000);
+    };
 
     const unavailable = (reason: string): CapabilityResult => terminalResult("unavailable", reason);
     const notApplicable = (reason: string): CapabilityResult => terminalResult("not_applicable", reason);
@@ -1750,6 +1799,7 @@ export function SessionAnalysisPanels({
         setResults(Object.fromEntries(allCapabilities.map((capability) => [capability, { ...initialResult }])));
       }
       apply(entries);
+      startTiPoll(entries.find(([capability]) => capability === "session-ti")?.[1]);
       const detailEntry = entries.find(([capability]) => capability === "detail");
       if (!detailEntry || detailEntry[1].state !== "ready") {
         const detailReason = detailEntry?.[1].reason || "The exact-session detail projection failed";
@@ -1808,6 +1858,7 @@ export function SessionAnalysisPanels({
     return () => {
       cancelled = true;
       if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      stopTiPoll();
     };
   }, [sessionId, onDetail, onLiveInteraction, onNextDistinct]);
 
