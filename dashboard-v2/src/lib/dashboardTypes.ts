@@ -171,6 +171,14 @@ export interface HardwareBackupRequestView {
   error: string | null;
 }
 
+export interface HardwareBackupStorageStatus {
+  source: string;
+  bucket: string;
+  storage_bytes: number;
+  file_versions: number;
+  checked_at: string;
+}
+
 export interface HardwareBackupStatus {
   can_control: boolean;
   collection: string;
@@ -191,6 +199,7 @@ export interface HardwareBackupStatus {
   };
   days: HardwareBackupDay[];
   request: HardwareBackupRequestView | null;
+  storage: HardwareBackupStorageStatus | null;
 }
 
 function isNullableNumber(value: unknown): value is number | null {
@@ -232,6 +241,15 @@ function isHardwareBackupRequest(value: unknown): value is HardwareBackupRequest
     isNullableString(value.error);
 }
 
+function isHardwareBackupStorageStatus(value: unknown): value is HardwareBackupStorageStatus {
+  if (!isRecord(value)) return false;
+  return typeof value.source === "string" &&
+    typeof value.bucket === "string" &&
+    typeof value.storage_bytes === "number" && Number.isFinite(value.storage_bytes) &&
+    typeof value.file_versions === "number" && Number.isFinite(value.file_versions) &&
+    typeof value.checked_at === "string";
+}
+
 export function isHardwareBackupStatus(value: unknown): value is HardwareBackupStatus {
   if (!isRecord(value) || typeof value.can_control !== "boolean" || typeof value.collection !== "string" || typeof value.generated_at !== "string" || !isRecord(value.expected_window) || !isRecord(value.summary) || !Array.isArray(value.days)) {
     return false;
@@ -251,7 +269,8 @@ export function isHardwareBackupStatus(value: unknown): value is HardwareBackupS
     isNullableString(summary.last_completed_at) &&
     (summary.latest_run_status === null || summary.latest_run_status === "success" || summary.latest_run_status === "failed" || summary.latest_run_status === "running" || summary.latest_run_status === "missing") &&
     value.days.every(isHardwareBackupDay) &&
-    (value.request === null || isHardwareBackupRequest(value.request));
+    (value.request === null || isHardwareBackupRequest(value.request)) &&
+    (value.storage === null || isHardwareBackupStorageStatus(value.storage));
 }
 
 function isHardwareHistoryMetric(value: unknown): value is HardwareHistoryMetric {

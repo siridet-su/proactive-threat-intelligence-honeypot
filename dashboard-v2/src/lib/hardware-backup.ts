@@ -8,12 +8,14 @@ import type {
   HardwareBackupRequestAction,
   HardwareBackupRequestProgress,
   HardwareBackupRequestView,
+  HardwareBackupStorageStatus,
   HardwareBackupStatus,
 } from "./dashboardTypes";
 
 const BACKUP_COLLECTION = "hardware_backup_manifests";
 const REQUEST_COLLECTION = "hardware_backup_requests";
 const REQUEST_SCHEMA_VERSION = "pti.hardware_backup_request.v1";
+const STORAGE_SNAPSHOT_COLLECTION = "b2_storage_snapshots";
 const HARDWARE_COLLECTION = "hardware_metrics_1m";
 const LOOKBACK_DAYS = 30;
 const SAFETY_DAYS = 2;
@@ -149,6 +151,21 @@ function requestView(document: Document | null): HardwareBackupRequestView | nul
   };
 }
 
+function storageSnapshotView(document: Document | null): HardwareBackupStorageStatus | null {
+  if (!document || typeof document.source !== "string" || typeof document.bucket !== "string") return null;
+  const storageBytes = numberValue(document.storage_bytes);
+  const fileVersions = numberValue(document.file_versions);
+  const checkedAt = dateValue(document.checked_at);
+  if (storageBytes === null || fileVersions === null || !checkedAt) return null;
+  return {
+    source: document.source,
+    bucket: document.bucket,
+    storage_bytes: storageBytes,
+    file_versions: fileVersions,
+    checked_at: checkedAt,
+  };
+}
+
 let requestIndexes: Promise<void> | null = null;
 
 async function ensureRequestIndexes() {
@@ -266,7 +283,7 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
   };
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
-  const [documents, latestRequest] = await Promise.all([
+  const [documents, latestRequest, storageSnapshot] = await Promise.all([
     database
       .collection(BACKUP_COLLECTION)
       .find(query)
@@ -300,6 +317,13 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
           error: 1,
         },
         sort: { created_at: -1 },
+      },
+    ),
+    database.collection(STORAGE_SNAPSHOT_COLLECTION).findOne(
+      { source: HARDWARE_COLLECTION },
+      {
+        projection: { source: 1, bucket: 1, storage_bytes: 1, file_versions: 1, checked_at: 1 },
+        sort: { checked_at: -1 },
       },
     ),
   ]);
@@ -348,5 +372,6 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
     },
     days,
     request: requestView(latestRequest),
+    storage: storageSnapshotView(storageSnapshot),
   };
 }

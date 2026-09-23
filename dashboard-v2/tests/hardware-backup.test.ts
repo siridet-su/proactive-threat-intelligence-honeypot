@@ -46,6 +46,13 @@ describe("hardware backup dashboard status", () => {
         error: null,
       }],
       request: null,
+      storage: {
+        source: "hardware_metrics_1m",
+        bucket: "pti-hardware-backups",
+        storage_bytes: 12_345_678,
+        file_versions: 29,
+        checked_at: "2026-09-23T15:03:00.000Z",
+      },
     })).toBe(true);
   });
 
@@ -89,6 +96,7 @@ describe("hardware backup dashboard status", () => {
         },
         error: null,
       },
+      storage: null,
     })).toBe(true);
   });
 });
