@@ -720,4 +720,34 @@ test.describe("FA-013 real-browser evidence", () => {
       await context.close();
     }
   });
+
+  test("N: final viewport and theme matrix keeps the audit workspace visible without page overflow", async ({ page }) => {
+    const viewports = [
+      { width: 1920, height: 1080 },
+      { width: 1440, height: 900 },
+      { width: 1280, height: 800 },
+      { width: 768, height: 1024 },
+      { width: 390, height: 844 },
+    ];
+
+    for (const viewport of viewports) {
+      await page.setViewportSize(viewport);
+      await openAuditPage(page, { url: "/filesystem-activity?view=audit&sessionId=closed-session" });
+      const palette = {};
+      for (const theme of ["light", "dark"]) {
+        palette[theme] = await page.evaluate((resolvedTheme) => {
+          localStorage.setItem("pti-theme", resolvedTheme);
+          document.documentElement.dataset.theme = resolvedTheme;
+          document.documentElement.dataset.themePreference = resolvedTheme;
+          document.documentElement.style.colorScheme = resolvedTheme;
+          return getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim();
+        }, theme);
+        await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+        await expect(page.getByRole("toolbar", { name: "Audit session and replay toolbar" })).toBeVisible();
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+      }
+      expect(palette.light).not.toBe(palette.dark);
+      await assertNoBrowserFailures(page);
+    }
+  });
 });
