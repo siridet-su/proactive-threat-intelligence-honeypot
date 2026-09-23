@@ -489,7 +489,7 @@ def production_guard_campaign_candidates(
         target_limit = int(max_daily_targets)
     except (TypeError, ValueError) as exc:
         raise ProofGuardError("production proof daily target limit is invalid") from exc
-    if target_limit < 1 or target_limit > 100:
+    if target_limit < 1 or target_limit > 200:
         raise ProofGuardError("production proof daily target limit is invalid")
     day = _utc_day(observed_at)
     base_digest = hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
@@ -522,7 +522,7 @@ class ExternalTIProductionGuard:
         if self.mode != PROOF_GUARD_MODE_REAL:
             raise ProofGuardError("production source-IP guard requires REAL_PROOF mode")
         self.max_daily_targets = int(max_daily_targets)
-        if self.max_daily_targets < 1 or self.max_daily_targets > 100:
+        if self.max_daily_targets < 1 or self.max_daily_targets > 200:
             raise ProofGuardError("production proof daily target limit is invalid")
         self._claimed_provider_guards: Dict[str, ExternalTIProofGuard] = {}
 
