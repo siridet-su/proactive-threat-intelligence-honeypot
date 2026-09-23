@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAdvisorySummary, ExternalTiSummary, Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("session assessment presentation", () => {
   it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
@@ -77,5 +77,38 @@ describe("session assessment presentation", () => {
     }} />);
     expect(html).toContain("No session-bound Model2 result is available");
     expect(html).toContain("no ensemble corroboration or combined score is claimed");
+  });
+
+  it("explains why a session has no bounded hypothesis without promoting context", () => {
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: [], correlated_ttp_hypotheses: [],
+      session_hypothesis_assessment: { missing_evidence: ["effect_status_not_eligible"],
+        semantic_families: [{ semantic_family: "filesystem", status: "insufficient_evidence", observed_fact_count: 1, missing_evidence: ["effect_status_not_eligible"] }] },
+    }} />);
+    expect(html).toContain("Why no hypothesis was established");
+    expect(html).toContain("did not confirm the required effect");
+    expect(html).toContain("not proof that its effect succeeded");
+  });
+
+  it("explains exactly which Model2 head makes a bound result partial", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-1", ensemble_evidence: { session_id: "session-1", run_id: "run-1",
+        model2: { available: true, availability: "PARTIAL", status: "VALID_SHADOW",
+          measurement_id: "measurement-1", episode_id: "episode-1", artifact_sha256: "a".repeat(64), feature_contract_sha256: "b".repeat(64),
+          binding: { session_id: "session-1", run_id: "run-1", measurement_id: "measurement-1", episode_id: "episode-1" },
+          unavailable_heads: { T1046: "t1046_multiservice_scan_evidence_missing" } } },
+    }} />);
+    expect(html).toContain("Why Model2 is partial");
+    expect(html).toContain("No exact-bound multiservice scan observation");
+    expect(html).not.toContain("No session-bound Model2 result is available");
+  });
+
+  it("separates the immutable assessment AI flag from current accepted advisory", () => {
+    const html = renderToStaticMarkup(<ProvenanceSummary value={{ report_summary: {
+      ai_enriched: "false", current_ai_advisory_status: "accepted",
+    } }} />);
+    expect(html).toContain("immutable assessment was generated without AI enrichment");
+    expect(html).toContain("Current AI advisory");
+    expect(html).toContain("accepted");
   });
 });

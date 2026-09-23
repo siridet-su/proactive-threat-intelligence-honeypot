@@ -2112,6 +2112,24 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
     }
 
 
+def _report_summary_with_current_ai(
+    config: MonitorConfig,
+    storage: Any,
+    session_id: str,
+    report_payload: Dict[str, Any],
+    artifact_payload: Dict[str, Any],
+) -> Dict[str, str]:
+    """Keep immutable assessment AI scope separate from late advisory state."""
+
+    summary = _report_summary(report_payload, artifact_payload)
+    projection = load_ai_advisory_detail(config, session_id, _storage=storage) if report_payload else {}
+    summary["current_ai_advisory_status"] = _text(
+        (projection.get("status") if isinstance(projection, dict) else "") or "not_available"
+    )
+    summary["current_ai_advisory_scope"] = "separate_late_bound_advisory"
+    return summary
+
+
 def _hypothesis_artifact_paths(
     hypothesis: Dict[str, Any],
     canonical_evidence: Any,
@@ -2953,6 +2971,9 @@ def load_dashboard_session_detail(
         if projected_duration is not None:
             overview["recorded_duration"] = overview.get("duration") or ""
             overview["duration"] = projected_duration
+    report_summary = _report_summary_with_current_ai(
+        config, storage, clean_session_id, report_payload, {},
+    )
     detail = {
         "ok": True,
         "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
@@ -3001,7 +3022,7 @@ def load_dashboard_session_detail(
         "observable_sightings": [_row_with_payload(row) for row in sighting_rows],
         "analysis_jobs": [_row_with_payload(row) for row in job_rows],
         "reports": [_row_with_payload(row) for row in report_rows],
-        "report_summary": _report_summary(report_payload, {}),
+        "report_summary": report_summary,
         "response_guidance": response_guidance,
         "errors": {
             table: message
@@ -3718,6 +3739,9 @@ def load_session_detail(
         configured_policy_path=config.response_guidance_policy_path,
     )
     primary_response_guidance = historical_response_guidance or current_policy_reevaluation
+    report_summary = _report_summary_with_current_ai(
+        config, storage, session_id, report_payload, artifact_payload,
+    )
     detail = {
         "ok": True,
         "timestamp": utc_now(),
@@ -3761,7 +3785,7 @@ def load_session_detail(
         "enrichment_jobs": [_row_with_payload(row) for row in enrichment_job_rows],
         "analysis_jobs": [_row_with_payload(row) for row in job_rows],
         "reports": [_row_with_payload(row) for row in report_rows],
-        "report_summary": _report_summary(report_payload, artifact_payload),
+        "report_summary": report_summary,
         "report_recommendations": report_recommendations,
         "response_guidance": primary_response_guidance,
         "historical_response_guidance": historical_response_guidance,

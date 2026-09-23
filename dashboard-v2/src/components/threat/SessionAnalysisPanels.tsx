@@ -1295,7 +1295,20 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   );
 }
 
-function HypothesisSummary({ data }: { data: JsonRecord }) {
+function hypothesisGateExplanation(value: unknown): string {
+  const code = String(value || "");
+  return ({
+    effect_status_not_eligible: "The observed command did not confirm the required effect.",
+    outcome_not_eligible: "The recorded outcome did not confirm success.",
+    additional_operation_not_activated: "A required follow-up operation was not observed.",
+    no_fact_for_activated_family: "No matching behavior fact was recorded.",
+    canonical_finding_not_emitted_after_match: "A selector matched but no canonical finding was emitted; review the assessment pipeline.",
+    typed_semantic_evaluation_unavailable: "The typed behavior check was unavailable.",
+    semantic_selector_error: "The behavior selector failed; review processing logs.",
+  } as Record<string, string>)[code] || readableCode(code);
+}
+
+export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const reportSummary = record(data.report_summary);
   const hypotheses = list(data.correlated_ttp_hypotheses);
@@ -1308,6 +1321,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
   const reports = list(data.reports);
   const canonicalCount = list(sessionAssessment.canonical_finding_ids).length;
   const relationshipCount = Number(sessionGraph.relationship_edges || 0);
+  const missingEvidence = list(sessionAssessment.missing_evidence).slice(0, 4);
   return (
     <div className="space-y-3">
       <Insight title="Assessment outcome" tone={hypothesisSets.length ? "primary" : "warning"}>
@@ -1318,6 +1332,11 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
         ["Canonical findings", String(canonicalCount)],
         ["TTP context", String(contextualHypotheses.length)],
       ]} />
+      {hypothesisSets.length === 0 && missingEvidence.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
+        <p className="font-semibold">Why no hypothesis was established</p>
+        <ul className="mt-2 list-inside list-disc space-y-1">{missingEvidence.map((reason, index) => <li key={`${String(reason)}-${index}`}>{hypothesisGateExplanation(reason)}</li>)}</ul>
+        <p className="mt-2 text-xs text-text-muted">These are assessment gates, not missing classification records. An observed command is not proof that its effect succeeded.</p>
+      </div>}
       {sessionFamilies.length > 0 && (
         <ScrollPanel title="Behavior checks across this session" count={sessionFamilies.length} height="max-h-80">
           <p className="mb-2 px-1 text-[11px] text-text-muted">Each behavior family shows whether observed evidence passed its review gate.</p>
@@ -1329,7 +1348,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
                   <span className={`ui-badge ${list(family.finding_ids).length ? "border-primary-border bg-primary-subtle text-primary" : ""}`}>{readableCode(family.status || "not evaluated")}</span>
                 </div>
                 <div className="mt-2 flex gap-3 text-text-muted"><span>{countOf(family.observed_fact_count)} observations</span><span>{countOf(list(family.finding_ids).length)} findings</span></div>
-                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Still needed: {list(family.missing_evidence).map(readableCode).join(", ")}</p>}
+                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Gate: {list(family.missing_evidence).map(hypothesisGateExplanation).join(" ")}</p>}
               </li>
             ))}
           </ul>
@@ -1455,6 +1474,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const model1 = record(ensemble.model1);
   const model2 = record(ensemble.model2);
   const binding = record(model2.binding);
+  const unavailableHeads = Object.entries(record(model2.unavailable_heads));
   const results = list(ensemble.results).map(record);
   const model1Only = list(ensemble.model1_only_labels).map(record);
   const recommendations = rankTtpRecommendations(data);
@@ -1472,13 +1492,17 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   return (
     <div className="space-y-3">
       <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
-        {hasBoundAvailableModel2(data) ? "A session-bound Model2 result is available for comparison with Model1." : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
+        {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only available heads may corroborate Model1.` : "A session-bound Model2 result is available for comparison with Model1.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
       </Insight>
       <MetricStrip fields={[
         ["Model1", model1.applicable === true || recommendations.length > 0 ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
         ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
         ["Comparisons", String(results.length)],
       ]} />
+      {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
+        <p className="font-semibold">Why Model2 is partial</p>
+        <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
+      </div>}
       <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
       {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1656,10 +1680,11 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
   );
 }
 
-function ProvenanceSummary({ value }: { value: JsonRecord }) {
+export function ProvenanceSummary({ value }: { value: JsonRecord }) {
   const reportSummary = record(value.report_summary);
   const errors = record(value.errors);
   const nonEmptyErrors = Object.values(errors).filter(hasMeaningfulValue).length;
+  const currentAiStatus = summaryValue(reportSummary.current_ai_advisory_status, "Not available");
   return (
     <>
       <Insight title="Evidence trail" tone={nonEmptyErrors ? "warning" : "primary"}>
@@ -1669,7 +1694,9 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
         ["Analysis jobs", countOf(list(value.analysis_jobs).length)],
         ["Report summary", hasMeaningfulRecord(reportSummary) ? "Ready" : "Empty"],
         ["Processing errors", countOf(nonEmptyErrors)],
+        ["Current AI advisory", readableCode(currentAiStatus)],
       ]} />
+      {hasMeaningfulRecord(reportSummary) && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text-muted">The immutable assessment was generated without AI enrichment ({summaryValue(reportSummary.ai_enriched, "not recorded")}). Current AI advisory: <span className="font-semibold text-text">{readableCode(currentAiStatus)}</span>. The advisory is stored separately and may arrive later; it does not rewrite the original assessment.</p>}
       <div className="mt-3"><MoreDetails title="Schema, session ID and processing details">
       <SummaryGrid fields={[
         ["Schema", summaryValue(value.schema_version, "Not recorded")],
