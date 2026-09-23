@@ -59,6 +59,7 @@ import {
   type RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
 import type { PopStateTransaction } from "./filesystemNavigationCoordinator";
+import { handleRovingTabKey } from "./tabSemantics";
 
 interface NavigationApplicationErrorState {
   target: AuditUrlParams;
@@ -69,6 +70,8 @@ interface NavigationApplicationErrorState {
 import { useTimelineDrag } from "./useTimelineDrag";
 
 export type ForensicTab = "replay" | "evidence" | "actions";
+
+const LIVE_WORKSPACE_TABS = ["map", "details"] as const;
 
 export function FilesystemActivity() {
   const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");
@@ -912,24 +915,64 @@ export function FilesystemActivity() {
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
-        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1">
+        <div
+          id="filesystem-live-panel"
+          role="tabpanel"
+          aria-labelledby="filesystem-live-tab"
+          className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1"
+        >
           {/* Mobile Tabs */}
-          <div className="flex lg:hidden gap-2 border-b border-border pb-2">
+          <div
+            className="flex lg:hidden gap-2 border-b border-border pb-2"
+            role="tablist"
+            aria-label="Live workspace views"
+          >
             <button
+              id="live-map-tab"
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "map"}
+              aria-controls="live-map-panel"
+              tabIndex={mobileTab === "map" ? 0 : -1}
               onClick={() => setMobileTab('map')}
+              onKeyDown={(event) => handleRovingTabKey({
+                event,
+                tabs: LIVE_WORKSPACE_TABS,
+                currentTab: "map",
+                onSelect: setMobileTab,
+                tabId: (tab) => `live-${tab}-tab`,
+              })}
               className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'map' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
             >
               Map
             </button>
             <button
+              id="live-details-tab"
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "details"}
+              aria-controls="live-details-panel"
+              tabIndex={mobileTab === "details" ? 0 : -1}
               onClick={() => setMobileTab('details')}
+              onKeyDown={(event) => handleRovingTabKey({
+                event,
+                tabs: LIVE_WORKSPACE_TABS,
+                currentTab: "details",
+                onSelect: setMobileTab,
+                tabId: (tab) => `live-${tab}-tab`,
+              })}
               className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'details' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
             >
               Details
             </button>
           </div>
 
-          <div className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}>
+          <div
+            id="live-map-panel"
+            role="tabpanel"
+            aria-labelledby="live-map-tab"
+            className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}
+          >
             <LiveScopeBar snapshot={snapshot} />
             <TopologyCanvas
               snapshot={snapshot}
@@ -948,7 +991,12 @@ export function FilesystemActivity() {
             />
           </div>
 
-          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}>
+          <div
+            id="live-details-panel"
+            role="tabpanel"
+            aria-labelledby="live-details-tab"
+            className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}
+          >
             <FilesystemContextPanel
               selectedSession={selectedSession}
               selectedClosedSession={selectedClosedSession}
@@ -964,17 +1012,22 @@ export function FilesystemActivity() {
         </div>
       ) : (
         <div
-          ref={isAuditFullscreen ? auditDialogRef : undefined}
-          role={isAuditFullscreen ? "dialog" : undefined}
-          aria-modal={isAuditFullscreen ? true : undefined}
-          aria-label={isAuditFullscreen ? "Audit Replay Studio Fullscreen" : undefined}
-          tabIndex={isAuditFullscreen ? -1 : undefined}
-          className={
-            isAuditFullscreen
-              ? "fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
-              : "space-y-4"
-          }
+          id="filesystem-audit-panel"
+          role="tabpanel"
+          aria-labelledby="filesystem-audit-tab"
         >
+          <div
+            ref={isAuditFullscreen ? auditDialogRef : undefined}
+            role={isAuditFullscreen ? "dialog" : undefined}
+            aria-modal={isAuditFullscreen ? true : undefined}
+            aria-label={isAuditFullscreen ? "Audit Replay Studio Fullscreen" : undefined}
+            tabIndex={isAuditFullscreen ? -1 : undefined}
+            className={
+              isAuditFullscreen
+                ? "fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+                : "space-y-4"
+            }
+          >
           {isAuditFullscreen ? (
           /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
           <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
@@ -1315,6 +1368,7 @@ export function FilesystemActivity() {
             isFullscreen={isAuditFullscreen}
             onToggleFullscreen={isAuditFullscreen ? () => setIsAuditFullscreen(false) : enterAuditFullscreen}
           />
+          </div>
         </div>
       )}
     </div>

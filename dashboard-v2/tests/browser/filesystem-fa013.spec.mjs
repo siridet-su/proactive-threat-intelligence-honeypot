@@ -375,7 +375,7 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(timelinePanel).toHaveAttribute("aria-hidden", "true");
       await expect(timelinePanel).toHaveAttribute("inert", "");
       await page.locator('[title="Show timeline sidebar"], [title="Show timeline panel"]').first().click();
-      const timelineViewButton = page.getByRole("button", { name: "Timeline", exact: true });
+      const timelineViewButton = page.getByRole("tab", { name: "Timeline", exact: true });
       if (await timelineViewButton.isVisible()) await timelineViewButton.click();
       await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
       await assertNoBrowserFailures(page);
@@ -419,8 +419,8 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(revisit).toHaveAttribute("data-transition-kind", "directed");
       await expect(revisit).toHaveAttribute("data-transition-route", "/tmp→/home/cowrie");
 
-      const timelineViewButton = page.getByRole("button", { name: "Timeline", exact: true });
-      const mapViewButton = page.getByRole("button", { name: "Map", exact: true });
+      const timelineViewButton = page.getByRole("tab", { name: "Timeline", exact: true });
+      const mapViewButton = page.getByRole("tab", { name: "Map", exact: true });
       if (await timelineViewButton.isVisible()) await timelineViewButton.click();
       const routeEvents = route.getByRole("button");
       await expect(routeEvents).toHaveCount(4);
@@ -538,7 +538,7 @@ test.describe("FA-013 real-browser evidence", () => {
     expect(fixtures.historyRequests).toHaveLength(historyRequestCount);
 
     await page.setViewportSize({ width: 375, height: 900 });
-    await page.getByRole("button", { name: "Timeline", exact: true }).click();
+    await page.getByRole("tab", { name: "Timeline", exact: true }).click();
     await expect(page.locator('[data-forensic-tab-panel="replay"]')).toBeVisible();
     await page.getByRole("button", { name: "Enter Fullscreen Audit Studio" }).click();
     await expect(page.getByRole("dialog", { name: "Audit Replay Studio Fullscreen" })).toBeVisible();
@@ -595,5 +595,65 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(page.getByRole("group", { name: "Minimap visibility" })).toBeVisible();
       await assertNoBrowserFailures(page);
     }
+  });
+
+  test("L: page, mobile workspace, and forensic tabs expose complete roving relationships", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 900 });
+    await openAuditPage(page, { url: "/filesystem-activity?view=audit&sessionId=closed-session" });
+
+    const modeTabs = page.getByRole("tablist", { name: "Filesystem view modes" });
+    const liveModeTab = modeTabs.getByRole("tab", { name: "Live Topology" });
+    const auditModeTab = modeTabs.getByRole("tab", { name: "Session Audit & Replay" });
+    await expect(liveModeTab).toHaveAttribute("tabindex", "-1");
+    await expect(auditModeTab).toHaveAttribute("tabindex", "0");
+    await expect(auditModeTab).toHaveAttribute("aria-controls", "filesystem-audit-panel");
+    await expect(page.locator("#filesystem-audit-panel")).toHaveAttribute("aria-labelledby", await auditModeTab.getAttribute("id"));
+
+    const auditWorkspaceTabs = page.getByRole("tablist", { name: "Audit workspace views" });
+    const auditMapTab = auditWorkspaceTabs.getByRole("tab", { name: "Map" });
+    const auditTimelineTab = auditWorkspaceTabs.getByRole("tab", { name: "Timeline" });
+    await expect(auditMapTab).toHaveAttribute("tabindex", "0");
+    await expect(auditTimelineTab).toHaveAttribute("tabindex", "-1");
+    await auditMapTab.focus();
+    await auditMapTab.press("End");
+    await expect(auditTimelineTab).toBeFocused();
+    await expect(auditTimelineTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#audit-timeline-panel")).toBeVisible();
+    await auditTimelineTab.press("Home");
+    await expect(auditMapTab).toBeFocused();
+    await expect(page.locator("#audit-map-panel")).toBeVisible();
+    await auditMapTab.press("ArrowRight");
+
+    const forensicTabs = page.getByRole("tablist", { name: "Forensic studio views" });
+    const routeTab = forensicTabs.getByRole("tab", { name: "Route Replay" });
+    const evidenceTab = forensicTabs.getByRole("tab", { name: "Evidence" });
+    const responseTab = forensicTabs.getByRole("tab", { name: "Response" });
+    await expect(routeTab).toHaveAttribute("tabindex", "0");
+    await expect(evidenceTab).toHaveAttribute("tabindex", "-1");
+    await routeTab.focus();
+    await routeTab.press("ArrowRight");
+    await expect(evidenceTab).toBeFocused();
+    await expect(evidenceTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#tabpanel-evidence")).toHaveAttribute("aria-labelledby", await evidenceTab.getAttribute("id"));
+    await evidenceTab.press("End");
+    await expect(responseTab).toBeFocused();
+    await responseTab.press("Home");
+    await expect(routeTab).toBeFocused();
+
+    await auditModeTab.focus();
+    await auditModeTab.press("ArrowLeft");
+    await expect(liveModeTab).toBeFocused();
+    await expect(liveModeTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#filesystem-live-panel")).toHaveAttribute("aria-labelledby", await liveModeTab.getAttribute("id"));
+
+    const liveWorkspaceTabs = page.getByRole("tablist", { name: "Live workspace views" });
+    const liveMapTab = liveWorkspaceTabs.getByRole("tab", { name: "Map" });
+    const liveDetailsTab = liveWorkspaceTabs.getByRole("tab", { name: "Details" });
+    await liveMapTab.focus();
+    await liveMapTab.press("End");
+    await expect(liveDetailsTab).toBeFocused();
+    await expect(liveDetailsTab).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator("#live-details-panel")).toBeVisible();
+    await assertNoBrowserFailures(page);
   });
 });

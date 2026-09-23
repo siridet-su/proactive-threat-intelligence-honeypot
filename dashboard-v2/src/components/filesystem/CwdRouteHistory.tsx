@@ -21,6 +21,7 @@ import {
 } from "./filesystemUtils";
 import type { HopResolutionStatus } from "./sessionHopResolver";
 import type { AuditReplayPresentation } from "./useAuditReplay";
+import { handleRovingTabKey } from "./tabSemantics";
 
 type SidebarTab = "replay" | "evidence" | "actions";
 
@@ -29,6 +30,14 @@ const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   evidence: 2,
   actions: 3,
 };
+
+const SIDEBAR_TABS = [
+  { id: "replay", label: "Route Replay", icon: null },
+  { id: "evidence", label: "Evidence", icon: Terminal },
+  { id: "actions", label: "Response", icon: Shield },
+] as const;
+
+const SIDEBAR_TAB_IDS = SIDEBAR_TABS.map((tab) => tab.id);
 
 const SIDEBAR_CONTENT_VARIANTS = {
   enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
@@ -171,6 +180,16 @@ export function CwdRouteHistory({
     onTabChange(nextTab);
   };
 
+  const handleSidebarTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentTab: SidebarTab) => {
+    handleRovingTabKey({
+      event,
+      tabs: SIDEBAR_TAB_IDS,
+      currentTab,
+      onSelect: handleSidebarTabChange,
+      tabId: (tab) => `tab-${tab}`,
+    });
+  };
+
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
       {/* Panel Header with Compact Tabs */}
@@ -205,11 +224,7 @@ export function CwdRouteHistory({
                   }
                 />
               </div>
-              {([
-                { id: "replay", label: "Route Replay", icon: null },
-                { id: "evidence", label: "Evidence", icon: Terminal },
-                { id: "actions", label: "Response", icon: Shield },
-              ] as const).map((tab) => {
+              {SIDEBAR_TABS.map((tab) => {
                 const isActive = sidebarTab === tab.id;
                 const Icon = tab.icon;
 
@@ -221,7 +236,9 @@ export function CwdRouteHistory({
                     id={`tab-${tab.id}`}
                     aria-selected={isActive}
                     aria-controls={`tabpanel-${tab.id}`}
+                    tabIndex={isActive ? 0 : -1}
                     onClick={() => handleSidebarTabChange(tab.id)}
+                    onKeyDown={(event) => handleSidebarTabKeyDown(event, tab.id)}
                     className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                       isActive ? "text-primary" : "text-text-muted hover:text-text"
                     }`}

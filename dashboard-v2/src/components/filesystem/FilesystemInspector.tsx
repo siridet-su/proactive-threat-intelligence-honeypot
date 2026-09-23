@@ -25,6 +25,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 interface FilesystemInspectorProps {
   embedded?: boolean;
@@ -40,6 +41,9 @@ interface FilesystemInspectorProps {
 
 type InspectorTab = "session" | "directory";
 type DirectoryView = "all" | "exact" | "sources";
+
+const INSPECTOR_TABS = ["session", "directory"] as const;
+const DIRECTORY_VIEW_TABS = ["all", "exact", "sources"] as const;
 
 interface DirectorySessionRowProps {
   session: FilesystemTopologySession;
@@ -204,12 +208,13 @@ export function FilesystemInspector({
             aria-controls="panel-inspector-session"
             tabIndex={activeTab === "session" ? 0 : -1}
             onClick={() => setActiveTab("session")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              setActiveTab("directory");
-              document.getElementById("tab-inspector-directory")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: INSPECTOR_TABS,
+              currentTab: "session",
+              onSelect: setActiveTab,
+              tabId: (tab) => `tab-inspector-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "session"
                 ? "bg-primary-subtle text-primary shadow-xs"
@@ -233,12 +238,13 @@ export function FilesystemInspector({
             aria-controls="panel-inspector-directory"
             tabIndex={activeTab === "directory" ? 0 : -1}
             onClick={() => setActiveTab("directory")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              setActiveTab("session");
-              document.getElementById("tab-inspector-session")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: INSPECTOR_TABS,
+              currentTab: "directory",
+              onSelect: setActiveTab,
+              tabId: (tab) => `tab-inspector-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "directory"
                 ? "bg-primary-subtle text-primary shadow-xs"
@@ -468,10 +474,20 @@ export function FilesystemInspector({
                   aria-label="Directory session grouping"
                 >
                   <button
+                    id="tab-directory-all"
                     type="button"
                     role="tab"
                     aria-selected={directoryView === "all"}
+                    aria-controls="panel-directory-all"
+                    tabIndex={directoryView === "all" ? 0 : -1}
                     onClick={() => setDirectoryView("all")}
+                    onKeyDown={(event) => handleRovingTabKey({
+                      event,
+                      tabs: DIRECTORY_VIEW_TABS,
+                      currentTab: "all",
+                      onSelect: setDirectoryView,
+                      tabId: (tab) => `tab-directory-${tab}`,
+                    })}
                     className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
                       directoryView === "all"
                         ? "bg-surface text-text shadow-xs border border-border/50"
@@ -483,10 +499,20 @@ export function FilesystemInspector({
                     <span className="opacity-60 shrink-0">({nodeCounts.branchCount})</span>
                   </button>
                   <button
+                    id="tab-directory-exact"
                     type="button"
                     role="tab"
                     aria-selected={directoryView === "exact"}
+                    aria-controls="panel-directory-exact"
+                    tabIndex={directoryView === "exact" ? 0 : -1}
                     onClick={() => setDirectoryView("exact")}
+                    onKeyDown={(event) => handleRovingTabKey({
+                      event,
+                      tabs: DIRECTORY_VIEW_TABS,
+                      currentTab: "exact",
+                      onSelect: setDirectoryView,
+                      tabId: (tab) => `tab-directory-${tab}`,
+                    })}
                     className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
                       directoryView === "exact"
                         ? "bg-surface text-text shadow-xs border border-border/50"
@@ -498,10 +524,20 @@ export function FilesystemInspector({
                     <span className="opacity-60 shrink-0">({nodeCounts.exactCount})</span>
                   </button>
                   <button
+                    id="tab-directory-sources"
                     type="button"
                     role="tab"
                     aria-selected={directoryView === "sources"}
+                    aria-controls="panel-directory-sources"
+                    tabIndex={directoryView === "sources" ? 0 : -1}
                     onClick={() => setDirectoryView("sources")}
+                    onKeyDown={(event) => handleRovingTabKey({
+                      event,
+                      tabs: DIRECTORY_VIEW_TABS,
+                      currentTab: "sources",
+                      onSelect: setDirectoryView,
+                      tabId: (tab) => `tab-directory-${tab}`,
+                    })}
                     className={`flex h-8 items-center justify-center gap-1 rounded-md px-1 font-medium transition-colors ${
                       directoryView === "sources"
                         ? "bg-surface text-text shadow-xs border border-border/50"
@@ -514,9 +550,14 @@ export function FilesystemInspector({
                   </button>
                 </div>
 
+                <div
+                  id={`panel-directory-${directoryView}`}
+                  role="tabpanel"
+                  aria-labelledby={`tab-directory-${directoryView}`}
+                >
                 {directoryView === "all" ? (
                   branchSessions.length ? (
-                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="All directory sessions in branch">
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
                       {branchSessions.map((session) => (
                         <DirectorySessionRow
                           key={session.sessionId}
@@ -532,7 +573,7 @@ export function FilesystemInspector({
                   )
                 ) : directoryView === "exact" ? (
                   exactSessions.length ? (
-                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="Exact path directory sessions">
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
                       {exactSessions.map((session) => (
                         <DirectorySessionRow
                           key={session.sessionId}
@@ -551,7 +592,7 @@ export function FilesystemInspector({
                   )
                 ) : (
                   sourceGroups.length ? (
-                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1" role="tabpanel" aria-label="Directory activity grouped by source">
+                    <div className="mt-2.5 max-h-60 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
                       {sourceGroups.map((source) => (
                         <details key={source.sourceIp} className="group rounded-lg border border-border bg-surface-subtle overflow-hidden">
                           <summary className="cursor-pointer list-none px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring [&::-webkit-details-marker]:hidden">
@@ -588,6 +629,7 @@ export function FilesystemInspector({
                     <p className="mt-3 text-xs text-text-muted">No sources are mapped to this directory branch.</p>
                   )
                 )}
+                </div>
               </div>
             </>
           ) : (

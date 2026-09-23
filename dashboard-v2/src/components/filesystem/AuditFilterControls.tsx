@@ -29,6 +29,7 @@ import { format, isSameDay } from "date-fns";
 
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 export type TimeRangeFilter =
   | "all"
@@ -157,6 +158,8 @@ const STEP_TAB_COLUMN: Record<"date" | "time", number> = {
   date: 1,
   time: 2,
 };
+
+const STEP_TABS = ["date", "time"] as const;
 
 const STEP_CONTENT_VARIANTS = {
   enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
@@ -364,6 +367,14 @@ export function AuditFilterControls({
     handleStepChange("time");
   }, [draftRange, handleStepChange]);
 
+  const selectStep = useCallback((step: "date" | "time") => {
+    if (step === "time") {
+      handleSwitchToTime();
+    } else {
+      handleStepChange("date");
+    }
+  }, [handleStepChange, handleSwitchToTime]);
+
   const handleClearTimeFilter = useCallback(() => {
     setIsSelecting(false);
     setSelectionStart(null);
@@ -535,6 +546,7 @@ export function AuditFilterControls({
               <div
                 className="relative isolate grid w-full grid-cols-2 gap-1 rounded-xl border border-border/60 bg-surface-subtle p-1 text-xs"
                 role="tablist"
+                aria-label="Time filter steps"
               >
                 <div aria-hidden="true" className="pointer-events-none absolute inset-1 grid grid-cols-2 gap-1">
                   <motion.span
@@ -549,10 +561,20 @@ export function AuditFilterControls({
                   />
                 </div>
                 <button
+                  id={`${timePopupId}-tab-date`}
                   type="button"
                   role="tab"
                   aria-selected={activeStep === "date"}
-                  onClick={() => handleStepChange("date")}
+                  aria-controls={`${timePopupId}-panel-date`}
+                  tabIndex={activeStep === "date" ? 0 : -1}
+                  onClick={() => selectStep("date")}
+                  onKeyDown={(event) => handleRovingTabKey({
+                    event,
+                    tabs: STEP_TABS,
+                    currentTab: "date",
+                    onSelect: selectStep,
+                    tabId: (tab) => `${timePopupId}-tab-${tab}`,
+                  })}
                   className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                     activeStep === "date"
                       ? "text-text font-semibold"
@@ -563,10 +585,20 @@ export function AuditFilterControls({
                   <span>Date Range</span>
                 </button>
                 <button
+                  id={`${timePopupId}-tab-time`}
                   type="button"
                   role="tab"
                   aria-selected={activeStep === "time"}
-                  onClick={handleSwitchToTime}
+                  aria-controls={`${timePopupId}-panel-time`}
+                  tabIndex={activeStep === "time" ? 0 : -1}
+                  onClick={() => selectStep("time")}
+                  onKeyDown={(event) => handleRovingTabKey({
+                    event,
+                    tabs: STEP_TABS,
+                    currentTab: "time",
+                    onSelect: selectStep,
+                    tabId: (tab) => `${timePopupId}-tab-${tab}`,
+                  })}
                   className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                     activeStep === "time"
                       ? "text-text font-semibold"
@@ -583,6 +615,9 @@ export function AuditFilterControls({
               <AnimatePresence initial={false} mode="popLayout" custom={stepDirection}>
                 <motion.div
                   key={activeStep}
+                  id={`${timePopupId}-panel-${activeStep}`}
+                  role="tabpanel"
+                  aria-labelledby={`${timePopupId}-tab-${activeStep}`}
                   custom={stepDirection}
                   variants={STEP_CONTENT_VARIANTS}
                   initial="enter"

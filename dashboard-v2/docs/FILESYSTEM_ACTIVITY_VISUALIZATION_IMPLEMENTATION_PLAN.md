@@ -29,7 +29,7 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **FSV-012A — Complete tab semantics**
+Current focus: **FSV-012B — Readability and touch targets**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
@@ -973,7 +973,7 @@ Verification:
 
 Checkpoint 4 remains **IN_PROGRESS** with `FSV-012A` as the current focus.
 
-#### `FSV-012A` Complete tab semantics
+#### `FSV-012A` Complete tab semantics — `DONE` (2026-09-23)
 
 - `role="tablist"`, `role="tab"`, `role="tabpanel"`
 - `aria-selected`, `aria-controls`, matching IDs
@@ -981,6 +981,39 @@ Checkpoint 4 remains **IN_PROGRESS** with `FSV-012A` as the current focus.
 - Arrow Left/Right หรือ Up/Down ตาม orientation, Home, End
 - Map/Timeline/Details บน mobile ใช้ pattern เดียวกัน
 - inactive panel policy ต้องชัดเจนว่า hidden หรือ unmounted และต้องไม่สร้าง duplicate owner
+
+Implementation and acceptance evidence:
+
+- Added one shared roving-tab keyboard contract with wrapping horizontal Arrow navigation plus
+  Home/End boundaries. Handled keys prevent default behavior and stop propagation so nested tabs do
+  not trigger global replay shortcuts.
+- Completed `role=tablist` → `role=tab` → `role=tabpanel` relationships, stable IDs,
+  `aria-controls`, `aria-labelledby`, `aria-selected`, and roving `tabIndex` for filesystem view
+  modes; live Map/Details; audit Map/Timeline; forensic Route Replay/Evidence/Response; inspector
+  Session/Directory; source Live/Closed; directory Branch/Exact/Sources; and date/time filter steps.
+- Responsive workspace panels remain a single owner. Mobile switches panel visibility using the
+  existing responsive classes; desktop continues to show its multi-column workspace without
+  duplicating canvas, replay, request, or timer ownership. Animated forensic/filter panels remain
+  intentionally unmounted when inactive.
+- The audit mode tab now controls a persistent tabpanel wrapper while the contained workspace may
+  acquire dialog semantics in fullscreen, preserving both tab and modal relationships.
+- Test-first browser evidence initially failed because inactive page tabs had no roving `tabIndex`.
+  The completed browser walkthrough verifies focus movement, automatic activation, controlled panel
+  relationships, and visible mobile panels across page, workspace, and forensic tab layers.
+- Pure navigation tests cover forward/backward wrap, Home/End, vertical orientation support,
+  unrelated keys, orientation mismatch, and invalid ranges.
+
+Verification:
+
+- Focused semantic/component suites: **PASSED** (104/104 tests).
+- All filesystem suites: **PASSED** (495 passed, 14 skipped).
+- Full Vitest suite: **PASSED** (752 passed, 2 expected failures, 14 skipped).
+- `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:browser`:
+  **PASSED** (10/10 real-browser tests).
+- ESLint: **PASSED** with 0 errors and 4 unrelated upstream warnings.
+- Webpack production build: **PASSED**, 18/18 static pages generated.
+
+Checkpoint 4 remains **IN_PROGRESS** with `FSV-012B` as the current focus.
 
 #### `FSV-012B` Readability and touch targets
 

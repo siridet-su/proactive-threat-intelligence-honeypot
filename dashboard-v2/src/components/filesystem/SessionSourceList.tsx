@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import type { FilesystemClosedSession, FilesystemTopologySession } from "@/lib/dashboardTypes";
 import { compactDirectoryPath, formatTimestamp } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 interface SessionSourceListProps {
   embedded?: boolean;
@@ -16,6 +17,8 @@ interface SessionSourceListProps {
 }
 
 type TabKey = "live" | "closed";
+
+const SOURCE_TABS = ["live", "closed"] as const;
 
 export function SessionSourceList({
   embedded = false,
@@ -111,12 +114,13 @@ export function SessionSourceList({
             aria-controls="panel-source-live"
             tabIndex={activeTab === "live" ? 0 : -1}
             onClick={() => selectTab("live")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              selectTab("closed");
-              document.getElementById("tab-source-closed")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: SOURCE_TABS,
+              currentTab: "live",
+              onSelect: selectTab,
+              tabId: (tab) => `tab-source-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "live"
                 ? "bg-success-subtle text-success shadow-xs"
@@ -142,12 +146,13 @@ export function SessionSourceList({
             aria-controls="panel-source-closed"
             tabIndex={activeTab === "closed" ? 0 : -1}
             onClick={() => selectTab("closed")}
-            onKeyDown={(event) => {
-              if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-              event.preventDefault();
-              selectTab("live");
-              document.getElementById("tab-source-live")?.focus();
-            }}
+            onKeyDown={(event) => handleRovingTabKey({
+              event,
+              tabs: SOURCE_TABS,
+              currentTab: "closed",
+              onSelect: selectTab,
+              tabId: (tab) => `tab-source-${tab}`,
+            })}
             className={`flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-colors duration-150 ${
               activeTab === "closed"
                 ? "bg-warning-subtle text-warning shadow-xs"
