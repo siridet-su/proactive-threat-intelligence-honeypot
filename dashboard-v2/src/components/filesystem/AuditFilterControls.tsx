@@ -29,6 +29,7 @@ import { format, isSameDay } from "date-fns";
 
 import type { CloseReason } from "./auditSessionSearchManager";
 import type { DistinctPathOption } from "./filesystemUtils";
+import { handleRovingTabKey } from "./tabSemantics";
 
 export type TimeRangeFilter =
   | "all"
@@ -125,11 +126,17 @@ export interface AuditFilterControlsProps {
   onTimeFilterChange?: (range: TimeRangeFilter, customDateRange: DateRange | undefined) => void;
   distinctPaths: readonly DistinctPathOption[];
   homeOnlyCount: number;
-  filteredCount: number;
-  totalCount: number;
+  filteredCount?: number;
+  totalCount?: number;
   onResetFilters: () => void;
   selectedCanvasPath?: string | null;
   className?: string;
+
+  // Retained semantics (FSV-004)
+  retainedMatchingCount?: number | null;
+  retainedLoadedCount?: number;
+  retainedTotalCount?: number | null;
+  retainedCountStatus?: "authoritative" | "loaded-only" | "loading" | "error" | "stale";
 }
 
 export type PathOptionItem = {
@@ -151,6 +158,8 @@ const STEP_TAB_COLUMN: Record<"date" | "time", number> = {
   date: 1,
   time: 2,
 };
+
+const STEP_TABS = ["date", "time"] as const;
 
 const STEP_CONTENT_VARIANTS = {
   enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
@@ -175,6 +184,9 @@ export function AuditFilterControls({
   onResetFilters,
   selectedCanvasPath,
   className,
+  retainedMatchingCount,
+  retainedLoadedCount,
+  retainedCountStatus,
 }: AuditFilterControlsProps) {
   const [pathDropdownOpen, setPathDropdownOpen] = useState(false);
   const [pathSearchQuery, setPathSearchQuery] = useState("");
@@ -355,6 +367,14 @@ export function AuditFilterControls({
     handleStepChange("time");
   }, [draftRange, handleStepChange]);
 
+  const selectStep = useCallback((step: "date" | "time") => {
+    if (step === "time") {
+      handleSwitchToTime();
+    } else {
+      handleStepChange("date");
+    }
+  }, [handleStepChange, handleSwitchToTime]);
+
   const handleClearTimeFilter = useCallback(() => {
     setIsSelecting(false);
     setSelectionStart(null);
@@ -526,6 +546,7 @@ export function AuditFilterControls({
               <div
                 className="relative isolate grid w-full grid-cols-2 gap-1 rounded-xl border border-border/60 bg-surface-subtle p-1 text-xs"
                 role="tablist"
+                aria-label="Time filter steps"
               >
                 <div aria-hidden="true" className="pointer-events-none absolute inset-1 grid grid-cols-2 gap-1">
                   <motion.span
@@ -540,10 +561,20 @@ export function AuditFilterControls({
                   />
                 </div>
                 <button
+                  id={`${timePopupId}-tab-date`}
                   type="button"
                   role="tab"
                   aria-selected={activeStep === "date"}
-                  onClick={() => handleStepChange("date")}
+                  aria-controls={`${timePopupId}-panel-date`}
+                  tabIndex={activeStep === "date" ? 0 : -1}
+                  onClick={() => selectStep("date")}
+                  onKeyDown={(event) => handleRovingTabKey({
+                    event,
+                    tabs: STEP_TABS,
+                    currentTab: "date",
+                    onSelect: selectStep,
+                    tabId: (tab) => `${timePopupId}-tab-${tab}`,
+                  })}
                   className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                     activeStep === "date"
                       ? "text-text font-semibold"
@@ -554,10 +585,20 @@ export function AuditFilterControls({
                   <span>Date Range</span>
                 </button>
                 <button
+                  id={`${timePopupId}-tab-time`}
                   type="button"
                   role="tab"
                   aria-selected={activeStep === "time"}
-                  onClick={handleSwitchToTime}
+                  aria-controls={`${timePopupId}-panel-time`}
+                  tabIndex={activeStep === "time" ? 0 : -1}
+                  onClick={() => selectStep("time")}
+                  onKeyDown={(event) => handleRovingTabKey({
+                    event,
+                    tabs: STEP_TABS,
+                    currentTab: "time",
+                    onSelect: selectStep,
+                    tabId: (tab) => `${timePopupId}-tab-${tab}`,
+                  })}
                   className={`relative z-10 h-8 flex items-center justify-center gap-1.5 rounded-lg text-xs font-sans transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                     activeStep === "time"
                       ? "text-text font-semibold"
@@ -574,6 +615,9 @@ export function AuditFilterControls({
               <AnimatePresence initial={false} mode="popLayout" custom={stepDirection}>
                 <motion.div
                   key={activeStep}
+                  id={`${timePopupId}-panel-${activeStep}`}
+                  role="tabpanel"
+                  aria-labelledby={`${timePopupId}-tab-${activeStep}`}
                   custom={stepDirection}
                   variants={STEP_CONTENT_VARIANTS}
                   initial="enter"
@@ -603,7 +647,7 @@ export function AuditFilterControls({
                               key={p.key}
                               type="button"
                               onClick={() => handleSelectPreset(p.key as TimeRangeFilter)}
-                              className={`h-7 flex items-center justify-center rounded-md text-[11px] font-sans transition-all cursor-pointer text-center tracking-tight ${
+                              className={`h-7 flex items-center justify-center rounded-md text-xs font-sans transition-all cursor-pointer text-center tracking-tight ${
                                 isSelected
                                   ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                                   : "bg-surface hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"
@@ -634,7 +678,7 @@ export function AuditFilterControls({
                       </div>
 
                       {/* Selected Date Summary */}
-                      <div className="px-3 py-1.5 flex items-center justify-center text-[11px] font-mono text-text-muted border-t border-border/40 bg-surface-subtle/30">
+                      <div className="px-3 py-1.5 flex items-center justify-center text-xs font-mono text-text-muted border-t border-border/40 bg-surface-subtle/30">
                         {draftTimeRange === "all" ? (
                           <span className="text-text-subtle">All time</span>
                         ) : draftRange?.from ? (
@@ -676,7 +720,7 @@ export function AuditFilterControls({
                           </span>
                         </div>
                         {formatDuration(draftRange?.from, draftRange?.to) && (
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-surface-subtle border border-border/70 text-text-muted">
+                          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-surface-subtle border border-border/70 text-text-muted">
                             {formatDuration(draftRange?.from, draftRange?.to)}
                           </span>
                         )}
@@ -1001,19 +1045,66 @@ export function AuditFilterControls({
 
       {/* 3. Filter Result Summary & Quick Reset */}
       {hasActiveFilters && (
-        <div className="flex h-9 min-h-9 items-stretch overflow-hidden rounded-lg border border-border bg-surface text-xs">
+        <div
+          className="flex h-9 min-h-9 items-stretch overflow-hidden rounded-lg border border-border bg-surface text-xs"
+          aria-label="Retained audit result coverage"
+        >
           <span className="flex items-center px-2 font-mono text-xs text-text-muted">
-            Filtered:{" "}
-            <strong
-              className={
-                filteredCount === 0
-                  ? "text-danger font-semibold"
-                  : "text-primary font-semibold"
+            {(() => {
+              if (
+                retainedLoadedCount !== undefined ||
+                retainedMatchingCount !== undefined ||
+                retainedCountStatus !== undefined
+              ) {
+                const loaded = retainedLoadedCount ?? filteredCount ?? 0;
+                if (
+                  retainedMatchingCount !== null &&
+                  typeof retainedMatchingCount === "number" &&
+                  retainedCountStatus === "authoritative"
+                ) {
+                  const isZero = retainedMatchingCount === 0;
+                  return (
+                    <>
+                      <strong className={isZero ? "text-danger font-semibold" : "text-primary font-semibold"}>
+                        {retainedMatchingCount}
+                      </strong>{" "}
+                      <span>retained matching</span>
+                      {loaded < retainedMatchingCount && (
+                        <>
+                          <span> · </span>
+                          <span>{loaded} loaded</span>
+                        </>
+                      )}
+                    </>
+                  );
+                }
+
+                // Unavailable / loading / stale / error / loaded-only
+                const statusSuffix = retainedCountStatus === "loading" ? "loading" : "unavailable";
+                return (
+                  <>
+                    <strong className="text-primary font-semibold">{loaded}</strong>{" "}
+                    <span>retained loaded · exact count {statusSuffix}</span>
+                  </>
+                );
               }
-            >
-              {filteredCount}
-            </strong>
-            /{totalCount}
+
+              return (
+                <>
+                  Filtered:{" "}
+                  <strong
+                    className={
+                      filteredCount === 0
+                        ? "text-danger font-semibold"
+                        : "text-primary font-semibold"
+                    }
+                  >
+                    {filteredCount}
+                  </strong>
+                  /{totalCount}
+                </>
+              );
+            })()}
           </span>
           <button
             type="button"

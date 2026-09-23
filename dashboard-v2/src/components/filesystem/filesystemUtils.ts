@@ -6,6 +6,7 @@ import type {
   SessionCwdHistoryEvent,
   SessionCwdHistoryPage,
 } from "@/lib/dashboardTypes";
+import type { RegionStatus } from "@/components/ui/RegionState";
 
 export type StreamState = "connecting" | "live" | "stale";
 export type Pan = { x: number; y: number };
@@ -26,6 +27,50 @@ export interface ActiveHopRoute {
   visitedPaths: string[];
   visitedStepMap: Record<string, number>;
   isFailedAttempt?: boolean;
+}
+
+export interface ActiveHopCanvasSemantics {
+  replayContextPath: string | null;
+  verifiedTargetPath: string | null;
+  layoutFocusPath: string | null;
+  autoCenterPath: string | null;
+  failedAnnotationPath: string | null;
+}
+
+/**
+ * Keeps replay context, verified destinations, layout focus, camera focus, and
+ * failed-origin annotations as separate presentation dimensions. A failed
+ * change only confirms the origin where the attempt happened.
+ */
+export function deriveActiveHopCanvasSemantics(activeHop: ActiveHopRoute | null | undefined): ActiveHopCanvasSemantics {
+  if (!activeHop) {
+    return {
+      replayContextPath: null,
+      verifiedTargetPath: null,
+      layoutFocusPath: null,
+      autoCenterPath: null,
+      failedAnnotationPath: null,
+    };
+  }
+
+  const isFailedAttempt = activeHop.isFailedAttempt === true || activeHop.action === "failed_change";
+  if (isFailedAttempt) {
+    return {
+      replayContextPath: activeHop.fromPath,
+      verifiedTargetPath: null,
+      layoutFocusPath: null,
+      autoCenterPath: null,
+      failedAnnotationPath: activeHop.fromPath,
+    };
+  }
+
+  return {
+    replayContextPath: activeHop.toPath,
+    verifiedTargetPath: activeHop.toPath,
+    layoutFocusPath: activeHop.toPath,
+    autoCenterPath: activeHop.toPath,
+    failedAnnotationPath: null,
+  };
 }
 
 export const INSPECTOR_PAGE_SIZE = 12;
@@ -111,11 +156,208 @@ export function getHistoryWindowMetrics(
   };
 }
 
+export type AuditEventCoverageStatus = "loading" | "partial" | "complete" | "error";
+
+export interface AuditPathCoverage {
+  source: "auditSummary" | "none";
+  status: "authoritative" | "unavailable";
+}
+
+export interface AuditCoverageModel {
+  hasSelectedSession: boolean;
+  loadedEvents: number;
+  totalEvents: number;
+  unloadedEvents: number;
+  eventCoverage: AuditEventCoverageStatus;
+  pathCoverage: AuditPathCoverage;
+  historyStatus: RegionStatus;
+  isRefreshing: boolean;
+  wording: string;
+}
+
+export interface DeriveAuditCoverageInput {
+  hasSelectedSession: boolean;
+  loadedEvents?: number | null;
+  historyTotalItems?: number | null;
+  historyComplete?: boolean | null;
+  historyStatus?: RegionStatus | "idle" | null;
+  auditSummaryEventCount?: number | null;
+}
+
+export function formatAuditCoverageWording(model: AuditCoverageModel): string {
+  if (!model.hasSelectedSession) {
+    return "Choose a session from the dropdown to replay its filesystem trajectory.";
+  }
+
+  // 1. Error state handling
+  if (model.historyStatus === "error") {
+    if (model.totalEvents === 0) {
+      return "0 retained events recorded according to authoritative summary. Retained event history retrieval failed.";
+    }
+    if (model.unloadedEvents === 0 && model.loadedEvents >= model.totalEvents) {
+      const countPrefix = model.totalEvents === 1
+        ? "The retained event remains loaded"
+        : `All ${model.totalEvents} retained events remain loaded`;
+      return `${countPrefix} across authoritative directory coverage. Latest history refresh failed.`;
+    }
+    if (model.loadedEvents === 0) {
+      return "Authoritative directory coverage remains available from session audit summary. Retained event history is unavailable.";
+    }
+    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Remaining event history is unavailable.`;
+  }
+
+  // 2. Initial loading state (not refreshing)
+  if (model.eventCoverage === "loading" && !model.isRefreshing) {
+    return "Authoritative directory coverage is available from session audit summary. Retained event history is loading...";
+  }
+
+  // 3. Refreshing state handling
+  if (model.isRefreshing) {
+    if (model.unloadedEvents === 0 && model.loadedEvents >= model.totalEvents) {
+      if (model.totalEvents === 0) {
+        return "0 retained events recorded. Retained event history is refreshing...";
+      }
+      const countPrefix = model.totalEvents === 1
+        ? "The retained event remains loaded"
+        : `All ${model.totalEvents} retained events remain loaded`;
+      return `${countPrefix} across authoritative directory coverage. Retained event history is refreshing...`;
+    }
+    if (model.loadedEvents === 0) {
+      return `Loaded 0 of ${model.totalEvents} retained events across authoritative directory coverage. Retained event history is refreshing...`;
+    }
+    return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Retained event history is refreshing (${model.unloadedEvents} earlier events remain unloaded).`;
+  }
+
+  // 4. Complete history (not error, not refreshing)
+  if (model.eventCoverage === "complete") {
+    if (model.totalEvents === 0) {
+      return "0 retained events recorded. Authoritative directory coverage is active.";
+    }
+    return model.totalEvents === 1
+      ? "The retained event is loaded across authoritative directory coverage."
+      : `All ${model.totalEvents} retained events are loaded across authoritative directory coverage.`;
+  }
+
+  // 5. Partial event coverage (ready, not refreshing, not error)
+  return `Loaded ${model.loadedEvents} of ${model.totalEvents} retained events across authoritative directory coverage. Earlier events remain unloaded.`;
+}
+
+export function deriveAuditCoverage(input: DeriveAuditCoverageInput): AuditCoverageModel {
+  const hasSelectedSession = Boolean(input.hasSelectedSession);
+  const rawStatus = input.historyStatus ?? "loading";
+  const status: RegionStatus = rawStatus === "idle" ? "loading" : rawStatus;
+  const isRefreshing = status === "refreshing";
+  const historyComplete = Boolean(input.historyComplete);
+
+  if (!hasSelectedSession) {
+    const emptyModel: AuditCoverageModel = {
+      hasSelectedSession: false,
+      loadedEvents: 0,
+      totalEvents: 0,
+      unloadedEvents: 0,
+      eventCoverage: "partial",
+      pathCoverage: {
+        source: "none",
+        status: "unavailable",
+      },
+      historyStatus: status,
+      isRefreshing: false,
+      wording: "Choose a session from the dropdown to replay its filesystem trajectory.",
+    };
+    return emptyModel;
+  }
+
+  const safeLoaded = Math.max(0, Math.trunc(input.loadedEvents ?? 0));
+  const safeHistoryTotal = typeof input.historyTotalItems === "number" && Number.isFinite(input.historyTotalItems)
+    ? Math.max(0, Math.trunc(input.historyTotalItems))
+    : 0;
+  const safeAuditCount = typeof input.auditSummaryEventCount === "number" && Number.isFinite(input.auditSummaryEventCount)
+    ? Math.max(0, Math.trunc(input.auditSummaryEventCount))
+    : 0;
+
+  // Maximum trustworthy total from historyTotalItems, auditSummary.eventCount and loaded history length
+  const rawTotal = Math.max(safeLoaded, safeHistoryTotal, safeAuditCount);
+  const metrics = getHistoryWindowMetrics(safeLoaded, rawTotal, -1);
+  const loadedEvents = metrics.loadedItems;
+  const totalEvents = metrics.totalItems;
+  const unloadedEvents = metrics.unloadedItems;
+
+  let eventCoverage: AuditEventCoverageStatus;
+
+  if (status === "error") {
+    eventCoverage = "error";
+  } else if (status === "loading" || rawStatus === "idle") {
+    eventCoverage = "loading";
+  } else if (historyComplete && loadedEvents >= totalEvents) {
+    eventCoverage = "complete";
+  } else {
+    // Fails closed to "partial" if historyComplete is true but loadedEvents < totalEvents,
+    // or if historyComplete is false, or if loadedEvents < totalEvents
+    eventCoverage = "partial";
+  }
+
+  const model: AuditCoverageModel = {
+    hasSelectedSession: true,
+    loadedEvents,
+    totalEvents,
+    unloadedEvents,
+    eventCoverage,
+    pathCoverage: {
+      source: "auditSummary",
+      status: "authoritative",
+    },
+    historyStatus: status,
+    isRefreshing,
+    wording: "",
+  };
+
+  model.wording = formatAuditCoverageWording(model);
+  return model;
+}
+
 export function formatTimestamp(value: string | null): string {
   if (!value) return "No timestamp";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "No timestamp";
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
+}
+
+export type ForensicTimestampLabel = "Observed" | "Started" | "Closed";
+
+export interface ForensicTimestampPresentation {
+  label: ForensicTimestampLabel;
+  zone: "UTC";
+  iso: string | null;
+  absolute: string;
+  available: boolean;
+}
+
+export function deriveForensicTimestamp(
+  label: ForensicTimestampLabel,
+  value: string | null | undefined,
+): ForensicTimestampPresentation {
+  const rawValue = typeof value === "string" ? value.trim() : "";
+  const parsed = rawValue ? new Date(rawValue) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) {
+    return { label, zone: "UTC", iso: null, absolute: "unavailable", available: false };
+  }
+  return {
+    label,
+    zone: "UTC",
+    iso: rawValue,
+    absolute: formatTimestamp(rawValue),
+    available: true,
+  };
 }
 
 /**
@@ -490,20 +732,82 @@ export function compactDirectoryPath(path: string): string {
   return path === "/" ? path : `…/${directorySegment(path)}`;
 }
 
-export function isSensitiveDirectory(path: string): boolean {
-  const p = path.toLowerCase();
-  return (
-    p === "/root" ||
-    p.startsWith("/root/") ||
-    p === "/tmp" ||
-    p.startsWith("/tmp/") ||
-    p === "/var/tmp" ||
-    p.startsWith("/var/tmp/") ||
-    p === "/dev/shm" ||
-    p.startsWith("/dev/shm/") ||
-    p === "/etc" ||
-    p.startsWith("/etc/")
+export type PathInterestCategory =
+  | "privileged-home"
+  | "temporary-directory"
+  | "shared-memory"
+  | "system-configuration";
+
+export type PathInterestMatchedRoot = "/root" | "/tmp" | "/var/tmp" | "/dev/shm" | "/etc";
+
+export interface RuleBasedPathInterest {
+  source: "path-rule";
+  label: "Rule-based path of interest";
+  category: PathInterestCategory;
+  categoryLabel: string;
+  matchedRoot: PathInterestMatchedRoot;
+  ruleDescription: string;
+  explanation: string;
+}
+
+interface PathInterestRule {
+  category: PathInterestCategory;
+  categoryLabel: string;
+  matchedRoot: PathInterestMatchedRoot;
+  ruleDescription: string;
+}
+
+const PATH_INTEREST_RULES: readonly PathInterestRule[] = [
+  {
+    category: "privileged-home",
+    categoryLabel: "Privileged account home",
+    matchedRoot: "/root",
+    ruleDescription: "Privileged account home path rule",
+  },
+  {
+    category: "temporary-directory",
+    categoryLabel: "Temporary directory",
+    matchedRoot: "/tmp",
+    ruleDescription: "Temporary directory path rule",
+  },
+  {
+    category: "temporary-directory",
+    categoryLabel: "Temporary directory",
+    matchedRoot: "/var/tmp",
+    ruleDescription: "Temporary directory path rule",
+  },
+  {
+    category: "shared-memory",
+    categoryLabel: "Shared memory",
+    matchedRoot: "/dev/shm",
+    ruleDescription: "Shared-memory path rule",
+  },
+  {
+    category: "system-configuration",
+    categoryLabel: "System configuration",
+    matchedRoot: "/etc",
+    ruleDescription: "System configuration path rule",
+  },
+];
+
+export function classifyRuleBasedPathInterest(path: string | null | undefined): RuleBasedPathInterest | null {
+  if (!path) return null;
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const matchedRule = PATH_INTEREST_RULES.find(({ matchedRoot }) =>
+    normalizedPath === matchedRoot || normalizedPath.startsWith(`${matchedRoot}/`),
   );
+  if (!matchedRule) return null;
+
+  return {
+    source: "path-rule",
+    label: "Rule-based path of interest",
+    ...matchedRule,
+    explanation: `Matched the ${matchedRule.ruleDescription.toLowerCase()} based on this directory path only. This heuristic classification is not evidence of observed file activity.`,
+  };
+}
+
+export function formatRuleBasedPathInterestDescription(interest: RuleBasedPathInterest): string {
+  return `${interest.label}. Category: ${interest.categoryLabel}. Matched rule: ${interest.ruleDescription}. Matched root: ${interest.matchedRoot}. ${interest.explanation}`;
 }
 
 export interface BreadcrumbSegment {
@@ -554,6 +858,11 @@ export function actionLabel(event: SessionCwdHistoryEvent): string {
   if (event.action === "entered") return "Entered directory";
   if (event.action === "failed_change") return "Directory change failed";
   return "Changed directory";
+}
+
+export function formatFailedChangeMessage(fromPath: string | null | undefined): string {
+  const verifiedOrigin = fromPath && fromPath.trim() ? fromPath : "an unknown verified origin";
+  return `Directory change failed while at ${verifiedOrigin}; attempted destination unavailable or unverified`;
 }
 
 
@@ -615,6 +924,7 @@ export interface PointForGraphOptions {
   selectedSessionId?: string | null;
   densityMode?: TopologyDensityMode;
   focusedPath?: string | null;
+  requiredPaths?: readonly string[];
 }
 
 export function pointForGraph(
@@ -662,6 +972,7 @@ export function pointForGraph(
   };
   for (const session of recentSessions) includePath(session.cwdState.path);
   includePath(selectedPath);
+  for (const requiredPath of options?.requiredPaths ?? []) includePath(requiredPath);
   if (options?.selectedSessionId) {
     const selectedSession = sessions.find((session) => session.sessionId === options.selectedSessionId);
     if (selectedSession?.cwdState?.path) {
@@ -1525,10 +1836,17 @@ export function buildAuditSnapshot(
     }
   };
 
-  // 1. Register session's cwdState path
+  // 1. Register all canonical paths from session auditSummary (with null observedAt)
+  if (session.auditSummary?.visitedPaths && Array.isArray(session.auditSummary.visitedPaths)) {
+    for (const p of session.auditSummary.visitedPaths) {
+      registerPath(p, null);
+    }
+  }
+
+  // 2. Register session's cwdState path with authoritative observedAt
   registerPath(session.cwdState.path, session.cwdState.observedAt);
 
-  // 2. Register all paths from history events (only toPath for non-failed moves to avoid typo nodes)
+  // 3. Register all paths from history events (only toPath for non-failed moves to avoid typo nodes)
   for (const event of history) {
     registerPath(event.fromPath, event.at);
     if (event.action !== "failed_change") {
@@ -1565,7 +1883,7 @@ export function buildAuditSnapshot(
 
 /**
  * Checks whether a session strictly stayed within `/home` (and its subdirectories)
- * without traversing into any sensitive or system directories (e.g. /etc, /var, /tmp, /root).
+ * without traversing into rule-based paths of interest or system directories (e.g. /etc, /var, /tmp, /root).
  */
 export function isHomeOnlySession(
   session: FilesystemTopologySession | FilesystemClosedSession,

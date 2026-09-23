@@ -183,7 +183,7 @@ describe("Automated Coverage Expansion (FS-018)", () => {
       const failRoute = deriveActiveHopRoute(failureEvents, 0, { totalItems: 1, selectedNumber: 1, indexOffset: 0 });
       expect(failRoute?.isFailedAttempt).toBe(true);
       expect(failRoute?.fromPath).toBe("/home");
-      expect(failRoute?.toPath).toBe("/home"); // Failed attempt keeps active hop anchored at fromPath
+      expect(failRoute?.toPath).toBeNull();
     });
   });
 

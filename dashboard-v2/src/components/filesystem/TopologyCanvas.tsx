@@ -26,22 +26,37 @@ import {
 } from "react";
 
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
-import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
+import type {
+  FilesystemClosedSession,
+  FilesystemTopologySession,
+  FilesystemTopologySnapshot,
+} from "@/lib/dashboardTypes";
 import { TopologyToolbar } from "./TopologyToolbar";
 import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
-import { HopEnergy } from "./HopEnergy";
+import { TransitionLegend, TransitionOverlay } from "./TransitionOverlay";
+import type { VerifiedCwdTransition } from "./filesystemTransitions";
+import {
+  deriveMinimapVisibility,
+  deriveTransitionEndpointCoverage,
+  requiredTransitionEndpointPaths,
+  topologyExceedsMinimapDensityThreshold,
+  type MinimapVisibilityPreference,
+} from "./topologyDensity";
 import {
   analyzeTopologyDensity,
   calloutsForGraph,
+  classifyRuleBasedPathInterest,
   clearAutomaticCalloutCollisions,
   compactDirectoryPath,
   DEFAULT_DENSITY_THRESHOLDS,
+  deriveActiveHopCanvasSemantics,
   directorySegment,
   formatUpdateAge,
+  formatFailedChangeMessage,
+  formatRuleBasedPathInterestDescription,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
-  isSensitiveDirectory,
   leaderEndpoints,
   pointForGraph,
   resolveCalloutPositions,
@@ -80,7 +95,122 @@ function sameElementBounds(
   });
 }
 
-interface TopologyCanvasProps {
+function HoneypotQuietState({
+  closedSessionCount,
+  streamState,
+}: {
+  closedSessionCount: number;
+  streamState: StreamState;
+}) {
+  const isLive = streamState === "live";
+  const retainedLabel = closedSessionCount === 1 ? "1 closed session available" : `${closedSessionCount} closed sessions available`;
+
+  return (
+    <section
+      className="relative isolate flex min-h-[25rem] items-center justify-center overflow-hidden rounded-xl border border-border bg-surface px-5 py-10 sm:px-8"
+      aria-label="Live honeypot activity"
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-50"
+        style={{
+          backgroundImage: "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
+          backgroundSize: "2.5rem 2.5rem",
+          maskImage: "radial-gradient(ellipse at center, black 5%, transparent 72%)",
+        }}
+        aria-hidden="true"
+      />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/10" aria-hidden="true" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/5" aria-hidden="true" />
+      <div className="relative mx-auto flex max-w-lg flex-col items-center rounded-2xl border border-border bg-surface/95 px-6 py-5 text-center shadow-xl backdrop-blur-sm sm:px-8">
+        <div className="relative mb-4 grid h-12 w-12 place-items-center rounded-full border border-success/30 bg-success-subtle text-success shadow-lg">
+          <span className="absolute inset-1.5 rounded-full border border-success/20" aria-hidden="true" />
+          <ScanLine className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
+          <span className="ui-badge border-success/30 bg-success-subtle text-success">Honeypot quiet</span>
+          <span className={`ui-badge ${isLive ? "border-success/30 bg-success-subtle text-success" : "border-warning-border bg-warning-subtle text-warning"}`}>
+            <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${isLive ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
+            {isLive ? "Live monitoring" : "Monitoring reconnecting"}
+          </span>
+        </div>
+        <h3 className="text-base font-semibold text-text">No active honeypot sessions</h3>
+        <p className="mt-2 max-w-md text-sm leading-6 text-text-muted">
+          No attacker is currently connected. Live filesystem activity will appear here as soon as a verified session begins.
+        </p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2 text-xs">
+          <span className="rounded-full border border-border bg-surface px-3 py-1.5 font-medium text-text">
+            <span className="mr-1.5 font-mono text-success">0</span> active now
+          </span>
+          {closedSessionCount > 0 && (
+            <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 font-medium text-warning">
+              {retainedLabel} in Directory
+            </span>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export type TopologyPresentationContext =
+  | {
+      mode: "live";
+    }
+  | {
+      mode: "audit";
+      session: {
+        lifecycle: "active" | "retained";
+        observedAt: string | null;
+        startedAt: string | null;
+        closedAt: string | null;
+      } | null;
+    };
+
+function isFilesystemClosedSession(
+  session: FilesystemTopologySession | FilesystemClosedSession,
+): session is FilesystemClosedSession {
+  return "lifecycle" in session && Boolean(session.lifecycle);
+}
+
+export function deriveTopologyPresentationContext(
+  mode: "live" | "audit",
+  selectedSession?: FilesystemTopologySession | FilesystemClosedSession | null,
+): TopologyPresentationContext {
+  if (mode === "live") {
+    return { mode: "live" };
+  }
+
+  if (!selectedSession) {
+    return {
+      mode: "audit",
+      session: null,
+    };
+  }
+
+  if (isFilesystemClosedSession(selectedSession)) {
+    return {
+      mode: "audit",
+      session: {
+        lifecycle: "retained",
+        observedAt: selectedSession.cwdState?.observedAt ?? null,
+        startedAt: selectedSession.lifecycle.startedAt ?? null,
+        closedAt: selectedSession.lifecycle.closedAt ?? null,
+      },
+    };
+  }
+
+  return {
+    mode: "audit",
+    session: {
+      lifecycle: "active",
+      observedAt: selectedSession.cwdState?.observedAt ?? null,
+      startedAt: null,
+      closedAt: null,
+    },
+  };
+}
+
+export interface TopologyCanvasProps {
   snapshot: FilesystemTopologySnapshot | null;
   regionStatus: RegionStatus;
   streamState: StreamState;
@@ -88,6 +218,8 @@ interface TopologyCanvasProps {
   selectedSessionId: string | null;
   selectedPath: string | null;
   activeHop?: ActiveHopRoute | null;
+  displayedTransitions?: readonly VerifiedCwdTransition[];
+  currentTransition?: VerifiedCwdTransition | null;
   hopDurationMs?: number;
   title?: string;
   subtitle?: string;
@@ -98,7 +230,7 @@ interface TopologyCanvasProps {
   onRefresh?: () => void;
   onReconnect?: () => void;
   staleThresholdMs: number;
-  isAuditMode?: boolean;
+  presentationContext: TopologyPresentationContext;
   isResizingContainer?: boolean;
   className?: string;
 }
@@ -111,6 +243,8 @@ export function TopologyCanvas({
   selectedSessionId,
   selectedPath,
   activeHop,
+  displayedTransitions = [],
+  currentTransition = null,
   hopDurationMs = 1400,
   title,
   subtitle,
@@ -121,10 +255,16 @@ export function TopologyCanvas({
   onRefresh,
   onReconnect,
   staleThresholdMs,
-  isAuditMode = false,
+  presentationContext,
   isResizingContainer = false,
   className,
 }: TopologyCanvasProps) {
+  const isAuditMode = presentationContext.mode === "audit";
+  const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
+  const isFailedHop = activeHop?.isFailedAttempt === true || activeHop?.action === "failed_change";
+  const failedHopMessage = isFailedHop
+    ? formatFailedChangeMessage(activeHop?.fromPath)
+    : null;
   const reducedMotion = useReducedMotion();
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
@@ -225,9 +365,9 @@ export function TopologyCanvas({
   });
 
   const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
+  const [minimapPreference, setMinimapPreference] = useState<MinimapVisibilityPreference>("auto");
 
   // Render limits state
-  const [isPathsExpanded, setIsPathsExpanded] = useState(false);
   const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
 
   // Derived graph layout
@@ -250,7 +390,11 @@ export function TopologyCanvas({
     return "aggregated";
   }, [densityPreference, snapshot?.nodes.length, snapshot?.sessions]);
 
-  const focusedGraphPath = selectedPath ?? activeHop?.toPath ?? null;
+  const focusedGraphPath = selectedPath ?? activeHopCanvasSemantics.layoutFocusPath;
+  const transitionEndpointPaths = useMemo(
+    () => requiredTransitionEndpointPaths(currentTransition),
+    [currentTransition],
+  );
 
   const automaticGraphNodes = useMemo(
     () =>
@@ -260,22 +404,23 @@ export function TopologyCanvas({
         selectedPath,
         isAuditMode,
         {
-          nodeLimit: isPathsExpanded || densityPreference === "detailed" || isAuditMode ? null : GRAPH_NODE_LIMIT,
+          nodeLimit: densityPreference === "detailed" || isAuditMode ? null : GRAPH_NODE_LIMIT,
           selectedSessionId,
           densityMode: effectiveDensityMode,
           focusedPath: focusedGraphPath,
+          requiredPaths: transitionEndpointPaths,
         },
       ),
     [
       effectiveDensityMode,
       focusedGraphPath,
       isAuditMode,
-      isPathsExpanded,
       densityPreference,
       selectedPath,
       selectedSessionId,
       snapshot?.nodes,
       snapshot?.sessions,
+      transitionEndpointPaths,
     ],
   );
   const graphNodes = useMemo(
@@ -283,25 +428,40 @@ export function TopologyCanvas({
     [automaticGraphNodes, nodePositions],
   );
   const graphNodeByPath = useMemo(() => new Map(graphNodes.map((node) => [node.path, node])), [graphNodes]);
+  const transitionEndpointCoverage = useMemo(
+    () => deriveTransitionEndpointCoverage(
+      transitionEndpointPaths,
+      snapshot?.nodes ?? [],
+      graphNodes,
+    ),
+    [graphNodes, snapshot?.nodes, transitionEndpointPaths],
+  );
+  const obscuredTransitionEndpoints = useMemo(
+    () => transitionEndpointCoverage.filter((endpoint) => endpoint.status !== "visible"),
+    [transitionEndpointCoverage],
+  );
+  const failedAnnotationNode = activeHopCanvasSemantics.failedAnnotationPath
+    ? graphNodeByPath.get(activeHopCanvasSemantics.failedAnnotationPath) ?? null
+    : null;
   const graphPlaneHeight = useMemo(
     () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
     [graphNodes],
   );
   const effectiveSessions = useMemo(() => {
-    if (!activeHop?.toPath || !selectedSessionId) return snapshot?.sessions ?? [];
+    if (!activeHopCanvasSemantics.replayContextPath || !selectedSessionId) return snapshot?.sessions ?? [];
     return (snapshot?.sessions ?? []).map((session) => {
       if (session.sessionId === selectedSessionId) {
         return {
           ...session,
           cwdState: {
             ...session.cwdState,
-            path: activeHop.toPath,
+            path: activeHopCanvasSemantics.replayContextPath,
           },
         };
       }
       return session;
     });
-  }, [activeHop, selectedSessionId, snapshot?.sessions]);
+  }, [activeHopCanvasSemantics.replayContextPath, selectedSessionId, snapshot?.sessions]);
 
   const automaticGraphNodeByPath = useMemo(
     () => new Map(automaticGraphNodes.map((node) => [node.path, node])),
@@ -486,13 +646,17 @@ export function TopologyCanvas({
   }, [calloutElementBounds, graphCallouts, graphNodes, nodeElementBounds, positionForCallout]);
 
   const totalOverlaps = overlappingNodePaths.size + overlappingCalloutIps.size;
-  const showMinimap = true;
+  const reserveMinimapSpace = minimapPreference === "show" || (
+    minimapPreference === "auto" &&
+    topologyExceedsMinimapDensityThreshold(densityAnalysis.totalNodes, densityAnalysis.totalSources)
+  );
 
   const {
     pan,
     setPan,
     zoom,
     setZoom,
+    fitZoom,
     panRef,
     zoomRef,
     isDraggingSurface,
@@ -511,7 +675,7 @@ export function TopologyCanvas({
     mapSurfaceRef,
     graphPlaneRef,
     isTopologyExpanded,
-    showMinimap,
+    reserveMinimapSpace,
     automaticGraphNodes,
     graphCallouts,
     nodePositions,
@@ -520,6 +684,13 @@ export function TopologyCanvas({
     nodeElementBounds,
     calloutElementBounds,
     nodesCount: snapshot?.nodes.length ?? 0,
+  });
+  const showMinimap = deriveMinimapVisibility({
+    preference: minimapPreference,
+    totalNodes: densityAnalysis.totalNodes,
+    totalSources: densityAnalysis.totalSources,
+    currentZoom: zoom,
+    fitZoom,
   });
 
   useEffect(() => {
@@ -541,17 +712,20 @@ export function TopologyCanvas({
     centerMapOn(positionForCallout(selectedGraphCallout, index));
   }, [centerMapOn, graphCallouts, positionForCallout, selectedGraphCallout]);
 
-  // Keep camera steady; only bring target node into view when hop changes AND it is outside the viewport
-  const lastCenteredHopEventId = useRef<string | null>(null);
+  // Keep camera steady; only bring a verified destination into view when a hop changes.
+  const lastProcessedHopEventId = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeHop?.eventId || !activeHop?.toPath) return;
-    if (activeHop.eventId === lastCenteredHopEventId.current) return;
-    lastCenteredHopEventId.current = activeHop.eventId;
+    const currentHopEventId = activeHop?.eventId ?? null;
+    const isNewHopEvent = currentHopEventId !== lastProcessedHopEventId.current;
+    lastProcessedHopEventId.current = currentHopEventId;
+
+    const autoCenterPath = activeHopCanvasSemantics.autoCenterPath;
+    if (!isNewHopEvent || !autoCenterPath) return;
 
     // Never auto-center while user is actively dragging or interacting with the canvas
     if (draggedNodePath || draggedCalloutIp || isDraggingSurface) return;
 
-    const targetNode = graphNodeByPath.get(activeHop.toPath);
+    const targetNode = graphNodeByPath.get(autoCenterPath);
     if (!targetNode) return;
 
     const surface = mapSurfaceRef.current;
@@ -573,7 +747,7 @@ export function TopologyCanvas({
     }
   }, [
     activeHop?.eventId,
-    activeHop?.toPath,
+    activeHopCanvasSemantics.autoCenterPath,
     centerMapOn,
     graphNodeByPath,
     isDraggingSurface,
@@ -638,6 +812,9 @@ export function TopologyCanvas({
           resetMapWorkspace={resetMapWorkspace}
           densityPreference={densityPreference}
           setDensityPreference={setDensityPreference}
+          minimapPreference={minimapPreference}
+          setMinimapPreference={setMinimapPreference}
+          minimapVisible={showMinimap}
           showGrid={showGrid}
           setShowGrid={setShowGrid}
           effectiveDensityMode={effectiveDensityMode}
@@ -662,21 +839,39 @@ export function TopologyCanvas({
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className="p-5">
+          {failedHopMessage && (
+            <div
+              role="status"
+              data-testid="failed-change-canvas-status"
+              aria-label={failedHopMessage}
+              className="mb-4 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning"
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+              <span>{failedHopMessage}</span>
+            </div>
+          )}
           {!isAuditMode && freshnessState.isDegraded && (
             <div role="status" className="mb-4 rounded-lg border border-warning-border bg-surface-raised px-3 py-2 text-xs text-text">
               <strong className="font-semibold text-warning">Degraded connection:</strong>{" "}
               Showing retained snapshot.
             </div>
           )}
-          <RegionState
-            kind="empty"
-            title={isAuditMode ? "No session selected for audit" : "No observed working directories yet"}
-            description={
-              isAuditMode
-                ? "Choose a session from the dropdown above or reset active filters."
-                : "The live view will populate after verified CWD telemetry is recorded."
-            }
-          />
+          {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
+            <HoneypotQuietState
+              closedSessionCount={snapshot.recentClosedSessions.length}
+              streamState={streamState}
+            />
+          ) : (
+            <RegionState
+              kind="empty"
+              title={isAuditMode ? "No session selected for audit" : "No verified working directory data yet"}
+              description={
+                isAuditMode
+                  ? "Choose a session from the dropdown above or reset active filters."
+                  : "An attacker is connected, but verified CWD telemetry has not been recorded yet."
+              }
+            />
+          )}
         </div>
       ) : (
         <>
@@ -728,7 +923,7 @@ export function TopologyCanvas({
                         <strong className="font-semibold text-warning">Degraded connection:</strong> Showing retained snapshot (received{" "}
                         {formatUpdateAge(freshnessState.snapshotReceiptAgeMs)}).
                       </span>
-                      <span className="hidden sm:inline text-text-subtle text-[11px]">
+                      <span className="hidden sm:inline text-text-subtle text-xs">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
                       </span>
                       {onRefresh && (
@@ -753,6 +948,7 @@ export function TopologyCanvas({
                   )}
                   {isArrangeMode && (
                     <motion.div
+                      key="arrange-mode-banner"
                       role="status"
                       initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -768,8 +964,9 @@ export function TopologyCanvas({
                       <span className="text-text-muted">to finish</span>
                     </motion.div>
                   )}
-                  {activeHop?.toPath && selectedPath && selectedPath !== activeHop.toPath && (
+                  {activeHopCanvasSemantics.verifiedTargetPath && selectedPath && selectedPath !== activeHopCanvasSemantics.verifiedTargetPath && (
                     <motion.div
+                      key="inspection-context-banner"
                       role="status"
                       initial={reducedMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
                       animate={{ opacity: 1, y: 0 }}
@@ -782,7 +979,7 @@ export function TopologyCanvas({
                       <span className="text-border" aria-hidden="true">·</span>
                       <button
                         type="button"
-                        onClick={() => onSelectPath(activeHop.toPath)}
+                        onClick={() => onSelectPath(activeHopCanvasSemantics.verifiedTargetPath)}
                         className="pointer-events-auto rounded border border-border bg-surface-subtle px-2 py-0.5 font-semibold text-text hover:bg-surface hover:text-text transition-colors shadow-2xs"
                       >
                         Return to current hop
@@ -790,6 +987,38 @@ export function TopologyCanvas({
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {failedHopMessage && !failedAnnotationNode && (
+                  <div
+                    role="status"
+                    data-testid="failed-change-canvas-status"
+                    aria-label={failedHopMessage}
+                    className="pointer-events-none absolute left-1/2 top-4 z-40 flex max-w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>{failedHopMessage}</span>
+                  </div>
+                )}
+
+                {obscuredTransitionEndpoints.length > 0 && (
+                  <div
+                    role="status"
+                    data-testid="transition-endpoint-coverage"
+                    className="pointer-events-none absolute right-4 top-16 z-40 max-w-[min(30rem,calc(100%-2rem))] rounded-lg border border-border bg-surface-raised/95 px-3 py-2 text-xs text-text-muted shadow-sm"
+                  >
+                    {obscuredTransitionEndpoints.map((endpoint) => (
+                      <div key={endpoint.path} data-transition-endpoint-status={endpoint.status}>
+                        {endpoint.status === "aggregated" ? (
+                          <>Current transition endpoint <span className="font-mono text-text">{endpoint.path}</span> is represented by aggregate <span className="font-mono text-text">{endpoint.aggregatePath}</span>.</>
+                        ) : (
+                          <>Current transition endpoint <span className="font-mono text-text">{endpoint.path}</span> is unavailable in the loaded topology.</>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {(displayedTransitions.length > 0 || currentTransition) && <TransitionLegend />}
 
                 <motion.div
                   ref={graphPlaneRef}
@@ -811,11 +1040,6 @@ export function TopologyCanvas({
                   }
                 >
                   <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pointer-events-none absolute h-full w-full overflow-visible" aria-hidden="true">
-                    <defs>
-                      <marker id="arrowhead-primary" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto">
-                        <polygon points="0 0, 4 2, 0 4" fill="var(--primary)" opacity="0.6" />
-                      </marker>
-                    </defs>
                     <AnimatePresence initial={false}>
                       {graphNodes.map((node) => {
                         const parent = node.parentPath ? graphNodeByPath.get(node.parentPath) : null;
@@ -825,21 +1049,6 @@ export function TopologyCanvas({
                         const cp2Y = parent.y <= node.y ? node.y - cpOffset : node.y + cpOffset;
                         const filesystemRoute = `M ${parent.x} ${parent.y} C ${parent.x} ${cp1Y}, ${node.x} ${cp2Y}, ${node.x} ${node.y}`;
 
-                        const isActiveHopEdge = Boolean(
-                          activeHop && (
-                            (activeHop.fromPath === parent.path && activeHop.toPath === node.path) ||
-                            (activeHop.fromPath === node.path && activeHop.toPath === parent.path)
-                          )
-                        );
-
-                        const isTrailEdge = Boolean(
-                          activeHop &&
-                          activeHop.visitedPaths.includes(node.path) &&
-                          activeHop.visitedPaths.includes(parent.path)
-                        );
-
-                        const hopColor = activeHop?.isFailedAttempt ? "var(--warning)" : "var(--primary)";
-
                         return (
                           <motion.g
                             key={`${parent.path}-${node.path}`}
@@ -848,7 +1057,6 @@ export function TopologyCanvas({
                             exit={reducedMotion ? undefined : { opacity: 0 }}
                             transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
                           >
-                            {/* The active connector is drawn with its packet in HopEnergy. */}
                             <motion.path
                               initial={false}
                               animate={{ d: filesystemRoute }}
@@ -858,35 +1066,13 @@ export function TopologyCanvas({
                                   : TOPOLOGY_TRANSITION
                               }
                               fill="none"
-                              stroke={
-                                isActiveHopEdge
-                                  ? hopColor
-                                  : isTrailEdge
-                                    ? "var(--primary)"
-                                    : "var(--border-strong)"
-                              }
-                              strokeWidth={
-                                isActiveHopEdge
-                                  ? "0.55"
-                                  : isTrailEdge
-                                    ? "0.24"
-                                    : "0.35"
-                              }
-                              strokeOpacity={
-                                isActiveHopEdge
-                                  ? 0
-                                  : isTrailEdge
-                                    ? 0.42
-                                    : 0.4
-                              }
-                              strokeDasharray={
-                                isActiveHopEdge
-                                  ? "none"
-                                  : isTrailEdge
-                                    ? "1.2 0.8"
-                                    : "none"
-                              }
-                              markerEnd={isTrailEdge ? "url(#arrowhead-primary)" : undefined}
+                              stroke="var(--border-strong)"
+                              strokeWidth="0.35"
+                              strokeOpacity="0.4"
+                              strokeDasharray="none"
+                              data-edge-kind="hierarchy"
+                              data-parent-path={parent.path}
+                              data-child-path={node.path}
                             />
                           </motion.g>
                         );
@@ -961,24 +1147,48 @@ export function TopologyCanvas({
                       })}
                     </AnimatePresence>
                   </svg>
-                  {activeHop?.toPath && !activeHop.isFailedAttempt && graphNodeByPath.has(activeHop.toPath) && (
-                    <HopEnergy
-                      key={`${selectedSessionId}:${activeHop.eventId}`}
-                      from={activeHop.fromPath ? graphNodeByPath.get(activeHop.fromPath) : undefined}
-                      to={graphNodeByPath.get(activeHop.toPath)!}
-                      fromBounds={activeHop.fromPath ? nodeElementBounds[activeHop.fromPath] : undefined}
-                      toBounds={nodeElementBounds[activeHop.toPath]}
+                  {(displayedTransitions.length > 0 || currentTransition) && (
+                    <TransitionOverlay
+                      transitions={displayedTransitions}
+                      currentTransition={currentTransition}
+                      nodes={graphNodes}
+                      nodeBounds={nodeElementBounds}
                       durationMs={hopDurationMs}
                       reducedMotion={Boolean(reducedMotion)}
-                      transition={reducedMotion || Boolean(draggedNodePath) ? { duration: 0 } : TOPOLOGY_TRANSITION}
+                      layoutTransition={
+                        reducedMotion || Boolean(draggedNodePath)
+                          ? { duration: 0 }
+                          : TOPOLOGY_TRANSITION
+                      }
+                      showLegend={false}
                     />
+                  )}
+                  {failedHopMessage && failedAnnotationNode && (
+                    <div
+                      role="status"
+                      data-testid="failed-change-annotation"
+                      data-failed-change-origin={activeHopCanvasSemantics.failedAnnotationPath ?? undefined}
+                      aria-label={failedHopMessage}
+                      className="pointer-events-none absolute z-30 flex max-w-[min(32rem,calc(100%-2rem))] items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
+                      style={{
+                        left: `${failedAnnotationNode.x}%`,
+                        top: `${failedAnnotationNode.y}%`,
+                        transform: "translate(-50%, calc(-100% - 0.75rem))",
+                      }}
+                    >
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      <span>{failedHopMessage}</span>
+                    </div>
                   )}
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {
                       const isSelected = node.path === selectedPath;
                       const isRoot = node.path === "/";
-                      const isSensitive = isSensitiveDirectory(node.path);
-                      const isHopTarget = activeHop?.toPath === node.path;
+                      const pathInterest = classifyRuleBasedPathInterest(node.path);
+                      const pathInterestAccessibleText = pathInterest
+                        ? formatRuleBasedPathInterestDescription(pathInterest)
+                        : null;
+                      const isHopTarget = activeHopCanvasSemantics.verifiedTargetPath === node.path;
                       const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
                       const visitedStep = activeHop?.visitedStepMap[node.path];
                       const isOverlapping = overlappingNodePaths.has(node.path);
@@ -1025,7 +1235,7 @@ export function TopologyCanvas({
                             (node.hiddenChildCount ?? 0) > 0
                               ? ` (${node.hiddenChildCount} child directories aggregated, click to expand)`
                               : ""
-                          }${isSensitive ? " (sensitive target)" : ""}${
+                          }${pathInterestAccessibleText ? ` (${pathInterestAccessibleText})` : ""}${
                             isHopTarget && activeHop ? ` (active hop target ${activeHop.stepIndex + 1} of ${activeHop.totalSteps})` : ""
                           }`}
                           title={
@@ -1051,15 +1261,13 @@ export function TopologyCanvas({
                           className={`absolute flex max-w-56 -translate-x-1/2 -translate-y-1/2 touch-none items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left shadow-sm transition-colors duration-200 ${isArrangeMode ? "cursor-grab active:cursor-grabbing" : "cursor-pointer"} ${
                             isOverlapping
                               ? "z-30 border-warning bg-warning-subtle/50 text-text ring-2 ring-warning/80 shadow-md shadow-warning/20"
-                              : isHopTarget && activeHop?.isFailedAttempt
-                                ? "z-20 border-warning bg-warning-subtle text-text"
-                                : isHopTarget
+                              : isHopTarget
                                   ? "z-20 border-primary bg-primary-subtle text-text"
                                   : isSelected
                                     ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
                                     : isHopVisited
                                       ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
-                                      : isSensitive
+                                      : pathInterest
                                         ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
                                         : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                           }`}
@@ -1082,31 +1290,32 @@ export function TopologyCanvas({
                             <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                           ) : (
                             <Folder
-                              className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
+                              className={`h-3.5 w-3.5 shrink-0 ${pathInterest ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
                               aria-hidden="true"
                             />
                           )}
                           <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
-                          {isSensitive && (
+                          {pathInterest && (
                             <span
-                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                              title="Sensitive target / Drop directory"
-                              aria-hidden="true"
-                            />
+                              data-testid="rule-based-path-interest"
+                              data-rule-based-path-interest-root={pathInterest.matchedRoot}
+                              role="img"
+                              aria-label={pathInterestAccessibleText ?? pathInterest.label}
+                              title={pathInterestAccessibleText ?? pathInterest.label}
+                              className="flex h-4 w-4 shrink-0 items-center justify-center text-warning"
+                            >
+                              <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                              <span className="sr-only">{pathInterestAccessibleText}</span>
+                            </span>
                           )}
                           {isHopTarget && activeHop ? (
                             <span
-                              className={`flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 font-mono text-xs font-bold shadow-xs ${
-                                activeHop.isFailedAttempt ? "bg-warning text-surface" : "bg-primary text-surface"
-                              }`}
-                              title={
-                                activeHop.isFailedAttempt
-                                  ? `Failed attempt target (attempt ${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
-                                  : `Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`
-                              }
+                              data-testid="active-hop-target-badge"
+                              className="flex shrink-0 items-center gap-0.5 rounded bg-primary px-1.5 py-0.5 font-mono text-xs font-bold text-surface shadow-xs"
+                              title={`Current hop target (${activeHop.stepIndex + 1}/${activeHop.totalSteps})`}
                             >
                               <Route className="h-2.5 w-2.5" aria-hidden="true" />
-                              <span>{activeHop.isFailedAttempt ? `Failed #${activeHop.stepIndex + 1}` : `Hop ${activeHop.stepIndex + 1}`}</span>
+                              <span>Hop {activeHop.stepIndex + 1}</span>
                             </span>
                           ) : isHopVisited && visitedStep !== undefined ? (
                             <span
@@ -1118,7 +1327,9 @@ export function TopologyCanvas({
                           ) : null}
                           {(node.hiddenChildCount ?? 0) > 0 && (
                             <span
-                              className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-bold text-primary"
+                              data-testid="topology-aggregate-indicator"
+                              data-aggregate-path={node.path}
+                              className="shrink-0 rounded-full border border-primary/40 bg-primary/10 px-1.5 py-0.5 font-mono text-xs font-bold text-primary"
                               title={`${node.hiddenChildCount} child ${node.hiddenChildCount === 1 ? "directory" : "directories"} aggregated under this path. Click to expand.`}
                             >
                               +{node.hiddenChildCount}
@@ -1252,7 +1463,7 @@ export function TopologyCanvas({
                                 <span className="block truncate font-mono text-xs font-semibold text-text" title={callout.sourceIp}>
                                   {callout.sourceIp}
                                 </span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px] text-text-subtle">
+                                <span className="mt-0.5 flex items-center gap-1 text-xs text-text-subtle">
                                   <span>
                                     {callout.sessionIds.length} {callout.sessionIds.length === 1 ? "session" : "sessions"}
                                   </span>
@@ -1341,7 +1552,7 @@ export function TopologyCanvas({
                                       />
                                       <span className="truncate text-text-muted">{sess.sessionId.slice(0, 8)}…</span>
                                       <span
-                                        className={`truncate px-1 py-0.2 rounded text-[10px] border ${
+                                        className={`truncate px-1 py-0.2 rounded text-xs border ${
                                           isSessSelected
                                             ? "bg-surface text-primary border-primary-border"
                                             : "bg-surface text-text-subtle border-border/50"
@@ -1368,7 +1579,7 @@ export function TopologyCanvas({
                 </motion.div>
 
                 <AnimatePresence>
-                  {(showMinimap || zoom !== 1) && (
+                  {showMinimap && (
                     <TopologyMinimap
                       graphNodes={graphNodes}
                       graphNodeByPath={graphNodeByPath}
@@ -1388,20 +1599,23 @@ export function TopologyCanvas({
                 densityAnalysisRenderedNodes={densityAnalysis.renderedNodes}
                 densityAnalysisTotalNodes={densityAnalysis.totalNodes}
                 densityPreference={densityPreference}
-                setDensityPreference={setDensityPreference}
-                setIsPathsExpanded={setIsPathsExpanded}
                 effectiveSessionsLength={effectiveSessions.length}
                 isSourcesTruncated={totalLiveSources > renderedSourcesCount}
                 renderedSourcesCount={renderedSourcesCount}
                 totalLiveSources={totalLiveSources}
                 isSourcesExpanded={isSourcesExpanded}
                 setIsSourcesExpanded={setIsSourcesExpanded}
-                snapshotGeneratedAt={snapshot.generatedAt}
-                freshnessState={freshnessState}
-                staleThresholdMs={staleThresholdMs}
                 totalOverlaps={totalOverlaps}
-                autoArrangeTopology={autoArrangeTopology}
-                reducedMotion={reducedMotion}
+                {...(presentationContext.mode === "live"
+                  ? {
+                      presentationContext,
+                      snapshotGeneratedAt: snapshot.generatedAt,
+                      freshnessState,
+                      staleThresholdMs,
+                    }
+                  : {
+                      presentationContext,
+                    })}
               />
               {snapshot.truncated && (
                 <div className="flex shrink-0 gap-2 border-t border-warning-border bg-warning-subtle px-5 py-3 text-xs text-text-muted">
@@ -1490,7 +1704,7 @@ export function TopologyCanvas({
                           <span className="font-mono text-xs text-text">{callout.sourceIp}</span>
                           <div className="flex items-center gap-1.5">
                             {!isRendered && (
-                              <span className="ui-badge border-warning-border bg-warning-subtle text-[10px] text-warning">
+                              <span className="ui-badge border-warning-border bg-warning-subtle text-xs text-warning">
                                 Omitted (limit)
                               </span>
                             )}

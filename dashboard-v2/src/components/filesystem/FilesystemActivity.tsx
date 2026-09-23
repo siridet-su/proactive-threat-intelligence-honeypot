@@ -37,6 +37,7 @@ import {
   DEFAULT_STALE_THRESHOLD_MS,
   buildAuditSnapshot,
   buildAuditUrlSearch,
+  deriveAuditCoverage,
 
   type AuditUrlParams,
 } from "./filesystemUtils";
@@ -47,6 +48,7 @@ import { useFilesystemUrlState } from "./useFilesystemUrlState";
 import { useAuditReplay } from "./useAuditReplay";
 import {
   deriveAuthoritativeAuditMetrics,
+  formatRetainedSubtitleCoverage,
   useAuditDirectory,
 } from "./useAuditDirectory";
 import {
@@ -57,6 +59,7 @@ import {
   type RemoteAuditLookupIntent,
 } from "./sessionHopResolver";
 import type { PopStateTransaction } from "./filesystemNavigationCoordinator";
+import { handleRovingTabKey } from "./tabSemantics";
 
 interface NavigationApplicationErrorState {
   target: AuditUrlParams;
@@ -67,6 +70,8 @@ interface NavigationApplicationErrorState {
 import { useTimelineDrag } from "./useTimelineDrag";
 
 export type ForensicTab = "replay" | "evidence" | "actions";
+
+const LIVE_WORKSPACE_TABS = ["map", "details"] as const;
 
 export function FilesystemActivity() {
   const [mobileTab, setMobileTab] = useState<"map" | "timeline" | "details">("map");
@@ -119,7 +124,10 @@ export function FilesystemActivity() {
   const {
     timelineWidth,
     isDraggingTimeline,
-    handleSplitterMouseDown,
+    handleSplitterPointerDown,
+    handleSplitterPointerMove,
+    handleSplitterPointerUp,
+    handleSplitterPointerCancel,
     handleResetTimelineWidth,
     handleSplitterKeyDown,
   } = useTimelineDrag();
@@ -268,6 +276,8 @@ export function FilesystemActivity() {
     selectedHistoryIndex,
     displayedHistoryMetrics,
     activeHop,
+    displayedTransitions,
+    currentTransition,
     onPrevHop: handlePrevHop,
     onNextHop: handleNextHop,
     onTogglePlay: handleTogglePlay,
@@ -306,6 +316,10 @@ export function FilesystemActivity() {
     selectedLiveCwdRef.current = selectedLiveSession?.cwdState.path ?? null;
 
     setSelectedPath((current) => {
+      // Live snapshots are not authoritative for the retained audit graph. In
+      // audit mode, keep the operator's inspected path across stream refreshes;
+      // session and replay navigation update it through their own owners.
+      if (viewModeRef.current === "audit") return current;
       // If the active session actually changed its working directory, follow the new CWD.
       if (liveCwdChanged && selectedLiveSession?.cwdState.path && data.nodes.some((node) => node.path === selectedLiveSession.cwdState.path)) {
         return selectedLiveSession.cwdState.path;
@@ -364,6 +378,10 @@ export function FilesystemActivity() {
     totalSessionsCount,
     filteredSessionsCount,
     isSelectedFilteredOut,
+    retainedLoadedCount,
+    retainedMatchingCount,
+    retainedTotalCount,
+    retainedCountStatus,
   } = useMemo(() => {
     return deriveAuthoritativeAuditMetrics({
       viewMode,
@@ -464,14 +482,37 @@ export function FilesystemActivity() {
 
   const auditCanvasSubtitle = useMemo(() => {
     if (!selectedSession) return "Choose a session from the dropdown to replay its filesystem trajectory.";
-    if (filteredSessionsCount === 0) {
-      return `0 of ${totalSessionsCount} sessions match the active filter criteria. This session is pinned outside the result set.`;
-    }
-    if (isSelectedFilteredOut) {
-      return `This session is pinned outside the active filter criteria (${filteredSessionsCount} matching session${filteredSessionsCount === 1 ? "" : "s"} available).`;
-    }
-    return "All historical directories touched by this session are preserved on the canvas.";
-  }, [selectedSession, filteredSessionsCount, totalSessionsCount, isSelectedFilteredOut]);
+
+    const coverageModel = deriveAuditCoverage({
+      hasSelectedSession: true,
+      loadedEvents: history.length,
+      historyTotalItems,
+      historyComplete,
+      historyStatus,
+      auditSummaryEventCount: selectedSession.auditSummary?.eventCount,
+    });
+    const coverageWording = coverageModel.wording;
+
+    return formatRetainedSubtitleCoverage({
+      retainedMatchingCount,
+      retainedLoadedCount,
+      retainedCountStatus,
+      isSelectedFilteredOut,
+      hasActiveFilters,
+      coverageWording,
+    });
+  }, [
+    selectedSession,
+    retainedMatchingCount,
+    retainedLoadedCount,
+    retainedCountStatus,
+    isSelectedFilteredOut,
+    hasActiveFilters,
+    history.length,
+    historyTotalItems,
+    historyComplete,
+    historyStatus,
+  ]);
 
   // Reload CWD route when a new source event arrives for the selected session
   useEffect(() => {
@@ -791,6 +832,10 @@ export function FilesystemActivity() {
     filteredClosedSessions,
     handleResetAuditFilters,
     handleClearSelection,
+    retainedLoadedCount,
+    retainedMatchingCount,
+    retainedTotalCount,
+    retainedCountStatus,
     auditSnapshot,
     snapshot,
     regionStatus,
@@ -799,6 +844,8 @@ export function FilesystemActivity() {
     selectedSessionId,
     selectedPath,
     activeHop,
+    displayedTransitions,
+    currentTransition,
     playbackSpeed,
     auditCanvasTitle,
     auditCanvasSubtitle,
@@ -808,7 +855,10 @@ export function FilesystemActivity() {
     isDraggingTimeline,
     isTimelineCollapsed,
     timelineWidth,
-    handleSplitterMouseDown,
+    handleSplitterPointerDown,
+    handleSplitterPointerMove,
+    handleSplitterPointerUp,
+    handleSplitterPointerCancel,
     handleResetTimelineWidth,
     handleSplitterKeyDown,
     history,
@@ -832,7 +882,7 @@ export function FilesystemActivity() {
 
   return (
     <FilesystemContext.Provider value={contextValue as FilesystemContextType}>
-    <div className="min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
+    <div className="filesystem-activity-scope min-w-0 space-y-5 overflow-x-hidden pb-10 sm:pb-14">
 
       {navigationApplicationError ? (
         <div
@@ -865,24 +915,64 @@ export function FilesystemActivity() {
 
       {/* Mode 1: Live Global Topology Mode */}
       {viewMode === "live" ? (
-        <div className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1">
+        <div
+          id="filesystem-live-panel"
+          role="tabpanel"
+          aria-labelledby="filesystem-live-tab"
+          className="flex flex-col lg:grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-stretch min-h-[calc(100dvh-12rem)] lg:flex-1"
+        >
           {/* Mobile Tabs */}
-          <div className="flex lg:hidden gap-2 border-b border-border pb-2">
+          <div
+            className="flex lg:hidden gap-2 border-b border-border pb-2"
+            role="tablist"
+            aria-label="Live workspace views"
+          >
             <button
+              id="live-map-tab"
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "map"}
+              aria-controls="live-map-panel"
+              tabIndex={mobileTab === "map" ? 0 : -1}
               onClick={() => setMobileTab('map')}
+              onKeyDown={(event) => handleRovingTabKey({
+                event,
+                tabs: LIVE_WORKSPACE_TABS,
+                currentTab: "map",
+                onSelect: setMobileTab,
+                tabId: (tab) => `live-${tab}-tab`,
+              })}
               className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'map' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
             >
               Map
             </button>
             <button
+              id="live-details-tab"
+              type="button"
+              role="tab"
+              aria-selected={mobileTab === "details"}
+              aria-controls="live-details-panel"
+              tabIndex={mobileTab === "details" ? 0 : -1}
               onClick={() => setMobileTab('details')}
+              onKeyDown={(event) => handleRovingTabKey({
+                event,
+                tabs: LIVE_WORKSPACE_TABS,
+                currentTab: "details",
+                onSelect: setMobileTab,
+                tabId: (tab) => `live-${tab}-tab`,
+              })}
               className={`px-4 py-2 text-sm font-medium rounded-t-lg ${mobileTab === 'details' ? 'bg-surface border-b-2 border-primary text-primary' : 'text-text-subtle'}`}
             >
               Details
             </button>
           </div>
 
-          <div className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}>
+          <div
+            id="live-map-panel"
+            role="tabpanel"
+            aria-labelledby="live-map-tab"
+            className={`min-w-0 flex-1 flex-col gap-4 ${mobileTab === 'map' ? 'flex' : 'hidden'} lg:flex`}
+          >
             <LiveScopeBar snapshot={snapshot} />
             <TopologyCanvas
               snapshot={snapshot}
@@ -896,11 +986,17 @@ export function FilesystemActivity() {
               onRefresh={refresh}
               onReconnect={handleReconnect}
               staleThresholdMs={DEFAULT_STALE_THRESHOLD_MS}
+              presentationContext={{ mode: "live" }}
               className="flex-1"
             />
           </div>
 
-          <div className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}>
+          <div
+            id="live-details-panel"
+            role="tabpanel"
+            aria-labelledby="live-details-tab"
+            className={`${mobileTab === 'details' ? 'block' : 'hidden'} lg:block`}
+          >
             <FilesystemContextPanel
               selectedSession={selectedSession}
               selectedClosedSession={selectedClosedSession}
@@ -914,17 +1010,26 @@ export function FilesystemActivity() {
             />
           </div>
         </div>
-      ) : isAuditFullscreen ? (
-        /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
+      ) : (
         <div
-          ref={auditDialogRef}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Audit Replay Studio Fullscreen"
-          tabIndex={-1}
-          className="fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+          id="filesystem-audit-panel"
+          role="tabpanel"
+          aria-labelledby="filesystem-audit-tab"
         >
-          {/* Studio Top Navigation Bar */}
+          <div
+            ref={isAuditFullscreen ? auditDialogRef : undefined}
+            role={isAuditFullscreen ? "dialog" : undefined}
+            aria-modal={isAuditFullscreen ? true : undefined}
+            aria-label={isAuditFullscreen ? "Audit Replay Studio Fullscreen" : undefined}
+            tabIndex={isAuditFullscreen ? -1 : undefined}
+            className={
+              isAuditFullscreen
+                ? "fixed inset-0 z-50 flex flex-col bg-surface-subtle p-2.5 sm:p-3.5 gap-2.5 overflow-hidden text-text"
+                : "space-y-4"
+            }
+          >
+          {isAuditFullscreen ? (
+          /* Mode 2 Fullscreen: Dedicated Forensic Replay Cockpit (Hybrid 70/30 with Collapse) */
           <header className="relative z-30 grid shrink-0 grid-cols-1 items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2 shadow-xs xl:grid-cols-[minmax(0,1fr)_auto]">
             <div
               className="flex min-w-0 flex-wrap items-center gap-1.5"
@@ -960,6 +1065,10 @@ export function FilesystemActivity() {
                   onClearSearch={clearAuditSearch}
                   hideHomeOnly={hideHomeOnly}
                   targetPathFilter={targetPathFilter}
+                  timeRange={timeRange}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedCountStatus={retainedCountStatus}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
@@ -980,6 +1089,10 @@ export function FilesystemActivity() {
                   totalCount={totalSessionsCount}
                   onResetFilters={handleResetAuditFilters}
                   selectedCanvasPath={selectedPath}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedTotalCount={retainedTotalCount}
+                  retainedCountStatus={retainedCountStatus}
                 />
               </div>
               {selectedSession && (
@@ -1017,8 +1130,9 @@ export function FilesystemActivity() {
                             onClick={handlePrevHop}
                             disabled={selectedHistoryIndex <= 0}
                             className="ui-button h-9 min-h-9 w-9 p-0"
-                            title="Previous hop (←)"
                             aria-label="Previous hop"
+                            data-tooltip-label="Previous hop (←)"
+                            data-keyboard-tooltip
                           >
                             <ChevronLeft className="h-3.5 w-3.5" />
                           </button>
@@ -1039,8 +1153,9 @@ export function FilesystemActivity() {
                             onClick={handleNextHop}
                             disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                             className="ui-button h-9 min-h-9 w-9 p-0"
-                            title="Next hop (→)"
                             aria-label="Next hop"
+                            data-tooltip-label="Next hop (→)"
+                            data-keyboard-tooltip
                           >
                             <ChevronRight className="h-3.5 w-3.5" />
                           </button>
@@ -1097,14 +1212,8 @@ export function FilesystemActivity() {
               </div>
             </div>
           </header>
-
-          {/* Main Studio Workspace */}
-          <AuditFilesystemWorkspace isFullscreen={true} onToggleFullscreen={() => setIsAuditFullscreen(false)} />
-        </div>
-      ) : (
-        /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
-        <div className="space-y-4">
-          {/* Target Session Selector & Action Bar (Structured Responsive Toolbar) */}
+          ) : (
+          /* Mode 2: Session Forensics & Replay Mode (Side-by-Side In-Page View) */
           <div
             className="relative z-30 flex flex-col xl:flex-row xl:items-center justify-between gap-2 rounded-xl border border-border bg-surface px-2.5 py-1.5 shadow-xs"
             role="toolbar"
@@ -1139,6 +1248,10 @@ export function FilesystemActivity() {
                   onClearSearch={clearAuditSearch}
                   hideHomeOnly={hideHomeOnly}
                   targetPathFilter={targetPathFilter}
+                  timeRange={timeRange}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedCountStatus={retainedCountStatus}
                   status={auditStatus}
                   errorMessage={auditErrorMessage}
                   onRetry={retryInitialDirectory}
@@ -1159,6 +1272,10 @@ export function FilesystemActivity() {
                   totalCount={totalSessionsCount}
                   onResetFilters={handleResetAuditFilters}
                   selectedCanvasPath={selectedPath}
+                  retainedMatchingCount={retainedMatchingCount}
+                  retainedLoadedCount={retainedLoadedCount}
+                  retainedTotalCount={retainedTotalCount}
+                  retainedCountStatus={retainedCountStatus}
                 />
               </div>
             </div>
@@ -1184,8 +1301,9 @@ export function FilesystemActivity() {
                     onClick={handlePrevHop}
                     disabled={selectedHistoryIndex <= 0}
                     className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Previous hop (←)"
                     aria-label="Previous hop"
+                    data-tooltip-label="Previous hop (←)"
+                    data-keyboard-tooltip
                   >
                     <ChevronLeft className="h-3.5 w-3.5" />
                   </button>
@@ -1206,8 +1324,9 @@ export function FilesystemActivity() {
                     onClick={handleNextHop}
                     disabled={selectedHistoryIndex < 0 || selectedHistoryIndex >= displayedHistory.length - 1}
                     className="ui-button h-9 min-h-9 w-9 p-0"
-                    title="Next hop (→)"
                     aria-label="Next hop"
+                    data-tooltip-label="Next hop (→)"
+                    data-keyboard-tooltip
                   >
                     <ChevronRight className="h-3.5 w-3.5" />
                   </button>
@@ -1246,9 +1365,14 @@ export function FilesystemActivity() {
               </div>
             </div>
           </div>
+          )}
 
-          {/* Side-by-Side Audit Layout */}
-          <AuditFilesystemWorkspace isFullscreen={false} onToggleFullscreen={enterAuditFullscreen} />
+          {/* A single stateful workspace changes layout props without remounting. */}
+          <AuditFilesystemWorkspace
+            isFullscreen={isAuditFullscreen}
+            onToggleFullscreen={isAuditFullscreen ? () => setIsAuditFullscreen(false) : enterAuditFullscreen}
+          />
+          </div>
         </div>
       )}
     </div>

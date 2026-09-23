@@ -97,7 +97,7 @@ describe("useAuditReplay pure replay helpers (FS-016)", () => {
     expect(hop?.visitedPaths).toContain("/var/log");
   });
 
-  it("computes failed attempt hop route staying at fromPath", () => {
+  it("computes failed attempt hop route with no verified destination", () => {
     const eventsWithFailure: SessionCwdHistoryEvent[] = [
       {
         id: "ev-fail",
@@ -115,7 +115,8 @@ describe("useAuditReplay pure replay helpers (FS-016)", () => {
 
     expect(hop).not.toBeNull();
     expect(hop?.isFailedAttempt).toBe(true);
-    expect(hop?.toPath).toBe("/var"); // Stayed at /var
+    expect(hop?.fromPath).toBe("/var");
+    expect(hop?.toPath).toBeNull();
   });
 
   it("navigates next and previous hops sequentially", () => {

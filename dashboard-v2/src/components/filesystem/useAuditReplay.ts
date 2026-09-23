@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
+  deriveAnchoredVerifiedCwdTransition,
+  deriveVerifiedCwdTransitions,
+  type VerifiedCwdTransition,
+} from "./filesystemTransitions";
+import {
   buildReplayTimeline,
   calculateReplayPacingDelay,
   getHistoryWindowMetrics,
@@ -27,25 +32,27 @@ export function filterDisplayedHistory(
   return chronologicalHistory.filter((e) => e.action !== "failed_change");
 }
 
-export function deriveActiveHopRoute(
-  displayedHistory: readonly SessionCwdHistoryEvent[],
-  selectedHistoryIndex: number,
+export function deriveActiveHopRouteFromEvent(
+  currentEvent: SessionCwdHistoryEvent,
+  eventsThroughSelection: readonly SessionCwdHistoryEvent[],
   displayedHistoryMetrics: HistoryWindowMetrics,
-): ActiveHopRoute | null {
-  if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
-  const currentEvent = displayedHistory[selectedHistoryIndex];
+): ActiveHopRoute {
   const isFailed = currentEvent.action === "failed_change";
   const visitedStepMap: Record<string, number> = {};
-  for (let i = 0; i <= selectedHistoryIndex; i++) {
-    const ev = displayedHistory[i];
-    if (ev.action !== "failed_change" && ev.toPath && visitedStepMap[ev.toPath] === undefined) {
-      visitedStepMap[ev.toPath] = displayedHistoryMetrics.indexOffset + i + 1;
+
+  for (let i = 0; i < eventsThroughSelection.length; i++) {
+    const event = eventsThroughSelection[i];
+    if (event.action !== "failed_change" && event.toPath && visitedStepMap[event.toPath] === undefined) {
+      visitedStepMap[event.toPath] = event.id === currentEvent.id
+        ? displayedHistoryMetrics.selectedNumber
+        : displayedHistoryMetrics.indexOffset + i + 1;
     }
   }
+
   return {
     eventId: currentEvent.id,
     fromPath: currentEvent.fromPath,
-    toPath: isFailed ? currentEvent.fromPath : currentEvent.toPath,
+    toPath: isFailed ? null : currentEvent.toPath,
     action: currentEvent.action,
     status: currentEvent.status,
     at: currentEvent.at,
@@ -55,6 +62,20 @@ export function deriveActiveHopRoute(
     visitedStepMap,
     isFailedAttempt: isFailed,
   };
+}
+
+export function deriveActiveHopRoute(
+  displayedHistory: readonly SessionCwdHistoryEvent[],
+  selectedHistoryIndex: number,
+  displayedHistoryMetrics: HistoryWindowMetrics,
+): ActiveHopRoute | null {
+  if (selectedHistoryIndex < 0 || !displayedHistory[selectedHistoryIndex]) return null;
+  const currentEvent = displayedHistory[selectedHistoryIndex];
+  return deriveActiveHopRouteFromEvent(
+    currentEvent,
+    displayedHistory.slice(0, selectedHistoryIndex + 1),
+    displayedHistoryMetrics,
+  );
 }
 
 export function getNextPlaybackSpeed(currentSpeed: number): number {
@@ -140,6 +161,8 @@ export interface AuditReplayPresentation {
   hopTimeMetrics: HopTimeMetrics[];
   sessionTimeSummary: SessionReplayTimeSummary;
   replayTimeline: ReplayTimeline;
+  displayedTransitions: VerifiedCwdTransition[];
+  currentTransition: VerifiedCwdTransition | null;
   isAnchoredSelected: boolean;
   showFailedAttempts: boolean;
   onToggleShowFailedAttempts: (show: boolean) => void;
@@ -182,6 +205,18 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   const displayedHistory = useMemo(
     () => filterDisplayedHistory(chronologicalHistory, showFailedAttempts),
     [chronologicalHistory, showFailedAttempts],
+  );
+
+  const chronologicalTransitions = useMemo(
+    () => deriveVerifiedCwdTransitions(chronologicalHistory, historyTotalItems),
+    [chronologicalHistory, historyTotalItems],
+  );
+
+  const displayedTransitions = useMemo(
+    () => showFailedAttempts
+      ? [...chronologicalTransitions]
+      : chronologicalTransitions.filter((transition) => transition.action !== "failed_change"),
+    [chronologicalTransitions, showFailedAttempts],
   );
 
   const isAnchoredSelected = useMemo(() => {
@@ -240,21 +275,15 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   const activeHop: ActiveHopRoute | null = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
-      const isFailed = anchoredHop.action === "failed_change";
       const hopNum = explicitHopNumber ?? 1;
-      return {
-        eventId: anchoredHop.id,
-        fromPath: anchoredHop.fromPath,
-        toPath: isFailed ? anchoredHop.fromPath : anchoredHop.toPath,
-        action: anchoredHop.action,
-        status: anchoredHop.status,
-        at: anchoredHop.at,
-        stepIndex: hopNum - 1,
-        totalSteps: displayedHistoryMetrics.totalItems,
-        visitedPaths: anchoredHop.toPath ? [anchoredHop.toPath] : [],
-        visitedStepMap: anchoredHop.toPath ? { [anchoredHop.toPath]: hopNum } : {},
-        isFailedAttempt: isFailed,
-      };
+      return deriveActiveHopRouteFromEvent(
+        anchoredHop,
+        [anchoredHop],
+        {
+          ...displayedHistoryMetrics,
+          selectedNumber: hopNum,
+        },
+      );
     }
     return deriveActiveHopRoute(displayedHistory, selectedHistoryIndex, displayedHistoryMetrics);
   }, [
@@ -265,6 +294,14 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     isAnchoredSelected,
     selectedHistoryIndex,
   ]);
+
+  const currentTransition = useMemo(() => {
+    if (isAnchoredSelected && anchoredHop) {
+      return deriveAnchoredVerifiedCwdTransition(anchoredHop, historyTotalItems);
+    }
+    if (selectedHistoryIndex < 0) return null;
+    return displayedTransitions[selectedHistoryIndex] ?? null;
+  }, [anchoredHop, displayedTransitions, historyTotalItems, isAnchoredSelected, selectedHistoryIndex]);
 
   const timeMetrics = useMemo(() => {
     if (isAnchoredSelected && anchoredHop) {
@@ -370,6 +407,8 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
     selectedHistoryIndex,
     displayedHistoryMetrics,
     activeHop,
+    displayedTransitions,
+    currentTransition,
     hopTimeMetrics: timeMetrics.hopMetrics,
     sessionTimeSummary: timeMetrics.summary,
     replayTimeline,

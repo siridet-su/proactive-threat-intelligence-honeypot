@@ -9,7 +9,10 @@ import {
 interface TimelineSplitterProps {
   isDragging: boolean;
   width: number;
-  onMouseDown: (e: React.MouseEvent) => void;
+  onPointerDown: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerCancel: (event: React.PointerEvent<HTMLDivElement>) => void;
   onDoubleClick?: () => void;
   onKeyDown?: (e: React.KeyboardEvent) => void;
   className?: string;
@@ -18,7 +21,10 @@ interface TimelineSplitterProps {
 export const TimelineSplitter = memo(function TimelineSplitter({
   isDragging,
   width,
-  onMouseDown,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
   onDoubleClick,
   onKeyDown,
   className = "",
@@ -30,10 +36,15 @@ export const TimelineSplitter = memo(function TimelineSplitter({
       aria-valuenow={width}
       aria-valuemin={MIN_TIMELINE_SIDEBAR_WIDTH}
       aria-valuemax={MAX_TIMELINE_SIDEBAR_WIDTH}
+      aria-valuetext={`${width} pixels wide`}
       aria-label="Resize timeline panel. Drag left/right, double click to reset."
       tabIndex={0}
       title="Drag to resize timeline (Double-click to reset)"
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
+      onLostPointerCapture={onPointerCancel}
       onDoubleClick={onDoubleClick}
       onKeyDown={onKeyDown}
       className={`relative z-20 flex items-center justify-center w-3 -mr-1.5 cursor-col-resize select-none group touch-none shrink-0 ${

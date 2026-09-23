@@ -808,7 +808,7 @@ function buildAuditProjectionFilterExpression(options: AuditScopingPipelineOptio
             $map: {
               input: { $ifNull: ["$auditVisitedPaths", []] },
               as: "path",
-              in: { $not: { $regexMatch: { input: "$path", regex: "^/home(/|$)" } } }
+              in: { $not: { $regexMatch: { input: "$$path", regex: "^/home(/|$)" } } }
             }
           }
         }

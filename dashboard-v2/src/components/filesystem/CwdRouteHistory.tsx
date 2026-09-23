@@ -2,6 +2,7 @@
 
 import {
   History,
+  AlertTriangle,
   Shield,
   Terminal,
 } from "lucide-react";
@@ -13,12 +14,14 @@ import { RouteEventList } from "./RouteEventList";
 import { RegionState, type RegionStatus } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
 import {
+  formatFailedChangeMessage,
   formatTimestamp,
   isReplayTimelineKeyboardKey,
   mapReplayTimelineKeyToIndex,
 } from "./filesystemUtils";
 import type { HopResolutionStatus } from "./sessionHopResolver";
 import type { AuditReplayPresentation } from "./useAuditReplay";
+import { handleRovingTabKey } from "./tabSemantics";
 
 type SidebarTab = "replay" | "evidence" | "actions";
 
@@ -27,6 +30,14 @@ const SIDEBAR_TAB_COLUMN: Record<SidebarTab, number> = {
   evidence: 2,
   actions: 3,
 };
+
+const SIDEBAR_TABS = [
+  { id: "replay", label: "Route Replay", icon: null },
+  { id: "evidence", label: "Evidence", icon: Terminal },
+  { id: "actions", label: "Response", icon: Shield },
+] as const;
+
+const SIDEBAR_TAB_IDS = SIDEBAR_TABS.map((tab) => tab.id);
 
 const SIDEBAR_CONTENT_VARIANTS = {
   enter: (direction: number) => ({ opacity: direction === 0 ? 1 : 0, x: direction * 10 }),
@@ -113,6 +124,9 @@ export function CwdRouteHistory({
 
   const activeHistoryEventId = selectedHistoryEvent?.id ?? null;
   const isFailedHop = selectedHistoryEvent?.action === "failed_change";
+  const selectedCwdContextPath = isFailedHop
+    ? selectedHistoryEvent?.fromPath ?? "an unknown verified origin"
+    : selectedHistoryEvent?.toPath ?? selectedSession?.cwdState.path ?? "Unknown";
 
   const timelineContainerRef = useRef<HTMLDivElement | null>(null);
   const activeItemRef = useRef<HTMLButtonElement | null>(null);
@@ -166,6 +180,16 @@ export function CwdRouteHistory({
     onTabChange(nextTab);
   };
 
+  const handleSidebarTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentTab: SidebarTab) => {
+    handleRovingTabKey({
+      event,
+      tabs: SIDEBAR_TAB_IDS,
+      currentTab,
+      onSelect: handleSidebarTabChange,
+      tabId: (tab) => `tab-${tab}`,
+    });
+  };
+
   return (
     <div className={`ui-panel overflow-hidden ${isSidebar ? "flex flex-col h-full min-h-0" : ""}`}>
       {/* Panel Header with Compact Tabs */}
@@ -200,11 +224,7 @@ export function CwdRouteHistory({
                   }
                 />
               </div>
-              {([
-                { id: "replay", label: "Route Replay", icon: null },
-                { id: "evidence", label: "Evidence", icon: Terminal },
-                { id: "actions", label: "Response", icon: Shield },
-              ] as const).map((tab) => {
+              {SIDEBAR_TABS.map((tab) => {
                 const isActive = sidebarTab === tab.id;
                 const Icon = tab.icon;
 
@@ -216,7 +236,9 @@ export function CwdRouteHistory({
                     id={`tab-${tab.id}`}
                     aria-selected={isActive}
                     aria-controls={`tabpanel-${tab.id}`}
+                    tabIndex={isActive ? 0 : -1}
                     onClick={() => handleSidebarTabChange(tab.id)}
+                    onKeyDown={(event) => handleSidebarTabKeyDown(event, tab.id)}
                     className={`relative z-10 flex min-h-9 cursor-pointer items-center justify-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium transition-colors duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus-ring ${
                       isActive ? "text-primary" : "text-text-muted hover:text-text"
                     }`}
@@ -324,27 +346,38 @@ export function CwdRouteHistory({
               {sidebarTab === "evidence" ? (
                 /* Command telemetry is intentionally explicit when no authoritative feed is connected. */
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">
-            <div className="rounded-xl border border-border bg-surface-subtle p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-text-muted">Selected CWD context</span>
-                <span className="font-mono text-text">
-                  {selectedHistoryEvent?.toPath ?? selectedSession.cwdState.path ?? "Unknown"}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
-                <span>
-                  {selectedHistoryEvent
-                    ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
-                    : "No route hop recorded"}
-                </span>
-                <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
-              </div>
-            </div>
-            <RegionState
-              kind="empty"
-              title="Evidence Unavailable"
-              description="No command feed or payload data is currently linked to this CWD hop."
-            />
+                  <div className="rounded-xl border border-border bg-surface-subtle p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="text-text-muted">Selected CWD context</span>
+                      <span className="font-mono text-text">
+                        {selectedCwdContextPath}
+                      </span>
+                    </div>
+                    {isFailedHop && (
+                      <div
+                        role="status"
+                        data-testid="failed-change-evidence-status"
+                        aria-label={formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}
+                        className="mt-2 flex items-start gap-1.5 border-t border-warning-border/50 pt-2 text-xs text-warning"
+                      >
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span>{formatFailedChangeMessage(selectedHistoryEvent?.fromPath)}</span>
+                      </div>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-xs text-text-subtle">
+                      <span>
+                        {selectedHistoryEvent
+                          ? `Hop ${displayedHistoryMetrics.selectedNumber} of ${displayedHistoryMetrics.totalItems}`
+                          : "No route hop recorded"}
+                      </span>
+                      <span>{formatTimestamp(selectedHistoryEvent?.at ?? selectedSession.cwdState.observedAt)}</span>
+                    </div>
+                  </div>
+                  <RegionState
+                    kind="empty"
+                    title="Evidence Unavailable"
+                    description="No command feed or payload data is currently linked to this CWD hop."
+                  />
                 </div>
               ) : sidebarTab === "actions" ? (
                 <div className="flex flex-1 flex-col min-h-0 space-y-3">

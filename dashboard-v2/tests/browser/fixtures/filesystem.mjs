@@ -70,7 +70,10 @@ export async function assertNoBrowserFailures(page) {
   await expect(page.__fa013BrowserFailures).toEqual([]);
 }
 
-export async function installApiFixtures(page, { deferDirectLookup = false } = {}) {
+export async function installApiFixtures(page, {
+  deferDirectLookup = false,
+  transitionReplay = false,
+} = {}) {
   await page.context().addCookies([{
     name: "pti_session",
     value: browserSessionToken(),
@@ -113,6 +116,52 @@ export async function installApiFixtures(page, { deferDirectLookup = false } = {
     at: "2026-09-19T00:00:10.000Z",
     hopNumber: 1,
   };
+  const transitionReplayHistory = [
+    {
+      id: "replay-revisit",
+      sessionId: "closed-session",
+      fromPath: "/tmp",
+      toPath: "/home/cowrie",
+      command: "cd /home/cowrie",
+      action: "changed",
+      status: "confirmed",
+      at: "2026-09-19T00:00:40.000Z",
+      hopNumber: 4,
+    },
+    {
+      id: "replay-failed",
+      sessionId: "closed-session",
+      fromPath: "/tmp",
+      toPath: "/unverified-hostile-destination",
+      command: "cd /unverified-hostile-destination",
+      action: "failed_change",
+      status: "conditional_candidate",
+      at: "2026-09-19T00:00:30.000Z",
+      hopNumber: 3,
+    },
+    {
+      id: "replay-change",
+      sessionId: "closed-session",
+      fromPath: "/home/cowrie",
+      toPath: "/tmp",
+      command: "cd /tmp",
+      action: "changed",
+      status: "confirmed",
+      at: "2026-09-19T00:00:20.000Z",
+      hopNumber: 2,
+    },
+    {
+      id: "replay-entered",
+      sessionId: "closed-session",
+      fromPath: "/home/cowrie",
+      toPath: "/home/cowrie",
+      command: null,
+      action: "entered",
+      status: "confirmed",
+      at: "2026-09-19T00:00:10.000Z",
+      hopNumber: 1,
+    },
+  ];
   const snapshot = {
     nodes: [],
     sessions: [liveSession],
@@ -203,6 +252,29 @@ export async function installApiFixtures(page, { deferDirectLookup = false } = {
     const hop = url.searchParams.get("hop");
     const cursor = url.searchParams.get("cursor");
     historyRequests.push({ sessionId, hop, cursor });
+    if (transitionReplay) {
+      const selectedReplayHop = transitionReplayHistory.find((event) => event.id === hop);
+      if (hop && selectedReplayHop) {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ item: { ...selectedReplayHop, sessionId } }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: transitionReplayHistory.map((event) => ({ ...event, sessionId })),
+          nextCursor: null,
+          totalItems: transitionReplayHistory.length,
+          totalSuccessfulItems: transitionReplayHistory.filter((event) => event.action !== "failed_change").length,
+          complete: true,
+        }),
+      });
+      return;
+    }
     if (hop === "deep-hop") {
       if (deferDirectLookup) await directLookup.promise;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ item: { ...deepHop, sessionId } }) });

@@ -144,6 +144,20 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         { path: "/opt/secret/backdoor", sessionCount: 1 },
       ],
     };
+    const unfiltered120Summary: AuditDirectorySummary = {
+      ...server120Summary,
+      matchingCount: undefined,
+    };
+    const hideHome120Summary: AuditDirectorySummary = {
+      ...server120Summary,
+      matchingCount: 80,
+    };
+    const targetPathScopeKey = createAuditScopeKey({
+      hideHome: false,
+      targetPath: "/opt/secret/backdoor",
+    });
+    const unfilteredScopeKey = createAuditScopeKey({ hideHome: false, targetPath: null });
+    const hideHomeScopeKey = createAuditScopeKey({ hideHome: true, targetPath: null });
 
     // Client only has page 1 (50 items) loaded into memory, NONE of which touch /opt/secret/backdoor
     const clientPage1Sessions: FilesystemClosedSession[] = Array.from({ length: 50 }, (_, i) => {
@@ -157,6 +171,8 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
         summary: server120Summary,
+        summaryScopeKey: targetPathScopeKey,
+        currentScopeKey: targetPathScopeKey,
         hideHomeOnly: false,
         targetPathFilter: "/opt/secret/backdoor",
         selectedSessionId: null,
@@ -179,7 +195,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         activeSessions: [activeSession],
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
-        summary: server120Summary,
+        summary: unfiltered120Summary,
+        summaryScopeKey: unfilteredScopeKey,
+        currentScopeKey: unfilteredScopeKey,
         hideHomeOnly: false,
         targetPathFilter: null,
         selectedSessionId: null,
@@ -197,7 +215,9 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
         activeSessions: [activeSession], // active session is not home-only
         authoritativeClosedSessions: clientPage1Sessions,
         snapshotRecentClosedSessions,
-        summary: server120Summary,
+        summary: hideHome120Summary,
+        summaryScopeKey: hideHomeScopeKey,
+        currentScopeKey: hideHomeScopeKey,
         hideHomeOnly: true,
         targetPathFilter: null,
         selectedSessionId: null,
@@ -1137,6 +1157,363 @@ describe("FA-001: Authoritative Audit Directory Ownership & Decoupled State", ()
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Suite G: FSV-003 Time Scope Propagation Through Search and Pagination
+  // ---------------------------------------------------------------------------
+  describe("Suite G: FSV-003 Time Scope Propagation Through Search and Pagination", () => {
+    it("includes canonical from and to query parameters in search URL when supplied, and omits them when absent", async () => {
+      const fetchedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        fetchedUrls.push(String(input));
+        return {
+          ok: true,
+          json: async () => ({ items: [], nextCursor: null, totalItems: 0 }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // 1. Search with from and to
+      await store.searchSessions("incident", null, {
+        hideHome: true,
+        targetPath: "/var/log",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+
+      expect(fetchedUrls.length).toBe(1);
+      expect(fetchedUrls[0]).toContain("q=incident");
+      expect(fetchedUrls[0]).toContain("hideHome=1");
+      expect(fetchedUrls[0]).toContain("targetPath=%2Fvar%2Flog");
+      expect(fetchedUrls[0]).toContain("from=1710000000000");
+      expect(fetchedUrls[0]).toContain("to=1710086400000");
+
+      // 2. Search without from and to
+      await store.searchSessions("another", null, { hideHome: false });
+      expect(fetchedUrls.length).toBe(2);
+      expect(fetchedUrls[1]).toContain("q=another");
+      expect(fetchedUrls[1]).not.toContain("from=");
+      expect(fetchedUrls[1]).not.toContain("to=");
+    });
+
+    it("paginates successfully and preserves scopes across bound variations with exact URL assertions", async () => {
+      const requestedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        const parsed = new URL(url, "http://localhost");
+        const cursor = parsed.searchParams.get("cursor");
+        if (cursor) {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("search-sess-p2", "2026-09-16T07:00:00.000Z", ["/tmp"], false)],
+              nextCursor: null,
+              totalItems: 2,
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("search-sess-p1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+            nextCursor: "cursor-p1",
+            totalItems: 2,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // 1. loadMoreSearch() without an options argument preserves a bounded stored scope
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      expect(store.getState().searchCursor).toBe("cursor-p1");
+      await store.loadMoreSearch();
+
+      expect(requestedUrls.length).toBe(2);
+      const p1Url = new URL(requestedUrls[0], "http://localhost");
+      const p2Url = new URL(requestedUrls[1], "http://localhost");
+
+      expect(p1Url.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(p1Url.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(p1Url.searchParams.getAll("cursor")).toEqual([]);
+
+      expect(p2Url.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(p2Url.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(p2Url.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+      expect(p2Url.searchParams.get("from")).toBe(p1Url.searchParams.get("from"));
+      expect(p2Url.searchParams.get("to")).toBe(p1Url.searchParams.get("to"));
+      expect(p2Url.searchParams.get("hideHome")).toBe("1");
+      expect(p2Url.searchParams.get("targetPath")).toBe("/tmp");
+      expect(store.getState().searchItems.length).toBe(2);
+      expect(store.getState().searchCursor).toBeNull();
+      expect(store.getState().searchHasMore).toBe(false);
+      expect(store.getState().searchIsComplete).toBe(true);
+
+      // 2. a fully matching explicit options object paginates successfully
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      await store.loadMoreSearch({
+        hideHome: true,
+        targetPath: "/tmp",
+        from: 1710000000000,
+        to: 1710086400000,
+      });
+      expect(requestedUrls.length).toBe(2);
+      const matchingP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(matchingP2.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(matchingP2.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(matchingP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 3. from-only scope remains from-only on page 2 (both no options and matching options)
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 1710000000000,
+      });
+      await store.loadMoreSearch();
+      expect(requestedUrls.length).toBe(2);
+      const fromOnlyP1 = new URL(requestedUrls[0], "http://localhost");
+      const fromOnlyP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(fromOnlyP1.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(fromOnlyP1.searchParams.getAll("to")).toEqual([]);
+      expect(fromOnlyP2.searchParams.getAll("from")).toEqual(["1710000000000"]);
+      expect(fromOnlyP2.searchParams.getAll("to")).toEqual([]);
+      expect(fromOnlyP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 4. to-only scope remains to-only on page 2
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        to: 1710086400000,
+      });
+      await store.loadMoreSearch({
+        hideHome: false,
+        targetPath: null,
+        to: 1710086400000,
+      });
+      expect(requestedUrls.length).toBe(2);
+      const toOnlyP1 = new URL(requestedUrls[0], "http://localhost");
+      const toOnlyP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(toOnlyP1.searchParams.getAll("from")).toEqual([]);
+      expect(toOnlyP1.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(toOnlyP2.searchParams.getAll("from")).toEqual([]);
+      expect(toOnlyP2.searchParams.getAll("to")).toEqual(["1710086400000"]);
+      expect(toOnlyP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 5. unbounded scope remains unbounded
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+      });
+      await store.loadMoreSearch({
+        hideHome: false,
+        targetPath: null,
+      });
+      expect(requestedUrls.length).toBe(2);
+      const unbP1 = new URL(requestedUrls[0], "http://localhost");
+      const unbP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(unbP1.searchParams.getAll("from")).toEqual([]);
+      expect(unbP1.searchParams.getAll("to")).toEqual([]);
+      expect(unbP2.searchParams.getAll("from")).toEqual([]);
+      expect(unbP2.searchParams.getAll("to")).toEqual([]);
+      expect(unbP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+
+      // 6. numeric zero remains a valid bound
+      requestedUrls.length = 0;
+      await store.searchSessions("payload", null, {
+        hideHome: false,
+        targetPath: null,
+        from: 0,
+        to: 1000,
+      });
+      await store.loadMoreSearch();
+      expect(requestedUrls.length).toBe(2);
+      const zeroP1 = new URL(requestedUrls[0], "http://localhost");
+      const zeroP2 = new URL(requestedUrls[1], "http://localhost");
+      expect(zeroP1.searchParams.getAll("from")).toEqual(["0"]);
+      expect(zeroP1.searchParams.getAll("to")).toEqual(["1000"]);
+      expect(zeroP2.searchParams.getAll("from")).toEqual(["0"]);
+      expect(zeroP2.searchParams.getAll("to")).toEqual(["1000"]);
+      expect(zeroP2.searchParams.getAll("cursor")).toEqual(["cursor-p1"]);
+    });
+
+    it("rejects all scope mismatch variations on loadMoreSearch, clears search state, and sends no cursor", async () => {
+      const requestedUrls: string[] = [];
+      const mockFetch: typeof fetch = async (input) => {
+        requestedUrls.push(String(input));
+        return {
+          ok: true,
+          json: async () => ({
+            items: [createClosedSession("search-sess-p1", "2026-09-16T08:00:00.000Z", ["/tmp"], false)],
+            nextCursor: "cursor-time-scope-1",
+            totalItems: 5,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      const setupPage1 = async (scope: { hideHome?: boolean; targetPath?: string | null; from?: number; to?: number }) => {
+        requestedUrls.length = 0;
+        await store.searchSessions("exploit", null, scope);
+        expect(store.getState().searchCursor).toBe("cursor-time-scope-1");
+        expect(requestedUrls.length).toBe(1);
+      };
+
+      const assertRejected = () => {
+        const cursorRequests = requestedUrls.slice(1).filter((u) => {
+          const params = new URL(u, "http://localhost").searchParams;
+          return params.has("cursor");
+        });
+        expect(cursorRequests).toEqual([]);
+        expect(store.getState().searchCursor).toBeNull();
+        expect(store.getState().searchQuery).toBe("");
+        expect(store.getState().searchItems).toEqual([]);
+        expect(store.getState().searchScopeKey).toBe("");
+      };
+
+      // 1. bounded stored scope → explicitly unbounded current scope ({ from: undefined, to: undefined })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: undefined, to: undefined });
+      assertRejected();
+
+      // 2. bounded stored scope → removal of only from ({ from: undefined, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: undefined, to: 2000 });
+      assertRejected();
+
+      // 3. bounded stored scope → removal of only to ({ from: 1000, to: undefined })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: undefined });
+      assertRejected();
+
+      // 4. unbounded stored scope → bounded current scope ({ from: 1000, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      assertRejected();
+
+      // 5. different numeric from ({ from: 9999, to: 2000 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 9999, to: 2000 });
+      assertRejected();
+
+      // 6. different numeric to ({ from: 1000, to: 8888 })
+      await setupPage1({ hideHome: false, targetPath: null, from: 1000, to: 2000 });
+      await store.loadMoreSearch({ hideHome: false, targetPath: null, from: 1000, to: 8888 });
+      assertRejected();
+    });
+
+    it("protects against out-of-order search responses across different time ranges for the same query", async () => {
+      let resolveRangeA!: (value: Response) => void;
+      const rangeAPromise = new Promise<Response>((resolve) => {
+        resolveRangeA = resolve;
+      });
+
+      const mockFetch: typeof fetch = async (input) => {
+        const url = String(input);
+        const params = new URL(url, "http://localhost").searchParams;
+        if (params.get("from") === "1000" && params.get("to") === "2000") {
+          return rangeAPromise;
+        }
+        if (params.get("from") === "3000" && params.get("to") === "4000") {
+          return {
+            ok: true,
+            json: async () => ({
+              items: [createClosedSession("sess-range-b", "2026-09-16T08:00:00.000Z", ["/opt"], false)],
+              nextCursor: null,
+              totalItems: 1,
+            }),
+          } as Response;
+        }
+        return { ok: false, status: 404 } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Trigger search in Range A (from: 1000, to: 2000)
+      const callA = store.searchSessions("target", null, { from: 1000, to: 2000 });
+
+      // Trigger search in Range B (from: 3000, to: 4000) which resolves quickly
+      await store.searchSessions("target", null, { from: 3000, to: 4000 });
+
+      // Verify Range B's results are active
+      expect(store.getState().searchQuery).toBe("target");
+      expect(store.getState().searchScopeKey).toBe(createAuditScopeKey({ q: "target", from: 3000, to: 4000 }));
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-range-b"]);
+
+      // Late resolution of Range A
+      resolveRangeA({
+        ok: true,
+        json: async () => ({
+          items: [createClosedSession("sess-range-a-stale", "2026-09-16T08:00:00.000Z", ["/opt"], false)],
+          nextCursor: null,
+          totalItems: 1,
+        }),
+      } as Response);
+      await callA;
+
+      // Stale Range A response must be discarded by generation guard
+      expect(store.getState().searchQuery).toBe("target");
+      expect(store.getState().searchScopeKey).toBe(createAuditScopeKey({ q: "target", from: 3000, to: 4000 }));
+      expect(store.getState().searchItems.map((s) => s.sessionId)).toEqual(["sess-range-b"]);
+    });
+
+    it("aborts in-flight search and clears search state when initial directory fetch changes time range", async () => {
+      let searchAborted = false;
+      const mockFetch: typeof fetch = async (input, init) => {
+        const url = String(input);
+        if (url.includes("q=")) {
+          const signal = init?.signal as AbortSignal | undefined;
+          if (signal) {
+            signal.addEventListener("abort", () => {
+              searchAborted = true;
+            });
+          }
+          return new Promise(() => {}); // never resolves
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            items: [],
+            nextCursor: null,
+            totalItems: 0,
+          }),
+        } as Response;
+      };
+
+      const store = createAuditDirectoryStore({ fetchFn: mockFetch });
+
+      // Start search under time range A
+      void store.searchSessions("attacker", null, { from: 1000, to: 2000 });
+      expect(store.getState().searchIsLoading).toBe(true);
+
+      // Time range filter changes: fetchInitial for time range B
+      await store.fetchInitial({ from: 3000, to: 4000 });
+
+      // In-flight search must be aborted and cleared
+      expect(searchAborted).toBe(true);
+      expect(store.getState().searchQuery).toBe("");
+      expect(store.getState().searchItems).toEqual([]);
+      expect(store.getState().searchIsLoading).toBe(false);
+      expect(store.getState().searchCursor).toBeNull();
     });
   });
 });
