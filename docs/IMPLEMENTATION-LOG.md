@@ -90,3 +90,45 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   loopback; review interface, port, firewall, and router path before doing so.
 - Related ADR/runbook: [ADR-0004](adr/ADR-0004-opencanary-http-login.md) and
   [OpenCanary runbook](../integrations/opencanary/README.md).
+
+### 2026-09-24 — Merge focused filesystem replay visualization into main
+
+- Status: prepared and merged into repository `main`; not deployed to a host.
+- Scope and intent: integrate the completed filesystem visualization branch,
+  including stable source connector geometry, collision-aware verified CWD
+  transition routing, a current-hop-first replay view, and synchronized transfer
+  and destination-impact effects.
+- Repository branch and commit/PR: source branch
+  `feat/filesystem-visualization-semantics`; merge commit recorded in Git history.
+- Repository changes: the audit canvas now defaults to the selected current hop,
+  provides optional previous-trail and all-transition comparison modes, keeps the
+  complete accessible transition sequence, restores the six-layer light packet
+  and impact wave, omits the redundant current-hop arrowhead, and retains
+  directional arrows for non-current events only in all-transition mode. The
+  splitter pointer suite now installs its own in-memory Storage stub so Node 26's
+  unavailable global `localStorage` accessor cannot leak state or fail setup.
+- Host/environment changes actually applied: none. No dashboard process,
+  systemd unit, reverse proxy, database, Pi service, or network exposure was
+  changed.
+- Runtime/exposure state: repository implementation only; production deployment
+  and activation were not performed in this change.
+- Validation performed and outcome: focused splitter suite passed 6/6; full
+  Vitest passed 797 tests with 2 expected failures and 14 skipped; ESLint passed
+  with zero errors; webpack production build passed and generated 19/19 static
+  pages; Chromium filesystem browser suite passed 15/15; `git diff --check`
+  passed. Add/add conflicts in five hardware-backup files were resolved by
+  preserving the newer `main` versions from the completed backup PR.
+- Not performed / deferred: no host deployment or external exposure test was
+  performed. A later visual refinement may reduce endpoint-ring/glow density;
+  it is intentionally not part of this merge.
+- Risks and data handling: no telemetry authority, API schema, retained evidence,
+  secrets, attacker payloads, or protected configuration were changed. Visual
+  density modes change presentation only; event identity and chronology remain
+  available to assistive technology.
+- Rollback: revert the merge commit on `main`; no host rollback is required for
+  this repository-only change.
+- Follow-up: visually evaluate whether the animated destination should suppress
+  its static endpoint ring while preserving the reduced-motion fallback.
+- Related ADR/runbook: filesystem semantics and validation evidence are recorded
+  in
+  [`dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md`](../dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md).

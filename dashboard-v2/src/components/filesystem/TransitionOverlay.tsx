@@ -8,6 +8,7 @@ import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import type { GraphElementBounds, GraphNode } from "./filesystemUtils";
 
 export type TransitionOverlayState = "previous" | "current" | "future";
+export type TransitionDisplayMode = "current" | "trail" | "all";
 
 export interface TransitionOverlayItem {
   transition: VerifiedCwdTransition;
@@ -24,17 +25,27 @@ export interface TransitionOverlayProps {
   reducedMotion: boolean;
   layoutTransition?: Transition;
   showLegend?: boolean;
+  displayMode?: TransitionDisplayMode;
 }
 
 export interface OverlayGeometry {
   route: string;
   startX: number;
   startY: number;
+  controlX: number;
+  controlY: number;
   labelX: number;
   labelY: number;
   targetX: number;
   targetY: number;
   selfLoop: boolean;
+}
+
+export interface PlannedTransitionOverlayItem {
+  item: TransitionOverlayItem;
+  geometry: OverlayGeometry | null;
+  marker: { x: number; y: number } | null;
+  lane: number | null;
 }
 
 function isSafeHop(value: number | null): value is number {
@@ -80,12 +91,18 @@ function markerPoint(
   return node ? { x: node.x, y: node.y } : null;
 }
 
-function rectangleBoundaryPoint(
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function transitionPortPoint(
   centerX: number,
   centerY: number,
   towardX: number,
   towardY: number,
   bounds: GraphElementBounds | undefined,
+  offsetX: number,
+  offsetY: number,
 ): { x: number; y: number } {
   const deltaX = towardX - centerX;
   const deltaY = towardY - centerY;
@@ -93,11 +110,59 @@ function rectangleBoundaryPoint(
 
   const halfWidth = bounds?.width && bounds.width > 0 ? bounds.width / 2 : 4;
   const halfHeight = bounds?.height && bounds.height > 0 ? bounds.height / 2 : 2.5;
-  const scale = 1 / Math.max(Math.abs(deltaX) / halfWidth, Math.abs(deltaY) / halfHeight);
+  const horizontalSide = Math.abs(deltaX) / halfWidth >= Math.abs(deltaY) / halfHeight;
+  const portInset = 0.45;
+  if (horizontalSide) {
+    return {
+      x: centerX + Math.sign(deltaX) * halfWidth,
+      y: centerY + clamp(offsetY, -Math.max(0, halfHeight - portInset), Math.max(0, halfHeight - portInset)),
+    };
+  }
   return {
-    x: centerX + deltaX * scale,
-    y: centerY + deltaY * scale,
+    x: centerX + clamp(offsetX, -Math.max(0, halfWidth - portInset), Math.max(0, halfWidth - portInset)),
+    y: centerY + Math.sign(deltaY) * halfHeight,
   };
+}
+
+function quadraticPoint(
+  startX: number,
+  startY: number,
+  controlX: number,
+  controlY: number,
+  endX: number,
+  endY: number,
+  progress: number,
+): { x: number; y: number } {
+  const remaining = 1 - progress;
+  return {
+    x: remaining * remaining * startX + 2 * remaining * progress * controlX + progress * progress * endX,
+    y: remaining * remaining * startY + 2 * remaining * progress * controlY + progress * progress * endY,
+  };
+}
+
+function pointInsideBounds(
+  point: { x: number; y: number },
+  bounds: GraphElementBounds,
+  padding: number,
+): boolean {
+  return Math.abs(point.x - bounds.x) < bounds.width / 2 + padding &&
+    Math.abs(point.y - bounds.y) < bounds.height / 2 + padding;
+}
+
+function routeIntersectsUnrelatedNode(
+  fromPath: string,
+  toPath: string,
+  start: { x: number; y: number },
+  control: { x: number; y: number },
+  end: { x: number; y: number },
+  nodeBounds: Readonly<Record<string, GraphElementBounds>>,
+): boolean {
+  const obstacles = Object.entries(nodeBounds).filter(([path]) => path !== fromPath && path !== toPath);
+  for (let sample = 1; sample < 16; sample += 1) {
+    const point = quadraticPoint(start.x, start.y, control.x, control.y, end.x, end.y, sample / 16);
+    if (obstacles.some(([, bounds]) => pointInsideBounds(point, bounds, 1.1))) return true;
+  }
+  return false;
 }
 
 export function deriveDirectedTransitionGeometry(
@@ -125,6 +190,8 @@ export function deriveDirectedTransitionGeometry(
       route: `M ${startX} ${startY} C ${from.x + radiusX} ${from.y - radiusY}, ${from.x - radiusX} ${from.y - radiusY}, ${endX} ${endY}`,
       startX,
       startY,
+      controlX: from.x,
+      controlY: from.y - radiusY,
       labelX: from.x,
       labelY: from.y - radiusY - 1.5,
       targetX: endX,
@@ -138,11 +205,34 @@ export function deriveDirectedTransitionGeometry(
   const distance = Math.max(1, Math.hypot(dx, dy));
   const perpendicularX = -dy / distance;
   const perpendicularY = dx / distance;
-  const laneOffset = 2 + lane * 3;
-  const controlX = (from.x + to.x) / 2 + perpendicularX * laneOffset;
-  const controlY = (from.y + to.y) / 2 + perpendicularY * laneOffset;
-  const start = rectangleBoundaryPoint(from.x, from.y, controlX, controlY, nodeBounds[from.path]);
-  const end = rectangleBoundaryPoint(to.x, to.y, controlX, controlY, nodeBounds[to.path]);
+  const portOffset = 1.8 + lane * 1.25;
+  const start = transitionPortPoint(
+    from.x,
+    from.y,
+    to.x,
+    to.y,
+    nodeBounds[from.path],
+    perpendicularX * portOffset,
+    perpendicularY * portOffset,
+  );
+  const end = transitionPortPoint(
+    to.x,
+    to.y,
+    from.x,
+    from.y,
+    nodeBounds[to.path],
+    perpendicularX * portOffset,
+    perpendicularY * portOffset,
+  );
+  let laneOffset = clamp(distance * 0.2, 7.5, 11) + lane * 4;
+  let controlX = (from.x + to.x) / 2 + perpendicularX * laneOffset;
+  let controlY = (from.y + to.y) / 2 + perpendicularY * laneOffset;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (!routeIntersectsUnrelatedNode(from.path, to.path, start, { x: controlX, y: controlY }, end, nodeBounds)) break;
+    laneOffset += 3.5;
+    controlX = (from.x + to.x) / 2 + perpendicularX * laneOffset;
+    controlY = (from.y + to.y) / 2 + perpendicularY * laneOffset;
+  }
   const startX = start.x;
   const startY = start.y;
   const endX = end.x;
@@ -152,12 +242,117 @@ export function deriveDirectedTransitionGeometry(
     route: `M ${startX} ${startY} Q ${controlX} ${controlY}, ${endX} ${endY}`,
     startX,
     startY,
+    controlX,
+    controlY,
     labelX: (startX + 2 * controlX + endX) / 4,
     labelY: (startY + 2 * controlY + endY) / 4,
     targetX: endX,
     targetY: endY,
     selfLoop: false,
   };
+}
+
+function labelBoxOverlaps(
+  point: { x: number; y: number },
+  usedLabels: readonly { x: number; y: number }[],
+): boolean {
+  const halfWidth = 2.25;
+  const halfHeight = 1.7;
+  return usedLabels.some((label) =>
+    Math.abs(point.x - label.x) < halfWidth * 2 && Math.abs(point.y - label.y) < halfHeight * 2,
+  );
+}
+
+function placeTransitionLabel(
+  geometry: OverlayGeometry,
+  nodeBounds: Readonly<Record<string, GraphElementBounds>>,
+  usedLabels: readonly { x: number; y: number }[],
+): { x: number; y: number } {
+  if (geometry.selfLoop) return { x: geometry.labelX, y: geometry.labelY };
+  const dx = geometry.targetX - geometry.startX;
+  const dy = geometry.targetY - geometry.startY;
+  const distance = Math.max(1, Math.hypot(dx, dy));
+  const perpendicularX = -dy / distance;
+  const perpendicularY = dx / distance;
+  const midpointX = (geometry.startX + geometry.targetX) / 2;
+  const midpointY = (geometry.startY + geometry.targetY) / 2;
+  const curveSide = Math.sign(
+    (geometry.controlX - midpointX) * perpendicularX +
+    (geometry.controlY - midpointY) * perpendicularY,
+  ) || 1;
+  const progressCandidates = [0.5, 0.38, 0.62, 0.28, 0.72];
+  const clearanceCandidates = [2.1, 4.2, 6.3];
+  for (const clearance of clearanceCandidates) {
+    for (const progress of progressCandidates) {
+      const routePoint = quadraticPoint(
+        geometry.startX,
+        geometry.startY,
+        geometry.controlX,
+        geometry.controlY,
+        geometry.targetX,
+        geometry.targetY,
+        progress,
+      );
+      const point = {
+        x: routePoint.x + perpendicularX * curveSide * clearance,
+        y: routePoint.y + perpendicularY * curveSide * clearance,
+      };
+      const overlapsNode = Object.values(nodeBounds).some((bounds) => pointInsideBounds(point, bounds, 1.8));
+      if (!overlapsNode && !labelBoxOverlaps(point, usedLabels)) return point;
+    }
+  }
+  return {
+    x: geometry.labelX + perpendicularX * curveSide * 6.3,
+    y: geometry.labelY + perpendicularY * curveSide * 6.3,
+  };
+}
+
+export function planTransitionOverlayRoutes(
+  items: readonly TransitionOverlayItem[],
+  nodeByPath: ReadonlyMap<string, GraphNode>,
+  nodeBounds: Readonly<Record<string, GraphElementBounds>>,
+): PlannedTransitionOverlayItem[] {
+  const directedCounts = new Map<string, number>();
+  const laneByEvent = new Map<string, number>();
+  for (const item of items) {
+    const transition = item.transition;
+    if (transition.presentationKind !== "directed" || !transition.fromPath || !transition.toPath) continue;
+    const key = `${transition.fromPath}\u0000${transition.toPath}`;
+    const lane = directedCounts.get(key) ?? 0;
+    laneByEvent.set(transition.eventId, lane);
+    directedCounts.set(key, lane + 1);
+  }
+
+  const usedLabels: Array<{ x: number; y: number }> = [];
+  return items.map((item) => {
+    const transition = item.transition;
+    const lane = transition.presentationKind === "directed"
+      ? laneByEvent.get(transition.eventId) ?? 0
+      : null;
+    const baseGeometry = transition.presentationKind === "directed"
+      ? deriveDirectedTransitionGeometry(transition, nodeByPath, nodeBounds, lane ?? 0)
+      : null;
+    const geometry = baseGeometry
+      ? (() => {
+          const label = placeTransitionLabel(baseGeometry, nodeBounds, usedLabels);
+          usedLabels.push(label);
+          return { ...baseGeometry, labelX: label.x, labelY: label.y };
+        })()
+      : null;
+    const marker = transition.presentationKind === "entry" || transition.presentationKind === "failed-origin"
+      ? markerPoint(transition.markerPath, nodeByPath)
+      : null;
+    return { item, geometry, marker, lane };
+  });
+}
+
+export function selectVisibleTransitionItems(
+  items: readonly TransitionOverlayItem[],
+  displayMode: TransitionDisplayMode,
+): TransitionOverlayItem[] {
+  if (displayMode === "all") return [...items];
+  if (displayMode === "trail") return items.filter((item) => item.state !== "future");
+  return items.filter((item) => item.state === "current");
 }
 
 function stateStyle(state: TransitionOverlayState) {
@@ -190,16 +385,16 @@ function describeTransition(item: TransitionOverlayItem): string {
   return `${prefix} transition; verified endpoints unavailable`;
 }
 
-export function TransitionLegend() {
+export function TransitionLegend({ displayMode = "current" }: { displayMode?: TransitionDisplayMode }) {
   return (
     <aside
       aria-label="Topology and transition legend"
       className="pointer-events-none absolute bottom-3 left-3 z-50 flex max-w-[calc(100%-1.5rem)] flex-wrap gap-x-3 gap-y-1 rounded-lg border border-border bg-surface/95 px-3 py-2 text-xs text-text-muted shadow-sm backdrop-blur-sm"
     >
       <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong" aria-hidden="true" />Filesystem hierarchy</span>
-      <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 bg-primary/50" aria-hidden="true" />Previous transition</span>
-      <span className="inline-flex items-center gap-1.5 font-semibold text-text"><span className="h-0.5 w-5 bg-primary" aria-hidden="true" />Current transition</span>
-      <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong/40" aria-hidden="true" />Future transition</span>
+      {displayMode !== "current" && <span className="inline-flex items-center gap-1.5"><span className="h-0.5 w-5 bg-primary/50" aria-hidden="true" />Previous trail</span>}
+      <span className="inline-flex items-center gap-1.5 font-semibold text-text"><span className="h-0.5 w-5 bg-primary" aria-hidden="true" />Current hop</span>
+      {displayMode === "all" && <span className="inline-flex items-center gap-1.5"><span className="h-px w-5 bg-border-strong/40" aria-hidden="true" />Future transition</span>}
       <span className="inline-flex items-center gap-1.5"><CornerDownRight className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Entry marker</span>
       <span className="inline-flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />Failed at origin</span>
     </aside>
@@ -215,6 +410,7 @@ export function TransitionOverlay({
   reducedMotion,
   layoutTransition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] },
   showLegend = true,
+  displayMode = "current",
 }: TransitionOverlayProps) {
   const markerNamespace = useId().replace(/:/g, "");
   const items = useMemo(
@@ -222,38 +418,27 @@ export function TransitionOverlay({
     [currentTransition, transitions],
   );
   const nodeByPath = useMemo(() => new Map(nodes.map((node) => [node.path, node])), [nodes]);
-  const laneByEvent = useMemo(() => {
-    const counts = new Map<string, number>();
-    const lanes = new Map<string, number>();
-    for (const item of items) {
-      const transition = item.transition;
-      if (transition.presentationKind !== "directed" || !transition.fromPath || !transition.toPath) continue;
-      const key = `${transition.fromPath}\u0000${transition.toPath}`;
-      const lane = counts.get(key) ?? 0;
-      lanes.set(transition.eventId, lane);
-      counts.set(key, lane + 1);
-    }
-    return lanes;
-  }, [items]);
-
-  const rendered = items.map((item) => {
-    const transition = item.transition;
-    const geometry = transition.presentationKind === "directed"
-      ? deriveDirectedTransitionGeometry(transition, nodeByPath, nodeBounds, laneByEvent.get(transition.eventId) ?? 0)
-      : null;
-    const marker = transition.presentationKind === "entry" || transition.presentationKind === "failed-origin"
-      ? markerPoint(transition.markerPath, nodeByPath)
-      : null;
-    return { item, geometry, marker };
-  });
+  const visibleItems = useMemo(
+    () => selectVisibleTransitionItems(items, displayMode),
+    [displayMode, items],
+  );
+  const rendered = useMemo(
+    () => planTransitionOverlayRoutes(visibleItems, nodeByPath, nodeBounds),
+    [nodeBounds, nodeByPath, visibleItems],
+  );
   const hasAnchoredCurrent = items.some((item) => item.isAnchored && item.state === "current");
 
   return (
     <>
-      <div className="pti-transition-overlay pointer-events-none absolute inset-0 z-[5]" data-testid="verified-transition-overlay">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
+      <div
+        className="pti-transition-overlay pti-hop-energy pointer-events-none absolute inset-0 z-[5]"
+        data-testid="verified-transition-overlay"
+        data-transition-display-mode={displayMode}
+        style={{ "--hop-cycle-duration": `${Math.max(600, durationMs)}ms` } as CSSProperties}
+      >
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="absolute inset-0 z-[1] h-full w-full overflow-visible" aria-hidden="true">
           <defs>
-            {(["previous", "current", "future"] as const).map((state) => {
+            {(["previous", "future"] as const).map((state) => {
               const style = stateStyle(state);
               return (
                 <marker
@@ -271,7 +456,7 @@ export function TransitionOverlay({
             })}
           </defs>
 
-          {rendered.map(({ item, geometry, marker }, index) => {
+          {rendered.map(({ item, geometry, marker, lane }, index) => {
             const { transition, state } = item;
             const style = stateStyle(state);
             const key = `${transition.eventId}:${index}`;
@@ -284,9 +469,7 @@ export function TransitionOverlay({
                       animate={{ d: geometry.route }}
                       transition={reducedMotion ? { duration: 0 } : layoutTransition}
                       fill="none"
-                      stroke="var(--primary)"
-                      strokeOpacity="0.16"
-                      strokeWidth="2"
+                      className="pti-hop-route-glow"
                     />
                   )}
                   {state === "current" && (
@@ -300,20 +483,6 @@ export function TransitionOverlay({
                       strokeWidth="0.55"
                     />
                   )}
-                  {state === "current" && !reducedMotion && (
-                    <circle
-                      data-testid="transition-current-pulse"
-                      cx={geometry.targetX}
-                      cy={geometry.targetY}
-                      r="1.05"
-                      fill="none"
-                      stroke="var(--primary)"
-                      strokeWidth="0.35"
-                    >
-                      <animate attributeName="r" values="1.05;2.5;1.05" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                      <animate attributeName="opacity" values="0.8;0;0.8" dur={`${Math.max(600, durationMs)}ms`} repeatCount="indefinite" />
-                    </circle>
-                  )}
                   <motion.path
                     initial={false}
                     animate={{ d: geometry.route }}
@@ -323,18 +492,31 @@ export function TransitionOverlay({
                     strokeOpacity={style.opacity}
                     strokeWidth={style.width}
                     strokeLinecap="round"
-                    markerEnd={`url(#${markerNamespace}-${state}-transition-arrow)`}
+                    markerEnd={displayMode === "all" && state !== "current"
+                      ? `url(#${markerNamespace}-${state}-transition-arrow)`
+                      : undefined}
                     data-transition-event-id={transition.eventId}
                     data-transition-kind="directed"
                     data-transition-state={state}
                     data-transition-route={`${transition.fromPath}→${transition.toPath}`}
                     data-transition-self-loop={geometry.selfLoop ? "true" : undefined}
+                    data-transition-lane={lane ?? undefined}
+                    data-transition-trail={displayMode === "trail" && state === "previous" ? "true" : undefined}
                     data-anchored-transition={item.isAnchored ? "true" : undefined}
                   />
                   {state === "current" && !reducedMotion && (
-                    <circle data-testid="transition-travel-packet" r="0.72" fill="var(--primary)">
-                      <animateMotion dur={`${Math.max(300, durationMs)}ms`} repeatCount="indefinite" path={geometry.route} />
-                    </circle>
+                    <g data-testid="transition-travel-packet">
+                      {(["bloom", "wake", "tail", "halo", "body", "core"] as const).map((layer) => (
+                        <motion.path
+                          key={layer}
+                          initial={false}
+                          animate={{ d: geometry.route }}
+                          transition={layoutTransition}
+                          pathLength={100}
+                          className={`pti-hop-packet pti-hop-packet-${layer}`}
+                        />
+                      ))}
+                    </g>
                   )}
                 </g>
               );
@@ -378,7 +560,39 @@ export function TransitionOverlay({
           })}
         </svg>
 
-        {rendered.map(({ item, geometry, marker }, index) => {
+        {rendered.map(({ item, geometry }, index) => {
+          const transition = item.transition;
+          if (
+            reducedMotion ||
+            item.state !== "current" ||
+            !geometry ||
+            !transition.fromPath ||
+            !transition.toPath ||
+            transition.fromPath === transition.toPath
+          ) return null;
+          const target = nodeByPath.get(transition.toPath);
+          if (!target) return null;
+          const bounds = nodeBounds[transition.toPath];
+          return (
+            <motion.div
+              key={`impact:${transition.eventId}:${index}`}
+              data-testid="transition-impact-wave"
+              initial={false}
+              animate={{
+                left: `${target.x}%`,
+                top: `${target.y}%`,
+                width: `${bounds?.width ?? 12}%`,
+                height: `${bounds?.height ?? 5}%`,
+              }}
+              transition={layoutTransition}
+              className="absolute z-0 -translate-x-1/2 -translate-y-1/2 rounded-lg"
+            >
+              <span className="pti-hop-wave" data-testid="transition-current-pulse" />
+            </motion.div>
+          );
+        })}
+
+        {displayMode === "all" && rendered.map(({ item, geometry, marker }, index) => {
           const point = geometry ? { x: geometry.labelX, y: geometry.labelY } : marker;
           if (!point) return null;
           const isCurrent = item.state === "current";
@@ -420,7 +634,7 @@ export function TransitionOverlay({
       <ol aria-label="Verified CWD transition sequence" className="sr-only">
         {items.map((item, index) => <li key={`${item.transition.eventId}:${index}`}>{describeTransition(item)}</li>)}
       </ol>
-      {showLegend && <TransitionLegend />}
+      {showLegend && <TransitionLegend displayMode={displayMode} />}
     </>
   );
 }
