@@ -1,6 +1,11 @@
-> **Status: superseded prototype.**
+> **Status: current asynchronous pipeline (verified 2026-09-24).**
 >
-> The current implementation uses a Redis-backed asynchronous worker; see [the TI design](design/threat-intelligence.md). Direct provider calls in the `processor-agent`, the in-memory cache, and the field layout below are historical only.
+> The processor publishes validated public IP/SHA-256 observables to Redis
+> `ti:jobs` after the canonical event is durable. `honeypot-ti-worker.service`
+> consumes these jobs asynchronously and writes bounded, cache-expiring
+> enrichment to MongoDB; see [the TI design](design/threat-intelligence.md).
+> Direct provider calls in the processor, its in-memory cache, and the field
+> layout below are historical only.
 >
 > **Current configuration boundary.**
 >
@@ -15,12 +20,20 @@
 >
 # Threat Intelligence Enrichment Pipeline
 
-This document outlines the architecture and implementation details for the automated Threat Intelligence (TI) enrichment pipeline integrated into the Honeypot's Go-based `processor-agent`.
+This document outlines the architecture and implementation details for the
+automated Threat Intelligence (TI) enrichment pipeline. The processor handles
+validated job publication while the separate `ti-worker` owns provider calls.
 
 ## Overview
-Instead of querying third-party threat intelligence APIs directly from the frontend (which is slow, blocks rendering, and easily exhausts API rate limits), the TI lookups are deeply integrated into the backend ingestion pipeline. 
+Instead of querying third-party threat intelligence APIs from the frontend or
+the processor hot path, the processor publishes validated jobs to Redis after
+the canonical event is persisted. The asynchronous `ti-worker` performs the
+provider lookups without blocking ingestion.
 
-When an event is consumed from Redis by the `processor-agent`, the agent immediately queries external Threat Intelligence providers before writing the enriched event to MongoDB.
+When an event is consumed from Redis by the `processor-agent`, the agent
+persists the canonical event and publishes validated observables to `ti:jobs`.
+The separate `ti-worker` then queries external providers and writes the
+cache-expiring enrichment to MongoDB.
 
 ## Features
 1. **AbuseIPDB Integration:** Automatically retrieves the abuse confidence score, ISP, and historical reporting data for any attacking IP address.
