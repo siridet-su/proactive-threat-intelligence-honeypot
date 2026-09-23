@@ -237,7 +237,7 @@ export function TimePicker({ date, onChange, label, variant = "start", compact =
           <button
             type="button"
             onClick={handleSetNow}
-            className={`${compact ? "h-7 rounded-md text-[10px]" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
+            className={`${compact ? "h-7 rounded-md text-xs" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
               isNow
                 ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                 : "bg-surface-subtle hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"
@@ -253,7 +253,7 @@ export function TimePicker({ date, onChange, label, variant = "start", compact =
               key={qp.label}
               type="button"
               onClick={() => commitTime(qp.h, qp.m)}
-              className={`${compact ? "h-7 rounded-md text-[10px]" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
+              className={`${compact ? "h-7 rounded-md text-xs" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
                 isSelected
                   ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                   : "bg-surface-subtle hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"

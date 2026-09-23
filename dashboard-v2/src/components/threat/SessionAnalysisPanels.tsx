@@ -82,6 +82,42 @@ function display(value: unknown, fallback = "Unavailable"): string {
   return fallback;
 }
 
+function Insight({ title, children, tone = "primary" }: { title: string; children: ReactNode; tone?: "primary" | "warning" }) {
+  return (
+    <div className={`rounded-xl border p-4 ${tone === "warning" ? "border-warning-border bg-warning-subtle" : "border-primary-border bg-primary-subtle"}`}>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">{title}</p>
+      <div className="mt-1 text-sm leading-6 text-text">{children}</div>
+    </div>
+  );
+}
+
+function ScrollPanel({ title, count, children, className = "", height = "max-h-72" }: { title: string; count?: number; children: ReactNode; className?: string; height?: string }) {
+  return (
+    <section className={`overflow-hidden rounded-xl border border-border bg-surface ${className}`}>
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-subtle px-3.5 py-2.5">
+        <h3 className="text-xs font-semibold text-text">{title}</h3>
+        {count !== undefined && <span className="ui-badge text-[10px]">{count}</span>}
+      </div>
+      <div role="region" aria-label={title} tabIndex={0} className={`ui-scroll-region ${height} space-y-2 overflow-y-auto overscroll-contain scroll-smooth p-2.5 pr-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`} style={{ scrollbarColor: "var(--border-strong) transparent", scrollbarWidth: "thin" }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function MoreDetails({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="group rounded-lg border border-border bg-surface">
+      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text marker:text-primary">{title}</summary>
+      <div className="border-t border-border px-4 py-4">{children}</div>
+    </details>
+  );
+}
+
+function readableCode(value: unknown): string {
+  return label(value, "not recorded").replaceAll("_", " ").toLowerCase();
+}
+
 // Allow the bounded server projection to finish over the local SSH tunnel.
 // The previous 2.5/7-second client cutoffs hid healthy session evidence.
 const CLIENT_TIMEOUT_MS = 45_000;
@@ -497,33 +533,55 @@ function Panel({
 
 function TimelineList({ items }: { items: unknown[] }) {
   const orderedItems = chronologicalRecords(items).filter((item) => item.command_event !== true);
+  const [filter, setFilter] = useState("all");
+  const category = (item: JsonRecord) => {
+    const eventName = String(item.eventid || item.event_id || item.event_type || "").toLowerCase();
+    if (/login|auth|password|client\.kex/.test(eventName)) return "Authentication";
+    if (/session|connect|disconnect|close/.test(eventName)) return "Session";
+    return "Other";
+  };
+  const visibleItems = orderedItems.filter((item) => filter === "all" || category(item) === filter);
+  const filters = [
+    ["all", "All events", orderedItems.length],
+    ["Authentication", "Access", orderedItems.filter((item) => category(item) === "Authentication").length],
+    ["Session", "Session", orderedItems.filter((item) => category(item) === "Session").length],
+    ["Other", "Other", orderedItems.filter((item) => category(item) === "Other").length],
+  ] as const;
   if (!orderedItems.length) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No persisted timeline events are available.</p>;
   }
   return (
     <div className="space-y-3">
-      <p className="text-xs text-text-muted">Transport, authentication, and lifecycle events. Command input is shown once in Command activity.</p>
-      <ol className="space-y-2">
-        {orderedItems.slice(0, 100).map((event, index) => {
+      <Insight title="Activity at a glance">{orderedItems.length} connection, authentication, or lifecycle event{orderedItems.length === 1 ? "" : "s"} were recorded. Commands are shown separately in Command activity.</Insight>
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter timeline events">
+        {filters.map(([key, title, count]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filter === key ? "border-primary bg-primary text-white shadow-sm" : "border-border bg-surface text-text-muted hover:border-primary-border hover:bg-primary-subtle hover:text-text"}`}>
+          {title}<span className="ml-1.5 opacity-70">{count}</span>
+        </button>)}
+      </div>
+      <ScrollPanel title={`Session timeline · ${filter === "all" ? "all activity" : filter.toLowerCase()}`} count={visibleItems.length} height="max-h-80">
+      <ol className="relative space-y-2 border-l border-primary-border pl-4">
+        {visibleItems.slice(0, 100).map((event, index) => {
         const eventName = summaryValue(event.eventid || event.event_id || event.event_type, "event");
         const timestamp = summaryValue(event.timestamp || event.received_at, "Timestamp unavailable");
-        const session = summaryValue(event.session_id || event.session, "Exact session unavailable");
+        const shortTime = timestamp.includes("T") ? `${timestamp.split("T")[1].slice(0, 8)} UTC` : timestamp;
+        const readableEvent = eventName.replace(/^cowrie\./i, "").replaceAll(".", " ");
         return (
-          <li key={`${index}-${eventName}-${timestamp}`} className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5">
+          <li key={`${index}-${eventName}-${timestamp}`} className="group relative rounded-lg border border-border bg-surface-subtle px-3 py-2.5 transition duration-150 hover:border-primary-border hover:bg-primary-subtle/40 hover:shadow-sm">
+            <span className="absolute -left-[21px] top-4 h-2.5 w-2.5 rounded-full border-2 border-surface bg-primary shadow-[0_0_0_2px_var(--primary-subtle)]" aria-hidden="true" />
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono text-xs font-semibold text-text">{eventName}</span>
-              <span className="ui-badge text-[11px]">Observed event</span>
+              <span className="text-sm font-semibold capitalize text-text">{readableEvent}</span>
+              <time className="rounded-full bg-surface px-2 py-1 font-mono text-[10px] text-text-muted" dateTime={timestamp}>{shortTime}</time>
             </div>
-            <div className="mt-2 grid gap-1 text-[11px] text-text-muted sm:grid-cols-2">
-              <span>time: <span className="font-mono text-text">{timestamp}</span></span>
-              <span>session: <span className="font-mono text-text">{session}</span></span>
-              <span>processed: <span className="font-mono text-text">{label(event.processed, "unknown")}</span></span>
-              <span>source: <span className="font-mono text-text">{summaryValue(event.sensor_id || event.sensor, "unknown")}</span></span>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
+              <span className="rounded bg-surface px-2 py-0.5">{category(event)}</span>
+              <span>{summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</span>
+              {event.processed === false && <span className="rounded bg-warning-subtle px-2 py-0.5 text-warning">Needs review</span>}
             </div>
           </li>
         );
         })}
       </ol>
+      </ScrollPanel>
     </div>
   );
 }
@@ -560,20 +618,23 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
   );
   return (
     <div className="space-y-3">
-      <SummaryGrid fields={[
+      <Insight title="Trusted classification">{trustedMappings.length} trusted mapping{trustedMappings.length === 1 ? "" : "s"} across {uniqueAttackTechniques.size} ATT&amp;CK technique{uniqueAttackTechniques.size === 1 ? "" : "s"}, from {classificationRecords.length} command-level record{classificationRecords.length === 1 ? "" : "s"}. Model1 is advisory; Model2 has its own panel.</Insight>
+      {uniqueAttackTechniques.size > 0 && <div className="flex flex-wrap gap-2">{[...uniqueAttackTechniques].map((technique) => <span key={technique} className="rounded-md border border-primary-border bg-primary-subtle px-2.5 py-1 font-mono text-xs text-text transition-transform hover:-translate-y-0.5">{technique}</span>)}</div>}
+      <MetricStrip fields={[
         ["Classification records", String(classificationRecords.length)],
         ["Classified command events", String(classifiedCommandKeys.size)],
-        ["Trusted ATT&CK mappings", `${trustedMappings.length} records · ${uniqueAttackTechniques.size} techniques`],
+        ["Trusted ATT&CK", String(uniqueAttackTechniques.size)],
       ]} />
-      {classificationRecords.length > 0 && <p className="text-xs text-text-muted">These command-level records contain reviewed classifier and Model1 advisory evidence. Model2 is shown only in the exact-session ensemble panel; it is not inferred from legacy command-level shadow fields. Scores are not combined and neither model authorizes response.</p>}
-      {classificationRecords.length > 0 && <ol className="space-y-2">
+      {classificationRecords.length > 0 && <p className="text-xs text-text-muted">Command-level classification is shown with its evidence. Model1 scores are advisory.</p>}
+      {classificationRecords.length > 0 && <ScrollPanel title="Classified activity" count={classificationRecords.length} height="max-h-96">
+      <ol className="space-y-2">
         {classificationRecords.slice(0, 50).map((mapping, index) => {
           const authority = record(mapping.authority_decision);
           const advisory = record(mapping.s1_advisory);
           const technique = mapping.ttp || mapping.technique_id || "NO_TECHNIQUE_ASSIGNED";
           const sourceCommand = commandText(mapping.source_command || mapping.command || mapping.original_command);
           return (
-            <li key={`${index}-${String(mapping.evidence_id || technique)}`} className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5">
+            <li key={`${index}-${String(mapping.evidence_id || technique)}`} className="rounded-lg border border-border bg-surface-subtle px-3 py-3 transition-colors hover:border-primary-border hover:bg-primary-subtle/30">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-sm font-semibold text-text">{summaryValue(technique)}</span>
@@ -584,21 +645,23 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
                 </div>
               </div>
               {sourceCommand && <p className="mt-2 rounded border border-border bg-surface px-2.5 py-2 font-mono text-xs text-text">{sourceCommand}</p>}
-              <SummaryGrid fields={[
-                ["Tactic", summaryValue(mapping.tactic, "Not recorded")],
-                ["Evidence / authority", `${summaryValue(mapping.evidence_type || mapping.evidence_tier, "observed event")} · ${summaryValue(authority.decision || mapping.authority, "advisory")}`],
-                ["Model1 advisory", advisory.decision_score === undefined ? "Not recorded" : `${summaryValue(advisory.predicted_technique, "unassigned")} · margin ${display(advisory.decision_score)}`],
-              ]} />
+              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(mapping.tactic, "Tactic not recorded")}</span>
+                <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(authority.decision || mapping.authority, "Advisory only")}</span>
+                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1 advisory: {summaryValue(advisory.predicted_technique)}</span>}
+              </div>
               <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
-              <p className="mt-2 text-[11px] text-text-muted">source: {summaryValue(mapping.source || mapping.rule_id, "reviewed classifier")} · event <span className="font-mono text-text">{summaryValue(record(mapping.durable_evidence_order).event_id || mapping.evidence_id, "Unavailable")}</span> · {summaryValue(mapping.event_timestamp, "Timestamp unavailable")}</p>
             </li>
           );
         })}
-      </ol>}
-      <div className="rounded-lg border border-primary-border bg-primary-subtle p-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-primary">Trusted ATT&amp;CK mappings</p>
+      </ol></ScrollPanel>}
+      <div className="rounded-xl border border-primary-border bg-primary-subtle/50 p-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mappings</p>
+          <span className="ui-badge text-[10px]">{trustedMappings.length}</span>
+        </div>
         {trustedMappings.length ? (
-          <ol className="mt-2 space-y-2">
+          <ol className="ui-scroll-region mt-2 max-h-64 space-y-2 overflow-y-auto pr-2">
             {trustedMappings.slice(0, 20).map((item, index) => {
               const mapping = record(item);
               const tactics = list(mapping.tactics).map((value) => display(value)).filter(Boolean).join(", ");
@@ -609,7 +672,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
                     <span className="ui-badge text-[11px]">{summaryValue(mapping.trust_tier || mapping.authority, "trusted_observation")}</span>
                   </div>
                   <p className="mt-1 text-text-muted">{tactics || "Tactic unavailable"} · {summaryValue(mapping.mapping_semantics, "Observed command evidence")}</p>
-                  <p className="mt-1 text-text-muted">evidence refs: {countOf(mapping.evidence_ref_count || list(mapping.evidence_refs).length)} · evidence semantics: {summaryValue(mapping.confidence_semantics, "evidence strength; not probability")}</p>
+                  <p className="mt-1 text-text-muted">{countOf(mapping.evidence_ref_count || list(mapping.evidence_refs).length)} evidence reference{Number(mapping.evidence_ref_count || list(mapping.evidence_refs).length) === 1 ? "" : "s"}</p>
                   <TrustedTraceability mapping={mapping} />
                 </li>
               );
@@ -731,6 +794,19 @@ function SummaryGrid({ fields }: { fields: Array<readonly [string, string]> }) {
         <div key={name} className="rounded-lg border border-border bg-surface-subtle p-3">
           <dt className="text-[11px] font-medium uppercase tracking-[0.1em] text-text-subtle">{name}</dt>
           <dd className="mt-1 break-words font-mono text-xs text-text">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function MetricStrip({ fields }: { fields: Array<readonly [string, string]> }) {
+  return (
+    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {fields.map(([name, value], index) => (
+        <div key={name} className={`rounded-lg border px-3 py-2.5 transition-colors hover:border-primary-border ${index === 0 ? "border-primary-border bg-primary-subtle/50" : "border-border bg-surface-subtle"}`}>
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-subtle">{name}</dt>
+          <dd className="mt-0.5 break-words text-lg font-semibold leading-6 text-text">{value}</dd>
         </div>
       ))}
     </dl>
@@ -1034,30 +1110,38 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
     attempts.map(analystAttackerUsername).filter((value): value is string => Boolean(value)),
   ));
   return (
-    <>
-      <SummaryGrid fields={[
+    <div className="space-y-3">
+      <Insight title="Observed access">{countOf(data.attempt_count)} login attempt{Number(data.attempt_count) === 1 ? "" : "s"}; {countOf(data.success_count)} succeeded and {countOf(data.failure_count)} failed. {visibleUsernames.length ? `Observed account: ${visibleUsernames.join(", ")}.` : "The account name was not retained."}</Insight>
+      <MetricStrip fields={[
         ["Attempts", countOf(data.attempt_count)],
         ["Successful", countOf(data.success_count)],
         ["Failed", countOf(data.failure_count)],
-        ["Attacker usernames", visibleUsernames.length ? visibleUsernames.join(", ") : summaryValue(data.username_visibility, "Not persisted")],
-        ["First attempt", summaryValue(data.first_attempt_at, "Not recorded")],
-        ["Last attempt", summaryValue(data.last_attempt_at, "Not recorded")],
       ]} />
       {attempts.length > 0 && (
-        <ol className="mt-3 space-y-2">
+        <ScrollPanel title="Login activity" count={attempts.length} height="max-h-64">
+        <ol className="space-y-2">
           {attempts.slice(0, 20).map((attempt, index) => (
-            <li key={`${index}-${summaryValue(attempt.timestamp, "attempt")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+            <li key={`${index}-${summaryValue(attempt.timestamp, "attempt")}`} className="flex items-start gap-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
+              <span className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full ${String(attempt.outcome).toLowerCase().includes("success") ? "bg-primary-subtle text-primary" : "bg-warning-subtle text-warning"}`} aria-hidden="true">
+                <Fingerprint className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-semibold text-text">{summaryValue(attempt.outcome, "attempt")}</span>
+                <span className="font-semibold capitalize text-text">{readableCode(attempt.outcome || "login attempt")}</span>
                 <span className="font-mono text-text-muted">{summaryValue(attempt.timestamp, "Timestamp unavailable")}</span>
               </div>
-              <p className="mt-1 text-text-muted">Username: <span className="font-mono text-text">{analystAttackerUsername(attempt) || summaryValue(attempt.username_visibility, "Not persisted")}</span>{hasMeaningfulValue(attempt.method) ? ` · method: ${summaryValue(attempt.method)}` : ""}</p>
+              <p className="mt-1 text-text-muted">Account: <span className="font-mono text-text">{analystAttackerUsername(attempt) || summaryValue(attempt.username_visibility, "Not retained")}</span>{hasMeaningfulValue(attempt.method) ? ` · method: ${readableCode(attempt.method)}` : ""}</p>
+              </div>
             </li>
           ))}
         </ol>
+        </ScrollPanel>
       )}
-      <p className="mt-3 text-xs text-text-subtle">Attacker-entered usernames are shown only when safely retained. Password values are never projected or rendered.</p>
-    </>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-muted">
+        <span>First seen: {summaryValue(data.first_attempt_at, "Not recorded")}</span>
+        <span>Last seen: {summaryValue(data.last_attempt_at, "Not recorded")}</span>
+      </div>
+    </div>
   );
 }
 
@@ -1065,27 +1149,23 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const sessions = list(data.sessions).map(record);
   return (
-    <>
-      <SummaryGrid fields={[
-        ["Authority", summaryValue(data.authority, "Contextual only")],
-        ["Observable", summaryValue(record(data.observable).value, "Source IP unavailable")],
-        ["Observable type", summaryValue(record(data.observable).type, "ip")],
-        ["Observable role", "source_ip"],
+    <div className="space-y-3">
+      <Insight title="Source-IP recurrence">{summaryValue(record(data.observable).value, "This source")} appears in {countOf(counts.sessions_found)} recorded session{Number(counts.sessions_found) === 1 ? "" : "s"}. This is repeated source context, not attribution.</Insight>
+      <MetricStrip fields={[
         ["Sessions found", countOf(counts.sessions_found)],
-        ["Sessions returned", countOf(counts.sessions_returned)],
-        ["Distinct sessions", countOf(counts.sessions_returned)],
         ["Sightings examined", countOf(counts.sightings_examined)],
         ["Provider calls", data.provider_calls === false ? "0" : "Not reported"],
       ]} />
       {sessions.length > 0 && (
-        <ol className="mt-3 space-y-2">
+        <ScrollPanel title="Related sessions" count={sessions.length} height="max-h-80">
+        <ol className="space-y-2">
           {sessions.slice(0, 20).map((session, index) => (
-            <li key={`${index}-${summaryValue(session.session_id, "session")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+            <li key={`${index}-${summaryValue(session.session_id, "session")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border hover:bg-primary-subtle/30">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(session.session_id, "Session unavailable")}</span>
                 <span className="ui-badge text-[11px]">{countOf(session.sighting_count)} sightings</span>
               </div>
-              <p className="mt-1 text-text-muted">{summaryValue(session.first_seen, "First seen unavailable")} → {summaryValue(session.last_seen, "Last seen unavailable")}</p>
+              <p className="mt-1 text-text-muted"><time>{summaryValue(session.first_seen, "First seen unavailable")}</time> <span aria-hidden="true">→</span> <time>{summaryValue(session.last_seen, "Last seen unavailable")}</time></p>
               <TraceabilityDetails
                 title="Observable recurrence details"
                 fields={[
@@ -1100,9 +1180,10 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
             </li>
           ))}
         </ol>
+        </ScrollPanel>
       )}
-      <p className="mt-3 text-xs text-text-subtle">Contextual source repetition only; it does not establish attribution, intent, or classification.</p>
-    </>
+      <p className="text-xs text-text-subtle">Repeated source context does not establish attribution, intent, or classification.</p>
+    </div>
   );
 }
 
@@ -1138,39 +1219,39 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   });
   return (
     <>
-      <SummaryGrid fields={[
-        ["Status", summaryValue(sessionData.status || freshness.state, "TI_PENDING")],
-        ["Observable", summaryValue(observable.value, "No eligible observable")],
-        ["Freshness", tiState.state],
-        ["Latest provider/cache lookup", tiTimestampLabel(tiState.latestRetrievedAt)],
+      <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
+        {evidence.length || cache.length ? `${evidence.length} stored provider finding${evidence.length === 1 ? "" : "s"} and ${cache.length} source-IP cache result${cache.length === 1 ? "" : "s"}. Check freshness before using this context.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+      </Insight>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
+        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Observable: {summaryValue(observable.value, "Not available")}</span>
+        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Last lookup: {tiTimestampLabel(tiState.latestRetrievedAt)}</span>
+      </div>
+      <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Stored normalized provider evidence", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
-        ["Source-IP cache rows", countOf(cache.length)],
+        ["Provider findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Cached results", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
-        ["Enrichment queue", jobSummary.pending === true
-          ? `Pending (${countOf(jobSummary.total)} job${Number(jobSummary.total) === 1 ? "" : "s"})`
-          : Number(jobSummary.total || 0) > 0
-            ? `${countOf(jobSummary.total)} processed`
-            : "No job recorded"],
-        ["Provider calls", sessionData.provider_calls === false || observableData.provider_calls === false ? "0 (stored-only read)" : "Not reported"],
       ]} />
       {jobSummary.pending === true && (
-        <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
+        <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-text-muted">
           {summaryValue(sessionData.status_reason_text, "An eligible provider lookup is awaiting the enrichment worker.")}
           {Object.keys(jobStatusCounts).length > 0 && ` Queue state: ${Object.entries(jobStatusCounts).map(([state, count]) => `${state}=${count}`).join(", ")}.`}
         </p>
       )}
       {tiState.state === "MIXED" && (
-        <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
+        <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-text-muted">
           Fresh source-IP cache data is available ({tiState.freshCacheCount} provider result{tiState.freshCacheCount === 1 ? "" : "s"}); older stored provider evidence is stale ({tiState.staleEvidenceCount} record{tiState.staleEvidenceCount === 1 ? "" : "s"}). Freshness is shown per record below.
         </p>
       )}
-      {entities.length > 0 && <ObservableList items={entities} empty="No shared entities are recorded." />}
-      <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
+      {entities.length > 0 && <ScrollPanel title="Shared entities" count={entities.length} height="max-h-64"><ObservableList items={entities} empty="No shared entities are recorded." /></ScrollPanel>}
+      <ScrollPanel title="Provider results and freshness" count={evidence.length + cache.length} height="max-h-96">
+        <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
+      </ScrollPanel>
       {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (
-        <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this exact session. The read model is {summaryValue(summary.uncertainty, "context-only")}; unavailable evidence is not inferred.</p>
+        <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this session. Read state: {readableCode(summary.uncertainty || sessionData.status || "context only")}.</p>
       )}
-      <p className="mt-3 text-xs font-medium text-text-subtle">NON_AUTHORITATIVE_CONTEXT_ONLY · provider claims remain attributed and never authorize classification or response.</p>
+      <p className="text-xs text-text-subtle">Provider results are attributed context; they do not establish classification or authorize response.</p>
     </>
   );
 }
@@ -1186,79 +1267,59 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
   const sessionGraph = record(sessionAssessment.evidence_graph);
   const followOnAssessment = record(sessionAssessment.follow_on_hypothesis);
   const reports = list(data.reports);
+  const canonicalCount = list(sessionAssessment.canonical_finding_ids).length;
+  const relationshipCount = Number(sessionGraph.relationship_edges || 0);
   return (
-    <>
-      <SummaryGrid fields={[
-        ["Authority", summaryValue(data.authority, "Contextual only")],
-        ["Correlated hypotheses", countOf(hypotheses.length || counts.correlations)],
-        ["Bounded hypothesis sets", countOf(hypothesisSets.length)],
-        ["Reports", countOf(reports.length)],
-        ["Evidence strength", summaryValue(reportSummary.evidence_strength || reportSummary.analytical_evidence_strength, "Not recorded")],
-        ["Analysis mode", summaryValue(reportSummary.analysis_mode, "Not recorded")],
-        ["Campaign", summaryValue(reportSummary.campaign_name, "Not recorded")],
+    <div className="space-y-3">
+      <Insight title="Assessment outcome" tone={hypothesisSets.length ? "primary" : "warning"}>
+        {hypothesisSets.length ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded.` : "No evidence-bounded hypothesis was established for this session."} {contextualHypotheses.length} TTP correlation{contextualHypotheses.length === 1 ? " is" : "s are"} context only, not validated findings.
+      </Insight>
+      <MetricStrip fields={[
+        ["Hypothesis sets", String(hypothesisSets.length)],
+        ["Canonical findings", String(canonicalCount)],
+        ["TTP context", String(contextualHypotheses.length)],
       ]} />
-      {hasMeaningfulValue(reportSummary.summary) && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">{summaryValue(reportSummary.summary)}</p>}
-      {hasMeaningfulValue(reportSummary.evidence_strength_reason) && <p className="mt-2 text-xs text-text-muted">Evidence note: {summaryValue(reportSummary.evidence_strength_reason)}</p>}
       {sessionFamilies.length > 0 && (
-        <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-3" aria-label="Session-wide hypothesis assessment">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-text">Session-wide evidence assessment</p>
-            <span className="ui-badge">{summaryValue(sessionAssessment.status, "UNAVAILABLE")}</span>
-          </div>
-          <p className="mt-1 text-[11px] text-text-muted">All activated semantic families are evaluated here. Forecasts and external TI remain context only.</p>
-          <dl className="mt-2 grid gap-x-4 gap-y-1 text-xs text-text-muted sm:grid-cols-3">
-            <div><dt className="inline font-semibold">Canonical findings: </dt><dd className="inline">{countOf(list(sessionAssessment.canonical_finding_ids).length)}</dd></div>
-            <div><dt className="inline font-semibold">Evidence nodes: </dt><dd className="inline">{countOf(sessionGraph.evidence_nodes)}</dd></div>
-            <div><dt className="inline font-semibold">Relationships: </dt><dd className="inline">{countOf(sessionGraph.relationship_edges)}</dd></div>
-          </dl>
-          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+        <ScrollPanel title="Behavior checks across this session" count={sessionFamilies.length} height="max-h-80">
+          <p className="mb-2 px-1 text-[11px] text-text-muted">Each behavior family shows whether observed evidence passed its review gate.</p>
+          <ul className="grid gap-2 sm:grid-cols-2">
             {sessionFamilies.map((family, index) => (
-              <li key={`${summaryValue(family.semantic_family, "family")}-${index}`} className="rounded border border-border bg-surface p-2 text-xs">
+              <li key={`${summaryValue(family.semantic_family, "family")}-${index}`} className="rounded-lg border border-border bg-surface p-3 text-xs transition-colors hover:border-primary-border">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-text">{summaryValue(family.semantic_family, "Family not recorded")}</span>
-                  <span className="ui-badge">{summaryValue(family.status, "UNAVAILABLE")}</span>
+                  <span className="font-semibold capitalize text-text">{readableCode(family.semantic_family || "behavior not recorded")}</span>
+                  <span className={`ui-badge ${list(family.finding_ids).length ? "border-primary-border bg-primary-subtle text-primary" : ""}`}>{readableCode(family.status || "not evaluated")}</span>
                 </div>
-                <p className="mt-1 text-text-muted">Facts: {countOf(family.observed_fact_count)} · Findings: {countOf(list(family.finding_ids).length)}</p>
-                {list(family.missing_evidence).length > 0 && <p className="mt-1 text-text-muted">Gate: {list(family.missing_evidence).map((item) => display(item)).join(", ")}</p>}
+                <div className="mt-2 flex gap-3 text-text-muted"><span>{countOf(family.observed_fact_count)} observations</span><span>{countOf(list(family.finding_ids).length)} findings</span></div>
+                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Still needed: {list(family.missing_evidence).map(readableCode).join(", ")}</p>}
               </li>
             ))}
           </ul>
-          <p className="mt-2 text-[11px] text-text-muted">Follow-on hypothesis: {summaryValue(followOnAssessment.status, "not assessed")}{followOnAssessment.reason ? ` — ${summaryValue(followOnAssessment.reason)}` : ""}</p>
-        </div>
+        </ScrollPanel>
       )}
       {contextualHypotheses.length > 0 && (
-        <div className="mt-3 rounded-lg border border-warning-border bg-warning-subtle/40 p-3" aria-label="Contextual TTP correlations">
-          <p className="text-xs font-semibold text-text">Session-correlated TTP context · not validated findings</p>
-          <ol className="mt-2 space-y-2">
+        <section className="rounded-xl border border-warning-border bg-warning-subtle/30 p-3" aria-label="Related ATT&CK context">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-text">Related ATT&amp;CK context · not confirmed behavior</h3>
+            <span className="ui-badge text-[10px]">{contextualHypotheses.length}</span>
+          </div>
+          <ol className="grid gap-2 sm:grid-cols-2">
             {contextualHypotheses.map((hypothesis) => (
-              <li key={hypothesis.key} className="rounded-md border border-border bg-surface p-3 text-xs">
+              <li key={hypothesis.key} className="rounded-lg border border-warning-border bg-warning-subtle/40 p-3 text-xs transition-colors hover:bg-warning-subtle">
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="font-semibold text-text">{hypothesis.techniqueId || "Technique not recorded"}</span>
-                  {hypothesis.techniqueName && <span className="text-text">{hypothesis.techniqueName}</span>}
-                  <span className="ui-badge">{hypothesis.claimStatus}</span>
+                  <span className="rounded-md bg-surface px-2 py-1 font-mono font-semibold text-text">{hypothesis.techniqueId || "Technique unavailable"}</span>
+                  {hypothesis.techniqueName && <span className="font-medium text-text">{hypothesis.techniqueName}</span>}
+                  <span className="ml-auto ui-badge">Context only</span>
                 </div>
-                <dl className="mt-2 grid gap-x-4 gap-y-1 text-text-muted sm:grid-cols-2">
-                  {hypothesis.tactic && <div><dt className="inline font-semibold">Tactic: </dt><dd className="inline">{hypothesis.tactic}</dd></div>}
-                  {hypothesis.sourceType && <div><dt className="inline font-semibold">Source: </dt><dd className="inline">{hypothesis.sourceType}</dd></div>}
-                  {hypothesis.ruleId && <div className="sm:col-span-2"><dt className="inline font-semibold">Correlation rule: </dt><dd className="inline break-all font-mono">{hypothesis.ruleId}</dd></div>}
-                </dl>
-                {hypothesis.matchedConditions.length > 0 && (
-                  <ul className="mt-2 list-disc space-y-1 pl-4 text-text-muted">
-                    {hypothesis.matchedConditions.map((condition, index) => (
-                      <li key={`${hypothesis.key}-condition-${index}`}>
-                        {condition.description || condition.type || "Policy condition matched"}
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                {hypothesis.tactic && <p className="mt-2 text-text-muted">Related tactic: {readableCode(hypothesis.tactic)}</p>}
+                {hypothesis.matchedConditions.length > 0 && <p className="mt-1 text-text-muted">Related evidence: {hypothesis.matchedConditions.map((condition) => condition.description || readableCode(condition.type || "observation")).join(" · ")}</p>}
               </li>
             ))}
           </ol>
-          <p className="mt-2 text-[11px] text-text-muted">Correlations are contextual and non-authoritative; they do not establish observed ATT&amp;CK findings, attacker intent, or response actions. Raw evidence text is intentionally not repeated here.</p>
-        </div>
+        </section>
       )}
       {hypothesisSets.length > 0 && (
-        <ol className="mt-3 space-y-2">
+        <ScrollPanel title="Evidence-bounded hypothesis sets" count={hypothesisSets.length} height="max-h-80">
+        <ol className="space-y-2">
           {hypothesisSets.slice(0, 10).map((hypothesisSet, index) => (
             <li key={`${index}-${summaryValue(hypothesisSet.hypothesis_set_id, "hypothesis-set")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <p className="font-semibold text-text">{summaryValue(hypothesisSet.question, "Bounded hypothesis set")}</p>
@@ -1272,10 +1333,26 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
             </li>
           ))}
         </ol>
+        </ScrollPanel>
       )}
-      {hypotheses.length === 0 && hypothesisSets.length === 0 && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs font-semibold text-text-muted">NO_CORRELATED_HYPOTHESIS</p>}
-      <p className="mt-3 text-xs text-text-subtle">Evidence-bounded context only; no attacker identity, intent, or authoritative TTP promotion is inferred.</p>
-    </>
+      {hypotheses.length === 0 && hypothesisSets.length === 0 && <div className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text-muted">No session-correlated ATT&amp;CK context was recorded.</div>}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-[11px] text-text-subtle">
+        <span>Evidence nodes: {countOf(sessionGraph.evidence_nodes)} · links: {relationshipCount} · reports: {reports.length}</span>
+        <span>Context does not confirm behavior or attacker intent.</span>
+      </div>
+      <MoreDetails title="Assessment method and report notes">
+        <SummaryGrid fields={[
+          ["Authority", summaryValue(data.authority, "Contextual only")],
+          ["Correlation records", countOf(hypotheses.length || counts.correlations)],
+          ["Evidence strength", readableCode(reportSummary.evidence_strength || reportSummary.analytical_evidence_strength || "not recorded")],
+          ["Analysis mode", readableCode(reportSummary.analysis_mode || "not recorded")],
+          ["Campaign", summaryValue(reportSummary.campaign_name, "Not recorded")],
+          ["Follow-on assessment", readableCode(followOnAssessment.status || "not assessed")],
+        ]} />
+        {hasMeaningfulValue(reportSummary.summary) && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">{summaryValue(reportSummary.summary)}</p>}
+        {hasMeaningfulValue(reportSummary.evidence_strength_reason) && <p className="mt-2 text-xs text-text-muted">Assessment note: {summaryValue(reportSummary.evidence_strength_reason)}</p>}
+      </MoreDetails>
+    </div>
   );
 }
 
@@ -1288,33 +1365,36 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
   const validation = record(guidance.validation);
   const safety = record(guidance.safety);
   const findingCount = Number(guidance.finding_count || 0);
-  const unmatchedFindingCount = Math.max(0, findingCount - actions.length);
+  const boundFindingIds = new Set(actions.flatMap((action) => list(action.finding_ids).map((id) => label(id, "")).filter(Boolean)));
+  const hasFindingBindings = actions.some((action) => Array.isArray(action.finding_ids));
+  const unmatchedFindingCount = hasFindingBindings ? Math.max(0, findingCount - boundFindingIds.size) : null;
   return (
     <>
-      <SummaryGrid fields={[
-        ["Status", summaryValue(guidance.status, "Unavailable")],
-        ["Authority", summaryValue(guidance.authority, "Policy-bounded")],
-        ["Guidance state", summaryValue(guidance.guidance_state, "Not recorded")],
-        ["Findings", countOf(findingCount)],
-        ["Actions", countOf(actions.length)],
-        ["Validation", summaryValue(validation.status, "Not recorded")],
-        ["Manual approval", guidance.requires_manual_approval === false ? "No" : "Required"],
-      ]} />
+      <Insight title="What an analyst can do">{actions.length ? `${actions.length} manual action${actions.length === 1 ? " is" : "s are"} available from reviewed policy. AI did not invent or execute ${actions.length === 1 ? "it" : "them"}.` : "No policy-approved response action is available for this evidence."}</Insight>
+      <div className="flex flex-wrap gap-2">
+        <span className="rounded-full border border-border bg-surface-subtle px-3 py-1.5 text-xs text-text-muted">{countOf(findingCount)} evidence finding{findingCount === 1 ? "" : "s"}</span>
+        <span className="rounded-full border border-primary-border bg-primary-subtle px-3 py-1.5 text-xs font-medium text-primary">{actions.length} reviewed action{actions.length === 1 ? "" : "s"}</span>
+        <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 text-xs text-warning">{guidance.requires_manual_approval === false ? "Manual approval not required" : "Manual approval required"}</span>
+      </div>
       {actions.length > 0 ? (
-        <ol className="mt-3 space-y-2">
+        <ScrollPanel title="Suggested analyst actions" count={actions.length} height="max-h-80">
+        <ol className="space-y-2">
           {actions.slice(0, 20).map((action, index) => (
-            <li key={`${index}-${summaryValue(action.action_id, "action")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+            <li key={`${index}-${summaryValue(action.action_id, "action")}`} className="rounded-lg border border-primary-border bg-primary-subtle/30 p-3 text-sm transition-colors hover:bg-primary-subtle/60">
               <p className="font-semibold text-text">{summaryValue(action.description || action.action_id, "Stored analyst action")}</p>
-              {hasMeaningfulValue(action.rationale) && <p className="mt-1 text-text-muted">Rationale: {summaryValue(action.rationale)}</p>}
-              {list(action.preconditions).length > 0 && <p className="mt-1 text-text-muted">Preconditions: {list(action.preconditions).map((value) => display(value)).join(" ")}</p>}
-              {list(action.verification_steps).length > 0 && <p className="mt-1 text-text-muted">Verification: {list(action.verification_steps).map((value) => display(value)).join(" ")}</p>}
-              <p className="mt-1 text-text-muted">Manual approval: {action.requires_manual_approval === false ? "not required" : "required"} · automatic execution: {action.safe_to_auto_execute === true ? "allowed" : "disabled"}</p>
-              <GuidanceTraceability action={action} guidance={guidance} />
+              <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(action.rationale, "Review the cited evidence before acting.")}</p>
+              {list(action.preconditions).length > 0 && <p className="mt-2 text-xs text-text-muted"><span className="font-semibold text-text">Before:</span> {list(action.preconditions).map((value) => display(value)).join(" ")}</p>}
+              {list(action.verification_steps).length > 0 && <p className="mt-1 text-xs text-text-muted"><span className="font-semibold text-text">Check:</span> {list(action.verification_steps).map((value) => display(value)).join(" ")}</p>}
+              <div className="mt-2">
+                <span className="ui-badge text-[10px]">{action.requires_manual_approval === false ? "Review not required" : "Human review required"} · {action.safe_to_auto_execute === true ? "automatic execution allowed" : "no automatic action"}</span>
+                <GuidanceTraceability action={action} guidance={guidance} />
+              </div>
             </li>
           ))}
         </ol>
+        </ScrollPanel>
       ) : <p className="mt-3 text-xs text-text-muted">No stored recommendation content is available.</p>}
-      {unmatchedFindingCount > 0 && (
+      {unmatchedFindingCount !== null && unmatchedFindingCount > 0 && (
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
           {unmatchedFindingCount} evidence finding{unmatchedFindingCount === 1 ? " does" : "s do"} not select a distinct reviewed action playbook. Actions are policy-matched and deduplicated; findings are not converted into recommendations automatically.
         </p>
@@ -1350,10 +1430,40 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
       : "Not reported";
 
   return (
-    <>
+    <div className="space-y-3">
+      <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
+        {hasBoundAvailableModel2(data) ? "A session-bound Model2 result is available for comparison with Model1." : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
+      </Insight>
+      <MetricStrip fields={[
+        ["Model1", model1.applicable === true ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
+        ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
+        ["Comparisons", String(results.length)],
+      ]} />
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 only adds a comparison when its result is bound to this session; model scores are not combined.</p>
+      {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
+        <ol className="space-y-2">
+          {results.map((item, index) => (
+            <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
+                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
+              </div>
+              <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
+                <span>Model1: <span className="font-medium text-text">{readableCode(item.model1_result || "not applicable")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
+                <span>Model2: <span className="font-medium text-text">{readableCode(item.model2_result || "unavailable")}</span>{item.model2_score !== null && item.model2_score !== undefined ? ` · score ${display(item.model2_score)}` : ""}</span>
+              </div>
+              <p className="mt-1 text-text-muted">{readableCode(item.model2_relation || "comparison not recorded")} · primary source: {readableCode(item.primary_source || "none")}</p>
+            </li>
+          ))}
+        </ol>
+      </ScrollPanel>}
+      {model1Only.length > 0 && <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-text-muted">Model1 only:</span>
+        {model1Only.map((item) => <span key={summaryValue(item.technique_id, "unknown")} className="ui-badge font-mono text-[10px]">{summaryValue(item.technique_id, "unknown")}</span>)}
+      </div>}
+      <MoreDetails title="Model artifact and run information">
       <SummaryGrid fields={[
         ["Authority", summaryValue(ensemble.ensemble_authority, "ADVISORY_ONLY")],
-        ["Model1", model1.applicable === true ? "APPLICABLE" : model1.applicable === false ? "NOT_APPLICABLE" : "Not reported"],
         ["Model2 status", summaryValue(model2.status, "Unavailable")],
         ["Model2 architecture", architecture],
         ["One inference call", booleanLabel(model2.one_inference_call)],
@@ -1365,28 +1475,8 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         ["Numeric score fusion", ensemble.fused_score === null ? "NONE" : display(ensemble.fused_score)],
         ["Computed at", summaryValue(ensemble.ensemble_computed_at, "Not reported")],
       ]} />
-      <p className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">
-        Model2 is one unified multi-output shadow model used for corroboration. Model1 remains the primary classifier; native scores are shown separately and are not numerically fused.
-      </p>
-      {results.length > 0 && (
-        <ol className="mt-3 space-y-2">
-          {results.map((item, index) => (
-            <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
-                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
-              </div>
-              <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
-                <span>Model1: <span className="font-mono text-text">{summaryValue(item.model1_result, "NOT_APPLICABLE")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
-                <span>Model2: <span className="font-mono text-text">{summaryValue(item.model2_result, "UNAVAILABLE")}</span>{item.model2_score !== null && item.model2_score !== undefined ? ` · score ${display(item.model2_score)}` : ""}</span>
-              </div>
-              <p className="mt-1 text-text-muted">Relation: {summaryValue(item.model2_relation, "Not recorded")} · primary source: {summaryValue(item.primary_source, "NONE")}</p>
-            </li>
-          ))}
-        </ol>
-      )}
-      {model1Only.length > 0 && <p className="mt-3 text-xs text-text-muted">Model1-only labels: {model1Only.map((item) => summaryValue(item.technique_id, "unknown")).join(", ")}</p>}
-    </>
+      </MoreDetails>
+    </div>
   );
 }
 
@@ -1401,35 +1491,52 @@ export function hasBoundAvailableModel2(data: JsonRecord): boolean {
     && Boolean(label(binding.run_id || ensemble.run_id, ""));
 }
 
-function AiAdvisorySummary({ data }: { data: JsonRecord }) {
+export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
   const provenance = record(advisory.provenance);
   const safety = record(advisory.safety);
   const rendered = record(advisory.rendered_advisory);
   const paragraphs = list(rendered.paragraphs).map(record);
+  const guidance = record(guidanceData.response_guidance);
+  const guidanceFindings = list(guidance.findings).map(record);
+  const guidanceActions = list(guidance.advisory_actions).map(record);
+  const selectedFindingIds = new Set(paragraphs.flatMap((item) => list(item.finding_ids).map((id) => label(id, ""))).filter(Boolean));
+  const selectedActionIds = new Set(paragraphs.flatMap((item) => list(item.action_ids).map((id) => label(id, ""))).filter(Boolean));
+  const selectedFindings = guidanceFindings.filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
+  const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
+  const inaccurateNarrative = selectedFindings.length > 0 && paragraphs.some((item) => label(item.text, "").includes("canonical finding"));
+  const hasSelection = selectedFindingIds.size > 0 || selectedActionIds.size > 0;
   return (
-    <>
-      <SummaryGrid fields={[
-        ["Status", summaryValue(data.status, "Unavailable")],
-        ["Authority", summaryValue(advisory.authority, "Non-authoritative")],
-        ["Validation", summaryValue(validation.status, "Not recorded")],
-        ["Provider", summaryValue(provenance.provider_id, "Not recorded")],
-        ["Model", summaryValue(provenance.model_id, "Not recorded")],
-        ["Manual approval", safety.requires_manual_approval === false ? "No" : "Required"],
-      ]} />
-      {paragraphs.length > 0 ? (
-        <ol className="mt-3 space-y-2">
-          {paragraphs.slice(0, 8).map((paragraph, index) => (
-            <li key={`${index}-${summaryValue(paragraph.template_id, "advisory")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
-              {summaryValue(paragraph.text, "No policy-authored advisory text stored.")}
-            </li>
-          ))}
-        </ol>
-      ) : <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No policy-authored advisory text is stored.</p>}
-      <p className="mt-3 text-xs font-semibold text-text">AI ADVISORY · ADVISORY_ONLY · NON_AUTHORITATIVE</p>
-      <p className="mt-1 text-xs text-text-subtle">This explanation can select existing evidence for review. It cannot create canonical findings, overwrite trusted mappings, select authoritative response actions, or execute a response.</p>
-    </>
+    <div className="space-y-3">
+      <Insight title="What AI actually did" tone={hasSelection ? "primary" : "warning"}>
+        {hasSelection ? `AI reviewed ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
+      </Insight>
+      {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
+        {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{label(item.finding_type, "Response-guidance finding")}</span></div>
+          {summaryValue(item.statement, "Statement unavailable")}
+        </article>)}
+        {selectedActions.map((item) => <article key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle/50 p-3 text-sm text-text">
+          <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing action selected for review</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
+          <p className="font-semibold">{summaryValue(item.description, "Action description unavailable")}</p>
+          {hasMeaningfulValue(item.rationale) && <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(item.rationale)}</p>}
+        </article>)}
+      </ScrollPanel>}
+      {(selectedFindingIds.size > selectedFindings.length || selectedActionIds.size > selectedActions.length) && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">Some AI selections could not be matched to the stored evidence or action details.</p>}
+      {inaccurateNarrative && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but its selected ID belongs to response guidance. The item shown above comes from the verified guidance record.</p>}
+      <MoreDetails title="AI provider, validation and original response">
+        <SummaryGrid fields={[
+          ["Status", summaryValue(data.status, "Unavailable")],
+          ["Authority", summaryValue(advisory.authority, "Non-authoritative")],
+          ["Validation", summaryValue(validation.status, "Not recorded")],
+          ["Provider", summaryValue(provenance.provider_id, "Not recorded")],
+          ["Model", summaryValue(provenance.model_id, "Not recorded")],
+          ["Manual approval", safety.requires_manual_approval === false ? "No" : "Required"],
+        ]} />
+        {paragraphs.map((paragraph, index) => <p key={`${index}-${label(paragraph.template_id)}`} className="mt-2 text-xs text-text-muted">{summaryValue(paragraph.text, "No stored narrative")}</p>)}
+      </MoreDetails>
+    </div>
   );
 }
 
@@ -1439,9 +1546,38 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
   return (
     <article className="rounded-lg border border-warning-border bg-warning-subtle p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-warning">AI proposed analysis · Policy gap proposal</p>
-        <span className="ui-badge text-[11px]">{summaryValue(gap.status, "IMPLEMENTATION_GAP")}</span>
+        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-warning">AI proposal for review</p>
+        <span className="ui-badge text-[11px]">Not approved policy</span>
       </div>
+      <p className="mt-2 text-sm text-text">{proposals.length ? `AI proposed ${proposals.length} possible pattern${proposals.length === 1 ? "" : "s"} to investigate. These are not verified findings or new response actions.` : "AI did not propose a new pattern for this session."}</p>
+      {proposals.length > 0 && <ScrollPanel title="Candidate patterns to review" count={proposals.length} height="max-h-96">
+        <ol className="space-y-2">
+          {proposals.slice(0, 8).map((proposal, index) => {
+            const predicates = record(proposal.predicates);
+            const evidence = list(proposal.supporting_evidence_references);
+            const missingEvidence = list(proposal.missing_evidence).length ? list(proposal.missing_evidence) : list(proposal.limitations);
+            const falsifiers = list(proposal.falsifiers);
+            const tests = list(proposal.proposed_validation_tests);
+            return <li key={`${index}-${label(proposal.proposal_id)}`} className="rounded-lg border border-warning-border bg-surface p-3 text-sm text-text transition-colors hover:shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="font-semibold capitalize">{readableCode(proposal.candidate_type)}</p>
+                <span className="ui-badge text-[10px]">Review required</span>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                <span className="rounded-full border border-border bg-surface-subtle px-2.5 py-1 text-[10px] text-text-muted">{readableCode(proposal.scope || "current session")}</span>
+                <span className="rounded-full border border-border bg-surface-subtle px-2.5 py-1 text-[10px] text-text-muted">{evidence.length} supporting reference{evidence.length === 1 ? "" : "s"}</span>
+              </div>
+              <p className="mt-2 text-xs text-text-muted"><span className="font-semibold text-text">Still missing / limits:</span> {missingEvidence.length ? missingEvidence.map(readableCode).join(", ") : "none recorded"}</p>
+              {Object.keys(predicates).length > 0 && <p className="mt-1 text-xs text-text-muted"><span className="font-semibold text-text">Conditions:</span> {Object.values(predicates).flatMap((value) => Array.isArray(value) ? value : [value]).map(readableCode).join(" · ")}</p>}
+              {falsifiers.length > 0 && <p className="mt-1 text-xs text-text-muted"><span className="font-semibold text-text">What would disprove it:</span> {falsifiers.map(readableCode).join(" · ")}</p>}
+              {tests.length > 0 && <p className="mt-1 text-xs text-text-muted"><span className="font-semibold text-text">Suggested validation:</span> {tests.map(readableCode).join(" · ")}</p>}
+              {evidence.length > 0 && <TraceabilityDetails title="See supporting evidence references" fields={evidence.map((reference, refIndex) => [`Evidence ${refIndex + 1}`, display(reference)] as const)} />}
+            </li>;
+          })}
+        </ol>
+      </ScrollPanel>}
+      {proposals.length === 0 && <p className="mt-3 rounded-lg border border-border bg-surface p-3 text-sm text-text-muted">No policy-gap candidate was proposed for this session.</p>}
+      <MoreDetails title="Policy proposal safeguards">
       <SummaryGrid fields={[
         ["Mode", summaryValue(gap.mode, "Read-only")],
         ["Proposals", countOf(proposals.length)],
@@ -1449,60 +1585,9 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
         ["Review", gap.requires_review === false ? "Not required" : "REQUIRES_REVIEW"],
         ["Policy mutation", gap.automatic_policy_mutation === true ? "Enabled" : "Disabled"],
       ]} />
-      {proposals.length > 0 ? (
-        <ol className="mt-3 space-y-2">
-          {proposals.slice(0, 8).map((proposal, index) => {
-            const predicates = record(proposal.predicates);
-            const evidence = list(proposal.supporting_evidence_references);
-            const limitations = list(proposal.limitations);
-            const falsifiers = list(proposal.falsifiers);
-            const tests = list(proposal.proposed_validation_tests);
-            return (
-              <li key={`${index}-${summaryValue(proposal.proposal_id, "proposal")}`} className="rounded-lg border border-warning-border bg-surface p-3 text-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-semibold text-text">{summaryValue(proposal.candidate_type, "Structured candidate")}</p>
-                  <span className="ui-badge text-[11px]">PROPOSED_UNVALIDATED</span>
-                </div>
-                <p className="mt-1 text-text-muted">Scope: {summaryValue(proposal.scope, "current_session_only")} · REQUIRES_REVIEW</p>
-                <p className="mt-1 text-text-muted">Supporting evidence: {evidence.length > 0 ? evidence.map((value) => display(value)).join(", ") : "Not supplied"}</p>
-                <p className="mt-1 text-text-muted">Conditions: {Object.values(predicates).flatMap((value) => list(value)).map((value) => display(value)).join(", ") || "Not supplied"}</p>
-                <p className="mt-1 text-text-muted">Limitations / missing evidence: {limitations.length > 0 ? limitations.map((value) => display(value)).join(", ") : "None identified"}</p>
-                <p className="mt-1 text-text-muted">Falsifiers: {falsifiers.length > 0 ? falsifiers.map((value) => display(value)).join(", ") : "Not supplied"}</p>
-                <p className="mt-1 text-text-muted">Proposed validation tests: {tests.length > 0 ? tests.map((value) => display(value)).join(", ") : "Not supplied"}</p>
-              </li>
-            );
-          })}
-        </ol>
-      ) : <p className="mt-3 text-xs text-text-muted">No policy-gap candidate was proposed for this session.</p>}
-      <p className="mt-3 text-xs text-text-subtle">Review-only candidate namespace. Policy writes, trusted promotion, response selection, and automatic execution are disabled.</p>
+      <p className="mt-3 text-xs text-text-subtle">Candidates are for review. Policy updates and automatic execution remain disabled.</p>
+      </MoreDetails>
     </article>
-  );
-}
-
-function ObservedTacticPath({ items, ended }: { items: unknown[]; ended: boolean }) {
-  const phases = items.map(record).filter((item) => hasMeaningfulValue(item.tactic));
-  return (
-    <div className="rounded-lg border border-border bg-surface-subtle p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">Observed tactic path</p>
-          <p className="mt-1 text-xs text-text-muted">Trusted canonical observations only; this is actual session history, not a forecast.</p>
-        </div>
-        <span className="ui-badge text-[11px]">{ended ? "SESSION ENDED" : "OBSERVED"}</span>
-      </div>
-      {phases.length > 0 ? (
-        <ol className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-          {phases.map((phase, index) => (
-            <li key={`${index}-${summaryValue(phase.tactic, "phase")}`} className="flex items-center gap-2">
-              {index > 0 && <span className="text-text-subtle" aria-hidden="true">→</span>}
-              <span className="rounded-md border border-primary-border bg-primary-subtle px-2.5 py-1 font-medium text-text">{summaryValue(phase.tactic)}</span>
-            </li>
-          ))}
-        </ol>
-      ) : (
-        <p className="mt-3 text-xs font-medium text-text-muted">WAITING_FOR_EVIDENCE</p>
-      )}
-    </div>
   );
 }
 
@@ -1512,6 +1597,15 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
   const nonEmptyErrors = Object.values(errors).filter(hasMeaningfulValue).length;
   return (
     <>
+      <Insight title="Evidence trail" tone={nonEmptyErrors ? "warning" : "primary"}>
+        {list(value.analysis_jobs).length} analysis job{list(value.analysis_jobs).length === 1 ? "" : "s"} recorded; {hasMeaningfulRecord(reportSummary) ? "a report summary is available" : "no report summary is stored"}. {nonEmptyErrors ? `${nonEmptyErrors} error field${nonEmptyErrors === 1 ? " needs" : "s need"} review.` : "No stored error is reported."}
+      </Insight>
+      <MetricStrip fields={[
+        ["Analysis jobs", countOf(list(value.analysis_jobs).length)],
+        ["Report summary", hasMeaningfulRecord(reportSummary) ? "Ready" : "Empty"],
+        ["Processing errors", countOf(nonEmptyErrors)],
+      ]} />
+      <div className="mt-3"><MoreDetails title="Schema, session ID and processing details">
       <SummaryGrid fields={[
         ["Schema", summaryValue(value.schema_version, "Not recorded")],
         ["Session", summaryValue(value.session_id, "Unknown")],
@@ -1519,6 +1613,7 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
         ["Report summary", hasMeaningfulRecord(reportSummary) ? "Present" : "Empty"],
         ["Errors", countOf(nonEmptyErrors)],
       ]} />
+      </MoreDetails></div>
     </>
   );
 }
@@ -1767,7 +1862,6 @@ export function SessionAnalysisPanels({
           <p className="mt-1 text-xs text-text-muted">Chronology, observed access, and trusted classification for this exact session.</p>
         </div>
         <div className="ui-panel overflow-hidden p-4 sm:p-5">
-          <ObservedTacticPath items={list(detail.observed_tactic_path)} ended={!sessionIsActive(detail)} />
           <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
           <Panel eyebrow="Chronology" title="Bounded event timeline" icon={<ListTree className="h-4 w-4" aria-hidden="true" />} result={timelineResult} variant="embedded" className="xl:col-span-8">
             <TimelineList items={events} />
@@ -1816,7 +1910,7 @@ export function SessionAnalysisPanels({
 
           <div className="mt-5 grid grid-cols-1 items-start gap-5 border-t border-border pt-5 xl:grid-cols-2">
             <Panel eyebrow="Stored AI advisory" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} variant="embedded">
-              <AiAdvisorySummary data={aiAdvisory.data} />
+              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} />
             </Panel>
             {aiAdvisory.state === "ready" || aiAdvisory.state === "limited" ? (
               <PolicyGapSummary data={aiAdvisory.data} />

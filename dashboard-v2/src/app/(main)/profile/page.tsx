@@ -31,7 +31,7 @@ export default function ProfilePage() {
 
   // Forms state
   const [infoForm, setInfoForm] = useState({ fullName: "", email: "" });
-  const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [infoError, setInfoError] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [isSavingInfo, setIsSavingInfo] = useState(false);
@@ -69,7 +69,7 @@ export default function ProfilePage() {
   const openEditPassword = () => {
     if (editPasswordCloseTimer.current !== null) window.clearTimeout(editPasswordCloseTimer.current);
     setPasswordError("");
-    setPasswordForm({ newPassword: "", confirmPassword: "" });
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
     setIsEditPasswordPresent(true);
     window.requestAnimationFrame(() => setIsEditPasswordOpen(true));
   };
@@ -185,11 +185,11 @@ export default function ProfilePage() {
       const res = await fetch("/api/auth/change-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operatorId: user.operatorId, newPassword: passwordForm.newPassword }),
+        body: JSON.stringify({ operatorId: user.operatorId, currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword }),
       });
       if (!res.ok) throw new Error(await getRequestError(res, "Security credentials could not be updated."));
       closeEditPassword();
-      setPasswordForm({ newPassword: "", confirmPassword: "" });
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       showOperationNotice({ kind: "success", title: "Credentials updated", description: "Your access key was updated successfully." });
     } catch (error) {
       setPasswordError(error instanceof Error ? error.message : "Security credentials could not be updated. Please try again.");
@@ -228,15 +228,6 @@ export default function ProfilePage() {
               <div>
                 <p className="mb-1 text-xs text-text-subtle">Account created</p>
                 {loading ? <ProfileSkeleton className="h-4 w-36" /> : <p className="text-text">{user!.createdAt ? new Date(user!.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' UTC' : 'N/A'}</p>}
-              </div>
-              <div>
-                <p className="mb-1 text-xs text-text-subtle">Clearance level</p>
-                <div className="mt-1">
-                  {loading ? <ProfileSkeleton className="h-6 w-28" /> : <span className={`ui-badge ${user!.role === 'Admin' ? 'border-primary-border bg-primary-subtle text-primary' : 'border-neutral-border bg-neutral-subtle text-text-muted'}`}>
-                    <span className={`h-2 w-2 rounded-full ${user!.role === 'Admin' ? 'bg-primary' : 'bg-neutral'}`} aria-hidden="true" />
-                    {user!.role === 'Admin' ? 'Level 4 (Admin)' : 'Level 2 (Supporter)'}
-                  </span>}
-                </div>
               </div>
             </div>
           </div>
@@ -331,8 +322,12 @@ export default function ProfilePage() {
             </div>
             <form onSubmit={handlePasswordSubmit} className="space-y-4" aria-busy={isSavingPassword}>
               <div>
+                <label htmlFor="profile-current-password" className="text-sm font-medium text-text-muted">Current password</label>
+                <input id="profile-current-password" type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})} required className="ui-field mt-2" disabled={isSavingPassword} data-autofocus />
+              </div>
+              <div>
                 <label htmlFor="profile-new-password" className="text-sm font-medium text-text-muted">New password</label>
-                <input id="profile-new-password" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="ui-field mt-2" disabled={isSavingPassword} data-autofocus />
+                <input id="profile-new-password" type="password" autoComplete="new-password" value={passwordForm.newPassword} onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})} required className="ui-field mt-2" disabled={isSavingPassword} />
               </div>
               <div>
                 <label htmlFor="profile-confirm-password" className="text-sm font-medium text-text-muted">Confirm password</label>

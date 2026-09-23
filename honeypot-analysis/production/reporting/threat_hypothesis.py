@@ -560,7 +560,9 @@ def _canonical_chain_for_typed_match(
         return {}
     candidates = []
     for chain in observed.get("connected_behavior_chains") or []:
-        if not isinstance(chain, dict) or chain.get("chain_status") != "supported":
+        if not isinstance(chain, dict) or chain.get("chain_status") not in {
+            "supported", "partially_supported"
+        }:
             continue
         canonical_refs = set(_texts(chain.get("evidence_refs") or []))
         if typed_refs.issubset(canonical_refs):
@@ -1182,7 +1184,11 @@ def build_follow_on_hypothesis(
         for match, canonical_chain, definition in typed_incomplete:
             claim = _claim(
                 _clean(definition.get("incomplete_claim_type")),
-                _clean(definition.get("incomplete_text")),
+                _clean(
+                    definition.get("attempt_incomplete_text")
+                    if match.get("unconfirmed_attempts")
+                    else definition.get("incomplete_text")
+                ),
                 "partially_supported",
                 match.get("supporting_evidence_refs") or [],
                 match.get("limitations") or [],
@@ -1265,14 +1271,13 @@ def build_follow_on_hypothesis(
         refs = transfer_refs or inspection_refs
         if transfer_refs:
             abstention_reason = (
-                "A typed direct Cowrie transfer observation supports a "
-                "behavioral finding, but no follow-on execution hypothesis "
-                "is authorized while execution and cross-family relationship "
-                "semantics remain non-activated."
+                "A direct Cowrie transfer observation supports a behavioral "
+                "finding, but no same-entity chronological follow-on chain "
+                "passed the reviewed hypothesis gate."
             )
             gap_text = (
-                "Execution and cross-family relationship semantics are "
-                "not activated for typed transfer policy."
+                "A linked follow-on command, resolved shared path, supported "
+                "relationship, or eligible outcome/chronology is missing."
             )
             selection_semantics = (
                 "typed_transfer_follow_on_hypothesis_abstention"

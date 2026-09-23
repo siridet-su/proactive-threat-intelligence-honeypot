@@ -8,6 +8,25 @@ import {
 } from "./fixtures/filesystem.mjs";
 
 test.describe("FA-013 real-browser evidence", () => {
+  test("loads verified topology when EventSource never opens or errors", async ({ page }) => {
+    monitorBrowserFailures(page);
+    await installApiFixtures(page);
+    await page.addInitScript(() => {
+      window.EventSource = class {
+        addEventListener() {}
+        close() {}
+      };
+    });
+    const topologyRequests = [];
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/filesystem-topology") topologyRequests.push(request);
+    });
+    await page.goto("/filesystem-activity");
+    await expect(page.getByRole("button", { name: /Inspect source 192\.0\.2\.10; 1 session/ })).toBeVisible({ timeout: 15_000 });
+    expect(topologyRequests.length).toBeGreaterThan(0);
+    await assertNoBrowserFailures(page);
+  });
+
   test("production minimal: Live -> Audit -> Back -> Live -> Forward -> Audit", async ({ page }) => {
     monitorBrowserFailures(page);
     await installApiFixtures(page);
@@ -418,6 +437,113 @@ test.describe("FA-013 real-browser evidence", () => {
       const revisit = overlay.locator('[data-transition-event-id="replay-revisit"][data-transition-state="current"][data-transition-kind="directed"]');
       await expect(revisit).toHaveAttribute("data-transition-kind", "directed");
       await expect(revisit).toHaveAttribute("data-transition-route", "/tmp→/home/cowrie");
+      await expect(revisit).not.toHaveAttribute("marker-end", /.+/);
+      await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(1);
+      await expect(overlay.locator('[data-transition-hop-label="true"]')).toHaveCount(0);
+      await expect(overlay.locator('[data-testid="transition-impact-wave"]')).toHaveCount(1);
+      const transferAnimation = await overlay.evaluate((element) => ({
+        packetName: getComputedStyle(element.querySelector(".pti-hop-packet-core")).animationName,
+        packetDuration: getComputedStyle(element.querySelector(".pti-hop-packet-core")).animationDuration,
+        waveName: getComputedStyle(element.querySelector(".pti-hop-wave")).animationName,
+        waveDuration: getComputedStyle(element.querySelector(".pti-hop-wave")).animationDuration,
+      }));
+      expect(transferAnimation).toEqual({
+        packetName: "pti-hop-transfer-core",
+        packetDuration: "1.4s",
+        waveName: "pti-hop-wave",
+        waveDuration: "1.4s",
+      });
+      const sourceConnection = page
+        .getByRole("region", { name: /Filesystem topology map workspace/ })
+        .locator('path[data-source-target-path="/home/cowrie"]')
+        .first();
+      await expect(sourceConnection).toBeVisible();
+      await expect(sourceConnection).toHaveAttribute("stroke-opacity", "0.32");
+      const sharedTargetPorts = await page.evaluate(
+        ({ sourceSelector, transitionSelector }) => {
+          const toScreenPoint = (path, useStart) => {
+            const coordinates = (path.getAttribute("d")?.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+            const svgBounds = path.ownerSVGElement?.getBoundingClientRect();
+            const coordinateIndex = useStart ? 0 : coordinates.length - 2;
+            return {
+              x: svgBounds.left + (coordinates[coordinateIndex] / 100) * svgBounds.width,
+              y: svgBounds.top + (coordinates[coordinateIndex + 1] / 100) * svgBounds.height,
+            };
+          };
+          const sourcePath = document.querySelector(sourceSelector);
+          const transitionPath = document.querySelector(transitionSelector);
+          if (!(sourcePath instanceof SVGPathElement) || !(transitionPath instanceof SVGPathElement)) return null;
+          return {
+            source: toScreenPoint(sourcePath, true),
+            transition: toScreenPoint(transitionPath, false),
+          };
+        },
+        {
+          sourceSelector: 'path[data-source-target-path="/home/cowrie"]',
+          transitionSelector: '[data-transition-event-id="replay-revisit"][data-transition-kind="directed"]',
+        },
+      );
+      expect(sharedTargetPorts).not.toBeNull();
+      expect(Math.hypot(
+        sharedTargetPorts.source.x - sharedTargetPorts.transition.x,
+        sharedTargetPorts.source.y - sharedTargetPorts.transition.y,
+      )).toBeGreaterThan(4);
+
+      await page.getByRole("button", { name: "View settings" }).click();
+      await page.getByRole("group", { name: "Transition visibility" }).getByRole("button", { name: "All transitions" }).click();
+      await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(2);
+      await expect(overlay.locator('[data-transition-event-id="replay-change"][data-transition-kind="directed"]')).toHaveAttribute("marker-end", /previous-transition-arrow/);
+      await expect(revisit).not.toHaveAttribute("marker-end", /.+/);
+      const transitionLaneMidpoints = await page.evaluate(() => {
+        const screenMidpoint = (selector) => {
+          const path = document.querySelector(selector);
+          if (!(path instanceof SVGPathElement)) return null;
+          const point = path.getPointAtLength(path.getTotalLength() / 2);
+          const matrix = path.getScreenCTM();
+          if (!matrix) return null;
+          return new DOMPoint(point.x, point.y).matrixTransform(matrix);
+        };
+        return {
+          forward: screenMidpoint('[data-transition-event-id="replay-change"][data-transition-kind="directed"]'),
+          reverse: screenMidpoint('[data-transition-event-id="replay-revisit"][data-transition-kind="directed"]'),
+        };
+      });
+      expect(transitionLaneMidpoints.forward).not.toBeNull();
+      expect(transitionLaneMidpoints.reverse).not.toBeNull();
+      expect(Math.hypot(
+        transitionLaneMidpoints.forward.x - transitionLaneMidpoints.reverse.x,
+        transitionLaneMidpoints.forward.y - transitionLaneMidpoints.reverse.y,
+      )).toBeGreaterThanOrEqual(18);
+      const directedHopLabels = ["replay-change", "replay-revisit"].map((eventId) =>
+        overlay.locator(`[data-transition-hop-label="true"][data-transition-event-id="${eventId}"]`),
+      );
+      const directedLabelBounds = await Promise.all(directedHopLabels.map((label) => label.boundingBox()));
+      expect(directedLabelBounds.every(Boolean)).toBe(true);
+      const [changedLabelBounds, revisitLabelBounds] = directedLabelBounds;
+      const directedLabelsOverlap = !(
+        changedLabelBounds.x + changedLabelBounds.width <= revisitLabelBounds.x ||
+        revisitLabelBounds.x + revisitLabelBounds.width <= changedLabelBounds.x ||
+        changedLabelBounds.y + changedLabelBounds.height <= revisitLabelBounds.y ||
+        revisitLabelBounds.y + revisitLabelBounds.height <= changedLabelBounds.y
+      );
+      expect(directedLabelsOverlap).toBe(false);
+
+      for (const node of [
+        page.getByRole("button", { name: /^Inspect directory \/home\/cowrie / }),
+        page.getByRole("button", { name: /^Inspect directory \/tmp / }),
+      ]) {
+        const nodeBounds = await node.boundingBox();
+        expect(nodeBounds).not.toBeNull();
+        for (const labelBounds of directedLabelBounds) {
+          const overlapsNode = !(
+            labelBounds.x + labelBounds.width <= nodeBounds.x ||
+            nodeBounds.x + nodeBounds.width <= labelBounds.x ||
+            labelBounds.y + labelBounds.height <= nodeBounds.y ||
+            nodeBounds.y + nodeBounds.height <= labelBounds.y
+          );
+          expect(overlapsNode).toBe(false);
+        }
+      }
 
       const timelineViewButton = page.getByRole("tab", { name: "Timeline", exact: true });
       const mapViewButton = page.getByRole("tab", { name: "Map", exact: true });

@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-08-26-phase4b-semantic-replay-v1",
+  "version": "2026-09-23-observed-attempt-hypothesis-v1",
   "reference_manifest": {
     "path": "configs/trusted_reference_manifest.v1.json",
     "sha256": "788543ecef24c0d7a9a2adff869076eac9c788908f7a4669d328d462b1df3e0f"
@@ -21,11 +21,12 @@
       "Bounded typed Cowrie execution-attempt activation decision",
       "Attempt-only typed HTTP(S) command transfer decision",
       "Exact-entity typed connected-chain and bounded incomplete-chain review",
-      "Phase 4B hypothesis derive/render versus select/authorize boundary"
+      "Phase 4B hypothesis derive/render versus select/authorize boundary",
+      "Observed command-input versus confirmed outcome boundary for incomplete same-path hypotheses"
     ],
     "reviewed": true,
     "reviewer": "project developer",
-    "last_reviewed": "2026-08-11",
+    "last_reviewed": "2026-09-23",
     "review_status": "approved for scoped Cowrie SSH analysis",
     "reference_scope": {
       "supports": [
@@ -41,7 +42,7 @@
       {
         "artifact_id": "threat-hypothesis-runtime",
         "path": "production/reporting/threat_hypothesis.py",
-        "sha256": "673b0a63811d3fd515e99fd0a322d00c7c713f1adfaff20a6093308763b9e4d0",
+        "sha256": "a7bfbdc7be2b38cb0d2c652e29e90f96cf7795946127682293262a085230fefc",
         "purpose": "hypothesis derivation, evidence references, limitations, and authority boundary",
         "supports": [
           "the executable derive/render behavior bound to the reviewed policy"
@@ -63,6 +64,30 @@
         ]
       },
       {
+        "artifact_id": "typed-chain-selector-runtime",
+        "path": "production/reporting/typed_semantic_chain_selection.py",
+        "sha256": "13bbbb1d3d1e327cb7a3efa9ef088c1577da45f031673d03b2ce9c7b5c506005",
+        "purpose": "same-entity, chronological and outcome-bounded chain selection",
+        "supports": [
+          "attempt-only incomplete hypothesis selection without canonical promotion"
+        ],
+        "does_not_support": [
+          "command completion or real-host effect without outcome evidence"
+        ]
+      },
+      {
+        "artifact_id": "behavior-policy-validator-runtime",
+        "path": "production/policies/threat_hypothesis_behavior_policy.py",
+        "sha256": "28e86537418b5df9679fa82e06ea922b285c47bf488de7475da27bc759e4c80f",
+        "purpose": "fail-closed validation of the reviewed observed-attempt hypothesis rule",
+        "supports": [
+          "typed rule shape and scoped authority validation"
+        ],
+        "does_not_support": [
+          "automatic promotion of contextual evidence to observed findings"
+        ]
+      },
+      {
         "artifact_id": "typed-command-semantics",
         "path": "production/semantics/command_operations.py",
         "sha256": "bd0ee88dccff80c3fbae76f91a9c114497b3f91edab4cc141c8013da7727d0c1",
@@ -77,7 +102,7 @@
       {
         "artifact_id": "threat-hypothesis-policy-tests",
         "path": "tests/test_threat_hypothesis_behavior_policy.py",
-        "sha256": "c4736f4b30daa4e0b7c9439be116282c2da483236ad97847ab9afc1473d3c4e9",
+        "sha256": "bbc4f3d807bb106ac44662ce865f22571940eae3812c5bb7b2510016ca51611f",
         "purpose": "trusted policy validation and fail-closed regression coverage",
         "supports": [
           "repeatable policy and containment checks"
@@ -322,6 +347,7 @@
         "execution_attempt"
       ],
       "minimum_incomplete_operation_count": 2,
+      "allow_unconfirmed_incomplete_hypothesis": true,
       "required_transition_types": ["same_path_transition"],
       "supporting_relationship_types": ["transfer_observation_confirmation"],
       "same_entity_required": true,
@@ -334,6 +360,7 @@
           ],
           "incomplete_claim_type": "possible_follow_on_execution",
           "incomplete_text": "A transfer attempt and permission-modification attempt referenced the same resolved artifact path, but no supported execution attempt for that path was observed.",
+          "attempt_incomplete_text": "A transfer command and permission-modification command referencing the same resolved artifact path were observed in chronological order; command completion and effects are not established, and no linked execution attempt was observed.",
           "missing_evidence_text": "A supported execution-attempt observation for the same resolved path is missing.",
           "falsifier_codes": [
             "execution_observed_elsewhere_for_same_path",

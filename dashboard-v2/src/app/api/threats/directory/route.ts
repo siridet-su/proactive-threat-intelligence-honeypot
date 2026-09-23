@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-
 import { getSessionFromRequest } from "@/lib/auth/session";
 import { getThreatDirectory } from "@/lib/threat-server";
 import type { ThreatSeverityFilter } from "@/lib/dashboardTypes";
@@ -22,7 +21,8 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const directory = await getThreatDirectory({
       query: searchParams.get("query") ?? "",
-      severity: searchParams.get("severity") as ThreatSeverityFilter | null ?? undefined,
+      severity: (searchParams.get("severity") as ThreatSeverityFilter | null) ?? undefined,
+      attackerType: searchParams.get("attackerType") ?? undefined,
       page: parsePositiveInteger(searchParams.get("page"), 1),
       pageSize: parsePositiveInteger(searchParams.get("pageSize"), 20),
     });

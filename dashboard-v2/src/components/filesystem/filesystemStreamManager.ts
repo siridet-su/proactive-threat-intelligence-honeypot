@@ -109,6 +109,11 @@ export class FilesystemStreamLifecycleManager {
         }
       }, 5_000);
     };
+
+    // A proxy can leave EventSource pending indefinitely without firing either
+    // onopen or onerror. Load the same verified snapshot over ordinary HTTP
+    // immediately, while keeping SSE subscribed for subsequent live updates.
+    void this.fetchFallbackSnapshot(generation);
   }
 
   private async fetchFallbackSnapshot(generation: number): Promise<void> {
@@ -119,6 +124,11 @@ export class FilesystemStreamLifecycleManager {
     }
     const abortController = new AbortController();
     this.fallbackAbortController = abortController;
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, 10_000);
 
     const fetchFn = this.options.fetchFallback ?? ((u, init) => fetch(u, { cache: "no-store", ...init }));
     const fallbackUrl = this.options.fallbackUrl ?? "/api/filesystem-topology";
@@ -130,14 +140,16 @@ export class FilesystemStreamLifecycleManager {
       if (this.disposed || this.currentGeneration !== generation) return;
       if (!isSnapshot(data)) return;
       this.options.onSnapshot(data);
+      this.options.onHydrated();
     } catch {
-      if (abortController.signal.aborted || this.disposed || this.currentGeneration !== generation) {
+      if (this.disposed || this.currentGeneration !== generation || (abortController.signal.aborted && !timedOut)) {
         return;
       }
       if (this.options.onRegionStatus) {
         this.options.onRegionStatus((curr) => (curr === "ready" ? "stale" : "error"));
       }
     } finally {
+      clearTimeout(timeout);
       if (this.fallbackAbortController === abortController) {
         this.fallbackAbortController = null;
       }

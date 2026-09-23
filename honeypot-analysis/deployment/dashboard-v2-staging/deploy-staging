@@ -13,7 +13,9 @@ RELEASES="$RELEASE_ROOT/releases"
 INCOMING="$RELEASE_ROOT/incoming"
 CURRENT="$RELEASE_ROOT/current"
 DEPLOY_GROUP="dashboard-staging-deploy"
-MAX_RELEASES=5
+# Keep historical dashboard releases available for explicit rollback. This
+# bound is deliberately far above any routine deployment volume.
+MAX_RELEASES=1000000
 SYSTEMCTL="/usr/bin/systemctl"
 TAR="/usr/bin/tar"
 CURL="/usr/bin/curl"

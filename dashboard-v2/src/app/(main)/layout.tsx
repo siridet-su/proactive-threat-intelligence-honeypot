@@ -175,7 +175,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <User className="h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <p className="break-words font-semibold text-text">{userName || operatorId || "Operator"}</p>
-            <p className="text-xs text-text-subtle">{userRole === "Admin" ? "LVL-4 ACCESS" : "LVL-2 ACCESS"}</p>
           </div>
           <Settings className="h-4 w-4 shrink-0 text-text-subtle transition-colors duration-150 group-hover:text-primary" aria-hidden="true" />
         </Link>

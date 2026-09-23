@@ -108,7 +108,7 @@ describe("server-only raw command forwarding", () => {
     await expect(loadAdminCowrieCommands(SESSION_ID)).rejects.toThrow("closed contract");
   });
 
-  it("does not make an upstream request when the credential file grants group/other access", async () => {
+  it.skipIf(process.platform === "win32")("does not make an upstream request when the credential file grants group/other access", async () => {
     configureTokenFile(0o644);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
 

@@ -1241,6 +1241,59 @@ production builds now pass. The two Vitest expected failures and four lint warni
 pre-existing items outside filesystem visualization scope. The branch was synchronized with remote
 `main` by merge, and unrelated upstream/user changes were preserved rather than rewritten.
 
+#### Post-completion transition routing hardening — **DONE (2026-09-24)**
+
+In `All transitions` mode, the verified transition overlay plans the complete displayed route set before rendering instead
+of deriving each curve independently. Directed transitions attach to deterministic edge-facing node
+ports; repeated routes receive distinct port/lane offsets and reverse routes remain on opposite sides
+of the route family. The planner samples each quadratic route against unrelated measured node bounds
+and expands its lane until the route clears the occupied corridor. Hop labels are then assigned from
+multiple progress/clearance candidates while rejecting node and earlier-label collisions.
+Forward/reverse tracks must remain at least eight graph-coordinate units apart at their midpoint and
+the real-browser gate requires at least 18 rendered pixels at mobile and desktop widths. The current
+track halo is deliberately narrower and lower-opacity so emphasis does not resemble a duplicate edge.
+
+This correction preserves the evidence contract: no transition is deduplicated or bundled into a
+synthetic event. In `All transitions` mode every event retains its own path element, hop label,
+direction, state, and event ID; every visibility mode retains the complete chronological accessible-list
+entry set. In the real-browser replay fixture, the source
+connector and verified transition entering the same directory use visibly separate node ports, and
+the forward/reverse hop labels remain non-overlapping at both mobile and desktop widths.
+
+Verification:
+
+- focused transition overlay suite: **14/14 passed**
+- filesystem suites: **513 passed, 14 skipped**
+- full Vitest suite: **783 passed, 2 expected failures, 14 skipped**
+- real-browser filesystem suite: **14/14 passed**
+- ESLint: **0 errors**; one pre-existing Threat Intelligence warning remains outside this change
+- webpack production build: **PASSED**, 18/18 static pages generated
+- `git diff --check`: **PASSED**
+
+#### Post-completion replay focus and transfer effect — **DONE (2026-09-24)**
+
+Audit replay now uses a focus-plus-context visibility policy instead of painting the entire retained
+route history over the topology by default. `Current hop` is the default and renders exactly the
+selected verified event; `Current + trail` adds earlier events as faint, arrowless context while
+keeping future events hidden; `All transitions` remains available under View for forensic comparison
+and preserves the full routed/labelled presentation. The screen-reader transition sequence remains
+complete in every mode, so reducing visual density does not remove event identity or chronology.
+
+The current directed hop restores the synchronized transfer effect introduced in commit `df731d9`:
+six tapered light-packet layers travel from the verified origin to the verified destination, then a
+capsule-shaped radiation wave expands from the destination on the same animation clock. Reduced-motion
+mode keeps the static directed evidence while suppressing both packet travel and impact radiation.
+Audit source connectors remain visible but are deliberately dimmed while a replay hop is focused, and
+default mode omits redundant floating hop-number labels because the target badge and timeline already
+carry that information. The oversized current-hop arrowhead is also omitted: packet travel communicates
+direction during animation, while the persistent endpoint ring, target Hop badge, and forensic from/to
+text preserve the destination when animation is paused or reduced. Historical and future lines retain
+directional arrowheads only in the opt-in `All transitions` comparison mode.
+
+Regression coverage proves the one-route default, arrowless historical trail, opt-in full route set,
+complete accessible sequence, restored synchronized packet/wave CSS animations, reduced-motion
+behavior, and real-browser mode switching at mobile and desktop widths.
+
 ## 6. File ownership map for implementation
 
 | Concern | Primary source files | Primary regression suites |
