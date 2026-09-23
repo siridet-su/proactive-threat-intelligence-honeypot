@@ -56,7 +56,7 @@ function tokenFromPrivateFile(configuredPath: string): string | null {
   if (!tokenPath || !isAbsolute(tokenPath)) return null;
   try {
     const stat = lstatSync(/* turbopackIgnore: true */ tokenPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.size > MAX_TOKEN_BYTES) return null;
+    if (!stat.isFile() || stat.isSymbolicLink() || (process.platform !== "win32" && (stat.mode & 0o077) !== 0) || stat.size > MAX_TOKEN_BYTES) return null;
     const token = readFileSync(/* turbopackIgnore: true */ tokenPath, { encoding: "utf8", flag: "r" }).trim();
     if (token.length < 32 || Buffer.byteLength(token, "utf8") > MAX_TOKEN_BYTES || /[\s\u0000-\u001f\u007f]/u.test(token)) return null;
     return token;

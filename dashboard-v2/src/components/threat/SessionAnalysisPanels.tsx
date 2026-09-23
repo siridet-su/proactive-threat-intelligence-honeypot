@@ -648,7 +648,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
               <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                 <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(mapping.tactic, "Tactic not recorded")}</span>
                 <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(authority.decision || mapping.authority, "Advisory only")}</span>
-                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1: {summaryValue(advisory.predicted_technique)}</span>}
+                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1 advisory: {summaryValue(advisory.predicted_technique)}</span>}
               </div>
               <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
             </li>
@@ -657,7 +657,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
       </ol></ScrollPanel>}
       <div className="rounded-xl border border-primary-border bg-primary-subtle/50 p-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mapping details</p>
+          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mappings</p>
           <span className="ui-badge text-[10px]">{trustedMappings.length}</span>
         </div>
         {trustedMappings.length ? (
@@ -1446,7 +1446,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
             <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
-                <span className="ui-badge text-[11px]">{readableCode(item.evidence_state || "comparison unavailable")}</span>
+                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
               </div>
               <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
                 <span>Model1: <span className="font-medium text-text">{readableCode(item.model1_result || "not applicable")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
@@ -1518,13 +1518,13 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
           {summaryValue(item.statement, "Statement unavailable")}
         </article>)}
         {selectedActions.map((item) => <article key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle/50 p-3 text-sm text-text">
-          <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing manual action</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
+          <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing action selected for review</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
           <p className="font-semibold">{summaryValue(item.description, "Action description unavailable")}</p>
           {hasMeaningfulValue(item.rationale) && <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(item.rationale)}</p>}
         </article>)}
       </ScrollPanel>}
       {(selectedFindingIds.size > selectedFindings.length || selectedActionIds.size > selectedActions.length) && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">Some AI selections could not be matched to the stored evidence or action details.</p>}
-      {inaccurateNarrative && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but the linked evidence is a response-guidance finding. The item shown above comes from the verified guidance record.</p>}
+      {inaccurateNarrative && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but its selected ID belongs to response guidance. The item shown above comes from the verified guidance record.</p>}
       <MoreDetails title="AI provider, validation and original response">
         <SummaryGrid fields={[
           ["Status", summaryValue(data.status, "Unavailable")],

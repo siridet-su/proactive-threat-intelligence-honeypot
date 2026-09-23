@@ -7,7 +7,6 @@ import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
 import type {
   DashboardThreatEvent,
   ThreatDirectoryPage,
-  ThreatSeverityFilter,
 } from "@/lib/dashboardTypes";
 import { severityDotClass } from "@/lib/presentation";
 import {
@@ -28,21 +27,11 @@ import {
   Activity,
   Lock,
 } from "lucide-react";
-import { TableStreamSkeleton } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
 
 type AttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
 
 type RequestStatus = "loading" | "ready" | "error";
-
-const getSeverityFromAttackerType = (type: AttackerTypeFilter): ThreatSeverityFilter => {
-  switch (type) {
-    case "APT": return "Critical";
-    case "Bot": return "High";
-    case "ScriptKiddie": return "Medium";
-    default: return "All";
-  }
-};
 
 // คอมโพเนนต์ดึงข้อมูล Attacker แบบแยก 2 คอลัมน์ (Type, Cmds)
 function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string }) {
@@ -70,7 +59,7 @@ function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string
             });
           }
         }
-      } catch (error) {
+      } catch {
         // หากดึงไม่ได้ ให้ใช้ fallback
       } finally {
         window.clearTimeout(timeout);
@@ -607,13 +596,23 @@ function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) {
         <tbody className="divide-y divide-border/60 cursor-pointer">
           {sessions.map((session) => {
             let dwellTime = "Not recorded";
+            
             if (session.duration === "Active" || session.session_status === "active") {
               dwellTime = "Active";
-            } else if (session.end_time && session.timestamp) {
-              const seconds = Math.max(0, Math.round((Date.parse(String(session.end_time)) - Date.parse(String(session.timestamp))) / 1000));
-              if (Number.isFinite(seconds)) dwellTime = `${seconds}s`;
-            } else if (session.duration !== "Closed" && session.duration !== "Active") {
-              dwellTime = session.duration;
+            } else {
+              // กรณีที่ 1: มี end_time ส่งมาให้คำนวณ
+              if (session.end_time && session.timestamp) {
+                const seconds = Math.max(0, Math.round((Date.parse(String(session.end_time)) - Date.parse(String(session.timestamp))) / 1000));
+                if (Number.isFinite(seconds)) dwellTime = `${seconds}s`;
+              } 
+              // กรณีที่ 2: duration ส่งมาเป็นตัวเลข (เช่น 45.12)
+              else if (typeof session.duration === "number" || (!isNaN(Number(session.duration)) && String(session.duration).trim() !== "")) {
+                dwellTime = `${Math.round(Number(session.duration))}s`;
+              } 
+              // กรณีที่ 3: ส่งมาเป็น String สำเร็จรูปที่ไม่ใช่คำว่า Closed
+              else if (typeof session.duration === "string" && session.duration !== "Closed" && session.duration !== "Unknown") {
+                dwellTime = session.duration;
+              }
             }
 
             return (
