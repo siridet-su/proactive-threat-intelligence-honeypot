@@ -29,13 +29,13 @@ Related documents:
 
 เอกสารนี้เป็น execution plan ไม่ใช่หลักฐานว่า implementation เสร็จแล้ว แต่ละรายการจะเปลี่ยนสถานะเป็น `DONE` ได้ต่อเมื่อ acceptance criteria และ test gate ของรายการนั้นผ่าน
 
-Current focus: **`FSV-006` — Separate heuristic from evidence**
+Current focus: **`FSV-007A` — Introduce a pure transition presentation model**
 
 | Checkpoint | Scope | Status |
 | --- | --- | --- |
 | 0 | Baseline and characterization | `DONE` |
-| 1 | Evidence semantics | `IN_PROGRESS` |
-| 2 | Verified transition model/rendering | `BLOCKED_BY_1` |
+| 1 | Evidence semantics | `DONE` |
+| 2 | Verified transition model/rendering | `IN_PROGRESS` |
 | 3 | Workspace structure | `BLOCKED_BY_2` |
 | 4 | Accessibility/responsive interaction | `BLOCKED_BY_3` |
 | 5 | Final verification/documentation | `BLOCKED_BY_4` |
@@ -494,6 +494,8 @@ Verification:
 
 #### `FSV-006` Separate heuristic from evidence
 
+Status: **DONE — 2026-09-23**
+
 Primary files:
 
 - `src/components/filesystem/filesystemUtils.ts`
@@ -502,17 +504,59 @@ Primary files:
 
 Implementation:
 
-- เปลี่ยน wording เป็น `Rule-based path of interest`
-- เปิดเผย rule/category ใน tooltip หรือ inspector
-- ใช้ warning outline/icon แทน evidence badge
-- ห้ามใช้คำว่า `drop`, `malware`, `compromised` หรือ `sensitive target` จาก path rule เพียงอย่างเดียว
+- Replaced the boolean `isSensitiveDirectory(path)` presentation API with `classifyRuleBasedPathInterest(path)`.
+- The classifier returns `RuleBasedPathInterest | null` with explicit `source: "path-rule"`, structured category, category label, matched root, rule description, and a path-only explanation that states the result is not evidence of observed file activity.
+- Matching is case-sensitive and segment-boundary-safe; the classifier matches only exact roots or real descendants and never parses command text or creates topology nodes.
+- Canvas and Inspector consume the same structured classifier. Canvas uses a warning-colored outline/icon with stable selector `[data-testid="rule-based-path-interest"]` and accessible rule text. Inspector renders an informational explanatory panel with the category, matched rule, matched root, and neutral path-only explanation.
+- Removed the heuristic phrases `Sensitive target / Drop directory` and `(sensitive target)` from generated Canvas and Inspector text, titles, and accessibility output.
+
+Rule/category matrix:
+
+| Matched root | Category | Category label | Rule description |
+| --- | --- | --- | --- |
+| `/root` | `privileged-home` | Privileged account home | Privileged account home path rule |
+| `/tmp` | `temporary-directory` | Temporary directory | Temporary directory path rule |
+| `/var/tmp` | `temporary-directory` | Temporary directory | Temporary directory path rule |
+| `/dev/shm` | `shared-memory` | Shared memory | Shared-memory path rule |
+| `/etc` | `system-configuration` | System configuration | System configuration path rule |
 
 Acceptance:
 
-- `/tmp` แสดงได้เพียง heuristic interest
-- UI มี accessible explanation ว่า label มาจาก rule ไม่ใช่ observed file action
+- `/tmp` and descendants expose only `Rule-based path of interest` with the temporary-directory rule context.
+- `/tmpfile`, `/etcetera`, `/rooted`, `/dev/shmemory`, `/TMP`, and `/ETC` return no classification.
+- Canvas exposes the category, matched rule, matched root, path-only wording, and not-evidence meaning through accessible text; ordinary paths expose no indicator.
+- Inspector exposes the same structured facts after selecting the Directory tab; ordinary paths expose no annotation.
+- Failed-change presentation remains separate: the verified origin may receive both its existing failed-origin annotation and a path-rule indicator, while the unverified destination remains absent and cannot receive a path-interest label.
 
-Checkpoint 1 full gate:
+Forbidden-claim regression coverage:
+
+- Pure classifier, Canvas, and Inspector tests inspect text, `innerHTML`, `title`, `aria-label`, `aria-description`, and every other DOM attribute for the forbidden heuristic claims.
+- The focused Canvas test proves the warning icon and rule text are present, while a normal node has no rule indicator and failed destinations remain unmaterialized.
+
+Checkpoint 1 semantic state audit:
+
+| State | FSV-006 result | Existing contract preserved |
+| --- | --- | --- |
+| Active live session | Path-rule annotation may appear on a materialized path | Active lifecycle and live freshness wording remain unchanged |
+| Retained/closed audit session | Path-rule annotation may appear on a materialized path | Retained lifecycle and evidence timestamps remain unchanged |
+| Partial topology/history | Classifier runs only on materialized authoritative paths | Partial coverage remains explicit; no completeness claim is added |
+| Complete topology/history | Same path-rule semantics apply | Coverage wording remains owned by the coverage model |
+| Failed change | Origin may show separate failure and path-rule annotations | Unverified destination remains absent and receives no label |
+| Selected session outside filter | No classifier state changes session selection | Active/retained notice and exact/loaded counts remain unchanged |
+
+Verification:
+
+- `npx vitest run tests/filesystem-path-interest-semantics.test.tsx`: **PASSED** (12/12 tests)
+- `npx vitest run tests/filesystem-path-interest-semantics.test.tsx tests/filesystem-failed-change-visualization.test.tsx tests/filesystem-layout.test.ts tests/fa013-component-evidence.test.tsx tests/filesystem-ownership-boundaries.test.tsx tests/filesystem-retained-semantics.test.tsx`: **PASSED** (142/142 tests)
+- `npx vitest run tests/filesystem-*.test.ts*`: **PASSED** (441 tests passed, 14 skipped)
+- `npm test`: **PASSED** (602 tests passed, 2 expected fail, 14 skipped)
+- `npm run lint`: **PASSED** (0 errors, 0 warnings)
+- `npm run build -- --webpack`: **PASSED** (production webpack build succeeded, 19/19 static pages generated)
+- Browser gate status: **`NOT RUN`** (system Chromium is present at `/usr/bin/chromium`, but Playwright's configured webServer probe fails with `EPERM` when connecting to `127.0.0.1:3100`; no browser was installed and no responsive visual verification is claimed)
+
+Checkpoint 1 status: **DONE**
+
+Checkpoint 2 status: **IN_PROGRESS**; current focus is `FSV-007A`.
 
 ```bash
 npm test
@@ -520,8 +564,6 @@ npm run lint
 npm run build
 git diff --check
 ```
-
-Phase audit: ตรวจ wording และ state matrix ของ active, closed, partial, complete, failed และ selected-outside-filter ก่อนเริ่ม transition renderer
 
 ---
 

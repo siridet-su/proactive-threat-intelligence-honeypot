@@ -16,10 +16,11 @@ import type {
   FilesystemTopologySession,
 } from "@/lib/dashboardTypes";
 import {
+  classifyRuleBasedPathInterest,
   compactDirectoryPath,
   formatTimestamp,
+  formatRuleBasedPathInterestDescription,
   getDirectorySessionCounts,
-  isSensitiveDirectory,
   pathBreadcrumbs,
   statusBadgeClass,
   statusLabel,
@@ -141,6 +142,7 @@ export function FilesystemInspector({
     () => (selectedNode ? pathBreadcrumbs(selectedNode.path) : []),
     [selectedNode],
   );
+  const pathInterest = selectedNode ? classifyRuleBasedPathInterest(selectedNode.path) : null;
 
   const nodeCounts = useMemo(() => {
     if (!selectedNode) return { exactCount: 0, descendantCount: 0, branchCount: 0, uniqueSourcesCount: 0 };
@@ -415,11 +417,31 @@ export function FilesystemInspector({
                     );
                   })}
                 </div>
-                {isSensitiveDirectory(selectedNode.path) && (
-                  <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-2 py-0.5 text-xs font-semibold text-warning">
-                    <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
-                    Sensitive target / Drop directory
-                  </div>
+                {pathInterest && (
+                  <aside
+                    data-testid="rule-based-path-interest"
+                    role="note"
+                    aria-label={formatRuleBasedPathInterestDescription(pathInterest)}
+                    className="mt-3 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-text"
+                  >
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                    <div className="min-w-0 space-y-1">
+                      <p className="font-semibold text-text">{pathInterest.label}</p>
+                      <p>
+                        <span className="font-medium">Category:</span> {pathInterest.categoryLabel}
+                      </p>
+                      <p>
+                        <span className="font-medium">Matched rule:</span> {pathInterest.ruleDescription}
+                      </p>
+                      <p>
+                        <span className="font-medium">Matched root:</span>{" "}
+                        <code className="font-mono">{pathInterest.matchedRoot}</code>
+                      </p>
+                      <p data-testid="rule-based-path-interest-explanation" className="leading-relaxed text-text-muted">
+                        {pathInterest.explanation}
+                      </p>
+                    </div>
+                  </aside>
                 )}
               </div>
 

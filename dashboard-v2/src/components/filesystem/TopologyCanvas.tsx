@@ -38,6 +38,7 @@ import { HopEnergy } from "./HopEnergy";
 import {
   analyzeTopologyDensity,
   calloutsForGraph,
+  classifyRuleBasedPathInterest,
   clearAutomaticCalloutCollisions,
   compactDirectoryPath,
   DEFAULT_DENSITY_THRESHOLDS,
@@ -45,9 +46,9 @@ import {
   directorySegment,
   formatUpdateAge,
   formatFailedChangeMessage,
+  formatRuleBasedPathInterestDescription,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
-  isSensitiveDirectory,
   leaderEndpoints,
   pointForGraph,
   resolveCalloutPositions,
@@ -1158,7 +1159,10 @@ export function TopologyCanvas({
                     {graphNodes.map((node) => {
                       const isSelected = node.path === selectedPath;
                       const isRoot = node.path === "/";
-                      const isSensitive = isSensitiveDirectory(node.path);
+                      const pathInterest = classifyRuleBasedPathInterest(node.path);
+                      const pathInterestAccessibleText = pathInterest
+                        ? formatRuleBasedPathInterestDescription(pathInterest)
+                        : null;
                       const isHopTarget = activeHopCanvasSemantics.verifiedTargetPath === node.path;
                       const isHopVisited = Boolean(activeHop?.visitedPaths.includes(node.path));
                       const visitedStep = activeHop?.visitedStepMap[node.path];
@@ -1206,7 +1210,7 @@ export function TopologyCanvas({
                             (node.hiddenChildCount ?? 0) > 0
                               ? ` (${node.hiddenChildCount} child directories aggregated, click to expand)`
                               : ""
-                          }${isSensitive ? " (sensitive target)" : ""}${
+                          }${pathInterestAccessibleText ? ` (${pathInterestAccessibleText})` : ""}${
                             isHopTarget && activeHop ? ` (active hop target ${activeHop.stepIndex + 1} of ${activeHop.totalSteps})` : ""
                           }`}
                           title={
@@ -1238,7 +1242,7 @@ export function TopologyCanvas({
                                     ? "z-10 border-primary-border bg-primary-subtle text-text ring-1 ring-primary/40"
                                     : isHopVisited
                                       ? "z-10 border-primary/40 bg-surface text-text hover:border-primary/70 hover:bg-surface-hover"
-                                      : isSensitive
+                                      : pathInterest
                                         ? "z-10 border-warning-border/80 bg-surface text-text hover:border-warning hover:bg-surface-hover"
                                         : "z-10 border-border bg-surface text-text hover:border-border-strong hover:bg-surface-hover"
                           }`}
@@ -1261,17 +1265,23 @@ export function TopologyCanvas({
                             <FolderOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
                           ) : (
                             <Folder
-                              className={`h-3.5 w-3.5 shrink-0 ${isSensitive ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
+                              className={`h-3.5 w-3.5 shrink-0 ${pathInterest ? "text-warning" : isHopVisited ? "text-primary/80" : "text-text-subtle"}`}
                               aria-hidden="true"
                             />
                           )}
                           <span className="truncate font-mono text-xs">{directorySegment(node.path)}</span>
-                          {isSensitive && (
+                          {pathInterest && (
                             <span
-                              className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning"
-                              title="Sensitive target / Drop directory"
-                              aria-hidden="true"
-                            />
+                              data-testid="rule-based-path-interest"
+                              data-rule-based-path-interest-root={pathInterest.matchedRoot}
+                              role="img"
+                              aria-label={pathInterestAccessibleText ?? pathInterest.label}
+                              title={pathInterestAccessibleText ?? pathInterest.label}
+                              className="flex h-4 w-4 shrink-0 items-center justify-center text-warning"
+                            >
+                              <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
+                              <span className="sr-only">{pathInterestAccessibleText}</span>
+                            </span>
                           )}
                           {isHopTarget && activeHop ? (
                             <span

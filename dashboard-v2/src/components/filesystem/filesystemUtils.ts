@@ -694,20 +694,82 @@ export function compactDirectoryPath(path: string): string {
   return path === "/" ? path : `…/${directorySegment(path)}`;
 }
 
-export function isSensitiveDirectory(path: string): boolean {
-  const p = path.toLowerCase();
-  return (
-    p === "/root" ||
-    p.startsWith("/root/") ||
-    p === "/tmp" ||
-    p.startsWith("/tmp/") ||
-    p === "/var/tmp" ||
-    p.startsWith("/var/tmp/") ||
-    p === "/dev/shm" ||
-    p.startsWith("/dev/shm/") ||
-    p === "/etc" ||
-    p.startsWith("/etc/")
+export type PathInterestCategory =
+  | "privileged-home"
+  | "temporary-directory"
+  | "shared-memory"
+  | "system-configuration";
+
+export type PathInterestMatchedRoot = "/root" | "/tmp" | "/var/tmp" | "/dev/shm" | "/etc";
+
+export interface RuleBasedPathInterest {
+  source: "path-rule";
+  label: "Rule-based path of interest";
+  category: PathInterestCategory;
+  categoryLabel: string;
+  matchedRoot: PathInterestMatchedRoot;
+  ruleDescription: string;
+  explanation: string;
+}
+
+interface PathInterestRule {
+  category: PathInterestCategory;
+  categoryLabel: string;
+  matchedRoot: PathInterestMatchedRoot;
+  ruleDescription: string;
+}
+
+const PATH_INTEREST_RULES: readonly PathInterestRule[] = [
+  {
+    category: "privileged-home",
+    categoryLabel: "Privileged account home",
+    matchedRoot: "/root",
+    ruleDescription: "Privileged account home path rule",
+  },
+  {
+    category: "temporary-directory",
+    categoryLabel: "Temporary directory",
+    matchedRoot: "/tmp",
+    ruleDescription: "Temporary directory path rule",
+  },
+  {
+    category: "temporary-directory",
+    categoryLabel: "Temporary directory",
+    matchedRoot: "/var/tmp",
+    ruleDescription: "Temporary directory path rule",
+  },
+  {
+    category: "shared-memory",
+    categoryLabel: "Shared memory",
+    matchedRoot: "/dev/shm",
+    ruleDescription: "Shared-memory path rule",
+  },
+  {
+    category: "system-configuration",
+    categoryLabel: "System configuration",
+    matchedRoot: "/etc",
+    ruleDescription: "System configuration path rule",
+  },
+];
+
+export function classifyRuleBasedPathInterest(path: string | null | undefined): RuleBasedPathInterest | null {
+  if (!path) return null;
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const matchedRule = PATH_INTEREST_RULES.find(({ matchedRoot }) =>
+    normalizedPath === matchedRoot || normalizedPath.startsWith(`${matchedRoot}/`),
   );
+  if (!matchedRule) return null;
+
+  return {
+    source: "path-rule",
+    label: "Rule-based path of interest",
+    ...matchedRule,
+    explanation: `Matched the ${matchedRule.ruleDescription.toLowerCase()} based on this directory path only. This heuristic classification is not evidence of observed file activity.`,
+  };
+}
+
+export function formatRuleBasedPathInterestDescription(interest: RuleBasedPathInterest): string {
+  return `${interest.label}. Category: ${interest.categoryLabel}. Matched rule: ${interest.ruleDescription}. Matched root: ${interest.matchedRoot}. ${interest.explanation}`;
 }
 
 export interface BreadcrumbSegment {
@@ -1781,7 +1843,7 @@ export function buildAuditSnapshot(
 
 /**
  * Checks whether a session strictly stayed within `/home` (and its subdirectories)
- * without traversing into any sensitive or system directories (e.g. /etc, /var, /tmp, /root).
+ * without traversing into rule-based paths of interest or system directories (e.g. /etc, /var, /tmp, /root).
  */
 export function isHomeOnlySession(
   session: FilesystemTopologySession | FilesystemClosedSession,
