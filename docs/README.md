@@ -19,6 +19,7 @@ and historical material inherited from the previous team.
 8. [Implementation log](IMPLEMENTATION-LOG.md) — dated record of repository
    implementations and deployment/audit evidence.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
+10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 
 ## Document status labels
 
@@ -53,6 +54,8 @@ and historical material inherited from the previous team.
 - `honeypot-analysis/` is the active post-session/cloud-analysis workstream.
 - `old-dashboard-2025/`, `maintenance/`, and `docs/logs/` contain inherited
   history and snapshots, not current operational instructions.
-- `../decoy-honeypot/docker-compose.yml` is currently the deployment source of
-  truth for the Docker decoy stack. A dedicated design/runbook will be added
-  before that configuration is materially changed.
+- `../decoy-honeypot/docker-compose.yml` remains the deployment source of truth
+  for the Docker decoy stack, outside this Git worktree. The corporate web
+  application source is tracked in [`integrations/web-corp/`](../integrations/web-corp/README.md);
+  its build-context decision is recorded in [ADR-0005](adr/ADR-0005-corporate-web-decoy-source.md).
+  Consolidation of the full Compose stack is deferred.
