@@ -1032,6 +1032,33 @@ def test_monitor_command_count_accepts_privacy_redacted_historical_input_events(
     assert '"input"' not in json.dumps(view, sort_keys=True)
 
 
+def test_monitor_command_count_excludes_only_explicit_blank_command_inputs() -> None:
+    rows = [
+        {
+            "event_id": f"event-{index}",
+            "eventid": "cowrie.command.input",
+            "session_id": "session-events",
+            **({"payload_json": json.dumps({"input": value})} if value is not None else {}),
+        }
+        for index, value in enumerate(("id", "", "   ", None))
+    ]
+
+    view = session_detail_view(
+        {
+            "ok": True,
+            "session_id": "session-events",
+            "overview": {"session_id": "session-events", "command_count": 99},
+            "session_payload": {"session_id": "session-events", "commands": []},
+            "events_table_rows": rows,
+        }
+    )
+
+    # The row without an input key remains countable for historical storage;
+    # rows that explicitly recorded an empty submission are not commands.
+    assert view["overview"]["command_count"] == 2
+    assert view["session"]["command_count"] == 2
+
+
 def test_monitor_request_log_sanitizes_sensitive_query_values(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

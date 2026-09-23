@@ -31,31 +31,16 @@ from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
 
-TI_DISPLAY_STATUS = {
-    "POLICY_BLOCKED": "LOOKUP_NOT_EXECUTED",
-    "TI_PENDING": "LOOKUP_PENDING",
-    "TI_PARTIAL": "PARTIAL_CONTEXT",
-    "TI_EXPIRED": "STORED_CONTEXT_STALE",
-    "TI_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
-    "TI_AVAILABLE": "AVAILABLE",
-    "AVAILABLE": "AVAILABLE",
-    "TI_FRESH": "FRESH",
-    "TI_STALE": "STALE",
-    "TI_AUTH_DISABLED": "LOOKUP_AUTH_DISABLED",
-    "TI_RATE_LIMITED": "LOOKUP_RATE_LIMITED",
-    "PROVIDER_EVIDENCE_AVAILABLE": "EVIDENCE_AVAILABLE",
-    "NO_ELIGIBLE_OBSERVABLE": "NO_ELIGIBLE_DATA",
-    "NO_STORED_PROVIDER_RESULT": "NO_STORED_RESULT",
-    "PROVIDER_RESULT_PENDING": "LOOKUP_PENDING",
-    "EXPIRED_STORED_RESULT": "STORED_CONTEXT_STALE",
-    "PROVIDER_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
-    "STATUS_NOT_SPECIFIED": "STATE_NOT_AVAILABLE",
-}
-
-
 def _ti_display_status(value: Any) -> str:
+    """Render the canonical ETI state without inventing report vocabulary.
+
+    The report is a durable projection of the API read model.  Translating
+    states here made the same session appear to have different ETI outcomes
+    in the API and PDF, so normalization is deliberately limited to casing.
+    """
+
     normalized = str(value or "NOT_AVAILABLE").strip().upper()
-    return TI_DISPLAY_STATUS.get(normalized, normalized)
+    return normalized
 
 
 def _latest_ti_lookup_at(external_context: Any) -> Any:
@@ -2024,17 +2009,8 @@ def write_pdf_report(
             "The external-TI read model did not record a more specific state.",
         )
     )
-    ti_status = (
-        ti_status_reason
-        if ti_raw_status in {"TI_PENDING", "NOT_RECORDED"}
-        and ti_status_reason != "STATUS_NOT_SPECIFIED"
-        else ti_raw_status
-    )
+    ti_status = ti_raw_status
     ti_display_status = _ti_display_status(ti_status)
-    if ti_status_reason == "EXPIRED_STORED_RESULT":
-        # The coarse API status remains backward compatible, but the report
-        # must not present stale context as an in-progress live lookup.
-        ti_display_status = _ti_display_status("TI_EXPIRED")
     ti_display_status_reason = _ti_display_status(ti_status_reason)
     ti_freshness = (
         external_context.get("freshness")
