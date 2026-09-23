@@ -8,15 +8,17 @@ and historical material inherited from the previous team.
 
 1. [Current architecture](CURRENT-ARCHITECTURE.md) — deployed components and
    intentional temporary states.
-2. [Service catalog](SERVICE-CATALOG.md) — every exposed or supporting service,
+2. [Implementation log](IMPLEMENTATION-LOG.md) — append-only record of repository
+   changes, host application, active state, and deferred verification.
+3. [Service catalog](SERVICE-CATALOG.md) — every exposed or supporting service,
    its owner, telemetry, and lifecycle status.
-3. [Data ownership](DATA-OWNERSHIP.md) — which system owns each stage of data.
-4. [Roadmap](ROADMAP.md) — current work ordered by dependency.
-5. [Filesystem Activity live working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) — active Dashboard Filesystem backlog, current focus, and completion evidence.
-6. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
+4. [Data ownership](DATA-OWNERSHIP.md) — which system owns each stage of data.
+5. [Roadmap](ROADMAP.md) — current work ordered by dependency.
+6. [Filesystem Activity live working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) — active Dashboard Filesystem backlog, current focus, and completion evidence.
+7. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
    artifact handling, and threat-intelligence boundaries.
-7. [Architecture decisions](adr/) — durable decisions and their rationale.
-8. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
+8. [Architecture decisions](adr/) — durable decisions and their rationale.
+9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 
 ## Document status labels
 
