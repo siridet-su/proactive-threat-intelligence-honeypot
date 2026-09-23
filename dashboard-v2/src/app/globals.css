@@ -838,6 +838,23 @@
   opacity: 1;
 }
 
+.filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]::after {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  translate: 0 -0.2rem;
+}
+
+.filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]:is(:hover, :focus-visible)::after {
+  translate: 0 0;
+}
+
+@media (max-width: 639px) {
+  .filesystem-activity-scope [data-keyboard-tooltip][data-tooltip-placement="end"]::after {
+    inset-inline-start: 0;
+    inset-inline-end: auto;
+  }
+}
+
 @media (hover: none), (pointer: coarse) {
   .pti-telemetry-path { animation: none; }
   .filesystem-activity-scope :where(button, [role="button"], [role="tab"], [role="separator"], select, input:not([type="range"])) {

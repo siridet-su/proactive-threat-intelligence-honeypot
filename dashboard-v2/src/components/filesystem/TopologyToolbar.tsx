@@ -390,6 +390,7 @@ export function TopologyToolbar({
           }
           aria-pressed={isTopologyExpanded}
           data-keyboard-tooltip
+          data-tooltip-placement="end"
           onClick={handleToggleExpand}
         >
           {isTopologyExpanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}

@@ -705,6 +705,42 @@ test.describe("FA-013 real-browser evidence", () => {
       expect(mapTargets.filter((target) => target.iconOnly && !target.hasKeyboardTooltip)).toEqual([]);
       expect(mapTargets.filter((target) => target.hasKeyboardTooltip && !target.customTooltipLabel)).toEqual([]);
       expect(mapTargets.filter((target) => target.hasKeyboardTooltip && target.hasNativeTitle)).toEqual([]);
+      const fullscreen = page.getByRole("button", { name: "Open fullscreen audit studio" });
+      await expect(fullscreen).toHaveAttribute("data-tooltip-placement", "end");
+      await fullscreen.focus();
+      await expect.poll(() => fullscreen.evaluate((button) => getComputedStyle(button, "::after").opacity)).toBe("1");
+      const readTooltipBounds = () => fullscreen.evaluate((button) => {
+        const buttonRect = button.getBoundingClientRect();
+        const panelRect = button.closest(".ui-panel")?.getBoundingClientRect();
+        const tooltipStyle = getComputedStyle(button, "::after");
+        const contentWidth = Number.parseFloat(tooltipStyle.width);
+        const tooltipWidth = tooltipStyle.boxSizing === "border-box"
+          ? contentWidth
+          : contentWidth
+            + Number.parseFloat(tooltipStyle.paddingInlineStart)
+            + Number.parseFloat(tooltipStyle.paddingInlineEnd)
+            + Number.parseFloat(tooltipStyle.borderInlineStartWidth)
+            + Number.parseFloat(tooltipStyle.borderInlineEndWidth);
+        const leftOffset = Number.parseFloat(tooltipStyle.left);
+        const rightOffset = Number.parseFloat(tooltipStyle.right);
+        const left = Number.isFinite(leftOffset)
+          ? buttonRect.left + leftOffset
+          : buttonRect.right - rightOffset - tooltipWidth;
+        return {
+          left,
+          right: left + tooltipWidth,
+          panelLeft: panelRect?.left ?? Number.NaN,
+          panelRight: panelRect?.right ?? Number.NaN,
+        };
+      });
+      const mobileTooltipBounds = await readTooltipBounds();
+      expect(mobileTooltipBounds.left).toBeGreaterThanOrEqual(mobileTooltipBounds.panelLeft);
+      expect(mobileTooltipBounds.right).toBeLessThanOrEqual(mobileTooltipBounds.panelRight);
+      await page.setViewportSize({ width: 1280, height: 844 });
+      const desktopTooltipBounds = await readTooltipBounds();
+      expect(desktopTooltipBounds.left).toBeGreaterThanOrEqual(desktopTooltipBounds.panelLeft);
+      expect(desktopTooltipBounds.right).toBeLessThanOrEqual(desktopTooltipBounds.panelRight);
+      await page.setViewportSize({ width: 390, height: 844 });
       const zoomOut = page.getByRole("button", { name: "Zoom out" });
       await zoomOut.focus();
       await expect.poll(() => zoomOut.evaluate((button) => ({
