@@ -15,6 +15,8 @@ import {
   ShieldCheck,
   Globe2,
   Ghost,
+  Info,
+  Terminal,
 } from "lucide-react";
 import AttackRateChart, { type ActivityPoint } from "@/components/dashboard/AttackRateChart";
 import RegionalMap from "@/components/dashboard/RegionalMap";
@@ -23,8 +25,10 @@ import { RegionState, RefreshStatus, type RegionStatus } from "@/components/ui/R
 import type {
   DashboardThreatEvent,
   ThreatDashboardSummary,
+  DeceptionDecision,
 } from "@/lib/dashboardTypes";
 import { cn } from "@/lib/utils";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 type RequestStatus = "loading" | "ready" | "error";
 
@@ -52,6 +56,55 @@ function buildActivityData(events: DashboardThreatEvent[], windowHours: number |
   }));
 }
 
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    const sortedPayload = [...payload].sort((a, b) => {
+      const order: Record<string, number> = { "APT": 1, "ScriptKiddie": 2, "Bot": 3 };
+      return order[a.dataKey] - order[b.dataKey];
+    });
+
+    return (
+      <div className="bg-surface-raised border border-border rounded-lg shadow-lg p-3 text-xs text-text min-w-[150px]">
+        <p className="font-bold mb-2 pb-2 border-b border-border/50">{label}</p>
+        {sortedPayload.map((entry: any, index: number) => (
+          <div key={index} className="flex justify-between items-center gap-4 py-1">
+             <span className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }}></span>
+                {entry.name}
+             </span>
+             <span className="font-bold">{entry.value}</span>
+          </div>
+        ))}
+        <div className="flex justify-between items-center gap-4 pt-2 mt-2 border-t border-border/50 font-bold">
+           <span>Total</span>
+           <span>{payload.reduce((acc: number, curr: any) => acc + curr.value, 0)}</span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
+const CustomXAxisTick = (props: any) => {
+  const { x, y, payload, data } = props;
+  const dataPoint = data.find((d: any) => d.time === payload.value);
+  const isToday = payload.value === "Today";
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      {isToday && (
+        <rect x={-20} y={4} width={40} height={20} rx={4} fill="var(--surface-hover)" />
+      )}
+      <text x={0} y={0} dy={18} textAnchor="middle" fill={isToday ? "var(--success)" : "var(--text)"} fontSize={12} fontWeight="600">
+        {payload.value}
+      </text>
+      <text x={0} y={0} dy={34} textAnchor="middle" fill="var(--text-subtle)" fontSize={11}>
+        {dataPoint ? `${dataPoint.total} sess.` : "0 sess."}
+      </text>
+    </g>
+  );
+};
+
 export default function DashboardPage() {
   const { threats: sessions, status, lastUpdated, refresh } = useThreatFeed();
   const mapPanel = useRef<HTMLDivElement>(null);
@@ -61,6 +114,8 @@ export default function DashboardPage() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [summary, setSummary] = useState<ThreatDashboardSummary | null>(null);
   const [summaryStatus, setSummaryStatus] = useState<RequestStatus>("loading");
+  
+  const [deceptions, setDeceptions] = useState<DeceptionDecision[]>([]);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setIsHydrated(true));
@@ -93,18 +148,34 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadDeceptions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/deception", { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) setDeceptions(data);
+      }
+    } catch (e) {
+      console.error("Failed to load deceptions", e);
+    }
+  }, []);
+
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadSummary(), 0);
+    const timer = window.setTimeout(() => {
+      void loadSummary();
+      void loadDeceptions();
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadSummary]);
+  }, [loadSummary, loadDeceptions]);
 
   useEffect(() => {
     if (!lastUpdated) return;
     const timer = window.setTimeout(() => {
       void loadSummary();
+      void loadDeceptions();
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [lastUpdated, loadSummary]);
+  }, [lastUpdated, loadSummary, loadDeceptions]);
 
   useEffect(() => {
     if (!isFullScreen) return;
@@ -148,6 +219,81 @@ export default function DashboardPage() {
     return renderedSessions.filter((entry) => entry.session_status === "active" || entry.duration === "Active").length;
   }, [renderedSessions]);
 
+  const dailyRiskData = useMemo(() => {
+    const grouped = new Map<string, { time: string; timestamp: number; APT: number; Bot: number; ScriptKiddie: number; total: number; fullDate: Date }>();
+    
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(startOfToday);
+      d.setDate(d.getDate() - i);
+      const dateKey = d.toISOString().split("T")[0];
+      const isToday = i === 0;
+      grouped.set(dateKey, {
+        time: isToday ? "Today" : d.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }),
+        timestamp: d.getTime(),
+        APT: 0,
+        Bot: 0,
+        ScriptKiddie: 0,
+        total: 0,
+        fullDate: d
+      });
+    }
+
+    const cutoff = new Date(startOfToday);
+    cutoff.setDate(cutoff.getDate() - 6);
+
+    deceptions.forEach((d) => {
+      if (!d.first_seen) return;
+      const date = new Date(d.first_seen);
+      if (isNaN(date.getTime()) || date < cutoff) return;
+
+      const dateKey = new Date(date.getFullYear(), date.getMonth(), date.getDate()).toISOString().split("T")[0];
+
+      if (grouped.has(dateKey)) {
+        const bucket = grouped.get(dateKey)!;
+        if (d.attacker_type === "APT") bucket.APT += 1;
+        else if (d.attacker_type === "Bot") bucket.Bot += 1;
+        else if (d.attacker_type === "ScriptKiddie") bucket.ScriptKiddie += 1;
+        bucket.total += 1;
+      }
+    });
+
+    return Array.from(grouped.values()).sort((a, b) => a.timestamp - b.timestamp);
+  }, [deceptions]);
+
+  const attackerSummary = useMemo(() => {
+    let totalAPT = 0;
+    let totalBot = 0;
+    let totalScriptKiddie = 0;
+    let total = 0;
+    dailyRiskData.forEach(d => {
+       totalAPT += d.APT;
+       totalBot += d.Bot;
+       totalScriptKiddie += d.ScriptKiddie;
+       total += d.total;
+    });
+    return { totalAPT, totalBot, totalScriptKiddie, total };
+  }, [dailyRiskData]);
+
+  const dateRangeText = useMemo(() => {
+    if (dailyRiskData.length === 0) return "";
+    const first = dailyRiskData[0].time;
+    const lastDate = dailyRiskData[dailyRiskData.length - 1].fullDate;
+    const lastFormatted = lastDate.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" });
+    return `${first} – ${lastFormatted}`;
+  }, [dailyRiskData]);
+
+  const peakDay = useMemo(() => {
+    if (dailyRiskData.length === 0) return null;
+    let peak = dailyRiskData[0];
+    dailyRiskData.forEach(d => {
+      if (d.APT > peak.APT) peak = d;
+    });
+    return peak.APT > 0 ? peak : null;
+  }, [dailyRiskData]);
+
   const metrics = [
     {
       title: "Observed sessions",
@@ -189,7 +335,6 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6 pb-12 font-sans">
-      {/* Top Header */}
       <header className="flex flex-col justify-between gap-3 border-b border-border pb-4 sm:flex-row sm:items-end">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info">
@@ -218,6 +363,7 @@ export default function DashboardPage() {
             onClick={() => {
               void refresh();
               void loadSummary();
+              void loadDeceptions();
             }}
             disabled={isRefreshDisabled}
             className="ui-button min-h-9 px-3.5 text-xs font-medium"
@@ -229,7 +375,6 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* KPI Cards */}
       <section aria-label="Situation summary" aria-busy={summaryStatus === "loading" || isUpdating} className="ui-panel overflow-hidden border border-border bg-surface">
         <dl className="grid grid-cols-1 divide-y divide-border sm:grid-cols-2 sm:divide-y-0 xl:grid-cols-4 xl:divide-x">
           {metrics.map(({ title, value, description, icon: Icon, tone, isLoading, isError }) => (
@@ -273,7 +418,6 @@ export default function DashboardPage() {
         </dl>
       </section>
 
-      {/* Row 1: Global Map & Attack Vector Summary */}
       <section aria-label="Live operational picture" className="space-y-4">
         <div>
           <h2 className="text-[11px] font-bold uppercase tracking-widest text-info">Live Operational Picture</h2>
@@ -281,7 +425,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:items-stretch">
-          {/* Map Panel */}
           <div
             ref={mapPanel}
             role={isFullScreen ? "dialog" : undefined}
@@ -331,11 +474,8 @@ export default function DashboardPage() {
         </div>
       </section>
 
-      {/* Row 2: Signal Review (Attack Trend + Live Threat Feed + Analyst Context) */}
       <section aria-label="Signal review" className="ui-panel overflow-hidden border border-border bg-surface shadow-xs">
         <div className="grid grid-cols-1 divide-y divide-border xl:grid-cols-12 xl:divide-x xl:divide-y-0">
-          
-          {/* ปรับเป็น xl:col-span-6 เพื่อให้กราฟกว้างครึ่งหนึ่งของหน้าจอ */}
           <article className="flex flex-col p-5 xl:col-span-6 h-[300px]">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -354,7 +494,6 @@ export default function DashboardPage() {
             </div>
           </article>
 
-          {/* ปรับลดลงเป็น xl:col-span-3 */}
           <div className="p-4 xl:col-span-3 h-[300px] flex flex-col">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-info mb-1">
               <Radio className="h-3.5 w-3.5" aria-hidden="true" />
@@ -381,13 +520,232 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ปรับลดลงเป็น xl:col-span-3 */}
           <div className="p-5 xl:col-span-3 flex flex-col justify-between bg-surface-subtle/30 h-[300px]">
             <AnalystInsightPanel summary={summary} status={summaryStatus} feedState={feedState} activeDeceptions={activeDeceptions} embedded />
           </div>
         </div>
       </section>
+
+      <section aria-label="Daily attacker risk" className="space-y-4">
+        <div>
+          <h2 className="text-[11px] font-bold uppercase tracking-widest text-danger">Risk Assessment</h2>
+          <p className="mt-1 text-xs text-text-muted">Daily threat classification, risk level criteria, and TTP evidence.</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-5 xl:grid-cols-12 xl:items-stretch">
+          <article className="ui-panel flex flex-col overflow-hidden border border-border bg-surface shadow-xs xl:col-span-6 h-[460px]">
+            <div className="flex shrink-0 flex-col sm:flex-row justify-between items-start border-b border-border px-5 py-4 gap-4">
+              <div>
+                 <h3 className="text-base font-semibold text-text tracking-tight">Daily Attacker Classification Trends</h3>
+                 <p className="text-xs text-text-muted mt-1">
+                   Session volume and risk proportion {dateRangeText}
+                 </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs font-medium bg-surface-subtle border border-border px-3 py-1.5 rounded-lg shrink-0">
+                 <div className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-danger"></span>
+                    <span className="text-text-muted">APT</span>
+                 </div>
+                 <div className="flex items-center gap-1.5 border-l border-border pl-3">
+                    <span className="h-2 w-2 rounded-full bg-warning"></span>
+                    <span className="text-text-muted">Script Kiddie</span>
+                 </div>
+                 <div className="flex items-center gap-1.5 border-l border-border pl-3">
+                    <span className="h-2 w-2 rounded-full bg-info"></span>
+                    <span className="text-text-muted">Scanner</span>
+                 </div>
+              </div>
+            </div>
+             
+            <div className="flex-1 min-h-0 w-full p-4">
+               <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={dailyRiskData} margin={{ top: 10, right: 0, left: -20, bottom: 0 }} barSize={32}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" opacity={0.6} />
+                      <XAxis dataKey="time" tickLine={false} axisLine={false} tick={(props) => <CustomXAxisTick {...props} data={dailyRiskData} />} />
+                      <YAxis hide />
+                      <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--surface-hover)', opacity: 0.5 }} />
+                      
+                      <Bar dataKey="Bot" name="Scanners (Low)" stackId="a" fill="var(--info)" radius={[0, 0, 4, 4]} />
+                      <Bar dataKey="ScriptKiddie" name="Script Kiddie (Med)" stackId="a" fill="var(--warning)" />
+                      <Bar dataKey="APT" name="APT (Critical)" stackId="a" fill="var(--danger)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+               </ResponsiveContainer>
+            </div>
+             
+            <div className="border-t border-border bg-surface-subtle/50 px-5 py-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+               {peakDay ? (
+                  <div className="flex items-center gap-2 text-xs">
+                      <span className="h-2 w-2 rounded-full bg-danger shrink-0 animate-pulse"></span>
+                      <span className="font-semibold text-text-muted">
+                        APT Peak Alert: <span className="font-normal text-text">Intrusion attempts on {peakDay.time === "Today" ? peakDay.fullDate.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }) : peakDay.time} ({peakDay.APT} events)</span>
+                      </span>
+                  </div>
+               ) : (
+                  <div className="text-xs text-text-muted italic">No critical APT alerts in the last 7 days.</div>
+               )}
+               <div className="text-xs font-mono font-medium text-text bg-surface px-2.5 py-1 rounded border border-border shadow-xs">
+                  7-day volume: <strong className="font-bold">{attackerSummary.total}</strong>
+               </div>
+            </div>
+          </article>
+
+          <aside className="ui-panel flex flex-col overflow-hidden border border-border bg-surface shadow-xs xl:col-span-3 h-[460px]" aria-labelledby="risk-criteria-title">
+            <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-5 py-3">
+               <div id="risk-criteria-title" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-primary">
+                  <Info className="h-3.5 w-3.5" aria-hidden="true" />
+                  Risk Level Criteria
+               </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-surface-subtle/30">
+                <div className="border border-danger-border bg-danger-subtle/40 rounded-xl p-4 flex flex-col hover:bg-danger-subtle/80 transition-colors">
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2 font-bold text-danger text-sm">
+                            <span className="h-2.5 w-2.5 rounded-full bg-danger"></span>
+                            APT
+                        </div>
+                        <span className="bg-danger text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">CRITICAL</span>
+                    </div>
+                    <div className="text-2xl font-bold text-danger tabular-nums border-t border-danger-border/50 pt-2 mt-2">
+                      {attackerSummary.totalAPT} <span className="text-xs font-medium text-danger/70 tracking-wide uppercase">sessions</span>
+                    </div>
+                </div>
+
+                <div className="border border-warning-border bg-warning-subtle/40 rounded-xl p-4 flex flex-col hover:bg-warning-subtle/80 transition-colors">
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2 font-bold text-warning text-sm">
+                            <span className="h-2.5 w-2.5 rounded-full bg-warning"></span>
+                            Script Kiddie
+                        </div>
+                        <span className="bg-warning text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">MEDIUM</span>
+                    </div>
+                    <div className="text-2xl font-bold text-warning tabular-nums border-t border-warning-border/50 pt-2 mt-2">
+                      {attackerSummary.totalScriptKiddie} <span className="text-xs font-medium text-warning/70 tracking-wide uppercase">sessions</span>
+                    </div>
+                </div>
+
+                <div className="border border-info-border bg-info-subtle/40 rounded-xl p-4 flex flex-col hover:bg-info-subtle/80 transition-colors">
+                    <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2 font-bold text-info text-sm">
+                            <span className="h-2.5 w-2.5 rounded-full bg-info"></span>
+                            Scanners
+                        </div>
+                        <span className="bg-info text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-sm">LOW</span>
+                    </div>
+                    <div className="text-2xl font-bold text-info tabular-nums border-t border-info-border/50 pt-2 mt-2">
+                      {attackerSummary.totalBot} <span className="text-xs font-medium text-info/70 tracking-wide uppercase">sessions</span>
+                    </div>
+                </div>
+            </div>
+          </aside>
+
+          <TopTTPsPanel sessions={renderedSessions} className="xl:col-span-3 h-[460px]" />
+        </div>
+      </section>
     </div>
+  );
+}
+
+function TopTTPsPanel({ sessions, className }: { sessions: DashboardThreatEvent[]; className?: string }) {
+  const [topTTPs, setTopTTPs] = useState<{ name: string; count: number; percent: number }[]>([]);
+  const [isTtpLoading, setIsTtpLoading] = useState(sessions.length > 0);
+
+  useEffect(() => {
+    if (sessions.length === 0) {
+      return;
+    }
+    let isCancelled = false;
+
+    const fetchTTPs = async () => {
+      setIsTtpLoading(true);
+      const sampleSessions = sessions.slice(0, 10);
+      const counts = new Map<string, number>();
+      let totalFound = 0;
+
+      await Promise.all(sampleSessions.map(async (s) => {
+        try {
+          const res = await fetch(`/api/sessions/${s.id}/commands`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.commands && Array.isArray(data.commands)) {
+              data.commands.forEach((cmd: any) => {
+                const ttp = cmd.classification_technique;
+                if (ttp && typeof ttp === "string") {
+                  counts.set(ttp, (counts.get(ttp) || 0) + 1);
+                  totalFound++;
+                } else if (Array.isArray(cmd.classification)) {
+                  cmd.classification.forEach((c: any) => {
+                    if (c.ttp && typeof c.ttp === "string") {
+                      counts.set(c.ttp, (counts.get(c.ttp) || 0) + 1);
+                      totalFound++;
+                    }
+                  });
+                }
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore fetch errors
+        }
+      }));
+
+      if (!isCancelled) {
+        const sorted = Array.from(counts.entries())
+          .map(([name, count]) => ({
+            name: `MITRE: ${name}`,
+            count,
+            percent: totalFound > 0 ? Math.round((count / totalFound) * 100) : 0
+          }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+        
+        setTopTTPs(sorted);
+        setIsTtpLoading(false);
+      }
+    };
+
+    void fetchTTPs();
+    return () => { isCancelled = true; };
+  }, [sessions]);
+
+  return (
+    <aside className={cn("ui-panel flex flex-col overflow-hidden border border-border shadow-xs bg-surface", className)}>
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-5 py-3">
+         <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-warning">
+            <Terminal className="h-3.5 w-3.5" aria-hidden="true" />
+            Top TTPs (MITRE ATT&CK)
+         </div>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-surface-subtle/30">
+        {isTtpLoading ? (
+          <div className="space-y-4 pt-1">
+            <div className="space-y-1.5"><div className="ui-skeleton h-4 w-full" /><div className="ui-skeleton h-1.5 w-full rounded-full" /></div>
+            <div className="space-y-1.5"><div className="ui-skeleton h-4 w-4/5" /><div className="ui-skeleton h-1.5 w-full rounded-full" /></div>
+            <div className="space-y-1.5"><div className="ui-skeleton h-4 w-3/4" /><div className="ui-skeleton h-1.5 w-full rounded-full" /></div>
+          </div>
+        ) : topTTPs.length > 0 ? (
+          <div className="space-y-5">
+            {topTTPs.map((item) => (
+              <div key={item.name} className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-text truncate max-w-[150px] sm:max-w-[180px]">{item.name}</span>
+                  <span className="font-mono text-text-subtle text-[11px]">{item.count} ({item.percent}%)</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-border/60 overflow-hidden">
+                  <div className="h-full rounded-full bg-warning" style={{ width: `${item.percent}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full text-center text-text-subtle">
+            <Terminal className="h-8 w-8 mb-2 opacity-20" />
+            <p className="text-[11px] italic">No TTP evidence extracted<br/>from recent commands.</p>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 

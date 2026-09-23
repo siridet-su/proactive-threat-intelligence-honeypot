@@ -1,7 +1,7 @@
 import "server-only";
 
 import geoip from "geoip-lite";
-import type { ChangeStream, Document, Filter } from "mongodb";
+import type { ChangeStream, Document, Filter, MongoClient } from "mongodb";
 
 import type {
   DashboardThreatEvent,
@@ -66,6 +66,7 @@ function limitForRange(range: string | null): number {
 export interface ThreatDirectoryFilters {
   query?: string;
   severity?: ThreatSeverityFilter;
+  attackerType?: string;
   page?: number;
   pageSize?: number;
 }
@@ -75,12 +76,17 @@ function normalizeDirectoryFilters(filters: ThreatDirectoryFilters) {
   const severity: ThreatSeverityFilter = ["Critical", "High", "Medium", "Low"].includes(filters.severity ?? "")
     ? filters.severity as ThreatSeverityFilter
     : "All";
+    
+  const attackerType: string = filters.attackerType && ["APT", "Bot", "ScriptKiddie"].includes(filters.attackerType)
+    ? filters.attackerType
+    : "All";
+
   const page = Number.isFinite(filters.page) ? Math.max(1, Math.floor(filters.page ?? 1)) : 1;
   const pageSize = Number.isFinite(filters.pageSize)
     ? Math.min(MAX_DIRECTORY_PAGE_SIZE, Math.max(1, Math.floor(filters.pageSize ?? DEFAULT_DIRECTORY_PAGE_SIZE)))
     : DEFAULT_DIRECTORY_PAGE_SIZE;
 
-  return { query, severity, page, pageSize };
+  return { query, severity, attackerType, page, pageSize };
 }
 
 function escapeRegex(value: string) {
@@ -119,6 +125,79 @@ function filterForDirectory({ query, severity }: Pick<ReturnType<typeof normaliz
   if (!conditions.length) return {};
   if (conditions.length === 1) return conditions[0];
   return { $and: conditions };
+}
+
+async function applyAttackerTypeFilter(client: MongoClient, baseQuery: Filter<Document>, attackerType: string): Promise<Filter<Document> | null> {
+  if (attackerType === "All") return baseQuery;
+
+  const deceptionDb = client.db("honeypot_db").collection("deception_decisions");
+  let condition: any = null;
+
+  if (attackerType === "ScriptKiddie") {
+    const nonKiddieDocs = await deceptionDb.find(
+       { attacker_type: { $in: ["APT", "Bot"] } },
+       { projection: { ip: 1, session_id: 1 } }
+    ).toArray();
+
+    const excludeIps = nonKiddieDocs.map(d => d.ip).filter(Boolean);
+    const excludeSessions = nonKiddieDocs.map(d => d.session_id).filter(Boolean);
+
+    if (excludeIps.length > 0 || excludeSessions.length > 0) {
+       condition = {
+         $nor: [
+            { src_ip: { $in: excludeIps } },
+            { session_id: { $in: excludeSessions } }
+         ]
+       };
+    }
+  } else {
+    const matchingDocs = await deceptionDb.find(
+       { attacker_type: attackerType },
+       { projection: { ip: 1, session_id: 1 } }
+    ).toArray();
+
+    const includeIps = matchingDocs.map(d => d.ip).filter(Boolean);
+    const includeSessions = matchingDocs.map(d => d.session_id).filter(Boolean);
+
+    if (includeIps.length === 0 && includeSessions.length === 0) {
+       return null; 
+    }
+
+    condition = {
+       $or: [
+          { src_ip: { $in: includeIps } },
+          { session_id: { $in: includeSessions } }
+       ]
+    };
+  }
+
+  if (!condition) return baseQuery;
+  if (Object.keys(baseQuery).length === 0) return condition;
+  if (baseQuery.$and) return { $and: [...baseQuery.$and, condition] };
+  return { $and: [baseQuery, condition] };
+}
+
+async function injectAttackerType(client: MongoClient, sessions: Document[]) {
+  if (!sessions.length) return;
+  const ips = [...new Set(sessions.map(s => s.src_ip))].filter(Boolean);
+  const sIds = [...new Set(sessions.map(s => s.session_id))].filter(Boolean);
+
+  if (ips.length === 0 && sIds.length === 0) return;
+
+  const deceptionDb = client.db("honeypot_db").collection("deception_decisions");
+  const deceptions = await deceptionDb.find({
+    $or: [ { ip: { $in: ips } }, { session_id: {$in: sIds } } ]
+  }, { projection: { ip: 1, session_id: 1, attacker_type: 1 } }).toArray();
+
+  const deceptionMap = new Map();
+  deceptions.forEach(d => {
+    if (d.ip) deceptionMap.set(`ip:${d.ip}`, d.attacker_type);
+    if (d.session_id) deceptionMap.set(`sid:${d.session_id}`, d.attacker_type);
+  });
+
+  sessions.forEach(s => {
+    s.computed_attacker_type = deceptionMap.get(`sid:${s.session_id}`) || deceptionMap.get(`ip:${s.src_ip}`) || "ScriptKiddie";
+  });
 }
 
 function normalizeThreats(sessionDocs: Document[]): DashboardThreatEvent[] {
@@ -160,20 +239,18 @@ function normalizeThreat(
   const severity = typeof session.max_confirmed_severity === "string" && session.max_confirmed_severity
     ? session.max_confirmed_severity
     : "Medium";
-  let classification = "SCRIPT KIDDIE";
+    
+  const classification = session.computed_attacker_type || "ScriptKiddie";
   let typeColor = "bg-amber-950/40 text-amber-400 border-amber-900/50";
 
-  if (severity === "Critical") {
-    classification = "APT";
+  if (classification === "APT") {
     typeColor = "bg-red-950/40 text-red-400 border-red-900/50";
-  } else if (severity === "High") {
-    classification = "BOT";
+  } else if (classification === "Bot") {
     typeColor = "bg-slate-800 text-slate-300 border-slate-700";
+  } else if (classification === "ScriptKiddie") {
+    typeColor = "bg-amber-950/40 text-amber-400 border-amber-900/50";
   }
 
-  // The canonical session projection persists explicit lifecycle evidence.
-  // Do not infer activity from recency or from a missing heartbeat: a closed
-  // session must remain closed in the feed after its final update.
   const lifecycle = session.lifecycle;
   const lifecycleStatus = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
     ? String((lifecycle as Document).status ?? "").trim().toLowerCase()
@@ -220,14 +297,12 @@ export async function getThreatSnapshot(range: string | null = null): Promise<Da
       .find(queryForRange(range))
       .sort({ start_time: -1 })
       .limit(limitForRange(range))
-      // MongoDB chooses `start_time_desc` automatically when the deployment has
-      // it. Disk use keeps the feed available while an index is absent or still
-      // being built, rather than failing the entire dashboard at Atlas' sort cap.
       .allowDiskUse(true)
       .toArray();
+      
+    await injectAttackerType(client, sessions);
     const threats = normalizeThreats(sessions);
 
-    // "all" is an archive query and should not keep a large historical cache resident.
     if (range !== "all") {
       runtime.snapshots.set(cacheKey, { value: threats, expiresAt: Date.now() + SNAPSHOT_TTL_MS });
     }
@@ -244,19 +319,27 @@ export async function getThreatSnapshot(range: string | null = null): Promise<Da
 
 export async function getThreatDirectory(filters: ThreatDirectoryFilters = {}): Promise<ThreatDirectoryPage> {
   const normalized = normalizeDirectoryFilters(filters);
-  const query = filterForDirectory(normalized);
+  const baseQuery = filterForDirectory(normalized);
   const client = await getMongoClient();
+  
+  const finalQuery = await applyAttackerTypeFilter(client, baseQuery, normalized.attackerType);
+  if (finalQuery === null) {
+    return { items: [], page: normalized.page, pageSize: normalized.pageSize, total: 0, totalPages: 1 };
+  }
+
   const collection = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME);
-  const total = await collection.countDocuments(query);
+  const total = await collection.countDocuments(finalQuery);
   const totalPages = Math.max(1, Math.ceil(total / normalized.pageSize));
   const page = Math.min(normalized.page, totalPages);
   const sessionDocs = await collection
-    .find(query)
+    .find(finalQuery)
     .sort({ start_time: -1 })
     .skip((page - 1) * normalized.pageSize)
     .limit(normalized.pageSize)
     .allowDiskUse(true)
     .toArray();
+
+  await injectAttackerType(client, sessionDocs);
 
   return {
     items: normalizeThreats(sessionDocs),
@@ -269,16 +352,24 @@ export async function getThreatDirectory(filters: ThreatDirectoryFilters = {}): 
 
 export async function getThreatDirectoryExport(filters: Omit<ThreatDirectoryFilters, "page" | "pageSize"> = {}) {
   const normalized = normalizeDirectoryFilters(filters);
-  const query = filterForDirectory(normalized);
+  const baseQuery = filterForDirectory(normalized);
   const client = await getMongoClient();
+
+  const finalQuery = await applyAttackerTypeFilter(client, baseQuery, normalized.attackerType);
+  if (finalQuery === null) {
+    return { items: [], total: 0, truncated: false };
+  }
+
   const collection = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME);
-  const total = await collection.countDocuments(query);
+  const total = await collection.countDocuments(finalQuery);
   const sessionDocs = await collection
-    .find(query)
+    .find(finalQuery)
     .sort({ start_time: -1 })
     .limit(MAX_DIRECTORY_EXPORT)
     .allowDiskUse(true)
     .toArray();
+
+  await injectAttackerType(client, sessionDocs);
 
   return {
     items: normalizeThreats(sessionDocs),
@@ -295,7 +386,7 @@ export async function getThreatDashboardSummary(): Promise<ThreatDashboardSummar
     uniqueSources: Array<{ count: number }>;
     prioritySessions: Array<{ count: number }>;
   }>([
-    { $match: { start_time: { $gte: windowStart } } },
+    { $match: { start_time: {$gte: windowStart } } },
     {
       $facet: {
         sessions: [{ $count: "count" }],
@@ -305,7 +396,7 @@ export async function getThreatDashboardSummary(): Promise<ThreatDashboardSummar
           { $count: "count" },
         ],
         prioritySessions: [
-          { $match: { max_confirmed_severity: { $in: ["Critical", "High"] } } },
+          { $match: { max_confirmed_severity: {$in: ["Critical", "High"] } } },
           { $count: "count" },
         ],
       },
@@ -360,7 +451,7 @@ async function ensureThreatChangeStream(): Promise<void> {
     if (!runtime.subscribers.size || runtime.stream) return;
 
     const stream = client.db(DATABASE_NAME).collection<Document>(COLLECTION_NAME).watch(
-      [{ $match: { operationType: { $in: ["insert", "replace", "update"] } } }],
+      [{ $match: { operationType: {$in: ["insert", "replace", "update"] } } }],
       { fullDocument: "updateLookup" },
     );
     runtime.stream = stream;
@@ -383,11 +474,6 @@ async function ensureThreatChangeStream(): Promise<void> {
 
 export function subscribeThreatUpdates(subscriber: ThreatSubscriber): () => void {
   runtime.subscribers.add(subscriber);
-  // Change-stream setup is deliberately best-effort.  The SSE route must be
-  // able to send its initial snapshot and heartbeat even when MongoDB's
-  // watch/connection negotiation is unavailable or slow.  The stream will be
-  // retried in the background while the route's snapshot polling remains the
-  // authoritative fallback for dashboard liveness.
   void ensureThreatChangeStream().catch(() => {
     scheduleReconnect();
   });
