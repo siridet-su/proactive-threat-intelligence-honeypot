@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import {
   calculateTwoDimensionalFit,
@@ -131,6 +138,22 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
   const dragStart = useRef<{ x: number; y: number; pan: Pan } | null>(null);
   const hasUserManuallyAdjustedViewRef = useRef(false);
   const prevSurfaceSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const fitMeasurementRef = useRef({
+    automaticCalloutPositions,
+    nodeElementBounds,
+    calloutElementBounds,
+  });
+
+  // Intrinsic card measurements change when a source disclosure opens or closes.
+  // Keep those measurements current for explicit Fit and real surface resizes without
+  // changing calculateFitViewport's identity and restarting the auto-fit effect.
+  useLayoutEffect(() => {
+    fitMeasurementRef.current = {
+      automaticCalloutPositions,
+      nodeElementBounds,
+      calloutElementBounds,
+    };
+  }, [automaticCalloutPositions, calloutElementBounds, nodeElementBounds]);
 
   const setMapZoom = useCallback((value: number, focalPoint?: Pan) => {
     const nextZoom = clampZoom(value);
@@ -172,15 +195,16 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       const baseHeight = plane.offsetHeight || 500;
       const effectiveNodes = overrideNodes ?? nodePositions;
       const effectiveLabels = overrideLabels ?? labelPositions;
+      const fitMeasurements = fitMeasurementRef.current;
 
       const bounds = calculateWorldBounds(
         automaticGraphNodes,
         graphCallouts,
         effectiveNodes,
         effectiveLabels,
-        automaticCalloutPositions,
-        nodeElementBounds,
-        calloutElementBounds,
+        fitMeasurements.automaticCalloutPositions,
+        fitMeasurements.nodeElementBounds,
+        fitMeasurements.calloutElementBounds,
       );
 
       return calculateTwoDimensionalFit(bounds, {
@@ -196,12 +220,9 @@ export function useTopologyViewport(options: UseTopologyViewportOptions): UseTop
       });
     },
     [
-      automaticCalloutPositions,
       automaticGraphNodes,
-      calloutElementBounds,
       graphCallouts,
       labelPositions,
-      nodeElementBounds,
       nodePositions,
       reserveMinimapSpace,
     ],

@@ -835,6 +835,11 @@ test.describe("FA-013 real-browser evidence", () => {
       .locator('path[data-source-connection="192.0.2.10"]');
     await expect(sourceRoutes).toHaveCount(2);
     const expandedRoutes = await sourceRoutes.evaluateAll((paths) => paths.map((path) => path.getAttribute("d")));
+    await page.waitForTimeout(350);
+    const expandedViewportTransform = await sourceRoutes.first().evaluate((path) => {
+      const plane = path.ownerSVGElement?.parentElement;
+      return plane ? getComputedStyle(plane).transform : null;
+    });
 
     await sourceToggle.click();
     await expect(sourceToggle).toHaveAttribute("aria-expanded", "false");
@@ -852,7 +857,12 @@ test.describe("FA-013 real-browser evidence", () => {
       };
     }));
     const collapsedBounds = await sourceCallout.boundingBox();
+    const collapsedViewportTransform = await sourceRoutes.first().evaluate((path) => {
+      const plane = path.ownerSVGElement?.parentElement;
+      return plane ? getComputedStyle(plane).transform : null;
+    });
     expect(collapsedRoutes.map(({ d }) => d)).not.toEqual(expandedRoutes);
+    expect(collapsedViewportTransform).toBe(expandedViewportTransform);
     expect(collapsedBounds).not.toBeNull();
     for (const endpoint of collapsedRoutes) {
       const withinHorizontalSpan = endpoint.x >= collapsedBounds.x - 2 && endpoint.x <= collapsedBounds.x + collapsedBounds.width + 2;
