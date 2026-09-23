@@ -20,7 +20,9 @@ export async function GET(request: Request) {
     const result = await getThreatDirectoryExport({
       query: searchParams.get("query") ?? "",
       severity: searchParams.get("severity") as ThreatSeverityFilter | null ?? undefined,
+      attackerType: searchParams.get("attackerType") ?? undefined,
     });
+
     const rows = [
       ["Session ID", "Origin IP", "Attacker Type", "Severity", "Date & Time", "Session status"],
       ...result.items.map((session) => [
@@ -32,6 +34,7 @@ export async function GET(request: Request) {
         session.duration,
       ]),
     ];
+
     const filename = `pti-incursion-directory-${new Date().toISOString().slice(0, 10)}.csv`;
 
     return new Response(rows.map((row) => row.map(escapeCsv).join(",")).join("\n"), {

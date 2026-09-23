@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
-// ไม่ต้องใช้ SelectMenu แล้ว เนื่องจากใช้ Native Select แทน
 import type {
   DashboardThreatEvent,
   ThreatDirectoryPage,
@@ -27,22 +26,15 @@ import {
   Database,
   Globe,
   Activity,
+  Lock,
 } from "lucide-react";
 import { TableStreamSkeleton } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
 
-// กำหนด Type ใหม่สำหรับ Attacker Filter
 type AttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
-
-const ATTACKER_TYPE_BADGE_CLASS: Record<string, string> = {
-  APT: "border-danger-border bg-danger-subtle text-danger",
-  ScriptKiddie: "border-warning-border bg-warning-subtle text-warning",
-  Bot: "border-border bg-surface-subtle text-text-muted",
-};
 
 type RequestStatus = "loading" | "ready" | "error";
 
-// ฟังก์ชันแปลง Attacker Type กลับไปเป็น Severity เพื่อส่งให้ API
 const getSeverityFromAttackerType = (type: AttackerTypeFilter): ThreatSeverityFilter => {
   switch (type) {
     case "APT": return "Critical";
@@ -51,6 +43,88 @@ const getSeverityFromAttackerType = (type: AttackerTypeFilter): ThreatSeverityFi
     default: return "All";
   }
 };
+
+// คอมโพเนนต์ดึงข้อมูล Attacker แบบแยก 2 คอลัมน์ (Type, Cmds)
+function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string }) {
+  const [data, setData] = useState<{ type: string, locked: boolean, cmds: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 7000);
+
+    const fetchData = async () => {
+      try {
+        const res = await fetch(`/api/deception?ip=${encodeURIComponent(ip)}`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (res.ok) {
+          const result = await res.json();
+          if (!cancelled && result && result.attacker_type) {
+            setData({
+              type: result.attacker_type,
+              locked: result.attacker_type_locked,
+              cmds: result.command_count
+            });
+          }
+        }
+      } catch (error) {
+        // หากดึงไม่ได้ ให้ใช้ fallback
+      } finally {
+        window.clearTimeout(timeout);
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    void fetchData();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [ip]);
+
+  const displayType = data?.type || fallback;
+  const classificationFormat = displayType.toUpperCase() === "APT" ? "APT" :
+                               displayType.toUpperCase() === "BOT" ? "Bot" :
+                               "ScriptKiddie";
+
+  const badgeClass = classificationFormat === "APT" ? "bg-rose-50 text-rose-600 border-rose-200" :
+                     classificationFormat === "Bot" ? "bg-slate-100 text-slate-500 border-slate-200" :
+                     "bg-orange-50 text-orange-600 border-orange-200";
+
+  if (loading) {
+    return (
+      <>
+        <td className="py-2.5 px-6">
+          <div className="ui-skeleton h-5 w-16 rounded border border-border/50"></div>
+        </td>
+        <td className="py-2.5 px-6 text-right">
+          <div className="ui-skeleton h-4 w-8 ml-auto"></div>
+        </td>
+      </>
+    );
+  }
+
+  const cmdCount = data?.cmds !== undefined ? data.cmds : 0;
+
+  return (
+    <>
+      <td className="py-2.5 px-6">
+        <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border inline-flex items-center gap-1", badgeClass)}>
+          {classificationFormat}
+          {data?.locked && <Lock className="h-2.5 w-2.5 opacity-80" aria-hidden="true" />}
+        </span>
+      </td>
+      <td className="py-2.5 px-6 text-text-muted text-xs font-mono text-right">
+        {cmdCount}
+      </td>
+    </>
+  );
+}
 
 export default function ThreatIntelPage() {
   const { threats: feedThreats, status, refresh } = useThreatFeed();
@@ -63,8 +137,6 @@ export default function ThreatIntelPage() {
   const [pageSize, setPageSize] = useState(15);
   const [queryInput, setQueryInput] = useState("");
   const query = useDebouncedValue(queryInput, 320);
-  
-  // เปลี่ยนจาก Severity เป็น Attacker Type
   const [attackerFilter, setAttackerFilter] = useState<AttackerTypeFilter>("All");
   const [filterOpen, setFilterOpen] = useState(false);
 
@@ -89,9 +161,7 @@ export default function ThreatIntelPage() {
         const params = new URLSearchParams({ page: String(currentPage), pageSize: String(pageSize) });
         if (query) params.set("query", query);
         
-        // แปลง Attacker Type เป็น Severity ก่อนยิง API
-        const severityParam = getSeverityFromAttackerType(attackerFilter);
-        if (severityParam !== "All") params.set("severity", severityParam);
+        if (attackerFilter !== "All") params.set("attackerType", attackerFilter);
         
         const response = await fetch(`/api/threats/directory?${params}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Threat directory unavailable");
@@ -152,8 +222,7 @@ export default function ThreatIntelPage() {
       const params = new URLSearchParams();
       if (query) params.set("query", query);
       
-      const severityParam = getSeverityFromAttackerType(attackerFilter);
-      if (severityParam !== "All") params.set("severity", severityParam);
+      if (attackerFilter !== "All") params.set("attackerType", attackerFilter);
       
       const response = await fetch(`/api/threats/directory/export?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error("Export failed");
@@ -364,6 +433,7 @@ export default function ThreatIntelPage() {
           )}
         </div>
 
+        {/* Pagination & Rows Selector */}
         {directoryTotal > 0 && directoryTotalPages > 1 && (
           <nav aria-label="Directory pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-subtle/50 px-5 py-2.5 text-xs">
             <div className="flex items-center gap-3">
@@ -500,7 +570,21 @@ function MetricCard({ label, value, description, icon: Icon, tone = "info", load
 }
 
 function DirectorySkeleton() {
-  return <TableStreamSkeleton variant="threat-intel" rows={6} />;
+  return (
+    <div className="divide-y divide-border">
+      {Array.from({ length: 5 }, (_, row) => (
+        <div key={row} className="flex items-center justify-between px-6 py-3">
+          <div className="ui-skeleton h-4 w-28" />
+          <div className="ui-skeleton h-4 w-32" />
+          <div className="ui-skeleton h-4 w-24" />
+          <div className="ui-skeleton h-4 w-24" />
+          <div className="ui-skeleton h-4 w-8" />
+          <div className="ui-skeleton h-4 w-12" />
+          <div className="ui-skeleton h-6 w-16 rounded-md" />
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) {
@@ -511,18 +595,26 @@ function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) {
       <table className="ui-table w-full text-xs">
         <thead>
           <tr className="border-b border-border bg-surface-subtle/50 text-text-muted font-semibold">
-            <th scope="col" className="py-2.5 px-6 text-left w-[240px]">Session ID</th>
-            <th scope="col" className="py-2.5 px-6 text-left w-[180px]">Origin IP</th>
-            <th scope="col" className="py-2.5 px-6 text-left w-[200px]">Timestamp (UTC)</th>
-            <th scope="col" className="py-2.5 px-6 text-left">Attacker Type</th>
+            <th scope="col" className="py-2.5 px-6 text-left w-[180px]">Session ID</th>
+            <th scope="col" className="py-2.5 px-6 text-left w-[220px]">Origin &amp; Sensor</th>
+            <th scope="col" className="py-2.5 px-6 text-left w-[150px]">Timestamp (UTC)</th>
+            <th scope="col" className="py-2.5 px-6 text-left w-[120px]">Attacker Type</th>
+            <th scope="col" className="py-2.5 px-6 text-right w-[80px]">Cmds</th>
+            <th scope="col" className="py-2.5 px-6 text-right w-[100px]">Dwell Time</th>
             <th scope="col" className="py-2.5 px-6 text-right w-[100px]">Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border/60 cursor-pointer">
           {sessions.map((session) => {
-            const classificationFormat = session.classification.toUpperCase() === "APT" ? "APT" :
-                                         session.classification.toUpperCase() === "BOT" ? "Bot" :
-                                         "ScriptKiddie";
+            let dwellTime = "Not recorded";
+            if (session.duration === "Active" || session.session_status === "active") {
+              dwellTime = "Active";
+            } else if (session.end_time && session.timestamp) {
+              const seconds = Math.max(0, Math.round((Date.parse(String(session.end_time)) - Date.parse(String(session.timestamp))) / 1000));
+              if (Number.isFinite(seconds)) dwellTime = `${seconds}s`;
+            } else if (session.duration !== "Closed" && session.duration !== "Active") {
+              dwellTime = session.duration;
+            }
 
             return (
               <tr 
@@ -537,19 +629,34 @@ function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) {
                     <span>{session.id.length > 14 ? `${session.id.substring(0, 12)}...` : session.id}</span>
                   </span>
                 </td>
-                <td className="py-2.5 px-6 font-mono font-medium text-primary">{session.sourceIp}</td>
+                <td className="py-2.5 px-6">
+                  <div className="font-mono font-medium text-primary">{session.sourceIp}</div>
+                  <div className="mt-1 flex items-center gap-1.5 text-[11px] text-text-muted truncate max-w-[180px]">
+                    <span className="truncate">{session.geo?.country !== "Unknown" ? session.geo.country : "Unknown Region"}</span>
+                    <span className="opacity-50">·</span>
+                    <span className="truncate" title={session.sensor}>{session.sensor}</span>
+                  </div>
+                </td>
                 <td className="py-2.5 px-6 text-text-muted">
                   <span className="text-text font-medium">{session.date}</span>{" "}
-                  <span className="text-text-subtle font-mono text-[11px]">{session.time}</span>
+                  <div className="mt-0.5 text-text-subtle font-mono text-[11px]">{session.time}</div>
                 </td>
-                <td className="py-2.5 px-6">
-                  <span className={cn("px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border", ATTACKER_TYPE_BADGE_CLASS[classificationFormat] ?? "border-border bg-surface-subtle text-text-muted")}>
-                    {session.classification}
-                  </span>
+                
+                {/* เรนเดอร์ 2 คอลัมน์ที่แยกออกมา: Type, Cmds */}
+                <AttackerContextColumns ip={session.sourceIp} fallback={session.classification} />
+
+                <td className="py-2.5 px-6 text-right font-mono text-text-muted">
+                  {dwellTime}
                 </td>
+
                 <td className="py-2.5 px-6 text-right">
-                  <span className="rounded border border-border/70 bg-surface-subtle px-2 py-0.5 text-[11px] text-text-muted">
-                    {session.duration}
+                  <span className={cn(
+                    "rounded border px-2 py-0.5 text-[11px]",
+                    session.duration === "Active" 
+                      ? "bg-emerald-50 text-emerald-600 border-emerald-200 animate-pulse" 
+                      : "bg-surface-subtle text-text-muted border-border/70"
+                  )}>
+                    {session.duration === "Active" ? "Active" : "Closed"}
                   </span>
                 </td>
               </tr>
