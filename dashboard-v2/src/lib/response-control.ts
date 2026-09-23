@@ -47,9 +47,26 @@ export function responseControlConfigured(): boolean {
 
 function isPrivateManagementHost(hostname: string): boolean {
   const host = hostname.toLowerCase();
-  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".ts.net") || host.startsWith("[fd7a:115c:a1e0:")) return true;
-  const octets = host.split(".").map(Number);
-  return octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127;
+  if (host === "localhost" || host === "127.0.0.1" || host.endsWith(".ts.net") || host.startsWith("[fd7a:115c:a1e0:") || host === "[::1]") {
+    return true;
+  }
+
+  const octets = host.split(".");
+  if (octets.length === 4 && octets.every((part) => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255)) {
+    const [a, b] = octets.map(Number);
+    // 127.0.0.0/8 (Loopback)
+    if (a === 127) return true;
+    // 10.0.0.0/8 (Private)
+    if (a === 10) return true;
+    // 172.16.0.0/12 (Private)
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    // 192.168.0.0/16 (Private)
+    if (a === 192 && b === 168) return true;
+    // 100.64.0.0/10 (Carrier-Grade NAT / Tailscale CGNAT)
+    if (a === 100 && b >= 64 && b <= 127) return true;
+  }
+
+  return false;
 }
 
 function responseAgentEndpoint(sessionId: string): URL {

@@ -261,26 +261,61 @@ export interface DeceptionDecision {
   synced_at: string;
 }
 
+// ============================================================================
+// Type Guards & Utility Functions
+// ============================================================================
+
+/**
+ * ตรวจสอบว่าค่าที่รับมาเป็น Object พื้นฐาน (Record) หรือไม่
+ * โดยต้องไม่เป็น null และไม่ใช่ Array
+ * 
+ * @param {unknown} value - ค่าที่ต้องการตรวจสอบ
+ * @returns {boolean} - true หากเป็น Record
+ */
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * ตรวจสอบว่าค่าที่รับมาเป็นประเภท String หรือ Number
+ * 
+ * @param {unknown} value - ค่าที่ต้องการตรวจสอบ
+ * @returns {boolean} - true หากเป็น string หรือ number
+ */
 function isStringOrNumber(value: unknown): value is string | number {
   return typeof value === "string" || typeof value === "number";
 }
 
+/**
+ * ตรวจสอบโครงสร้างข้อมูลพิกัดภูมิศาสตร์ (Geo)
+ * 
+ * @param {unknown} value - ข้อมูลที่คาดว่าเป็น DashboardThreatGeo
+ * @returns {boolean} - true หากมีโครงสร้างที่ถูกต้อง
+ */
 function isGeo(value: unknown): value is DashboardThreatGeo {
   if (!isRecord(value)) return false;
   return typeof value.lat === "number" && typeof value.lon === "number" &&
     typeof value.country === "string" && typeof value.city === "string";
 }
 
+/**
+ * ตรวจสอบข้อมูลความน่าเชื่อถือของ IP จาก AbuseIPDB
+ * 
+ * @param {unknown} value - ข้อมูล AbuseIPDB
+ * @returns {boolean} - true หากข้อมูลถูกต้องหรือเป็น optional (ว่างเปล่า)
+ */
 function isAbuseIpdb(value: unknown): boolean {
   if (value === undefined || value === null) return true;
   if (!isRecord(value)) return false;
   return value.abuseConfidenceScore === undefined || typeof value.abuseConfidenceScore === "number";
 }
 
+/**
+ * ตรวจสอบข้อมูลสถิติจาก VirusTotal
+ * 
+ * @param {unknown} value - ข้อมูล VirusTotal
+ * @returns {boolean} - true หากข้อมูลถูกต้องหรือเป็น optional (ว่างเปล่า)
+ */
 function isVirusTotal(value: unknown): boolean {
   if (value === undefined || value === null) return true;
   if (!isRecord(value)) return false;
@@ -294,6 +329,12 @@ function isVirusTotal(value: unknown): boolean {
     (stats.undetected === undefined || typeof stats.undetected === "number");
 }
 
+/**
+ * ตรวจสอบโครงสร้างของข้อมูลภัยคุกคาม (DashboardThreatEvent) ว่าครบถ้วนหรือไม่
+ * 
+ * @param {unknown} value - ข้อมูลที่ต้องการตรวจสอบ
+ * @returns {boolean} - true หากเป็น DashboardThreatEvent ที่สมบูรณ์
+ */
 export function isDashboardThreatEvent(value: unknown): value is DashboardThreatEvent {
   if (!isRecord(value)) return false;
   return typeof value.id === "string" && isStringOrNumber(value.timestamp) &&
@@ -305,6 +346,12 @@ export function isDashboardThreatEvent(value: unknown): value is DashboardThreat
     isAbuseIpdb(value.abuseipdb) && isVirusTotal(value.virustotal);
 }
 
+/**
+ * แปลงข้อมูลเวลาของ Hardware เป็น Epoch timestamp (ตัวเลขมิลลิวินาที)
+ * 
+ * @param {unknown} value - วันที่ (Date, number, หรือ string)
+ * @returns {number | null} - Epoch timestamp หรือ null หากแปลงไม่ได้
+ */
 function hardwareTimestampEpoch(value: unknown): number | null {
   if (value instanceof Date) return Number.isFinite(value.getTime()) ? value.getTime() : null;
   if (typeof value === "number") return Number.isFinite(value) ? new Date(value).getTime() : null;
@@ -315,6 +362,12 @@ function hardwareTimestampEpoch(value: unknown): number | null {
   return null;
 }
 
+/**
+ * ตรวจสอบว่าค่า Metric ของ Hardware เป็นตัวเลขที่ใช้งานได้หรือไม่
+ * 
+ * @param {unknown} value - ค่า Metric
+ * @returns {boolean} - true หากเป็นตัวเลขหรือแปลงเป็นตัวเลขได้
+ */
 function isHardwareMetric(value: unknown): boolean {
   if (value === undefined || value === null) return true;
   if (typeof value === "number") return Number.isFinite(value);
@@ -325,6 +378,12 @@ function isHardwareMetricList(value: unknown): boolean {
   return value === undefined || value === null || (Array.isArray(value) && value.length > 0 && value.every(isHardwareMetric));
 }
 
+/**
+ * ตรวจสอบโครงสร้างข้อมูล Telemetry ของ Hardware (เช่น CPU, RAM)
+ * 
+ * @param {unknown} value - ข้อมูลที่ต้องการตรวจสอบ
+ * @returns {boolean} - true หากโครงสร้างถูกต้อง
+ */
 export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry {
   if (!isRecord(value)) return false;
   return hardwareTimestampEpoch(value.timestamp) !== null && isHardwareMetric(value.cpu_percent) &&
@@ -336,6 +395,12 @@ export function isHardwareTelemetry(value: unknown): value is HardwareTelemetry 
     isHardwareMetric(value.net_wlan0_tx_mbps);
 }
 
+/**
+ * ตรวจสอบและแยกประเภท Message ที่ได้จาก Hardware Stream (Initial หรือ Update)
+ * 
+ * @param {unknown} value - Message ดิบจาก Stream
+ * @returns {HardwareStreamMessage | null} - Message ที่ถูกจัดประเภทแล้ว หรือ null หากผิดพลาด
+ */
 export function parseHardwareStreamMessage(value: unknown): HardwareStreamMessage | null {
   if (!isRecord(value) || (value.type !== "initial" && value.type !== "update")) return null;
   if (value.type === "initial") {
@@ -345,6 +410,12 @@ export function parseHardwareStreamMessage(value: unknown): HardwareStreamMessag
   return isHardwareTelemetry(value.data) ? { type: "update", data: value.data } : null;
 }
 
+/**
+ * ตรวจสอบและแยกประเภท Message ที่ได้จาก Threat Stream
+ * 
+ * @param {unknown} value - Message ดิบจาก Stream
+ * @returns {ThreatStreamMessage | null} - Message ที่ถูกต้อง หรือ null
+ */
 export function parseThreatStreamMessage(value: unknown): ThreatStreamMessage | null {
   if (!isRecord(value) || typeof value.type !== "string") return null;
 
@@ -364,6 +435,12 @@ export function parseThreatStreamMessage(value: unknown): ThreatStreamMessage | 
   return null;
 }
 
+/**
+ * จัดรูปแบบข้อมูล Hardware Metric ให้พร้อมสำหรับการนำไปแสดงผลบน Chart
+ * 
+ * @param {HardwareTelemetry} metric - ข้อมูล Telemetry ต้นฉบับ
+ * @returns {HardwareChartRecord} - ข้อมูลที่จัดรูปแบบเวลาและแปลงเป็นตัวเลขแล้ว
+ */
 export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRecord {
   const timestampEpoch = hardwareTimestampEpoch(metric.timestamp) ?? 0;
   const date = new Date(timestampEpoch);
@@ -387,8 +464,17 @@ export function formatHardwareMetric(metric: HardwareTelemetry): HardwareChartRe
   };
 }
 
+/**
+ * แปลงค่าที่คาดว่าจะเป็นตัวเลขให้เป็น Number
+ * 
+ * @param {unknown} value - ค่าที่ต้องการแปลง
+ * @returns {number | null} - ตัวเลข หรือ null หากไม่ใช่ตัวเลขที่ใช้งานได้
+ */
 export function numericHardwareMetric(value: unknown): number | null {
   if (value === undefined || value === null) return null;
+  // ดักจับสตริงว่างหรือช่องว่างเปล่าๆ ป้องกัน JavaScript แปลงค่า "" เป็น 0
+  if (typeof value === "string" && value.trim() === "") return null;
+  
   const numberValue = typeof value === "number" ? value : Number(value);
   return Number.isFinite(numberValue) ? numberValue : null;
 }
@@ -399,6 +485,12 @@ export function numericHardwareMetricList(value: unknown): number[] | null {
   return metrics.every((metric): metric is number => metric !== null) ? metrics : null;
 }
 
+/**
+ * ตรวจสอบโครงสร้างข้อมูลของ DashboardUser (ผู้ดูแลระบบ)
+ * 
+ * @param {unknown} value - ข้อมูลที่ต้องการตรวจสอบ
+ * @returns {boolean} - true หากมีโครงสร้างที่ถูกต้อง
+ */
 export function isDashboardUser(value: unknown): value is DashboardUser {
   if (!isRecord(value)) return false;
   return typeof value.operatorId === "string" && typeof value.fullName === "string" &&
