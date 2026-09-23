@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -15,6 +17,8 @@ from production.enrichment.enrichment_cache import SourceIPCacheService
 from production.enrichment.external_ti_contract import (
     SOURCE_IP_AMENDMENT_SHA256,
     SOURCE_IP_ENRICHMENT_MODE,
+    SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     default_external_ti_provider_configs,
     evaluate_outbound_sighting,
     load_source_ip_governance_amendment,
@@ -370,3 +374,41 @@ def test_source_ip_observable_lookup_uses_governed_cache_provenance(tmp_path: Pa
     assert result["source_ip_cache"][0]["provider"] == "abuseipdb"
     assert result["source_ip_cache"][0]["provenance"]["cache_authority"] == "NON_AUTHORITATIVE_CACHE"
     assert result["source_ip_cache"][0]["provenance"]["provider_config_identity"]
+
+
+def test_reviewed_2_3_cache_remains_readable_as_legacy_context_under_2_4(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    session_id = "reviewed-legacy-cache-session"
+    storage.save_session({"session_id": session_id, "src_ip": SOURCE_IP})
+    storage.record_observable_sighting(_sighting(session_id))
+    policy_path = Path(__file__).resolve().parents[1] / "configs" / "external_ti_source_ip_governance.v2.json"
+    config = replace(
+        _source_config(tmp_path),
+        source_ip_governance_path=str(policy_path),
+        source_ip_governance_sha256=hashlib.sha256(policy_path.read_bytes()).hexdigest(),
+    )
+    entry = SourceIPCacheService(storage).store_result(
+        "abuseipdb",
+        SOURCE_IP,
+        ProviderResult("abuseipdb", "ok", {"data": {"abuseConfidenceScore": 23, "totalReports": 4}}),
+        config.external_ti_provider_configs["abuseipdb"],
+        privacy_policy_version=SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    )
+    assert entry is not None
+    result = build_session_ti_projection(storage, session_id, config=config)
+    assert result["status"] == "TI_AVAILABLE"
+    assert len(result["source_ip_cache"]) == 1
+    assert result["source_ip_cache"][0]["policy_binding"] == "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"
+    assert result["source_ip_cache"][0]["provenance"]["privacy_policy_version"] == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION
+    assert SOURCE_IP not in json.dumps(result)
+
+    entry["provenance"]["privacy_policy_version"] = "unreviewed-version"
+    storage.upsert_external_ti_source_ip_cache(entry)
+    rejected = build_session_ti_projection(storage, session_id, config=config)
+    assert rejected["source_ip_cache"] == []
+    assert rejected["status"] == "TI_PENDING"
+
+    entry["provenance"]["privacy_policy_version"] = SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION
+    storage.upsert_external_ti_source_ip_cache(entry)
+    current = build_session_ti_projection(storage, session_id, config=config)
+    assert current["source_ip_cache"][0]["policy_binding"] == "CURRENT_POLICY"

@@ -407,6 +407,47 @@ def test_pdf_uses_exact_external_ti_api_status_vocabulary(tmp_path: Path) -> Non
     assert "LOOKUP_PENDING" not in text
 
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
+def test_pdf_shows_reviewed_legacy_source_ip_provider_context(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    external_ti = {
+        "ok": True,
+        "status": "TI_AVAILABLE",
+        "status_reason": "PROVIDER_EVIDENCE_AVAILABLE",
+        "freshness": {"state": "TI_FRESH"},
+        "external_ti_summary": {
+            "status": "TI_AVAILABLE",
+            "status_reason": "PROVIDER_EVIDENCE_AVAILABLE",
+            "source_ip_cache_records_found": 1,
+            "source_ip_cache_policy_bindings": ["LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"],
+            "source_ip_cache_freshness": "FRESH",
+        },
+        "source_ip_cache": [{
+            "provider": "abuseipdb",
+            "lookup_status": "OK",
+            "lookup_at": "2026-09-23T18:47:32Z",
+            "expires_at": "2026-09-24T18:47:32Z",
+            "policy_binding": "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY",
+            "provenance": {"privacy_policy_version": "2.3.0"},
+            "normalized_context": {"abuse_confidence_score": 23, "total_reports": 4},
+        }],
+    }
+    output_dir = tmp_path / "legacy-eti-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(write_pdf_report(report, session, output_dir, external_ti_projection=external_ti))
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+    assert "TI_AVAILABLE" in text
+    assert "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY" in text
+    assert "abuse score: 23" in text
+    assert "reports: 4" in text
+
+
 def test_evidence_reference_summary_is_bounded_and_content_addressed() -> None:
     references = [f"evidence_ref_{index:04d}" for index in range(50)]
     summary = _evidence_reference_summary(references)
