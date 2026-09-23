@@ -9,6 +9,7 @@ import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
 import {
   TransitionOverlay,
   deriveDirectedTransitionGeometry,
+  planTransitionOverlayRoutes,
   deriveTransitionOverlayItems,
 } from "../src/components/filesystem/TransitionOverlay";
 import { deriveVerifiedCwdTransitions } from "../src/components/filesystem/filesystemTransitions";
@@ -133,6 +134,69 @@ describe("FSV-007B: separate verified transition overlay", () => {
       ["failed", "future"],
     ]);
     expect(items.filter((item) => item.transition.fromPath === "/home/a" && item.transition.toPath === "/tmp")).toHaveLength(2);
+  });
+
+  it("plans repeated and reverse transitions on distinct node ports with collision-free labels", () => {
+    const items = deriveTransitionOverlayItems(transitions, transitions[2]);
+    const plans = planTransitionOverlayRoutes(
+      items,
+      new Map(nodes.map((node) => [node.path, node])),
+      {
+        "/home/a": { x: 22, y: 68, width: 14, height: 8 },
+        "/tmp": { x: 76, y: 55, width: 12, height: 8 },
+      },
+    ).filter((plan) => plan.geometry !== null);
+
+    const repeated = plans.filter((plan) => plan.item.transition.fromPath === "/home/a");
+    const reverse = plans.find((plan) => plan.item.transition.eventId === "reverse");
+    expect(repeated).toHaveLength(2);
+    expect(reverse?.geometry).not.toBeNull();
+    expect(repeated[0].geometry?.startY).not.toBe(repeated[1].geometry?.startY);
+
+    const forwardSide = Math.sign((repeated[0].geometry?.controlY ?? 0) - 61.5);
+    const reverseSide = Math.sign((reverse?.geometry?.controlY ?? 0) - 61.5);
+    expect(forwardSide).toBe(-reverseSide);
+
+    const labels = plans.map((plan) => plan.geometry!).map((geometry) => ({
+      left: geometry.labelX - 2.25,
+      right: geometry.labelX + 2.25,
+      top: geometry.labelY - 1.7,
+      bottom: geometry.labelY + 1.7,
+    }));
+    for (let index = 0; index < labels.length; index += 1) {
+      for (let otherIndex = index + 1; otherIndex < labels.length; otherIndex += 1) {
+        const a = labels[index];
+        const b = labels[otherIndex];
+        const overlaps = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+        expect(overlaps).toBe(false);
+      }
+    }
+  });
+
+  it("routes a transition around an unrelated node occupying the direct corridor", () => {
+    const transition = deriveVerifiedCwdTransitions([
+      cwdEvent("obstacle-route", "changed", "/from", "/to"),
+    ], 1)[0];
+    const routeNodes: GraphNode[] = [
+      { path: "/from", parentPath: "/", depth: 1, sessionIds: [], observedAt: null, x: 20, y: 50 },
+      { path: "/obstacle", parentPath: "/", depth: 1, sessionIds: [], observedAt: null, x: 50, y: 50 },
+      { path: "/to", parentPath: "/", depth: 1, sessionIds: [], observedAt: null, x: 80, y: 50 },
+    ];
+    const plan = planTransitionOverlayRoutes(
+      [{ transition, state: "current", isAnchored: false }],
+      new Map(routeNodes.map((node) => [node.path, node])),
+      {
+        "/from": { x: 20, y: 50, width: 12, height: 8 },
+        "/obstacle": { x: 50, y: 50, width: 16, height: 10 },
+        "/to": { x: 80, y: 50, width: 12, height: 8 },
+      },
+    )[0];
+
+    expect(plan.geometry).not.toBeNull();
+    expect(Math.abs((plan.geometry?.controlY ?? 50) - 50)).toBeGreaterThan(7);
+    expect(
+      (plan.geometry?.labelY ?? 50) < 43.3 || (plan.geometry?.labelY ?? 50) > 56.7,
+    ).toBe(true);
   });
 
   it("adds an anchored current event without mutating or appending it to the displayed input", () => {

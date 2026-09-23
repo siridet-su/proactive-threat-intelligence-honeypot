@@ -1241,6 +1241,31 @@ production builds now pass. The two Vitest expected failures and four lint warni
 pre-existing items outside filesystem visualization scope. The branch was synchronized with remote
 `main` by merge, and unrelated upstream/user changes were preserved rather than rewritten.
 
+#### Post-completion transition routing hardening — **DONE (2026-09-24)**
+
+The verified transition overlay now plans the complete displayed route set before rendering instead
+of deriving each curve independently. Directed transitions attach to deterministic edge-facing node
+ports; repeated routes receive distinct port/lane offsets and reverse routes remain on opposite sides
+of the route family. The planner samples each quadratic route against unrelated measured node bounds
+and expands its lane until the route clears the occupied corridor. Hop labels are then assigned from
+multiple progress/clearance candidates while rejecting node and earlier-label collisions.
+
+This correction preserves the evidence contract: no transition is deduplicated, bundled into a
+synthetic event, or removed. Every event retains its own path element, hop label, direction, state,
+event ID, and chronological accessible-list entry. In the real-browser replay fixture, the source
+connector and verified transition entering the same directory use visibly separate node ports, and
+the forward/reverse hop labels remain non-overlapping at both mobile and desktop widths.
+
+Verification:
+
+- focused transition overlay suite: **14/14 passed**
+- filesystem suites: **513 passed, 14 skipped**
+- full Vitest suite: **783 passed, 2 expected failures, 14 skipped**
+- real-browser filesystem suite: **14/14 passed**
+- ESLint: **0 errors**; one pre-existing Threat Intelligence warning remains outside this change
+- webpack production build: **PASSED**, 18/18 static pages generated
+- `git diff --check`: **PASSED**
+
 ## 6. File ownership map for implementation
 
 | Concern | Primary source files | Primary regression suites |
