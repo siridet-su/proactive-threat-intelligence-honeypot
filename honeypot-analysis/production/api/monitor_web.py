@@ -90,7 +90,10 @@ from production.storage import open_storage, safe_database_descriptor
 
 DEFAULT_REPORTS_DIR = "./runtime/reports"
 DEFAULT_REFRESH_SECONDS = 5
-DEFAULT_SESSION_LIMIT = 500
+# A 500-document Mongo sort exceeds the deployment's in-memory sort limit
+# (OperationFailure 292). The overview/SSE feed only needs a recent window;
+# total and active counts are queried separately. Keep explicit pagination.
+DEFAULT_SESSION_LIMIT = 50
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
@@ -2021,6 +2024,7 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
                 f"{len(hypothesis_sets)} falsifiable hypothesis sets"
             ),
             "ai_enriched": "false",
+            "ai_enrichment_scope": "immutable_deterministic_assessment_at_generation",
             "analysis_mode": "deterministic_session_assessment_v4",
             "semantic_coverage": _text(
                 coverage.get("coverage_status") or "unavailable"

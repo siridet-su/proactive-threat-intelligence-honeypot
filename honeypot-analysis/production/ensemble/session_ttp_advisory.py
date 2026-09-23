@@ -45,6 +45,14 @@ def summarize_session_model1_ttp(
         if bound and bound != expected:
             excluded += 1
             continue
+        # Cowrie emits command.input for the entered line and may emit a
+        # command.failed/success event for that same line.  Those outcome
+        # events remain classification evidence, but are not another command
+        # vote.  Legacy rows without event provenance retain their old path.
+        cowrie_eventid = _text(row.get("cowrie_eventid"))
+        if cowrie_eventid and cowrie_eventid != "cowrie.command.input":
+            excluded += 1
+            continue
         prediction = row.get("s1_advisory")
         if not isinstance(prediction, Mapping):
             excluded += 1

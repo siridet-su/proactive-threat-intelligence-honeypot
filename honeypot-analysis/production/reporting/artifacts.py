@@ -1812,7 +1812,12 @@ def write_pdf_report(
             if isinstance(advisory.get("rendered_advisory"), dict)
             else {}
         )
-        selections = advisory.get("template_selections")
+        validated = (
+            advisory.get("validated_advisory")
+            if isinstance(advisory.get("validated_advisory"), dict)
+            else advisory
+        )
+        selections = validated.get("template_selections")
         if not isinstance(selections, list):
             selections = rendered.get("paragraphs")
         if not isinstance(selections, list):
@@ -1834,9 +1839,9 @@ def write_pdf_report(
             return result
 
         template_ids: List[str] = []
-        finding_ids: List[str] = _ids(advisory.get("selected_finding_ids"))
-        action_ids: List[str] = _ids(advisory.get("ranked_action_ids"))
-        relationship_ids: List[str] = []
+        finding_ids: List[str] = _ids(validated.get("selected_finding_ids"))
+        action_ids: List[str] = _ids(validated.get("ranked_action_ids"))
+        relationship_ids: List[str] = _ids(validated.get("selected_relationship_ids"))
         limitation_codes: List[str] = _ids(advisory.get("limitation_codes"))
         reason_codes: List[str] = _ids(advisory.get("reason_codes"))
         finding_families: List[str] = []
@@ -2713,6 +2718,7 @@ def write_pdf_report(
                 ("templates", selection_summary["templates"]),
                 ("findings", selection_summary["finding_ids"]),
                 ("actions", selection_summary["action_ids"]),
+                ("relationships", selection_summary["relationship_ids"]),
                 ("limitations", selection_summary["limitation_codes"]),
                 ("reasons", selection_summary["reason_codes"]),
             )
@@ -2728,10 +2734,16 @@ def write_pdf_report(
                 story.append(_p(advisory_text, body, limit=1200))
         else:
             story.append(_p(
-                "No validated advisory narrative is available for the current canonical assessment. "
-                "The canonical evidence and policy guidance remain authoritative.",
+                "No rendered advisory narrative was stored. Validated AI selections, "
+                "when listed above, remain available for analyst review; the canonical "
+                "evidence and policy guidance remain authoritative.",
                 body,
             ))
+        story.append(_p(
+            "This AI projection is read at PDF generation time and may be newer than "
+            "the immutable deterministic assessment stored when the session closed.",
+            small,
+        ))
     else:
         story.append(_p("No separate AI advisory projection was available for this session.", body))
 

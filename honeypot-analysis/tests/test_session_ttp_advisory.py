@@ -1,4 +1,6 @@
 import importlib.util
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -61,6 +63,15 @@ def test_event_identity_fallback_is_deduplicated():
     assert value["techniques"][0]["supporting_command_events"] == 1
 
 
+def test_cowrie_outcome_event_does_not_cast_second_model1_vote():
+    entered = dict(row(0, "T1059"), cowrie_eventid="cowrie.command.input")
+    failed = dict(row(1, "T1059"), cowrie_eventid="cowrie.command.failed")
+    value = summarize_session_model1_ttp([entered, failed], session_id="session-a")
+    assert value["assessed_command_events"] == 1
+    assert value["excluded_classification_rows"] == 1
+    assert value["techniques"][0]["supporting_command_events"] == 1
+
+
 def test_pdf_artifact_privacy_projection_preserves_same_counts_without_command_text():
     source = {
         "session_id": "session-a",
@@ -99,3 +110,44 @@ def test_rendered_pdf_agrees_with_session_advisory(tmp_path: Path):
     assert "1 distinct command event" in extracted
     assert "index:0" in extracted
     assert "private command text" not in extracted
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None or shutil.which("pdftotext") is None,
+    reason="optional PDF renderer or text extractor unavailable",
+)
+def test_pdf_shows_validated_ai_selections_without_rendered_paragraphs(tmp_path: Path):
+    report = {
+        "schema_version": "phase2.artifact.fixture", "session_id": "session-a",
+        "generated_at": "2026-09-23T00:00:03Z", "summary": "Test report",
+    }
+    session = {
+        "session_id": "session-a", "src_ip": "192.0.2.8",
+        "start_time": "2026-09-23T00:00:00Z", "end_time": "2026-09-23T00:00:03Z",
+        "commands": [], "raw_events": [], "classification_events": [],
+    }
+    ai_projection = {
+        "status": "accepted", "advisory_id": "advisory-test",
+        "advisory": {
+            "validation": {"status": "accepted"},
+            "validated_advisory": {
+                "selected_finding_ids": ["finding-test-1"],
+                "ranked_action_ids": ["action-test-1"],
+                "selected_relationship_ids": ["relationship-test-1"],
+                "template_selections": [],
+            },
+            "rendered_advisory": {"status": "rendered", "paragraphs": []},
+        },
+    }
+    output = tmp_path / "reports"
+    output.mkdir(mode=0o700)
+    path = write_pdf_report(
+        report, session, output, ai_advisory_projection=ai_projection,
+    )
+    extracted = subprocess.check_output(
+        ["pdftotext", "-layout", str(path), "-"], text=True,
+    )
+    assert "finding-test-1" in extracted
+    assert "action-test-1" in extracted
+    assert "relationship-test-1" in extracted
+    assert "may be newer than" in extracted

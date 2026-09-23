@@ -26,6 +26,27 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Existing manual action");
   });
 
+  it("shows validated AI selections even when no narrative template was rendered", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ status: "accepted", advisory: {
+        validated_advisory: {
+          selected_finding_ids: ["finding-1"],
+          selected_relationship_ids: ["relationship-1"],
+          ranked_action_ids: ["action-1"],
+        },
+        rendered_advisory: { status: "rendered", paragraphs: [] },
+      } }}
+      guidanceData={{ response_guidance: {
+        findings: [{ finding_id: "finding-1", statement: "Observed Cowrie interaction" }],
+        advisory_actions: [{ action_id: "action-1", description: "Review authentication logs" }],
+      } }}
+    />);
+    expect(html).toContain("AI selected 1 existing evidence item and 1 existing manual action");
+    expect(html).toContain("Observed Cowrie interaction");
+    expect(html).toContain("Review authentication logs");
+    expect(html).toContain("no rendered narrative was recorded");
+  });
+
   it("does not imply that an unavailable Model2 corroborated the session", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-v1",

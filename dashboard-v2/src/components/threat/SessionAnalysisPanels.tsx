@@ -1514,11 +1514,21 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   const safety = record(advisory.safety);
   const rendered = record(advisory.rendered_advisory);
   const paragraphs = list(rendered.paragraphs).map(record);
+  const validated = record(advisory.validated_advisory);
   const guidance = record(guidanceData.response_guidance);
   const guidanceFindings = list(guidance.findings).map(record);
   const guidanceActions = list(guidance.advisory_actions).map(record);
-  const selectedFindingIds = new Set(paragraphs.flatMap((item) => list(item.finding_ids).map((id) => label(id, ""))).filter(Boolean));
-  const selectedActionIds = new Set(paragraphs.flatMap((item) => list(item.action_ids).map((id) => label(id, ""))).filter(Boolean));
+  // Provider selections are validated and stored independently of the optional
+  // rendered policy templates. Empty paragraphs must not erase those choices.
+  const selectedFindingIds = new Set([
+    ...list(validated.selected_finding_ids),
+    ...paragraphs.flatMap((item) => list(item.finding_ids)),
+  ].map((id) => label(id, "")).filter(Boolean));
+  const selectedActionIds = new Set([
+    ...list(validated.ranked_action_ids),
+    ...paragraphs.flatMap((item) => list(item.action_ids)),
+  ].map((id) => label(id, "")).filter(Boolean));
+  const selectedRelationshipCount = list(validated.selected_relationship_ids).length;
   const selectedFindings = guidanceFindings.filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
   const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
   const inaccurateNarrative = selectedFindings.length > 0 && paragraphs.some((item) => label(item.text, "").includes("canonical finding"));
@@ -1526,8 +1536,9 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   return (
     <div className="space-y-3">
       <Insight title="What AI actually did" tone={hasSelection ? "primary" : "warning"}>
-        {hasSelection ? `AI reviewed ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
+        {hasSelection ? `AI selected ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for review${selectedRelationshipCount ? `, with ${selectedRelationshipCount} relationship${selectedRelationshipCount === 1 ? "" : "s"}` : ""}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
       </Insight>
+      {hasSelection && paragraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The AI selection is stored, but no rendered narrative was recorded. The linked evidence and actions below come from the verified guidance record.</p>}
       {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
         {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
           <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{label(item.finding_type, "Response-guidance finding")}</span></div>
