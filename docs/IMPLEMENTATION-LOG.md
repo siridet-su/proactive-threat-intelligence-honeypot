@@ -555,3 +555,358 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related material: [deployment validation](validation/2026-09-24-web-login-pipeline.md),
   [web-login telemetry design](design/web-login-telemetry.md), and
   [data access guide](../integrations/web-corp/DATA-ACCESS.md).
+
+### 2026-09-24 — Track FTP and SMTP decoy sources in the repository
+
+- Status: source/build-context migration completed; running containers were not
+  recreated.
+- Scope and intent: make the FTP and SMTP implementations, dependencies,
+  Dockerfiles, and operating notes reviewable in this repository without
+  changing their exposure or sending test credentials/mail.
+- Repository branch and commit/PR: feat/opencanary-web-login-honeypot; local
+  working-tree changes, not committed.
+- Repository changes: added integrations/ftp and integrations/smtp with
+  pinned dependencies and runbooks; clarified current event ownership and
+  updated the stale TI-worker status from disabled to active based on the
+  user-confirmed runtime state. The FTP track-failure debug log no longer
+  includes the command string, which can contain an attempted password.
+- Host/environment changes: changed the unversioned sibling
+  /home/cpe27/decoy-honeypot/docker-compose.yml FTP and SMTP build contexts to
+  the tracked integration directories. The shared FTP VFS schema remains a
+  read-only external mount because it is shared with Core and contains
+  credential-like decoy configuration. Original sibling source files were
+  left in place; Compose now builds from the repository source.
+- Runtime/exposure state: images were built locally from the repository
+  sources, but no running container was recreated or restarted. The existing
+  FTP service remained bound to ZeroTier port 21 and passive ports 30000-30009;
+  SMTP remained loopback-only on host port 25.
+  The updated Compose file is outside this Git repository and therefore is
+  not itself tracked by this commit/worktree.
+- Validation performed and outcome: Compose config validation passed; both
+  images built from the new contexts; both image entrypoints passed Python
+  syntax compilation in network-disabled temporary containers. Read-only
+  checks confirmed the running FTP process, its banner, its Core health
+  dependency, and the four bait filenames. No FTP login/LIST/RETR or SMTP
+  message test was performed.
+- Not performed / deferred: no service restart, no live transaction test, no
+  SMTP-to-telemetry adapter, and no migration of the shared VFS schema.
+- Risks and data handling: FTP failed-login activity sent to Core includes the
+  submitted username/password, so Core event/session stores are sensitive.
+  The container still runs as root internally and its FTP banner duplicates
+  the 220 code. SMTP records envelope metadata and byte count but discards
+  the message body.
+- Rollback: restore the sibling Compose build contexts to its previous local
+  doors/ftp and doors/smtp directories; running containers and their data
+  were not changed.
+- Follow-up: decide whether to split the shared VFS credential/config data
+  from the Core persona schema, fix the FTP banner and container user,
+  configure health checks, add FTP/SMTP event adapters, and version the full
+  decoy-stack deployment Compose file.
+
+### 2026-09-24 — Clarify current and future HTTP decoy scope
+
+- Status: documentation-only clarification; runtime behavior unchanged.
+- Scope and intent: make the active web-corp login-collection purpose distinct
+  from optional future interactive ERP deception and other HTTP enhancements.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree changes, not committed.
+- Repository changes: added the HTTP current/future scope document and linked
+  it from the docs index, web-corp runbook, login telemetry design, and service
+  catalog.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: unchanged; web-corp continues to accept HTTP on the
+  configured ZeroTier listener, always reject login attempts, and keep login
+  telemetry separate from Deception Core page/bait events.
+- Validation performed and outcome: documentation cross-links and factual
+  claims reviewed against the existing runbook, design, service catalog, and
+  architecture snapshot; no service or data-path test was run.
+- Not performed / deferred: no code, deployment, service restart, TLS setup,
+  brute-force detector, SQLi rule tuning, or post-login ERP simulation.
+- Risks and data handling: existing raw login events remain credential-
+  sensitive; this documentation change did not query or copy event data.
+- Rollback: revert this documentation-only entry and the linked HTTP scope
+  documentation changes; runtime is unaffected.
+- Follow-up: any future HTTP capability requires a separate design and
+  implementation-log entry before deployment.
+- Related ADR/runbook: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry design](design/web-login-telemetry.md), and
+  [web-corp runbook](../integrations/web-corp/README.md).
+
+### 2026-09-24 — Add ZeroTier HTTPS listener for web-corp
+
+- Status: deployed and verified; HTTP remains active alongside HTTPS.
+- Scope and intent: serve the existing web-corp persona over TLS on ZeroTier
+  port 443 without adding a reverse proxy or connecting login requests to Odoo.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree changes, not committed.
+- Repository changes: added a direct-TLS web-corp app service definition to
+  the sibling Compose file; the app records `http.scheme`, coordinates shared
+  spool writers with `flock`, and the collector/processor preserve HTTPS scheme
+  and destination port/service metadata. Added tests and updated the HTTP
+  scope, telemetry design, runbook, architecture snapshot, and service catalog.
+- Host/environment changes actually applied: generated a self-signed RSA
+  certificate for SAN `IP:10.58.33.42` at
+  `/var/lib/decoy-honeypot/web-corp-tls/tls.crt`; its private key is outside
+  Git at `tls.key` (directory mode `0700`, key `0400`, certificate `0444`).
+  Updated the unversioned sibling
+  `/home/cpe27/decoy-honeypot/docker-compose.yml` and rebuilt/recreated
+  `web-corp`; started the new `web-corp-https` service. No UFW rule or public
+  interface binding was added. Replaced the ignored collector and processor
+  binaries after preserving both prior versions under the protected
+  `/var/backups/honeypot/web-https-20260924/` directory, then restarted only
+  `honeypot-collector.service` and `honeypot-processor.service`.
+- Runtime/exposure state: HTTP is still bound to `10.58.33.42:80` → container
+  `8080`; HTTPS is bound to `10.58.33.42:443` → container `8443`. The same app
+  serves both; HTTPS negotiates TLS 1.3. The certificate expires
+  `2027-09-24` and is self-signed, so client verification correctly reports
+  `self-signed certificate` until a trusted certificate is installed.
+- Validation performed and outcome: Compose config validation passed; six
+  web-corp unit tests passed in an isolated, network-disabled container;
+  collector-agent and processor-agent Go test suites passed. HTTP and HTTPS
+  `/web/login` returned 200 and identical body SHA-256; a later HTTPS
+  `/robots.txt` returned 200 and its Core `/v1/track` request succeeded.
+  OpenSSL confirmed TLS 1.3 and the IP SAN. No login credentials were sent to
+  the live service.
+- Not performed / deferred: no end-to-end HTTPS login POST through the live
+  Redis/Mongo pipeline, second-peer ZeroTier test, publicly trusted
+  certificate, or certificate renewal automation.
+- Risks and data handling: the self-signed certificate causes a browser trust
+  warning; replace it before expiry if a trusted DNS identity becomes
+  available. The private key remains outside Git. Both app containers share
+  the credential-bearing spool; a mode-`0600` process lock serializes writes.
+  One initial page-tracking request timed out while services were just starting;
+  Core health then returned 200 and the later tracking retry succeeded.
+- Rollback: stop/remove only `web-corp-https` and its port-443 mapping to
+  disable HTTPS while leaving HTTP intact. Preserve the external certificate
+  directory and the sibling Compose backup; collected telemetry is unchanged.
+- Follow-up: renew/replace the self-signed certificate before expiry, test
+  from an authorized second ZeroTier peer, and track the sibling Compose file
+  in a separate scoped change.
+- Related ADR/runbook: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry design](design/web-login-telemetry.md), and
+  [web-corp runbook](../integrations/web-corp/README.md) and
+  [HTTPS validation evidence](validation/2026-09-24-web-corp-https.md).
+
+### 2026-09-24 — Document publicly trusted HTTPS target on a VPS
+
+- Status: target runbook documented; no deployment or approval to expose a
+  public listener was made by this documentation change.
+- Scope and intent: explain how a future public-IP certificate and VPS TLS
+  edge could serve web-corp while keeping its Pi backend behind WireGuard.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree change, not committed.
+- Repository changes: added
+  [`integrations/web-corp/PUBLIC-VPS-HTTPS.md`](../integrations/web-corp/PUBLIC-VPS-HTTPS.md)
+  with prerequisites, IP certificate/renewal steps, exposure boundary,
+  forwarding-header requirements, validation, rollback, and credential-data
+  cautions. Linked it from the web-corp runbook, HTTP scope, and docs index.
+- Host/environment changes actually applied: none. No VPS, Pi, certificate,
+  firewall, WireGuard, proxy, or service configuration was changed.
+- Runtime/exposure state: unchanged. The Pi remains ZeroTier-only on HTTP/HTTPS;
+  HTTPS still uses its self-signed certificate. No public endpoint was created.
+- Validation performed and outcome: reviewed the runbook against the current
+  web-corp request fields and proxy trust behavior; official Let's Encrypt,
+  Certbot, and Uvicorn documentation was checked for IP-certificate lifetime,
+  client support, and trusted forwarded headers. Targeted `git diff --check`
+  passed for the modified tracked docs; the new untracked runbook was reviewed
+  for whitespace and its referenced local documents exist.
+- Not performed / deferred: no certificate request, external VPS login,
+  WireGuard route/firewall change, proxy deployment, live login POST, or
+  renewal dry-run was performed.
+- Risks and data handling: a future public endpoint would receive real-world
+  scans and potentially credential-bearing submissions. Existing spool, raw
+  Redis, MongoDB, and backups remain sensitive; the runbook requires synthetic
+  validation and a restricted public exposure boundary.
+- Rollback: revert the documentation-only changes; no host state requires
+  rollback.
+- Follow-up: select a VPS/public IP and peer addresses; verify current ACME
+  client support and automated six-day renewal; review firewall and proxy trust
+  boundaries; then separately approve and validate implementation.
+- Addendum: this target supersedes earlier follow-up wording in this log that
+  implied a publicly trusted DNS name was required before replacing the
+  self-signed certificate. A publicly trusted IP certificate is now an option;
+  its short validity and client-support caveats are recorded in the runbook.
+- Related runbooks/design: [public-VPS HTTPS runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md),
+  [HTTP decoy scope](design/http-decoy-scope.md), and
+  [current web-corp runbook](../integrations/web-corp/README.md).
+
+### 2026-09-25 — Narrow web-corp telemetry and stop inactive decoys
+
+- Status: login-only HTTP behavior deployed; out-of-scope web services stopped.
+- Scope and intent: retain the web-corp login honeypot for brute-force and
+  SQLi observation while removing page/scan telemetry from the active web path.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  changes remain uncommitted.
+- Repository changes: removed the web-corp Deception Core `/v1/track` client,
+  page/scan spool events, and current XSS indicators; kept static persona and
+  login compatibility routes. Disabled Uvicorn access logging. Updated the
+  current-state/service docs to classify Pi HTTPS, Odoo, FTP, and SMTP as
+  stopped/future work; documented the internal-only `:8080` app port, the
+  dashboard query gap, and the external Compose-file restart caveat. Existing
+  page/scan compatibility remains in the Go pipeline for prior spool or Redis
+  entries; the updated app produces no new events of that type. Removed
+  generated `.next`, `next-env.d.ts`, `.pytest_cache`, and Python
+  `__pycache__` output; retained node_modules, environment files, binaries,
+  backups, archives, and installed packages.
+- Host/environment changes actually applied: stopped only the web-corp HTTPS,
+  Odoo, FTP, and SMTP containers; rebuilt the web-corp image and recreated only
+  the HTTP `web-corp` container. Container data/volumes were not deleted.
+  Cowrie, Zeek, collector, processor, TI, hardware, response-agent, PostgreSQL,
+  and Deception Core were left running; PostgreSQL and Core are retained for
+  Cowrie integrations. No source/deployment file outside this repository was
+  edited. Docker reported FTP/SMTP exit code 137 (`OOMKilled=false`), indicating
+  they exceeded the graceful stop timeout; Odoo and HTTPS exited with code 0.
+- Runtime/exposure state: `10.58.33.42:80` maps to container `:8080`; host
+  `:8080` and Pi `:443` have no listener. FTP/SMTP/Odoo containers are exited.
+  PostgreSQL and Deception Core remain bound to loopback. The external Compose
+  file still declares stopped services, so an unrestricted full-stack `up`
+  could reactivate them.
+- Validation performed and outcome: rebuilt `decoy-honeypot-web-corp`; all 7
+  web-corp tests passed inside that image, including proof that page GETs,
+  bait paths, 404s, and unrelated POSTs create no spool events, while SQLi-like
+  login input is tagged and always rejected. Live HTTP GET returned 200;
+  container command includes `--no-access-log`; `ss` showed only port 80 for
+  web-corp (no host 8080 or 443). Cowrie, Zeek, collector, processor, TI,
+  hardware, and response-agent units reported active. `go test ./...` passed
+  in both Go agent directories; `git diff --check` passed.
+- Not performed / deferred: no live login POST was made, to avoid adding a new
+  credential-bearing record to Redis/MongoDB; no VPS/HTTPS rollout, FTP/SMTP
+  protocol test, Odoo test, dashboard query/view, or full-stack Compose start.
+  Host Python lacked FastAPI; the same suite was run successfully inside the
+  built application image.
+- Risks and data handling: historical Core and Mongo/Redis records are not
+  migrated or deleted and may include prior page/scan or credential-bearing
+  data. The sibling Compose source remains external and still defines stopped
+  services. Port 8080 is an internal app port, not a separate host exposure.
+- Rollback: restore the prior web-corp image/source and recreate only the
+  `web-corp` HTTP service. Do not start the full Compose stack as a rollback;
+  stopped service state is intentional. Existing telemetry and volumes remain
+  untouched.
+- Follow-up: migrate/clean up the external Compose definitions (including the
+  web-corp Core dependency and disabled services); provide an authorized
+  dashboard/API path to persisted login events; separately design the VPS
+  HTTPS boundary; add graceful shutdown handling for FTP/SMTP before any
+  reactivation; keep FTP/SMTP adapters and post-login deception future work.
+- Related runbooks/design: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md), and the
+  [service catalog](SERVICE-CATALOG.md).
+
+### 2026-09-25 — Reconcile current-state documentation with active TI worker
+
+- Status: documentation-only reconciliation; no runtime changes.
+- Scope and intent: align this branch's current architecture and service
+  catalog with the active TI-worker state and operating controls already
+  documented on `main`.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  pending scoped commit.
+- Repository changes: recorded the worker as enabled/running (last verified
+  2026-09-24), documented validated `ti:jobs` processing and queue/cache/
+  provider-quota controls, and corrected the stale priority that said to keep
+  enrichment disabled. Web-corp login remains outside TI enrichment.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: no new runtime check was performed; the documented
+  worker state is the existing 2026-09-24 verification and user-confirmed
+  normal operation.
+- Validation performed and outcome: compared current-state wording with
+  `origin/main`; checked the processor's `THREAT_INTEL_ENABLED` and `ti:jobs`
+  configuration references; `git diff --check` passed.
+- Not performed / deferred: no TI service restart, provider request, queue
+  inspection, or host configuration change.
+- Risks and data handling: no credentials or event data were accessed or added.
+- Rollback: revert this documentation-only reconciliation; runtime is
+  unaffected.
+- Follow-up: verify runtime status separately before making operational
+  changes; retain this current-state wording unless the worker policy changes.
+- Related docs: [current architecture](CURRENT-ARCHITECTURE.md),
+  [service catalog](SERVICE-CATALOG.md), and
+  [TI design](design/threat-intelligence.md).
+
+### 2026-09-25 — Merge latest main and preserve login-only producer scope
+
+- Status: source and documentation merge prepared; no host service changes.
+- Scope and intent: bring the feature branch up to the fetched `origin/main`
+  (`ca9d7dd0`) while keeping the current web-corp producer limited to rejected
+  login POST telemetry.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  merge commit pending at the time of this entry.
+- Repository changes: retained main's read-only GCP `/http-activity`
+  dashboard/API and dashboard evidence; reconciled current docs to distinguish
+  that read-side from the login-only sensor producer. Kept bounded ingestion
+  support for older `web_http_request` records, but did not restore page/scan
+  event production, Core `/v1/track`, or XSS indicators. TI-worker state remains
+  active as documented on main.
+- Host/environment changes actually applied: no containers, systemd units,
+  firewall rules, or external Compose files changed. Created a byte-verified
+  temporary copy of the six pre-existing untracked hardware-backup binaries at
+  `/tmp/honeypot-hardware-backup-pre-merge.tcFpE6/`; the originals remained in
+  place and unmodified.
+- Runtime/exposure state: unchanged by the merge. Web-corp remains HTTP-only on
+  the Pi with login-only app telemetry; the dashboard's last production
+  projection/auth-boundary validation is captured in the main-branch
+  validation record, and authenticated browser rendering remains unverified.
+- Validation performed and outcome: collector and processor `go test ./...`
+  passed; all 10 web-corp unit tests passed in a network-disabled container;
+  five focused dashboard HTTP activity test files passed (18 tests); staged
+  diff whitespace checks passed.
+- Not performed / deferred: no live login POST, authenticated dashboard
+  browser test, provider request, host service restart, or public exposure
+  change.
+- Risks and data handling: existing local binary backups remain untracked and
+  are excluded from commits; the temporary copy contains only those local
+  artifacts. Historical page events may still be readable in Mongo/dashboard,
+  but the current app creates no new page events.
+- Rollback: no runtime rollback is needed. Retain the feature checkpoint
+  `3ef9454d`; revert the merge commit only after reviewing its complete upstream
+  file set and confirming the backup worktree is preserved.
+- Follow-up: verify authenticated dashboard rendering with synthetic login
+  data; continue to keep FTP/SMTP, direct-Pi HTTPS, and page/scan telemetry
+  outside the active producer scope unless separately approved.
+- Related docs: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-corp data access](../integrations/web-corp/DATA-ACCESS.md),
+  [dashboard integration](../dashboard-v2/docs/WEB_CORP_HTTP_INTEGRATION.md),
+  and [live validation](WEB_CORP_HTTP_LIVE_VALIDATION_20260925.md).
+
+### 2026-09-25 — Preserve Web-corp client source ports
+
+- Status: repository implementation and tests prepared; not deployed.
+- Scope and intent: capture the observed client TCP source port for new
+  Web-corp login attempts and carry it into MongoDB's `network.src_port`,
+  without mislabeling a reverse proxy's own socket port as the client port.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  uncommitted working-tree change.
+- Repository changes: added the optional sensor `source_port` field; added
+  trusted-proxy-only `X-Forwarded-Client-Port` handling; validated and forwarded
+  it as Redis `src_port`; mapped it to MongoDB `network.src_port`; tested the
+  existing dashboard projection; and documented the accepted boundary in
+  ADR-0006, the telemetry design, runbooks, and data-access guide.
+- Host/environment changes actually applied: none. No deployed image/binary,
+  container, systemd unit, database, external Compose file, or proxy config was
+  changed.
+- Runtime/exposure state: no fresh runtime check or restart was performed.
+  Existing Web-corp events are unchanged; this additive optional field requires
+  no MongoDB migration, and historical records cannot be backfilled.
+- Validation performed and outcome: all 14 Web-corp tests passed in a
+  network-disabled container with read-only source; collector and processor
+  `go test ./...` passed; four focused dashboard HTTP tests passed (16 tests);
+  `git diff --check` passed. Tests cover direct, trusted-proxy, and Uvicorn-
+  rewritten peer-port behavior, range validation, Mongo normalization, and the
+  dashboard projection.
+- Not performed / deferred: no new login event was sent to a live sensor,
+  Redis, or MongoDB; no live database query, proxy-header configuration test,
+  image/binary rollout, or service restart was performed.
+- Risks and data handling: source ports are transient and can change under NAT;
+  they are not actor identities. Only a peer in configured
+  `WEB_TRUSTED_PROXY_CIDRS` may assert a forwarded client port, and Uvicorn's
+  `--forwarded-allow-ips` must match that peer set if its middleware rewrites
+  the client scope. The proxy must overwrite the header. Missing or invalid
+  forwarded ports remain absent.
+- Rollback: revert the source, pipeline, tests, ADR, and documentation changes;
+  no runtime rollback is needed because deployment was not performed.
+- Follow-up: deploy the reviewed Web-corp, collector, and processor changes in
+  dependency order, then verify one synthetic event in `honeypot_db.events`
+  without retrieving or recording submitted credentials.
+- Related material: [ADR-0006](adr/ADR-0006-web-client-source-port.md),
+  [web-login telemetry design](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md), and
+  [data-access guide](../integrations/web-corp/DATA-ACCESS.md).

@@ -21,7 +21,7 @@ describe("HTTP Mongo read boundary", () => {
   it("queries only web-corp login events with a narrow projection and bounded result", async () => {
     const toArray = vi.fn().mockResolvedValue([{
       source: "web-corp", event_type: "web_login_attempt", event_id: "a123",
-      network: { src_ip: "198.51.100.10" }, http: { method: "POST" },
+      network: { src_ip: "198.51.100.10", src_port: 49152 }, http: { method: "POST" },
       analysis: { sqli: { indicators: { password: ["sql_comment"] } } },
     }]);
     const limit = vi.fn(() => ({ toArray }));
@@ -40,11 +40,13 @@ describe("HTTP Mongo read boundary", () => {
       }) }),
     );
     const projection = find.mock.calls[0]![1].projection as Record<string, number>;
+    expect(projection["network.src_port"]).toBe(1);
     expect(Object.keys(projection)).not.toContain("web_login.password");
     expect(Object.keys(projection)).not.toContain("raw.payload");
     expect(Object.keys(projection)).not.toContain("http.query");
     expect(limit).toHaveBeenCalledWith(100);
     expect(result.items[0]?.ttpCandidate).toBe("T1190");
+    expect(result.items[0]?.sourcePort).toBe(49152);
   });
 
   it("reads an exact HTTP session with the same safe projection", async () => {

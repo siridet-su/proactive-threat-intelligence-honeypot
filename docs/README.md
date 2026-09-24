@@ -25,6 +25,17 @@ The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the
 [web-corp runbook](../integrations/web-corp/README.md), and its
 [data-access guide](../integrations/web-corp/DATA-ACCESS.md).
+The optional Web-corp client source-port capture and trusted-proxy boundary are
+recorded in [ADR-0006](adr/ADR-0006-web-client-source-port.md).
+The status boundary between the active HTTP decoy work and candidate future
+work is summarized in [HTTP decoy scope](design/http-decoy-scope.md).
+The not-yet-deployed public-IP HTTPS/VPS/WireGuard target procedure is in the
+[web-corp public-VPS HTTPS runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
+
+The tracked decoy source runbooks are [FTP](../integrations/ftp/README.md) and
+[SMTP](../integrations/smtp/README.md). Both services are stopped/future work;
+their intended behavior and adapter gaps are recorded in the
+[service catalog](SERVICE-CATALOG.md).
 
 ## Document status labels
 

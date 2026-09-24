@@ -230,6 +230,13 @@ func enqueueWebLoginFile(ctx context.Context, rdb *redis.Client, cfg AppConfig, 
 		"ingested_at": time.Now().UTC().Format(time.RFC3339Nano),
 		"payload":     strings.TrimSpace(string(data)),
 	}
+	srcPort, validSourcePort := webLoginSourcePort(payload)
+	if !validSourcePort {
+		return "", "", fmt.Errorf("invalid web-login event: invalid source_port")
+	}
+	if srcPort != "" {
+		values["src_port"] = srcPort
+	}
 	redisID, err := rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: "raw:web-login",
 		MaxLen: cfg.StreamMaxLen,
@@ -282,6 +289,9 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 	if net.ParseIP(sourceIP) == nil {
 		return "", "", fmt.Errorf("invalid web-login event: invalid source_ip")
 	}
+	if _, valid := webLoginSourcePort(payload); !valid {
+		return "", "", fmt.Errorf("invalid web-login event: invalid source_port")
+	}
 	httpPayload, ok := payload["http"].(map[string]any)
 	if !ok || getString(httpPayload, "path") == "" {
 		return "", "", fmt.Errorf("invalid web-login event: missing http object")
@@ -326,6 +336,21 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 		}
 	}
 	return requestID, sourceIP, nil
+}
+
+// webLoginSourcePort validates the optional JSON integer and formats the
+// accepted value for the Redis envelope. A missing or null port is compatible
+// with older sensor payloads and proxy paths that cannot preserve it.
+func webLoginSourcePort(payload map[string]any) (string, bool) {
+	raw, exists := payload["source_port"]
+	if !exists || raw == nil {
+		return "", true
+	}
+	port, ok := raw.(float64) // encoding/json decodes JSON numbers into float64.
+	if !ok || port < 1 || port > 65535 || port != float64(int(port)) {
+		return "", false
+	}
+	return strconv.Itoa(int(port)), true
 }
 
 func webLoginDestinationPort(payload map[string]any) string {

@@ -2,11 +2,19 @@
 
 This guide is for authorized honeypot administrators and developers working
 under that authorization. Login events intentionally retain the submitted
-password as plaintext. New page events also retain bounded literal URL paths
-and queries, which can themselves contain sensitive values. Terminal output,
-Redis responses, Mongo query results,
-and pending spool files can therefore contain credential-sensitive data. Do
-not paste their contents into tickets, chat, source control, or ordinary logs.
+password as plaintext and may also retain a bounded query from the login URL.
+Historical `web_http_request` records may contain bounded literal paths and
+queries. The current app emits telemetry only for login POSTs: page views,
+scans, unrelated POSTs, and 404s are not captured, and the app does not call
+Deception Core. Terminal output, Redis responses, Mongo query results, and
+pending spool files can contain credential-sensitive data. Do not paste their
+contents into tickets, chat, source control, or ordinary logs.
+The GCP dashboard `/http-activity` read-side queries `honeypot_db.events`; it
+does not consume Redis directly or write MongoDB. The production projection
+and unauthenticated API boundary were checked on 2026-09-25, but authenticated
+browser rendering was not exercised. The broad feed omits submitted values;
+the exact-session detail API exposes captured fields only to an authenticated
+Admin. Use the authorized retrieval steps below if the dashboard is unavailable.
 
 ## Where data lives
 
@@ -14,9 +22,10 @@ not paste their contents into tickets, chat, source control, or ordinary logs.
 | --- | --- | --- |
 | web-corp container spool `/var/spool/web-corp-login/pending/` | One JSONL file per login attempt, including the submitted password | Retry queue only; collector removes a file after Redis accepts it |
 | Redis `raw:web-login` | Full bounded event in the `payload` field | Transient, bounded stream (maximum length configured by collector, currently 50,000 entries) |
-| MongoDB `honeypot_db.events` | Canonical normalized event; login password at `web_login.password`, literal URL at `http.query`/`http.raw_path` when captured | Durable event store with the processor's current 30-day TTL |
+| MongoDB `honeypot_db.events` | Canonical normalized event; login password at `web_login.password`, login URL query at `http.query`; older page events may also have `http.raw_path`/`http.query` | Durable event store with the processor's current 30-day TTL |
 | Redis `event:canonical` | Normalized downstream projection without `web_login.password`, `http.query`, or `http.raw_path` | Bounded stream for consumers that do not need literal submitted values |
-| Deception Core container `/data/events.jsonl` | Legacy `/v1/track` records created before cutover; a login command may include the old credential-bearing JSON | Historical only; new web-corp login attempts do not go here |
+| GCP dashboard `/http-activity` | Read-only projection of Web-corp login attempts and retained page events; detail endpoint returns captured payload fields only to Admin | Authenticated, no-store API; production projection/auth boundary checked 2026-09-25, authenticated browser render not exercised |
+| Deception Core container `/data/events.jsonl` | Historical `/v1/track` records from the prior web-corp implementation; may include credential-bearing login commands and page/scan events | Historical only; the current web-corp app does not call Core |
 
 The event ID/request ID is the same across the app spool filename, raw Redis
 payload, MongoDB `event_id`, and canonical Redis event. Use it to correlate
@@ -24,6 +33,12 @@ copies and deduplicate Redis stream deliveries: the pipeline is at-least-once,
 so a retried raw entry or canonical projection may be repeated even though the
 MongoDB record is idempotently upserted. Odoo/PostgreSQL is not the login
 telemetry store.
+
+The previous app version also wrote `web_http_request` page/scan events into
+the shared spool/Redis path. The collector/processor retain compatibility for
+those pre-change events while they drain, but the current web-corp app emits
+only `web_login_attempt`. Do not treat older page/scan records as current
+collection behavior.
 
 ## Inspect pending files in the web-corp container
 
@@ -115,10 +130,14 @@ webLoginDb.events.find(
     event_id: 1,
     timestamp: 1,
     "network.src_ip": 1,
+    "network.src_port": 1,
+    "network.dst_port": 1,
+    "network.service": 1,
     "web_login.database": 1,
     "web_login.username": 1,
     "web_login.redirect": 1,
     "web_login.remember": 1,
+    "http.scheme": 1,
     "http.method": 1,
     "http.path": 1,
     "analysis.sqli": 1,
@@ -127,6 +146,11 @@ webLoginDb.events.find(
   }
 ).sort({ timestamp: -1 }).limit(20).toArray();
 ```
+
+`network.src_port` is optional connection metadata. New direct-peer events can
+include it; events behind a trusted proxy include the original client port only
+when that proxy overwrites and supplies `X-Forwarded-Client-Port`. Historical
+events cannot be backfilled, so older records may not have this field.
 
 The raw Redis source event preserves empty strings. The processor's normalized
 Mongo/canonical event omits empty strings during compaction, so a missing
