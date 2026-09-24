@@ -297,8 +297,13 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 		if _, exists := payload["odoo_login"]; exists {
 			return "", "", fmt.Errorf("invalid web-login event: unexpected credentials in http event")
 		}
-		if _, exists := httpPayload["query"]; exists {
-			return "", "", fmt.Errorf("invalid web-login event: raw query in http event")
+		for field, limit := range map[string]int{"query": 512, "raw_path": 512} {
+			if raw, exists := httpPayload[field]; exists {
+				value, ok := raw.(string)
+				if !ok || utf8.RuneCountInString(value) > limit {
+					return "", "", fmt.Errorf("invalid web-login event: invalid http.%s", field)
+				}
+			}
 		}
 		return requestID, sourceIP, nil
 	}
