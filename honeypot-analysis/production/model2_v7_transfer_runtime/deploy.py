@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Deploy the bounded Model2 transfer fix to Pi and GCP with local rollback.
+"""Deploy the GCP-only Model2 sensor-binding fix with local rollback.
 
-Run only after reviewing the files and tests. This touches three Model2 services
-and the Pi capture override; it does not alter model or policy artifacts.
+Run only after reviewing the files and tests. This revision touches only the
+GCP Model2 receiver; it does not alter Pi, model, or policy artifacts.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ PI_DIR = "/opt/model2-v7/production_runtime_v1"
 OVERRIDE = "/etc/systemd/system/model2-v7-pi-capture-transfer.service.d/transfer-http.conf"
 BASELINE = {
     "gcp": {
-        "v7_capstone_runtime.py": "bb2a1731c64d9ed05becb65c96e3d468ca52c586de2942da80eac4570ccb72ec",
+        "v7_capstone_runtime.py": "9766c23f12a0150fbec8c8c909c5c089c9efeb0fcb41b5e5189f7f3fc7411fe8",
         "v7_offline_zeek.py": "686bb7c1b97079a775bfad1e0be006fc2c000545b6d7f207ed691be6c9a3d501",
         "v7_transfer_binding.py": "44aa6f6290b6f7a86cbe3d378bf4b1373ee2c22cbfae1fcb0d502c9b6e471a38",
     },
@@ -32,13 +32,13 @@ BASELINE = {
     },
 }
 FILES = {
-    "gcp": ("v7_capstone_runtime.py", "v7_transfer_binding.py"),
+    "gcp": ("v7_capstone_runtime.py", "v7_transfer_binding.py", "v7_sensor_binding.py"),
     "pi": ("v7_pi_observer.py", "v7_offline_zeek.py", "v7_transfer_binding.py", "model2-v7-pi-capture-transfer.override.conf"),
 }
 SSH = ["ssh", "-F", "/home/rubchek/.ssh/config", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 SCP = ["scp", "-O", "-F", "/home/rubchek/.ssh/config", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]
 HOSTS = {"gcp": "honeypot-gcp", "pi": "cpe27@10.58.33.42"}
-BACKUP = "/var/backups/model2-transfer-20260924-r3"
+BACKUP = "/var/backups/model2-transfer-20260924-r4"
 SITES = ("gcp",)
 PI_OVERRIDE_BASELINE = "d1f3b704a7cc801ee633e7d70560582d89c87612311ad8ce30c4ded2079b6132"
 
@@ -71,6 +71,8 @@ def verify_baseline(site: str) -> None:
     for name in FILES[site]:
         if not (HERE / name).is_file():
             raise RuntimeError(f"candidate file missing: {name}")
+    if site == "gcp" and ssh(site, f"sudo -n test -e {shlex.quote(directory + '/v7_sensor_binding.py')} && echo PRESENT || echo ABSENT", capture=True) != "ABSENT":
+        raise RuntimeError("GCP sensor helper already exists; refusing overwrite")
     if site == "pi":
         actual = ssh(site, f"sudo -n sha256sum {shlex.quote(OVERRIDE)}", capture=True).split()[0]
         if actual != PI_OVERRIDE_BASELINE:
@@ -126,6 +128,8 @@ def rollback(site: str) -> None:
     directory = GCP_DIR if site == "gcp" else PI_DIR
     for name in BASELINE[site]:
         ssh(site, f"sudo -n cp -p {shlex.quote(BACKUP + '/' + name)} {shlex.quote(directory + '/' + name)}")
+    if site == "gcp":
+        ssh(site, f"sudo -n rm -f {shlex.quote(directory + '/v7_sensor_binding.py')}")
     if site == "pi":
         ssh(site, f"sudo -n cp -p {shlex.quote(BACKUP + '/transfer-http.conf')} {shlex.quote(OVERRIDE)} && sudo -n systemctl daemon-reload && sudo -n systemctl restart model2-v7-pi-capture-transfer.service model2-v7-pi-observer.service")
     else:

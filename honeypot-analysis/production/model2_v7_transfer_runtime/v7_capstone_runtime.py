@@ -38,6 +38,7 @@ from v7_common import (  # noqa: E402
 )
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA  # noqa: E402
 from v7_transfer_binding import transfer_tuple_allowed  # noqa: E402
+from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples  # noqa: E402
 
 
 _v6_sanitized_event = v6.sanitized_event
@@ -167,7 +168,10 @@ class Coordinator(v6.Coordinator):
             pass
         return result
 
-    def _sensor_tuples(self, source_ip: str, low: float, high: float) -> list[dict[str, Any]]:
+    def _sensor_tuples(
+        self, source_ip: str, low: float, high: float, *,
+        session_id: str, run_id: str, measurement_id: str, episode_id: str,
+    ) -> list[dict[str, Any]]:
         try:
             size = self.sensor_receipt_path.stat().st_size
             with self.sensor_receipt_path.open("rb") as handle:
@@ -177,24 +181,20 @@ class Coordinator(v6.Coordinator):
             return []
         if size > 16 * 1024 * 1024:
             _, _, data = data.partition(b"\n")
-        result: list[dict[str, Any]] = []
+        receipts: list[Mapping[str, Any]] = []
         for line in data.splitlines():
             try:
                 item = json.loads(line)
-                started = float(item["started_epoch"])
-                value = exact_tuple({"src_ip": item["source_ip"], "src_port": item["source_port"], "dst_ip": item["target_ip"], "dst_port": item["target_port"]}, "sensor_tuple")
-                if item.get("schema_version") != "model2_v7_t1046_sensor_receipt.v1":
-                    continue
-                if value["src_ip"] != source_ip or value["dst_ip"] != CAPSTONE_PUBLIC_IP or value["dst_port"] not in SENSOR_PORTS or not low <= started <= high:
-                    continue
-                if int(item.get("response_bytes", -1)) != 19 or not 0 <= int(item.get("orig_payload_bytes", -1)) <= 4096:
-                    continue
-                result.append(value)
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError, V7BoundaryError):
+                if isinstance(item, Mapping):
+                    receipts.append(item)
+            except (ValueError, json.JSONDecodeError):
                 continue
-        if len(result) != len({(v["src_ip"], v["src_port"], v["dst_ip"], v["dst_port"]) for v in result}):
-            raise V7BoundaryError("sensor_receipt_tuple_duplicate")
-        return result
+        return select_bound_sensor_tuples(
+            receipts, source_ip=source_ip, target_ip=CAPSTONE_PUBLIC_IP,
+            allowed_ports=SENSOR_PORTS, low=low, high=high,
+            session_id=session_id, run_id=run_id,
+            measurement_id=measurement_id, episode_id=episode_id,
+        )
 
     def _transfer_tuples(self, raw_candidates: Any, events: list[Any]) -> list[dict[str, Any]]:
         if not isinstance(raw_candidates, list):
@@ -304,13 +304,22 @@ class Coordinator(v6.Coordinator):
                 raise V7BoundaryError("live_flow_candidates_invalid")
             live_flows = [sanitize_flow(item) for item in raw_flows]
             transfer_tuples = self._transfer_tuples(body.get("transfer_packet_tuples"), events)
-            sensor_tuples = self._sensor_tuples(original["src_ip"], connect_epoch - 1.0, close_epoch + 1.0)
+            sensor_tuples = self._sensor_tuples(
+                original["src_ip"], connect_epoch - 1.0, close_epoch + 1.0,
+                session_id=session_id, run_id=run_id,
+                measurement_id=measurement_id, episode_id=episode_id,
+            )
             pcap_path = self.root / "pcap" / f"{run_id}.capstone.pcap"
             pcap_meta, base = self._capstone_exact(output=pcap_path, original=original, connect_ts=connects[0].timestamp.timestamp(), close_ts=closes[0].timestamp.timestamp(), sensor_tuples=sensor_tuples, run_id=run_id)
             download_events = [{"eventid": item.get("eventid"), "download_request_sha256": item.get("download_request_sha256")} for item in events_raw if item.get("eventid") == "cowrie.session.file_download"]
             offline = self._offline(connection, pcap_path, backend=base["backend"], sensor_tuples=sensor_tuples, transfer_tuples=transfer_tuples, download_events=download_events, low=capture_low, high=capture_high)
             pcap_evidence, zeek_evidence = dict(offline["pcap"]), dict(offline["zeek"])
             flows = [sanitize_flow(item) for item in offline["flows"]]
+            t1046_observation = bound_scan_observation(
+                sensor_tuples, flows[1:1 + len(sensor_tuples)],
+                session_id=session_id, run_id=run_id,
+                measurement_id=measurement_id, episode_id=episode_id,
+            )
             event_epochs = [item.timestamp.timestamp() for item in events]
             flow_starts = [float(item["ts"]) for item in flows]
             flow_ends = [float(item["ts"]) + float(item["duration"]) for item in flows]
@@ -333,10 +342,11 @@ class Coordinator(v6.Coordinator):
                 "cowrie_binding": cowrie_binding, "network_observation_complete": True,
                 "source_ip_only_binding": False, "cross_session_contamination": "NO",
                 "measurement_evidence": {"pcap": pcap_evidence, "zeek": zeek_evidence},
+                "t1046_observation": t1046_observation,
                 "network_flows": flows, "network_flow_binding": {"flow_uids": flow_uids},
             }
             row = materialize_episode(episode)
-            for key in ("measurement_boundary", "measurement_evidence", "cowrie_binding", "network_flows", "network_flow_binding"):
+            for key in ("measurement_boundary", "measurement_evidence", "t1046_observation", "cowrie_binding", "network_flows", "network_flow_binding"):
                 row[key] = episode[key]
             row["session_id"] = session_id
             if row.get("measurement_validity") != "VALID" or row.get("feature_count") != 32:
@@ -376,6 +386,7 @@ class Coordinator(v6.Coordinator):
                 "source_ip_only_binding": False, "cross_session_contamination": "NO",
                 "proxy_v1_delivery": "PASS", "capture_sha256": pcap_evidence["sha256"],
                 "selected_flow_uids": flow_uids, "sensor_flow_count": len(sensor_tuples),
+                "t1046_observation": t1046_observation,
                 "transfer_flow_count": len(transfer_tuples), "binding_contract_sha256": BINDING_SHA256,
                 "canonical_write_authority": False,
             })

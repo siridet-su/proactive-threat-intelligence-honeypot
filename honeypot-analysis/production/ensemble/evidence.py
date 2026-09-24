@@ -399,7 +399,9 @@ def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
     for field in ("session_id", "run_id", "measurement_id", "episode_id"):
         marker_value = _clean(marker.get(field))
         result_value = _clean(value.get(field))
-        if marker_value and marker_value != result_value:
+        # Source/time coincidence is not a measurement binding. All four
+        # identities must be present on both sides and agree exactly.
+        if not marker_value or not result_value or marker_value != result_value:
             return False, "t1046_scan_evidence_invalid"
     return True, "exact_bound_multiservice_scan"
 
