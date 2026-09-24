@@ -386,11 +386,15 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		}
 	}
 	if source == "web-corp" {
+		httpPayload, _ := payload["http"].(map[string]any)
 		if protocol == "" {
 			protocol = "tcp"
 		}
 		if service == "" {
 			service = "http"
+			if getPayloadString(httpPayload, "scheme") == "https" {
+				service = "https"
+			}
 		}
 	}
 
@@ -431,6 +435,7 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			}
 		}
 		webHTTP = map[string]any{
+			"scheme":          getPayloadString(httpPayload, "scheme"),
 			"method":          getPayloadString(httpPayload, "method"),
 			"path":            getPayloadString(httpPayload, "path"),
 			"status_code":     getPayloadAny(httpPayload, "status_code"),
@@ -445,7 +450,7 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		}
 		webAnalysis = map[string]any{
 			"sqli": map[string]any{"indicators": indicators},
-			"xss": map[string]any{"indicators": xssIndicators},
+			"xss":  map[string]any{"indicators": xssIndicators},
 		}
 	}
 

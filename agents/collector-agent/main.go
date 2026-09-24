@@ -212,7 +212,7 @@ func enqueueWebLoginFile(ctx context.Context, rdb *redis.Client, cfg AppConfig, 
 	}
 
 	dstIP := cfg.WebLoginSensorIP
-	dstPort := "80"
+	dstPort := webLoginDestinationPort(payload)
 	logType := "web_login"
 	if getString(payload, "event") == "web_http_request" {
 		logType = "web_http"
@@ -286,6 +286,9 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 	if !ok || getString(httpPayload, "path") == "" {
 		return "", "", fmt.Errorf("invalid web-login event: missing http object")
 	}
+	if scheme := getString(httpPayload, "scheme"); scheme != "" && scheme != "http" && scheme != "https" {
+		return "", "", fmt.Errorf("invalid web-login event: unsupported http scheme")
+	}
 	if eventType == "web_http_request" {
 		method := getString(httpPayload, "method")
 		if method != "GET" && method != "HEAD" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" && method != "OPTIONS" {
@@ -318,6 +321,14 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 		}
 	}
 	return requestID, sourceIP, nil
+}
+
+func webLoginDestinationPort(payload map[string]any) string {
+	httpPayload, ok := payload["http"].(map[string]any)
+	if ok && getString(httpPayload, "scheme") == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 func quarantineWebLoginFile(spoolDir string, path string) error {

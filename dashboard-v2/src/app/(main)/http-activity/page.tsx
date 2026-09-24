@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, ShieldAlert, Globe2 } from "lucide-react";
-import type { WebHttpHint } from "@/lib/web-http-intel";
+import { groupWebHttpSessions, type WebHttpHint } from "@/lib/web-http-intel";
 
 type HttpFeed = { items: WebHttpHint[]; coverage: string };
 
@@ -31,6 +31,7 @@ export default function HttpActivityPage() {
   const items = feed?.items ?? [];
   const sqliCount = items.filter((item) => item.signals.includes("sqli")).length;
   const xssCount = items.filter((item) => item.signals.includes("xss")).length;
+  const sessions = groupWebHttpSessions(items);
 
   return (
     <div className="space-y-5 pb-12">
@@ -38,7 +39,7 @@ export default function HttpActivityPage() {
         <div>
           <p className="text-xs font-semibold uppercase tracking-widest text-primary">HTTP / Web-corp</p>
           <h1 className="mt-1 text-2xl font-bold text-text">HTTP activity</h1>
-          <p className="mt-1 text-sm text-text-muted">Observed web login attempts and review-only injection hints.</p>
+          <p className="mt-1 text-sm text-text-muted">Web request chronology, browser-continuity sessions, and review-only injection hints.</p>
         </div>
         <button className="ui-button flex items-center gap-2 px-3 py-2 text-sm" type="button" onClick={() => void load()}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" /> Refresh
@@ -56,24 +57,33 @@ export default function HttpActivityPage() {
       {feed && (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            {[["Stored attempts shown", items.length], ["SQLi hints", sqliCount], ["XSS hints", xssCount]].map(([label, value]) => (
+            {[["HTTP requests shown", items.length], ["SQLi hints", sqliCount], ["XSS hints", xssCount]].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-border bg-surface p-4">
                 <p className="text-xs uppercase tracking-wide text-text-muted">{label}</p>
                 <p className="mt-1 text-2xl font-semibold text-text">{value}</p>
               </div>
             ))}
           </div>
-          <p className="text-xs text-text-muted">{feed.coverage} Showing the latest 50 records; counts apply only to this page.</p>
+          <p className="text-xs text-text-muted">{feed.coverage} Showing the latest 50 records; counts apply only to this page. A shared session ID means browser-cookie continuity, not verified attacker identity.</p>
           {items.length === 0 ? (
-            <p className="rounded-xl border border-border bg-surface p-5 text-sm text-text-muted">No stored Web-corp login attempts are visible in this dashboard Mongo database.</p>
+            <p className="rounded-xl border border-border bg-surface p-5 text-sm text-text-muted">No stored Web-corp HTTP events are visible in this dashboard Mongo database.</p>
           ) : (
-            <ol className="space-y-3" aria-label="Recent HTTP activity">
-              {items.map((item) => (
-                <li key={item.eventId} className="rounded-xl border border-border bg-surface p-4">
+            <ol className="space-y-4" aria-label="Recent HTTP sessions">
+              {sessions.map((session) => (
+                <li key={session.id ?? `unlinked:${session.events[0]?.eventId}`} className="rounded-xl border border-border bg-surface p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 className="font-semibold text-text">{session.id ? `HTTP session ${session.id.slice(0, 8)}…` : "Unlinked legacy request"}</h2>
+                      <p className="mt-1 text-xs text-text-muted">{session.events.length} request(s) · {session.firstObservedAt} → {session.lastObservedAt}</p>
+                    </div>
+                    {session.sourceIps.length > 1 && <span className="rounded-full border border-warning-border px-2 py-1 text-xs">Multiple source IPs; review continuity</span>}
+                  </div>
+                  <ol className="mt-3 max-h-96 space-y-3 overflow-y-auto pr-1" aria-label="Session request chronology">
+                  {session.events.map((item) => <li key={item.eventId} className="rounded-lg border border-border bg-surface-subtle p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="flex items-center gap-2 font-semibold text-text"><Globe2 className="h-4 w-4 text-primary" aria-hidden="true" /> {item.method} web login · {item.sourceIp}</p>
-                      <p className="mt-1 text-xs text-text-muted">{item.observedAt || "Time unavailable"} · outcome: {item.outcome}</p>
+                      <p className="flex items-center gap-2 font-semibold text-text"><Globe2 className="h-4 w-4 text-primary" aria-hidden="true" /> {item.method} {item.path} · {item.sourceIp}</p>
+                      <p className="mt-1 text-xs text-text-muted">{item.observedAt || "Time unavailable"} · {item.eventType === "web_login_attempt" ? `login ${item.outcome}` : `HTTP ${item.statusCode ?? "unknown"}`}</p>
                     </div>
                     <span className="rounded-full border border-border px-2 py-1 text-xs text-text-muted">{item.signals.length ? "Review hint" : "No injection hint"}</span>
                   </div>
@@ -83,7 +93,9 @@ export default function HttpActivityPage() {
                       <span className="text-text-muted">T1190 candidate · attempt only</span>
                     </div>
                   )}
-                  {item.ruleIds.length > 0 && <p className="mt-2 text-xs text-text-muted">Rule hints: {item.ruleIds.join(", ")}</p>}
+                  {item.matches.length > 0 && <p className="mt-2 text-xs text-text-muted">Matched fields/rules: {item.matches.map((match) => `${match.field}: ${match.signal}_${match.ruleId}`).join(", ")}</p>}
+                  </li>)}
+                  </ol>
                 </li>
               ))}
             </ol>

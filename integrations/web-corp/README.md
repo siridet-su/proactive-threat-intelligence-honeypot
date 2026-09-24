@@ -30,6 +30,12 @@ attempt and always returns a failed-login page. The older `/login.html` page and
 redirect to `/login.html`; bait paths and ordinary page requests are sent to
 the deception core as web telemetry.
 
+Each new request receives a sensor-issued, signed browser-continuity cookie.
+The optional `web_session_id` links page, bait-path, and login events from a
+cookie-retaining client. It expires after 30 minutes idle or 24 hours total;
+the process-local signing key rotates on restart. This is not authenticated
+attacker identity and must never be joined to Cowrie by IP alone.
+
 Each login event includes a UTC timestamp, request ID, observed source IP,
 HTTP method/path/query, selected request headers (Host, User-Agent, Referer,
 Origin, and Accept-Language), and the submitted database, login, password,
@@ -37,7 +43,8 @@ redirect, and remember values. Values and headers are length-bounded. The
 application does not collect cookies or authorization headers. For non-login
 POST requests it records method/path/query, not the request body.
 
-The service adds heuristic SQLi indicators to the event; they are triage hints,
+The service adds heuristic SQLi and XSS indicators to the event (field and rule
+names only); they are triage hints,
 not a definitive classifier. Every attempt has a timestamp and source IP so
 downstream analysis can count repeated attempts, but the web door does not
 currently enforce or label a brute-force rate threshold.
@@ -58,7 +65,8 @@ bearing copies; do not request the password in routine queries.
 
 Login events no longer use Core `/v1/track` and do not enter its IP-keyed
 command/session classifier. Ordinary page and bait-path telemetry still uses
-Core `/v1/track` under the `web` door. Older login events created before this
+Core `/v1/track` under the `web` door with redacted path and no query; it also
+enters the restricted spool as a credential-free `web_http_request`. Older login events created before this
 cutover may remain in Core's `/data/events.jsonl`; they are not migrated or
 deleted by this change.
 

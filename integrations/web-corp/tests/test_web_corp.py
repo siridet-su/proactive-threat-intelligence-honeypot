@@ -28,7 +28,7 @@ class WebCorpTests(TestCase):
         self.page_track_patch = patch.object(main, "_track")
         self.proxy_patch = patch.object(main, "TRUSTED_PROXY_NETWORKS", ())
         self.transport_patch.start()
-        self.page_track_patch.start()
+        self.page_track = self.page_track_patch.start()
         self.proxy_patch.start()
         self.client = TestClient(main.app)
 
@@ -41,9 +41,11 @@ class WebCorpTests(TestCase):
         self.spool.cleanup()
 
     def _last_login_event(self):
-        event_files = sorted(Path(self.spool.name).glob("*.jsonl"))
-        self.assertTrue(event_files, "login event was not written to the spool")
-        return json.loads(event_files[-1].read_text(encoding="utf-8"))
+        events = [json.loads(path.read_text(encoding="utf-8"))
+                  for path in Path(self.spool.name).glob("*.jsonl")]
+        login_events = [item for item in events if item.get("event") == "web_login_attempt"]
+        self.assertTrue(login_events, "login event was not written to the spool")
+        return login_events[-1]
 
     def test_odoo_login_page_and_structured_attempt(self):
         page = self.client.get("/web/login")
@@ -177,6 +179,17 @@ class WebCorpTests(TestCase):
             with TestClient(main.app, cookies={"web_corp_visit": str(cookie)}) as stale:
                 stale_response = stale.get("/login.html")
         self.assertNotEqual(stale_response.cookies["web_corp_visit"].split(".")[0], original)
+
+    def test_encoded_url_pattern_is_tagged_without_raw_query_in_http_event_or_core(self):
+        response = self.client.get("/login.html?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+        self.assertEqual(response.status_code, 200)
+        events = [json.loads(path.read_text(encoding="utf-8"))
+                  for path in Path(self.spool.name).glob("*.jsonl")]
+        self.assertEqual(len(events), 1)
+        self.assertIn("script_tag", events[0]["xss_indicators"]["query"])
+        self.assertNotIn("query", events[0]["http"])
+        self.assertNotIn("alert(1)", json.dumps(events[0]))
+        self.assertNotIn("alert(1)", str(self.page_track.call_args))
 
 
 if __name__ == "__main__":

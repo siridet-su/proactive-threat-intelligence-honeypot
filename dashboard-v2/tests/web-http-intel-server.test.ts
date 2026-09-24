@@ -31,14 +31,16 @@ describe("HTTP Mongo read boundary", () => {
     expect(db).toHaveBeenCalledWith("honeypot_db");
     expect(collection).toHaveBeenCalledWith("events");
     expect(find).toHaveBeenCalledWith(
-      { source: "web-corp", event_type: "web_login_attempt" },
+      { source: "web-corp", event_type: { $in: ["web_login_attempt", "web_http_request"] } },
       expect.objectContaining({ projection: expect.objectContaining({
-        "analysis.sqli.indicators": 1, "http.query": 1,
+        "analysis.sqli.indicators": 1, "analysis.xss.indicators": 1,
+        "correlation.web_session_id": 1,
       }) }),
     );
     const projection = find.mock.calls[0]![1].projection as Record<string, number>;
     expect(Object.keys(projection)).not.toContain("web_login.password");
     expect(Object.keys(projection)).not.toContain("raw.payload");
+    expect(Object.keys(projection)).not.toContain("http.query");
     expect(limit).toHaveBeenCalledWith(100);
     expect(result.items[0]?.ttpCandidate).toBe("T1190");
   });

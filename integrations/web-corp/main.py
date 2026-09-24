@@ -16,6 +16,7 @@ robots Disallow /backup/, /backup/ listing, fake sql.gz 2202009 bytes, 404 basel
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import hmac
 import ipaddress
@@ -282,6 +283,9 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
         ),
         "source_ip": ip,
         "http": {
+            "scheme": _bounded_login_value(
+                request.url.scheme, "http.scheme", 16, truncated_fields
+            ),
             "method": _bounded_login_value(
                 request.method, "http.method", 16, truncated_fields
             ),
@@ -317,7 +321,7 @@ def _http_event(request: Request, ip: str, web_session_id: str, status_code: int
         "web_session_id": web_session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "source_ip": ip,
-        "http": {"method": request.method, "path": safe_path, "status_code": status_code},
+        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "status_code": status_code},
         "sqli_indicators": _pattern_indicators({"query": query, "path": path}, _SQLI_RULES),
         "xss_indicators": _pattern_indicators({"query": query, "path": path}, _XSS_RULES),
         "bait_path": _is_sensitive(path.rstrip("/") or "/"),
@@ -367,40 +371,48 @@ def _spool_login_event(event: dict) -> Path:
     with _LOGIN_SPOOL_LOCK:
         spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(spool_dir, 0o700)
-        pending_bytes = 0
-        for path in spool_dir.iterdir():
-            if path.suffix != ".jsonl":
-                continue
-            try:
-                if path.is_file():
-                    pending_bytes += path.stat().st_size
-            except FileNotFoundError:
-                # The host collector may remove an event after its Redis XADD.
-                continue
-        if pending_bytes + len(payload) > LOGIN_SPOOL_MAX_BYTES:
-            raise OSError("web login spool capacity reached")
-        if final_path.exists():
-            return final_path
-
-        temp_path = spool_dir / f".{request_id}.{uuid.uuid4().hex}.tmp"
-        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # HTTP and HTTPS containers share this spool. The thread lock alone
+        # cannot serialize their capacity checks and writes.
+        lock_fd = os.open(spool_dir / ".write.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            with os.fdopen(fd, "wb") as spool_file:
-                spool_file.write(payload)
-                spool_file.flush()
-                os.fsync(spool_file.fileno())
-            os.replace(temp_path, final_path)
-            dir_fd = os.open(spool_dir, os.O_RDONLY)
+            os.fchmod(lock_fd, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            pending_bytes = 0
+            for path in spool_dir.iterdir():
+                if path.suffix != ".jsonl":
+                    continue
+                try:
+                    if path.is_file():
+                        pending_bytes += path.stat().st_size
+                except FileNotFoundError:
+                    continue
+            if pending_bytes + len(payload) > LOGIN_SPOOL_MAX_BYTES:
+                raise OSError("web login spool capacity reached")
+            if final_path.exists():
+                return final_path
+
+            temp_path = spool_dir / f".{request_id}.{uuid.uuid4().hex}.tmp"
+            fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except Exception:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(fd, "wb") as spool_file:
+                    spool_file.write(payload)
+                    spool_file.flush()
+                    os.fsync(spool_file.fileno())
+                os.replace(temp_path, final_path)
+                dir_fd = os.open(spool_dir, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except Exception:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
     return final_path
 
