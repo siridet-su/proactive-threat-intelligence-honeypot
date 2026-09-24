@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Home, Menu, X, FolderTree, Archive, Globe2 } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Home, Menu, X, FolderTree, Archive } from "lucide-react";
 import { useCallback, useEffect, useState, useRef, type KeyboardEvent } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -160,7 +160,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {[
           { href: "/dashboard", title: "Dashboard", icon: LayoutDashboard, active: pathname === "/dashboard" },
           { href: "/threat-intel", title: "Threat Intel", icon: Brain, active: pathname.includes("/threat-intel") },
-          { href: "/http-activity", title: "HTTP Activity", icon: Globe2, active: pathname.includes("/http-activity") },
           { href: "/filesystem-activity", title: "Filesystem Activity", icon: FolderTree, active: pathname.includes("/filesystem-activity") },
           { href: "/malware-vault", title: "Artifact Intelligence", icon: Bug, active: pathname.includes("/malware-vault") },
           { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },

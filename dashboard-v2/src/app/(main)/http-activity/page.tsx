@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, ShieldAlert, Globe2 } from "lucide-react";
+import Link from "next/link";
 import { groupWebHttpSessions, type WebHttpHint } from "@/lib/web-http-intel";
 
 type HttpFeed = { items: WebHttpHint[]; coverage: string };
@@ -37,6 +38,7 @@ export default function HttpActivityPage() {
     <div className="space-y-5 pb-12">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
         <div>
+          <Link href="/threat-intel" className="text-sm text-primary hover:underline">← Threat Intel</Link>
           <p className="text-xs font-semibold uppercase tracking-widest text-primary">HTTP / Web-corp</p>
           <h1 className="mt-1 text-2xl font-bold text-text">HTTP activity</h1>
           <p className="mt-1 text-sm text-text-muted">Web request chronology, browser-continuity sessions, and review-only injection hints.</p>
@@ -73,7 +75,7 @@ export default function HttpActivityPage() {
                 <li key={session.id ?? `unlinked:${session.events[0]?.eventId}`} className="rounded-xl border border-border bg-surface p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <h2 className="font-semibold text-text">{session.id ? `HTTP session ${session.id.slice(0, 8)}…` : "Unlinked legacy request"}</h2>
+                      <h2 className="font-semibold text-text">{session.id ? <Link href={`/threat-intel/http/${session.id}`} className="text-primary hover:underline">HTTP session {session.id.slice(0, 8)}… →</Link> : "Unlinked legacy request"}</h2>
                       <p className="mt-1 text-xs text-text-muted">{session.events.length} request(s) · {session.firstObservedAt} → {session.lastObservedAt}</p>
                     </div>
                     {session.sourceIps.length > 1 && <span className="rounded-full border border-warning-border px-2 py-1 text-xs">Multiple source IPs; review continuity</span>}

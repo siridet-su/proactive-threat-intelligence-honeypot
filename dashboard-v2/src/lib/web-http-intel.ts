@@ -10,6 +10,9 @@ export type WebHttpHint = {
   eventType: "web_login_attempt" | "web_http_request";
   observedAt: string;
   sourceIp: string;
+  sourcePort: number | null;
+  destinationIp: string | null;
+  destinationPort: number | null;
   method: string;
   path: string;
   statusCode: number | null;
@@ -38,6 +41,11 @@ function record(value: unknown): Record<string, unknown> {
 
 function boundedString(value: unknown, limit: number): string {
   return typeof value === "string" ? value.slice(0, limit) : "";
+}
+
+function port(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && /^\d{1,5}$/.test(value) ? Number(value) : NaN;
+  return Number.isInteger(number) && number >= 1 && number <= 65535 ? number : null;
 }
 
 export function projectWebHttpEvent(value: unknown): WebHttpHint | null {
@@ -73,6 +81,7 @@ export function projectWebHttpEvent(value: unknown): WebHttpHint | null {
   if (ruleIds.some((name) => name.startsWith("xss_"))) signals.push("xss");
   const network = record(event.network);
   const sourceIp = boundedString(network.src_ip, 45);
+  const destinationIp = boundedString(network.dst_ip, 45);
   const method = boundedString(http.method, 8).toUpperCase();
   const rawPath = boundedString(http.path, 128);
   const path = /^\/[A-Za-z0-9_./-]{0,127}$/.test(rawPath) ? rawPath : "[redacted-path]";
@@ -86,6 +95,9 @@ export function projectWebHttpEvent(value: unknown): WebHttpHint | null {
     eventType: event.event_type,
     observedAt: timestamp instanceof Date ? timestamp.toISOString() : boundedString(timestamp, 40),
     sourceIp: /^[0-9a-fA-F:.]{2,45}$/.test(sourceIp) ? sourceIp : "unavailable",
+    sourcePort: port(network.src_port),
+    destinationIp: /^[0-9a-fA-F:.]{2,45}$/.test(destinationIp) ? destinationIp : null,
+    destinationPort: port(network.dst_port),
     method: /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(method) ? method : "UNKNOWN",
     path,
     statusCode,
