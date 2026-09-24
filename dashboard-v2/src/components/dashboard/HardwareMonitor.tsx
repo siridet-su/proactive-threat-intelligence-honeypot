@@ -8,7 +8,8 @@ import { motion, useReducedMotion } from "framer-motion";
 import { formatHardwareMetric, isHardwareTelemetry, parseHardwareStreamMessage } from "@/lib/dashboardTypes";
 import type { HardwareChartRecord, HardwareTelemetry } from "@/lib/dashboardTypes";
 import { RegionState } from "@/components/ui/RegionState";
-import { ChartLaserLoader } from "@/components/ui/loaders";
+import { ChartWireframeSkeleton } from "@/components/ui/loaders";
+import { cn } from "@/lib/utils";
 
 const MAX_SAMPLES = 30;
 const STALE_AFTER_MS = 30_000;
@@ -324,6 +325,18 @@ export function HardwareMonitor() {
         </div>
       </div>
 
+      {/* Scanning Laser Bar when loading, refreshing, or connecting */}
+      <div className="h-0.5 w-full bg-border/40 overflow-hidden relative">
+        {(loading || manualRefreshing || displayState === "connecting" || displayState === "fallback") && (
+          <div
+            className="absolute inset-y-0 w-56 bg-gradient-to-r from-transparent via-primary to-transparent"
+            style={{
+              animation: "pti-laser-scan 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+            }}
+          />
+        )}
+      </div>
+
       {loading && metrics.length === 0 ? (
         <HardwareSkeleton />
       ) : metrics.length === 0 ? (
@@ -331,7 +344,7 @@ export function HardwareMonitor() {
           <RegionState kind={fetchFailed ? "error" : "empty"} title={fetchFailed ? "Hardware telemetry unavailable" : "No hardware telemetry"} description={fetchFailed ? "The hardware service could not be reached. Retry now or wait for the next automatic refresh." : "No verified telemetry samples were returned from hardware_live."} />
         </div>
       ) : (
-        <div className="mt-4 space-y-4">
+        <div className={cn("mt-4 space-y-4 transition-opacity duration-200", manualRefreshing && "opacity-50")}>
           <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
             <MetricCard index={0} icon={Cpu} label="CPU usage" value={formatPercent(latest?.cpu_percent)} detail={`${latest?.cpu_core_percent?.length ?? "—"} logical cores`} delta={formatDelta(latest?.cpu_percent, previous?.cpu_percent)} tone={pressureTone(latest?.cpu_percent)} reduceMotion={Boolean(shouldReduceMotion)} />
             <MetricCard index={1} icon={MemoryStick} label="Memory pressure" value={formatPercent(memoryPercent(latest))} detail={`${formatBytes(memoryUsedBytes(latest))} used · ${formatBytes(latest?.mem_available_bytes)} free`} delta={formatDelta(memoryPercent(latest), memoryPercent(previous))} tone={pressureTone(memoryPercent(latest))} reduceMotion={Boolean(shouldReduceMotion)} />
@@ -403,25 +416,112 @@ function MetricCard({ index, icon: Icon, label, value, unit, detail, delta, tone
   );
 }
 
+const METRIC_SKELETON_SPECS = [
+  {
+    icon: Cpu,
+    label: "CPU usage",
+    placeholder: "--.-%",
+    detail: "4 logical cores",
+    delta: "Awaiting telemetry",
+  },
+  {
+    icon: MemoryStick,
+    label: "Memory pressure",
+    placeholder: "--.-%",
+    detail: "RAM allocation",
+    delta: "Awaiting telemetry",
+  },
+  {
+    icon: HardDrive,
+    label: "Storage",
+    placeholder: "--.-%",
+    detail: "Disk volume",
+    delta: "Awaiting telemetry",
+  },
+  {
+    icon: Thermometer,
+    label: "Temperature",
+    placeholder: "--.-°C",
+    detail: "Thermal probe",
+    delta: "Awaiting telemetry",
+  },
+  {
+    icon: Wifi,
+    label: "wlan0 throughput",
+    placeholder: "—.—— / —.——",
+    unit: "RX / TX Mbps",
+    detail: "Virtual interface",
+    delta: "Awaiting telemetry",
+  },
+];
+
 function HardwareSkeleton() {
   return (
     <div className="mt-4 space-y-4" aria-busy="true" aria-label="Loading hardware telemetry">
       <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-5">
-        {Array.from({ length: 5 }, (_, index) => (
-          <div key={index} className="rounded-xl border border-border bg-surface-subtle p-3">
-            <div className="ui-skeleton h-8 w-8 rounded-lg" />
-            <div className="mt-3 space-y-2">
-              <div className="ui-skeleton h-3 w-20" />
-              <div className="ui-skeleton h-5 w-24" />
-              <div className="ui-skeleton h-2.5 w-full" />
+        {METRIC_SKELETON_SPECS.map((spec) => (
+          <article
+            key={spec.label}
+            className="min-w-0 rounded-xl border border-border bg-surface-subtle p-3"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-hover/80 text-text-subtle">
+                <spec.icon className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-border-strong animate-pulse" />
             </div>
-          </div>
+            <p className="mt-3 truncate text-[11px] font-medium text-text-muted" title={spec.label}>
+              {spec.label}
+            </p>
+            <p className="mt-0.5 truncate font-mono text-[17px] font-semibold tabular-nums text-text tracking-tight flex items-baseline gap-1">
+              <span className="opacity-60">{spec.placeholder}</span>
+              {spec.unit && <span className="text-[10px] font-medium text-text-subtle">{spec.unit}</span>}
+            </p>
+            <div className="mt-2 flex min-w-0 items-center justify-between gap-2 text-[10px] text-text-subtle">
+              <span className="truncate">{spec.detail}</span>
+              <span className="shrink-0 font-mono text-[9px] text-text-subtle/70">{spec.delta}</span>
+            </div>
+          </article>
         ))}
       </div>
+
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(230px,0.65fr)] lg:grid-rows-2">
-        <ChartLaserLoader title="Calibrating system pressure…" />
-        <ChartLaserLoader title="Calibrating thermal signal…" />
-        <ChartLaserLoader title="Calibrating network signal…" />
+        <ChartWireframeSkeleton
+          title="System pressure"
+          description="CPU, memory, and storage use"
+          lines={[
+            { name: "CPU", color: "var(--chart-1)", fill: "var(--chart-1)", baselineYPercent: 94 },
+            { name: "Memory", color: "var(--chart-6)", baselineYPercent: 69 },
+            { name: "Storage", color: "var(--chart-3)", baselineYPercent: 49 },
+          ]}
+          yTicks={[100, 75, 50, 25, 0]}
+          mode="area"
+          className="min-h-[250px] lg:row-span-2"
+          chartHeightClassName="h-[180px] lg:h-[260px]"
+        />
+        <ChartWireframeSkeleton
+          title="Thermal signal"
+          description="Temperature in °C"
+          lines={[
+            { name: "Temperature", color: "var(--warning)", fill: "var(--warning)", baselineYPercent: 35 },
+          ]}
+          yTicks={[80, 20]}
+          mode="area"
+          className="min-h-[154px]"
+          chartHeightClassName="h-[95px]"
+        />
+        <ChartWireframeSkeleton
+          title="wlan0 throughput"
+          description="RX / TX Mbps"
+          lines={[
+            { name: "RX", color: "var(--chart-6)", baselineYPercent: 88 },
+            { name: "TX", color: "var(--chart-1)", baselineYPercent: 92 },
+          ]}
+          yTicks={[1, 0.25]}
+          mode="line"
+          className="min-h-[154px]"
+          chartHeightClassName="h-[95px]"
+        />
       </div>
     </div>
   );

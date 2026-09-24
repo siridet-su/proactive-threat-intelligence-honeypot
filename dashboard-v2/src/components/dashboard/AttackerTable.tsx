@@ -4,6 +4,7 @@ import { Activity, MapPin, Radio, Search, X } from "lucide-react";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { SeverityBadge } from "./SeverityBadge";
 import { RegionState } from "@/components/ui/RegionState";
+import { cn } from "@/lib/utils";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 type SourceSummary = {
@@ -107,8 +108,20 @@ export function AttackerTable() {
         </div>
       </div>
 
-        <div className="mt-3 max-h-[420px] min-h-0 flex-1 overflow-auto rounded-lg border border-border/70">
-        <table className="ui-table min-w-[500px]">
+      {/* Scanning Laser Bar when loading or refreshing */}
+      <div className="h-0.5 w-full bg-border/40 overflow-hidden relative mt-1">
+        {(loading || status === "refreshing") && (
+          <div
+            className="absolute inset-y-0 w-56 bg-gradient-to-r from-transparent via-primary to-transparent"
+            style={{
+              animation: "pti-laser-scan 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+            }}
+          />
+        )}
+      </div>
+
+      <div className="mt-2 max-h-[420px] min-h-0 flex-1 overflow-auto rounded-lg border border-border/70">
+        <table className={cn("ui-table min-w-[500px] transition-opacity duration-200", status === "refreshing" && "opacity-50")}>
           <thead className="sticky top-0 z-10">
             <tr>
               <th className="w-10 px-3 py-2.5 text-center text-[10px] uppercase tracking-wider">#</th>
@@ -117,13 +130,41 @@ export function AttackerTable() {
               <th className="w-28 px-3 py-2.5 text-[10px] uppercase tracking-wider">Risk</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody aria-busy={loading || status === "refreshing"}>
             {loading && Array.from({ length: 6 }, (_, index) => (
               <tr key={`loading-${index}`} aria-hidden="true">
-                <td className="px-3 py-3"><div className="ui-skeleton mx-auto h-3 w-4" /></td>
-                <td className="px-3 py-3"><div className="space-y-2"><div className="ui-skeleton h-3 w-28" /><div className="ui-skeleton h-2.5 w-40" /></div></td>
-                <td className="px-3 py-3"><div className="space-y-2"><div className="ui-skeleton h-2 w-full" /><div className="ui-skeleton h-2.5 w-12" /></div></td>
-                <td className="px-3 py-3"><div className="ui-skeleton h-5 w-16 rounded-full" /></td>
+                <td className="px-3 py-3 text-center font-mono text-[11px] text-text-subtle/60">
+                  {String(index + 1).padStart(2, "0")}
+                </td>
+                <td className="max-w-0 px-3 py-3">
+                  <div className="min-w-0">
+                    <span className="block font-mono text-xs font-medium text-primary/70 animate-pulse">
+                      ---.---.---.---
+                    </span>
+                    <span className="mt-1 flex items-center gap-1 text-[11px] text-text-subtle/70">
+                      <MapPin className="h-3 w-3 shrink-0 text-text-subtle/50" aria-hidden="true" />
+                      Resolving location…
+                    </span>
+                    <span className="mt-1 block text-[10px] text-text-subtle/60">
+                      Analyzing activity signatures…
+                    </span>
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <div className="min-w-0">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover">
+                      <div className="h-full w-12 rounded-full bg-primary/30 animate-pulse" />
+                    </div>
+                    <span className="mt-1.5 block font-mono text-[11px] tabular-nums text-text-subtle/70">
+                      -- events
+                    </span>
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  <span className="inline-flex items-center rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[10px] font-semibold text-text-subtle/70 animate-pulse">
+                    Evaluating
+                  </span>
+                </td>
               </tr>
             ))}
             {!loading && fetchFailed && <tr><td colSpan={4} className="p-4"><RegionState kind="error" title="Source activity unavailable" description="The live threat feed could not be loaded." /></td></tr>}
