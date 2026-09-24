@@ -370,6 +370,17 @@ function LiveRadarOverlay({
       aria-hidden="true"
     >
       {showGrid && <div className="pti-live-radar-grid absolute inset-0" />}
+      <svg
+        className="pti-live-radar-diagonals absolute inset-0 h-full w-full"
+        viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <path
+          className="pti-live-radar-diagonal"
+          d={`M0 0L${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}M${LIVE_RADAR_CANVAS_SIZE} 0L0 ${LIVE_RADAR_CANVAS_SIZE}`}
+        />
+      </svg>
       <div className="pti-live-radar-crosshair absolute inset-0" />
       {!reducedMotion && (
         <svg
@@ -448,7 +459,7 @@ function LiveTopologyStandby({
     >
       <LiveRadarOverlay reducedMotion={reducedMotion} />
       <div
-        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-xl`}
+        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full`}
         aria-hidden="true"
       />
 

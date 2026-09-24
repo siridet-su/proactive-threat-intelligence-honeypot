@@ -330,6 +330,18 @@
   opacity: 0.5;
 }
 
+.pti-live-radar-diagonals {
+  pointer-events: none;
+}
+
+.pti-live-radar-diagonal {
+  fill: none;
+  stroke: var(--pti-radar-accent);
+  stroke-opacity: 0.2;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
 .pti-live-radar-crosshair::before,
 .pti-live-radar-crosshair::after {
   position: absolute;
@@ -481,7 +493,7 @@
 .pti-live-radar-hub {
   --pti-radar-hub-emitter: var(--pti-radar-accent);
   border: 1px solid color-mix(in srgb, var(--pti-radar-hub-emitter) 70%, var(--surface));
-  border-radius: var(--pti-radar-canvas-radius);
+  border-radius: 50%;
   color: var(--surface);
   background: var(--pti-radar-hub-emitter);
   box-shadow: 0 0 1.25rem var(--pti-radar-hub-glow);

@@ -693,3 +693,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the wake's previous 0.14 peak opacity and the layered primary-color background gradients; no host rollback is required.
 - Follow-up: inspect the sweep wake in empty standby in light and dark themes and confirm the solid canvas makes the wake provide the scene's localized brightness.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Add diagonal guides and a circular radar emitter
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: try two corner-to-corner diagonal guides through the radar origin and change the filled center emitter from a square to a circle.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3173531`; this refinement is uncommitted.
+- Repository changes: add two low-contrast SVG diagonal lines that span the canvas corners, pass through its exact center, and adapt to the canvas aspect ratio; render the solid 32×32 primary-color center emitter as a circle; keep the rounded-square pulse waves unchanged; update the current `FS-024` criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of diagonal contrast and circle alignment in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG/CSS change in empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the diagonal SVG and style, restore the square emitter radius/class, and revert the corresponding `FS-024` criterion; no host rollback is required.
+- Follow-up: inspect the diagonals against the crosshairs and moving sweep and confirm the circle reads clearly at the origin in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
