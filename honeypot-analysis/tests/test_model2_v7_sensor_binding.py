@@ -69,6 +69,22 @@ def test_current_source_time_only_receipts_are_not_session_features() -> None:
             item.pop(field)
         item.pop("binding_mode")
     assert select(unbound) == []
+    assert binding.unbound_sensor_context_present(
+        unbound, source_ip="198.51.100.9", target_ip="10.148.0.2",
+        allowed_ports=frozenset({80, 443, 445, 3306}), low=99.0, high=101.0,
+    ) is True
+    marker = binding.bound_scan_observation([], [], unbound_sensor_context=True, **IDS)
+    assert marker["observed"] is False
+    assert marker["reason"] == "t1046_unbound_sensor_context"
+    assert marker["flow_uids"] == []
+
+
+def test_unrelated_sensor_receipts_do_not_become_context() -> None:
+    assert binding.unbound_sensor_context_present(
+        [receipt(source_ip="203.0.113.8", binding_mode="")],
+        source_ip="198.51.100.9", target_ip="10.148.0.2",
+        allowed_ports=frozenset({80, 443, 445, 3306}), low=99.0, high=101.0,
+    ) is False
 
 
 def test_same_ip_other_session_and_mismatched_measurement_are_rejected() -> None:

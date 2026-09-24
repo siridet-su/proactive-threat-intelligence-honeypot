@@ -79,6 +79,31 @@ def select_bound_sensor_tuples(
     return result
 
 
+def unbound_sensor_context_present(
+    receipts: list[Mapping[str, Any]], *, source_ip: str, target_ip: str,
+    allowed_ports: frozenset[int], low: float, high: float,
+) -> bool:
+    """Report nearby traffic as context only; never turn it into a session claim."""
+    for item in receipts:
+        if item.get("schema_version") != "model2_v7_t1046_sensor_receipt.v1":
+            continue
+        if item.get("binding_mode") == "EXACT_MEASUREMENT_IDENTITY":
+            continue
+        try:
+            started = float(item["started_epoch"])
+            value = _tuple(item)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if (
+            value["src_ip"] == source_ip
+            and value["dst_ip"] == target_ip
+            and value["dst_port"] in allowed_ports
+            and low <= started <= high
+        ):
+            return True
+    return False
+
+
 def bound_scan_observation(
     sensor_tuples: list[Mapping[str, Any]],
     sensor_flows: list[Mapping[str, Any]],
@@ -87,6 +112,7 @@ def bound_scan_observation(
     run_id: str,
     measurement_id: str,
     episode_id: str,
+    unbound_sensor_context: bool = False,
 ) -> dict[str, Any]:
     """Create a scan marker only after exact receipt and offline-flow selection."""
     expected_identity = {
@@ -124,5 +150,7 @@ def bound_scan_observation(
         "cross_session_contamination": "NO",
         "flow_uids": uids if observed else [],
         "destination_ports": sorted(ports) if observed else [],
-        "reason": "exact_bound_multiservice_scan" if observed else "t1046_not_observed",
+        "reason": "exact_bound_multiservice_scan" if observed else (
+            "t1046_unbound_sensor_context" if unbound_sensor_context else "t1046_not_observed"
+        ),
     }

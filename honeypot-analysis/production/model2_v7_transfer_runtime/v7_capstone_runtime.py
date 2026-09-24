@@ -38,7 +38,7 @@ from v7_common import (  # noqa: E402
 )
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA  # noqa: E402
 from v7_transfer_binding import transfer_tuple_allowed  # noqa: E402
-from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples  # noqa: E402
+from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples, unbound_sensor_context_present  # noqa: E402
 
 
 _v6_sanitized_event = v6.sanitized_event
@@ -171,14 +171,14 @@ class Coordinator(v6.Coordinator):
     def _sensor_tuples(
         self, source_ip: str, low: float, high: float, *,
         session_id: str, run_id: str, measurement_id: str, episode_id: str,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         try:
             size = self.sensor_receipt_path.stat().st_size
             with self.sensor_receipt_path.open("rb") as handle:
                 handle.seek(max(0, size - 16 * 1024 * 1024))
                 data = handle.read(16 * 1024 * 1024)
         except OSError:
-            return []
+            return [], False
         if size > 16 * 1024 * 1024:
             _, _, data = data.partition(b"\n")
         receipts: list[Mapping[str, Any]] = []
@@ -189,11 +189,15 @@ class Coordinator(v6.Coordinator):
                     receipts.append(item)
             except (ValueError, json.JSONDecodeError):
                 continue
-        return select_bound_sensor_tuples(
+        selected = select_bound_sensor_tuples(
             receipts, source_ip=source_ip, target_ip=CAPSTONE_PUBLIC_IP,
             allowed_ports=SENSOR_PORTS, low=low, high=high,
             session_id=session_id, run_id=run_id,
             measurement_id=measurement_id, episode_id=episode_id,
+        )
+        return selected, unbound_sensor_context_present(
+            receipts, source_ip=source_ip, target_ip=CAPSTONE_PUBLIC_IP,
+            allowed_ports=SENSOR_PORTS, low=low, high=high,
         )
 
     def _transfer_tuples(self, raw_candidates: Any, events: list[Any]) -> list[dict[str, Any]]:
@@ -304,7 +308,7 @@ class Coordinator(v6.Coordinator):
                 raise V7BoundaryError("live_flow_candidates_invalid")
             live_flows = [sanitize_flow(item) for item in raw_flows]
             transfer_tuples = self._transfer_tuples(body.get("transfer_packet_tuples"), events)
-            sensor_tuples = self._sensor_tuples(
+            sensor_tuples, unbound_sensor_context = self._sensor_tuples(
                 original["src_ip"], connect_epoch - 1.0, close_epoch + 1.0,
                 session_id=session_id, run_id=run_id,
                 measurement_id=measurement_id, episode_id=episode_id,
@@ -319,6 +323,7 @@ class Coordinator(v6.Coordinator):
                 sensor_tuples, flows[1:1 + len(sensor_tuples)],
                 session_id=session_id, run_id=run_id,
                 measurement_id=measurement_id, episode_id=episode_id,
+                unbound_sensor_context=unbound_sensor_context,
             )
             event_epochs = [item.timestamp.timestamp() for item in events]
             flow_starts = [float(item["ts"]) for item in flows]
