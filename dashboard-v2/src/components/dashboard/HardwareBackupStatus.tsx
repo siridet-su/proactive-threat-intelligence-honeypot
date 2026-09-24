@@ -274,7 +274,7 @@ export function HardwareBackupStatus() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Last sync</p>
             <p className="mt-0.5 font-mono text-xs tabular-nums text-text-muted">{formatDateTime(data?.generated_at ?? null)}</p>
           </div>
-          <button type="button" onClick={refresh} disabled={loading || refreshing} className="ui-button h-10 min-h-10 w-10 p-0" title="Refresh backup status" aria-label="Refresh backup status">
+          <button type="button" onClick={refresh} disabled={refreshing} className="ui-button h-10 min-h-10 w-10 p-0" title="Refresh backup status" aria-label="Refresh backup status">
             <RefreshCw className={`h-4 w-4 ${refreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
           </button>
         </div>
