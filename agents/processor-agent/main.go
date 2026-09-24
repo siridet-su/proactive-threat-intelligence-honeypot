@@ -386,11 +386,15 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		}
 	}
 	if source == "web-corp" {
+		httpPayload, _ := payload["http"].(map[string]any)
 		if protocol == "" {
 			protocol = "tcp"
 		}
 		if service == "" {
 			service = "http"
+			if getPayloadString(httpPayload, "scheme") == "https" {
+				service = "https"
+			}
 		}
 	}
 
@@ -415,28 +419,39 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 	webHTTP := map[string]any{}
 	webAnalysis := map[string]any{}
 	requestID := getPayloadString(payload, "request_id")
+	webSessionID := getPayloadString(payload, "web_session_id")
 	if source == "web-corp" {
 		loginPayload, _ := payload["odoo_login"].(map[string]any)
 		httpPayload, _ := payload["http"].(map[string]any)
 		indicators, _ := payload["sqli_indicators"].(map[string]any)
-		webLogin = map[string]any{
-			"database": getPayloadString(loginPayload, "database"),
-			"username": getPayloadString(loginPayload, "login"),
-			"password": getPayloadString(loginPayload, "password"),
-			"redirect": getPayloadString(loginPayload, "redirect"),
-			"remember": getPayloadAny(loginPayload, "remember"),
+		xssIndicators, _ := payload["xss_indicators"].(map[string]any)
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			webLogin = map[string]any{
+				"database": getPayloadString(loginPayload, "database"),
+				"username": getPayloadString(loginPayload, "login"),
+				"password": getPayloadString(loginPayload, "password"),
+				"redirect": getPayloadString(loginPayload, "redirect"),
+				"remember": getPayloadAny(loginPayload, "remember"),
+			}
 		}
 		webHTTP = map[string]any{
+			"scheme":          getPayloadString(httpPayload, "scheme"),
 			"method":          getPayloadString(httpPayload, "method"),
 			"path":            getPayloadString(httpPayload, "path"),
-			"query":           getPayloadString(httpPayload, "query"),
+			"status_code":     getPayloadAny(httpPayload, "status_code"),
 			"host":            getPayloadString(httpPayload, "host"),
 			"user_agent":      getPayloadString(httpPayload, "user_agent"),
 			"referer":         getPayloadString(httpPayload, "referer"),
 			"origin":          getPayloadString(httpPayload, "origin"),
 			"accept_language": getPayloadString(httpPayload, "accept_language"),
 		}
-		webAnalysis = map[string]any{"sqli": map[string]any{"indicators": indicators}}
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			webHTTP["query"] = getPayloadString(httpPayload, "query")
+		}
+		webAnalysis = map[string]any{
+			"sqli": map[string]any{"indicators": indicators},
+			"xss":  map[string]any{"indicators": xssIndicators},
+		}
 	}
 
 	sshVersion := ""
@@ -576,12 +591,17 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 	if source == "web-corp" {
 		event["schema_version"] = getPayloadAny(payload, "schema_version")
 		event["http"] = webHTTP
-		event["web_login"] = webLogin
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			event["web_login"] = webLogin
+		}
 		event["analysis"] = webAnalysis
 		event["outcome"] = getPayloadString(payload, "result")
 		event["truncated_fields"] = getPayloadAny(payload, "truncated_fields")
-		event["correlation"] = map[string]any{"request_id": requestID}
+		event["correlation"] = map[string]any{"request_id": requestID, "web_session_id": webSessionID}
 		delete(event, "session")
+		if webSessionID != "" {
+			event["session"] = map[string]any{"id": webSessionID, "source": "web-corp", "semantics": "browser_continuity_only"}
+		}
 	}
 
 	return compactMap(event)
@@ -886,6 +906,9 @@ func inferEventType(source string, logType string, payload map[string]any) strin
 	if source == "web-corp" {
 		if getPayloadString(payload, "event") == "web_login_attempt" {
 			return "web_login_attempt"
+		}
+		if getPayloadString(payload, "event") == "web_http_request" {
+			return "web_http_request"
 		}
 		return "web_event"
 	}

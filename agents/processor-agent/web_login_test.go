@@ -14,7 +14,7 @@ func syntheticWebLoginPayload() map[string]any {
 		"timestamp":      "2026-09-24T12:00:00.000Z",
 		"source_ip":      "198.51.100.20",
 		"http": map[string]any{
-			"method": "POST", "path": "/web/login", "query": "",
+			"scheme": "http", "method": "POST", "path": "/web/login", "query": "",
 			"host": "decoy.invalid", "user_agent": "synthetic-test-agent",
 		},
 		"odoo_login": map[string]any{
@@ -24,6 +24,29 @@ func syntheticWebLoginPayload() map[string]any {
 		"sqli_indicators":  map[string]any{"login": []any{"sql_keyword"}},
 		"truncated_fields": []any{},
 		"result":           "rejected",
+	}
+}
+
+func TestNormalizeHTTPSLoginPreservesTransportAndPort(t *testing.T) {
+	payload := syntheticWebLoginPayload()
+	payload["http"].(map[string]any)["scheme"] = "https"
+	values := map[string]any{
+		"source": "web-corp", "log_type": "web_login",
+		"dedup_id": "0123456789abcdef0123456789abcdef",
+		"src_ip":   "198.51.100.20", "dst_ip": "10.58.33.42", "dst_port": "443",
+		"sensor_ip": "10.58.33.42", "sensor_name": "test-sensor",
+		"ingested_at": "2026-09-24T12:00:01Z",
+	}
+	event := normalizeEvent("raw:web-login", "1-0", values, payload)
+
+	if event["network"].(map[string]any)["dst_port"] != 443 {
+		t.Fatalf("HTTPS destination port was not preserved: %#v", event["network"])
+	}
+	if event["network"].(map[string]any)["service"] != "https" {
+		t.Fatalf("HTTPS service was not identified: %#v", event["network"])
+	}
+	if event["http"].(map[string]any)["scheme"] != "https" {
+		t.Fatalf("HTTPS scheme was not preserved: %#v", event["http"])
 	}
 }
 

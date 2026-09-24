@@ -212,10 +212,14 @@ func enqueueWebLoginFile(ctx context.Context, rdb *redis.Client, cfg AppConfig, 
 	}
 
 	dstIP := cfg.WebLoginSensorIP
-	dstPort := "80"
+	dstPort := webLoginDestinationPort(payload)
+	logType := "web_login"
+	if getString(payload, "event") == "web_http_request" {
+		logType = "web_http"
+	}
 	values := map[string]any{
 		"source":      "web-corp",
-		"log_type":    "web_login",
+		"log_type":    logType,
 		"sensor_name": cfg.SensorName,
 		"sensor_ip":   dstIP,
 		"interface":   cfg.WebLoginSensorIface,
@@ -242,7 +246,8 @@ func enqueueWebLoginFile(ctx context.Context, rdb *redis.Client, cfg AppConfig, 
 }
 
 func validateWebLoginPayload(payload map[string]any) (string, string, error) {
-	if getString(payload, "event") != "web_login_attempt" {
+	eventType := getString(payload, "event")
+	if eventType != "web_login_attempt" && eventType != "web_http_request" {
 		return "", "", fmt.Errorf("invalid web-login event: unexpected event type")
 	}
 	if getInt(payload, "schema_version") != 1 {
@@ -257,6 +262,19 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 			return "", "", fmt.Errorf("invalid web-login event: invalid request_id")
 		}
 	}
+	if sessionID, exists := payload["web_session_id"]; exists {
+		value, ok := sessionID.(string)
+		if !ok || len(value) != 32 {
+			return "", "", fmt.Errorf("invalid web-login event: invalid web_session_id")
+		}
+		for _, char := range value {
+			if !(char >= '0' && char <= '9') && !(char >= 'a' && char <= 'f') {
+				return "", "", fmt.Errorf("invalid web-login event: invalid web_session_id")
+			}
+		}
+	} else if eventType == "web_http_request" {
+		return "", "", fmt.Errorf("invalid web-login event: missing web_session_id")
+	}
 	if _, err := time.Parse(time.RFC3339Nano, getString(payload, "timestamp")); err != nil {
 		return "", "", fmt.Errorf("invalid web-login event: invalid timestamp")
 	}
@@ -265,8 +283,27 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 		return "", "", fmt.Errorf("invalid web-login event: invalid source_ip")
 	}
 	httpPayload, ok := payload["http"].(map[string]any)
-	if !ok || getString(httpPayload, "method") != "POST" || getString(httpPayload, "path") == "" {
+	if !ok || getString(httpPayload, "path") == "" {
 		return "", "", fmt.Errorf("invalid web-login event: missing http object")
+	}
+	if scheme := getString(httpPayload, "scheme"); scheme != "" && scheme != "http" && scheme != "https" {
+		return "", "", fmt.Errorf("invalid web-login event: unsupported http scheme")
+	}
+	if eventType == "web_http_request" {
+		method := getString(httpPayload, "method")
+		if method != "GET" && method != "HEAD" && method != "POST" && method != "PUT" && method != "PATCH" && method != "DELETE" && method != "OPTIONS" {
+			return "", "", fmt.Errorf("invalid web-login event: invalid http method")
+		}
+		if _, exists := payload["odoo_login"]; exists {
+			return "", "", fmt.Errorf("invalid web-login event: unexpected credentials in http event")
+		}
+		if _, exists := httpPayload["query"]; exists {
+			return "", "", fmt.Errorf("invalid web-login event: raw query in http event")
+		}
+		return requestID, sourceIP, nil
+	}
+	if getString(httpPayload, "method") != "POST" {
+		return "", "", fmt.Errorf("invalid web-login event: login method must be POST")
 	}
 	if getString(payload, "result") != "rejected" {
 		return "", "", fmt.Errorf("invalid web-login event: outcome must be rejected")
@@ -284,6 +321,14 @@ func validateWebLoginPayload(payload map[string]any) (string, string, error) {
 		}
 	}
 	return requestID, sourceIP, nil
+}
+
+func webLoginDestinationPort(payload map[string]any) string {
+	httpPayload, ok := payload["http"].(map[string]any)
+	if ok && getString(httpPayload, "scheme") == "https" {
+		return "443"
+	}
+	return "80"
 }
 
 func quarantineWebLoginFile(spoolDir string, path string) error {

@@ -1,7 +1,7 @@
 ---
 title: Web-corp login telemetry design
 status: current
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 ---
 
 # Web-corp login telemetry design
@@ -16,10 +16,15 @@ The intended readers and consumers of credential-bearing records are
 honeypot administrators.
 
 The login handler writes one bounded JSONL event to its mounted pending spool.
-Page views and bait-path telemetry continue to use Deception Core's generic
-`/v1/track` endpoint; login values no longer enter Core's generic
-command/session classifier. Pre-cutover login entries remain in Core's legacy
-event file and are not migrated by this implementation.
+The current Pi listener is ZeroTier HTTP `:80` → container `:8080`. The direct
+TLS app container on Pi `:443` is stopped; publicly trusted HTTPS on a VPS is
+target work, not an active listener. The HTTP app no longer emits page/scan
+events or calls Deception Core, and Uvicorn access logging is disabled. GETs,
+scans, and 404s therefore do not enter the web-login telemetry path. Historical
+Core records from the previous implementation are retained as-is. The Go
+collector/processor still accept the former `web_http_request` event shape so
+any already-spooled or queued events can drain; the current app does not create
+new events of that type.
 
 ## Goals and boundaries
 
@@ -35,8 +40,11 @@ event file and are not migrated by this implementation.
 
 This design covers login attempts at `web-corp` only. OpenCanary remains a
 separate HTTP decoy and is not the web-corp login handler. Page views and bait
-path/scan telemetry are not part of the login event contract. Mock ERP records,
-post-login pages, and post-login user actions are future work.
+path/scan telemetry are intentionally not collected in the current phase. Mock
+ERP records, post-login pages, and post-login user actions are future work.
+For the broader HTTP current/future boundary—including the distinction between
+the existing fake login persona and optional interactive post-login deception—
+see [HTTP decoy scope](http-decoy-scope.md).
 
 ## Current event path
 
@@ -75,16 +83,16 @@ stream write succeed. The deployed processor retention is `720h` (30 days);
 `expires_at` is based on the observed event time and the `events` collection
 uses its TTL index. No Odoo/PostgreSQL database is used for login telemetry.
 
-### Why not the current generic Core tracking route?
+### Why the login path is separate from Deception Core
 
-Core `/v1/track` is currently a behavior/session tracking interface, not a
-dedicated event-ingestion contract. Its generic route updates IP-keyed session
-state and records the supplied command for classification. Embedding a login
-event after `web-login ` therefore places the full credential-bearing payload
-in command/session data and can mix web login activity with other activity for
-the same IP. The login handler must stop using this generic route for login
-attempts. Other web page/bait-path events may continue on their existing route
-until separately redesigned.
+Core `/v1/track` is a behavior/session tracking interface, not a dedicated
+credential-bearing login-event contract. It updates IP-keyed session state and
+records the supplied command for classification. Embedding a login event there
+would place submitted credentials in generic command/session data. The current
+web-corp app therefore does not call Core at all: login attempts use the
+restricted spool pipeline, while ordinary pages and scan paths produce no
+application telemetry. Older Core records from before this boundary remain
+historical and are not migrated or deleted.
 
 ## Event contract
 
@@ -99,7 +107,7 @@ when the contract changes incompatibly.
 | `timestamp` | Time the app observed the submission, UTC | Required; keep separate `ingested_at` |
 | `source`, `log_type`, `event_type`, `schema_version` | Producer and schema identity | Fixed values for this event kind |
 | `network.src_ip` | Observed client address | Derive from peer; honor forwarded address only from configured trusted proxies |
-| `http.method`, `http.path`, `http.query` | Request target/context | Length-bounded; query may itself contain attack input |
+| `http.scheme`, `http.method`, `http.path`, `http.query` | Request transport and target/context | Scheme and method are bounded; query/path may themselves contain attack input; scheme drives destination port 80/443 downstream |
 | `http.headers` | Selected Host, User-Agent, Referer, Origin, Accept-Language | Bounded allowlist; do not capture cookies or Authorization |
 | `web_login.database`, `web_login.username`, `web_login.password`, `web_login.redirect`, `web_login.remember` | Values submitted in the login form (source JSON uses `odoo_login`) | Raw Redis preserves all bounded values, including plaintext password and empty strings. Mongo normalization preserves non-empty values; the generic compactor currently omits empty strings. |
 | `analysis.sqli.indicators` | Heuristic indicator names grouped by submitted field | Hints only; never claim a confirmed exploit from a regex match |
@@ -155,6 +163,13 @@ the password field as credential-sensitive even within that audience:
 - This rollout did not change or independently verify Atlas encryption-at-rest,
   backup expiry, or database role assignments; verify those controls through
   the existing operations process.
+
+HTTPS encrypts the client-to-decoy transport, but does not change storage
+handling: the raw spool, Redis, and MongoDB still contain the bounded submitted
+password. The Pi's direct-TLS service is stopped; its self-signed ZeroTier-IP
+certificate is retained outside Git but is not currently served. The public
+VPS certificate/proxy path is a target deployment documented in the
+[VPS HTTPS runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
 
 No separate password hash/fingerprint is needed while the raw sample is kept.
 If a future retention policy removes raw values but needs grouping, evaluate a
@@ -223,10 +238,11 @@ deployed validation:
    report for scope and limitations.
 
 Remaining decisions: brute-force threshold/window/grouping and whether a
-derived finding should be materialized; Atlas backup/role verification; and an
-admin query UI beyond direct approved Redis/Mongo tools. After-login ERP data
-and behavior remain future work. No brute-force threshold is assigned; repeated
-attempts are captured for downstream analysis.
+derived finding should be materialized; Atlas backup/role verification; and
+dashboard/API integration for querying web-login events (currently available
+through approved Redis/Mongo tools only). After-login ERP data and behavior
+remain future work. No brute-force threshold is assigned; repeated attempts
+are captured for downstream analysis.
 
 ## Related material
 

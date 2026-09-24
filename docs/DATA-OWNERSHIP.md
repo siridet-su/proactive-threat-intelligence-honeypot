@@ -1,7 +1,7 @@
 ---
 title: Data ownership and event-flow contract
 status: current
-last_verified: 2026-09-24
+last_verified: 2026-09-25
 ---
 
 # Data ownership and event-flow contract
@@ -13,6 +13,8 @@ last_verified: 2026-09-24
 | Raw Cowrie/Zeek/service logs | origin service | collector/adapter | local, bounded and rotated |
 | Web-corp login spool | web-corp app | host collector | root-only, max 64 MiB pending; delete after successful Redis enqueue |
 | Redis streams | Go telemetry plane | processor and workers | transient, bounded queue |
+| FTP decoy activity | none while FTP container is stopped | future adapter / admin investigation | source is tracked, but service is stopped; old Core records may remain; no current Atlas bridge |
+| SMTP sink activity | none while SMTP container is stopped | future adapter / admin investigation | source is tracked, but service is stopped; no current Atlas bridge |
 | Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | durable project record |
 | Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
 | Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard history endpoint and reporting | one compact upserted row per sensor/minute, 30-day TTL |
@@ -35,6 +37,12 @@ source log or service adapter
 The processor must persist the canonical event before acknowledging its raw
 Redis message. A third-party API timeout must never prevent baseline telemetry
 from reaching Atlas.
+
+Web-corp currently emits only login POST events into this pipeline. Its page,
+scan, and 404 requests create no application event; Uvicorn access logging is
+disabled. Web-login events are persisted in MongoDB, but the dashboard does not
+yet include a web-login query or investigation view. Use the approved direct
+Redis/Mongo retrieval procedure until that UI/API integration is implemented.
 
 ## Event identity and correlation
 

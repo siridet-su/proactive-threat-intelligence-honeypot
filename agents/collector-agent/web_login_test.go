@@ -12,7 +12,7 @@ func validWebLoginPayload() map[string]any {
 		"request_id":     "0123456789abcdef0123456789abcdef",
 		"timestamp":      "2026-09-24T12:00:00.000Z",
 		"source_ip":      "198.51.100.20",
-		"http":           map[string]any{"method": "POST", "path": "/web/login"},
+		"http":           map[string]any{"scheme": "http", "method": "POST", "path": "/web/login"},
 		"odoo_login": map[string]any{
 			"database": "synthetic-db", "login": "test-user", "password": "synthetic-test-value",
 			"redirect": "/web", "remember": "1",
@@ -55,6 +55,7 @@ func TestValidateWebLoginPayloadRejectsInvalidMetadata(t *testing.T) {
 		{name: "invalid id", change: func(p map[string]any) { p["request_id"] = "../bad" }},
 		{name: "invalid timestamp", change: func(p map[string]any) { p["timestamp"] = "yesterday" }},
 		{name: "invalid source ip", change: func(p map[string]any) { p["source_ip"] = "not-an-ip" }},
+		{name: "invalid HTTP scheme", change: func(p map[string]any) { p["http"].(map[string]any)["scheme"] = "ftp" }},
 		{name: "accepted result", change: func(p map[string]any) { p["result"] = "accepted" }},
 		{name: "missing login object", change: func(p map[string]any) { delete(p, "odoo_login") }},
 	}
@@ -64,6 +65,28 @@ func TestValidateWebLoginPayloadRejectsInvalidMetadata(t *testing.T) {
 			test.change(payload)
 			if _, _, err := validateWebLoginPayload(payload); err == nil {
 				t.Fatal("invalid event unexpectedly accepted")
+			}
+		})
+	}
+}
+
+func TestWebLoginDestinationPortFollowsScheme(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		scheme string
+		want   string
+	}{
+		{name: "legacy event defaults to HTTP", want: "80"},
+		{name: "HTTP", scheme: "http", want: "80"},
+		{name: "HTTPS", scheme: "https", want: "443"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := validWebLoginPayload()
+			if test.scheme != "" {
+				payload["http"].(map[string]any)["scheme"] = test.scheme
+			}
+			if got := webLoginDestinationPort(payload); got != test.want {
+				t.Fatalf("destination port = %q, want %q", got, test.want)
 			}
 		})
 	}

@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 
 INTEGRATION_DIR = Path(__file__).resolve().parents[1]
@@ -23,20 +23,13 @@ class WebCorpTests(TestCase):
         self.spool = tempfile.TemporaryDirectory()
         self.spool_patch = patch.object(main, "LOGIN_SPOOL_DIR", self.spool.name)
         self.spool_patch.start()
-        self.transport = AsyncMock(return_value=None)
-        self.transport_patch = patch.object(main, "_post_track", self.transport)
-        self.page_track_patch = patch.object(main, "_track")
         self.proxy_patch = patch.object(main, "TRUSTED_PROXY_NETWORKS", ())
-        self.transport_patch.start()
-        self.page_track_patch.start()
         self.proxy_patch.start()
         self.client = TestClient(main.app)
 
     def tearDown(self):
         self.client.close()
         self.proxy_patch.stop()
-        self.page_track_patch.stop()
-        self.transport_patch.stop()
         self.spool_patch.stop()
         self.spool.cleanup()
 
@@ -80,11 +73,27 @@ class WebCorpTests(TestCase):
         self.assertEqual(event["http"]["accept_language"], "th-TH")
         self.assertEqual(event["source_ip"], "testclient")
         self.assertEqual(event["result"], "rejected")
+        self.assertEqual(event["http"]["scheme"], "http")
         self.assertEqual(event["truncated_fields"], [])
-        self.assertEqual(self.transport.await_count, 0, "login values must not go to Core /v1/track")
+        self.assertNotIn("xss_indicators", event)
 
         event_file = next(Path(self.spool.name).glob("*.jsonl"))
         self.assertEqual(stat.S_IMODE(event_file.stat().st_mode), 0o600)
+        writer_lock = Path(self.spool.name) / ".write.lock"
+        self.assertEqual(stat.S_IMODE(writer_lock.stat().st_mode), 0o600)
+
+    def test_https_login_records_scheme_and_still_rejects(self):
+        with TestClient(main.app, base_url="https://testserver") as client:
+            response = client.post(
+                "/web/login",
+                data={"login": "synthetic-https-user", "password": "synthetic-https-value"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("อีเมลหรือรหัสผ่านไม่ถูกต้อง", response.text)
+        event = self._last_login_event()
+        self.assertEqual(event["http"]["scheme"], "https")
+        self.assertEqual(event["result"], "rejected")
 
     def test_legacy_login_field_alias_and_admin_redirect(self):
         response = self.client.post(
@@ -98,6 +107,21 @@ class WebCorpTests(TestCase):
         redirect = self.client.get("/admin", follow_redirects=False)
         self.assertEqual(redirect.status_code, 302)
         self.assertEqual(redirect.headers["location"], "/login.html")
+
+    def test_only_login_submissions_create_telemetry(self):
+        self.assertEqual(self.client.get("/web/login").status_code, 200)
+        self.assertEqual(self.client.get("/.env").status_code, 404)
+        self.assertEqual(self.client.get("/wp-admin").status_code, 404)
+        self.assertEqual(self.client.get("/missing-page").status_code, 404)
+        self.assertEqual(self.client.post("/unrelated", data={"x": "y"}).status_code, 404)
+        self.assertEqual(self.client.get("/admin", follow_redirects=False).status_code, 302)
+        self.assertEqual(list(Path(self.spool.name).glob("*.jsonl")), [])
+
+        response = self.client.post(
+            "/web/login", data={"login": "synthetic-user", "password": "synthetic-value"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(list(Path(self.spool.name).glob("*.jsonl"))), 1)
 
     def test_login_values_are_bounded_and_truncation_is_explicit(self):
         response = self.client.post(
@@ -126,7 +150,6 @@ class WebCorpTests(TestCase):
         self.assertEqual(event["odoo_login"]["password"], "' OR 'a'='a' --")
         self.assertIn("boolean_tautology", event["sqli_indicators"]["password"])
         self.assertIn("sql_comment", event["sqli_indicators"]["password"])
-        self.assertEqual(self.transport.await_count, 0)
 
     def test_spool_capacity_failure_does_not_accept_the_login(self):
         with patch.object(main, "LOGIN_SPOOL_MAX_BYTES", 64):

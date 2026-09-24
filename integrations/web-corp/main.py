@@ -5,10 +5,10 @@ web-corp door — FastAPI (เขียนใหม่ 2026-09-20 แทน ngin
 (JS ฝั่ง client ล้วน ไม่มี backend จริง) — จับพฤติกรรม attacker ไม่ได้เลย
 
 ใหม่: เสิร์ฟหน้า/persona บริษัทเดิม (Rattana Trading & Logistics) พร้อม backend ปลอมเพื่อ
-  1. เก็บ login attempts ที่ POST /web/login (คง POST /login สำหรับ compatibility)
-  2. ดัก path scanning (/.env /wp-admin /phpmyadmin /.git /backup ...) → log เป็น signal "web-scan"
-  3. เขียน login event ลง restricted local spool เพื่อส่งเข้า Redis/Mongo โดยไม่ปนกับ Core command/session
-     ส่วน page views และ bait-path signals ยังคงส่ง /v1/track แบบ fire-and-forget
+  1. เก็บเฉพาะ login attempts ที่ POST /web/login (คง POST /login สำหรับ compatibility)
+  2. ปฏิเสธทุก login และไม่ส่งค่าที่กรอกไปยัง Odoo/PostgreSQL
+  3. ส่ง login event ผ่าน restricted local spool เข้า Redis/Mongo; page views, scans และ 404
+     ไม่ถูกบันทึกเป็น telemetry ของแอป
 
 คงพฤติกรรมเดิมที่ test_suite/web_corp_behavior_test.py เช็คไว้ทุกข้อ (title, /admin→302 /login.html,
 robots Disallow /backup/, /backup/ listing, fake sql.gz 2202009 bytes, 404 baseline).
@@ -16,17 +16,22 @@ robots Disallow /backup/, /backup/ listing, fake sql.gz 2202009 bytes, 404 basel
 from __future__ import annotations
 
 import asyncio
+import fcntl
+import hashlib
+import hmac
 import ipaddress
 import json
 import logging
 import os
 import re
+import secrets
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote_plus
 
-import httpx
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
     FileResponse,
@@ -39,10 +44,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("web-corp")
 
 HTML_DIR = Path(os.environ.get("WEB_HTML_DIR", "/app/html"))
-DECEPTION_CORE_URL = os.environ.get(
-    "DECEPTION_CORE_URL", "http://deception-core:9000"
-).rstrip("/")
-TRACK_URL = DECEPTION_CORE_URL + "/v1/track"
 LOGIN_SPOOL_DIR = os.environ.get("WEB_LOGIN_SPOOL_DIR", "").strip()
 try:
     LOGIN_SPOOL_MAX_BYTES = max(
@@ -51,18 +52,12 @@ try:
 except ValueError:
     LOGIN_SPOOL_MAX_BYTES = 64 * 1024 * 1024
 _LOGIN_SPOOL_LOCK = threading.Lock()
+_WEB_SESSION_KEY = secrets.token_bytes(32)  # Process-local: restart rotates continuity, never persists a credential.
+_WEB_SESSION_COOKIE = "web_corp_visit"
+_WEB_SESSION_IDLE_SECONDS = 30 * 60
+_WEB_SESSION_MAX_SECONDS = 24 * 60 * 60
+_SESSION_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
-# path ล่อที่สแกนเนอร์/attacker ชอบยิง — เจอ = log เป็น "web-scan" (สัญญาณตั้งใจเจาะ ไม่ใช่ดูเว็บเฉยๆ)
-# เก็บแบบ normalize (ตัด trailing slash) เทียบกับ path ที่เข้ามา
-BAIT_PATHS = {
-    "/.env", "/.git/config", "/.git/HEAD", "/wp-admin", "/wp-login.php",
-    "/phpmyadmin", "/phpMyAdmin", "/administrator", "/server-status",
-    "/.aws/credentials", "/config.php", "/shell.php", "/vendor", "/.ssh/id_rsa",
-    "/actuator", "/actuator/env", "/console", "/adminer.php", "/.env.bak",
-    "/web/database/manager", "/web/database/selector", "/web/dataset/call_kw",
-    "/web/session/authenticate", "/jsonrpc", "/xmlrpc/2/common", "/xmlrpc/2/object",
-}
-_BAIT_NORM = {p.rstrip("/") or "/" for p in BAIT_PATHS}
 _FIELD_LIMIT = 256
 _HEADER_LIMIT = 256
 _QUERY_LIMIT = 512
@@ -91,6 +86,55 @@ _SQLI_RULES = (
         re.IGNORECASE,
     )),
 )
+def _web_session(request: Request) -> tuple[str, str]:
+    """Return a sensor-issued continuity ID and refreshed, signed cookie.
+
+    This is browser continuity, *not* an attacker identity. It cannot join SSH
+    sessions by IP and does not authorize a finding or action.
+    """
+    now = int(time.time())
+    raw = request.cookies.get(_WEB_SESSION_COOKIE, "")[:160]
+    parts = raw.split(".")
+    if len(parts) == 4:
+        session_id, created_text, last_text, signature = parts
+        try:
+            created, last = int(created_text), int(last_text)
+        except ValueError:
+            created, last = 0, 0
+        signed = f"{session_id}.{created_text}.{last_text}"
+        expected = hmac.new(_WEB_SESSION_KEY, signed.encode(), hashlib.sha256).hexdigest()
+        if (_SESSION_ID_RE.fullmatch(session_id) and
+                hmac.compare_digest(signature, expected) and
+                0 <= now - last <= _WEB_SESSION_IDLE_SECONDS and
+                0 <= now - created <= _WEB_SESSION_MAX_SECONDS and
+                created <= last):
+            refreshed = f"{session_id}.{created}.{now}"
+            signature = hmac.new(_WEB_SESSION_KEY, refreshed.encode(), hashlib.sha256).hexdigest()
+            return session_id, f"{refreshed}.{signature}"
+    session_id = uuid.uuid4().hex
+    signed = f"{session_id}.{now}.{now}"
+    signature = hmac.new(_WEB_SESSION_KEY, signed.encode(), hashlib.sha256).hexdigest()
+    return session_id, f"{signed}.{signature}"
+
+
+def _with_session_cookie(response, request: Request, token: str):
+    response.set_cookie(
+        _WEB_SESSION_COOKIE, token, max_age=_WEB_SESSION_IDLE_SECONDS,
+        httponly=True, secure=request.url.scheme == "https", samesite="lax", path="/",
+    )
+    return response
+
+
+def _pattern_indicators(values: dict[str, str], rules) -> dict[str, list[str]]:
+    findings = {}
+    for field, raw in values.items():
+        # One bounded decoding pass catches ordinary URL encoding; no recursive
+        # decoding or attacker-controlled regex is used.
+        text = unquote_plus(str(raw or "")[:512])[:512]
+        matches = [name for name, pattern in rules if pattern.search(text)]
+        if matches:
+            findings[field] = matches
+    return findings
 
 
 def _trusted_proxy_networks() -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
@@ -135,10 +179,6 @@ def _client_ip(request: Request) -> str:
     return peer
 
 
-def _limited(value: str, limit: int = _FIELD_LIMIT) -> str:
-    return str(value or "")[:limit]
-
-
 def _bounded_login_value(value: str, field: str, limit: int,
                          truncated_fields: set[str]) -> str:
     raw = str(value or "")
@@ -147,16 +187,7 @@ def _bounded_login_value(value: str, field: str, limit: int,
     return raw[:limit]
 
 
-def _sqli_indicators(values: dict[str, str]) -> dict[str, list[str]]:
-    indicators = {}
-    for field, value in values.items():
-        matches = [name for name, pattern in _SQLI_RULES if pattern.search(value)]
-        if matches:
-            indicators[field] = matches
-    return indicators
-
-
-def _login_event(request: Request, ip: str, *, database: str, login: str,
+def _login_event(request: Request, ip: str, web_session_id: str, *, database: str, login: str,
                  password: str, redirect: str, remember: str) -> dict:
     truncated_fields: set[str] = set()
     query = _bounded_login_value(
@@ -209,11 +240,15 @@ def _login_event(request: Request, ip: str, *, database: str, login: str,
         "schema_version": 1,
         "event": "web_login_attempt",
         "request_id": uuid.uuid4().hex,
+        "web_session_id": web_session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
             "+00:00", "Z"
         ),
         "source_ip": ip,
         "http": {
+            "scheme": _bounded_login_value(
+                request.url.scheme, "http.scheme", 16, truncated_fields
+            ),
             "method": _bounded_login_value(
                 request.method, "http.method", 16, truncated_fields
             ),
@@ -230,31 +265,10 @@ def _login_event(request: Request, ip: str, *, database: str, login: str,
             "redirect": bounded["redirect"],
             "remember": bounded["remember"],
         },
-        "sqli_indicators": _sqli_indicators(values),
+        "sqli_indicators": _pattern_indicators(values, _SQLI_RULES),
         "truncated_fields": sorted(truncated_fields),
         "result": "rejected",
     }
-
-
-async def _post_track(ip: str, command: str) -> None:
-    """Wait for the core to durably append the event before considering it captured."""
-    async with httpx.AsyncClient(timeout=2.0) as c:
-        response = await c.post(
-            TRACK_URL, json={"ip": ip, "door": "web", "command": command}
-        )
-        response.raise_for_status()
-
-
-def _track(ip: str, command: str) -> None:
-    """Fire-and-forget for ordinary page views; login attempts use _track_login."""
-
-    async def _call():
-        try:
-            await _post_track(ip, command)
-        except Exception:
-            log.exception("track call failed")
-
-    asyncio.create_task(_call())
 
 
 def _spool_login_event(event: dict) -> Path:
@@ -272,40 +286,48 @@ def _spool_login_event(event: dict) -> Path:
     with _LOGIN_SPOOL_LOCK:
         spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(spool_dir, 0o700)
-        pending_bytes = 0
-        for path in spool_dir.iterdir():
-            if path.suffix != ".jsonl":
-                continue
-            try:
-                if path.is_file():
-                    pending_bytes += path.stat().st_size
-            except FileNotFoundError:
-                # The host collector may remove an event after its Redis XADD.
-                continue
-        if pending_bytes + len(payload) > LOGIN_SPOOL_MAX_BYTES:
-            raise OSError("web login spool capacity reached")
-        if final_path.exists():
-            return final_path
-
-        temp_path = spool_dir / f".{request_id}.{uuid.uuid4().hex}.tmp"
-        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # HTTP and HTTPS containers share this spool. The thread lock alone
+        # cannot serialize their capacity checks and writes.
+        lock_fd = os.open(spool_dir / ".write.lock", os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            with os.fdopen(fd, "wb") as spool_file:
-                spool_file.write(payload)
-                spool_file.flush()
-                os.fsync(spool_file.fileno())
-            os.replace(temp_path, final_path)
-            dir_fd = os.open(spool_dir, os.O_RDONLY)
+            os.fchmod(lock_fd, 0o600)
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            pending_bytes = 0
+            for path in spool_dir.iterdir():
+                if path.suffix != ".jsonl":
+                    continue
+                try:
+                    if path.is_file():
+                        pending_bytes += path.stat().st_size
+                except FileNotFoundError:
+                    continue
+            if pending_bytes + len(payload) > LOGIN_SPOOL_MAX_BYTES:
+                raise OSError("web login spool capacity reached")
+            if final_path.exists():
+                return final_path
+
+            temp_path = spool_dir / f".{request_id}.{uuid.uuid4().hex}.tmp"
+            fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             try:
-                os.fsync(dir_fd)
-            finally:
-                os.close(dir_fd)
-        except Exception:
-            try:
-                temp_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise
+                with os.fdopen(fd, "wb") as spool_file:
+                    spool_file.write(payload)
+                    spool_file.flush()
+                    os.fsync(spool_file.fileno())
+                os.replace(temp_path, final_path)
+                dir_fd = os.open(spool_dir, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
+            except Exception:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
     return final_path
 
@@ -328,17 +350,6 @@ async def _track_login(event: dict) -> bool:
         ",".join(indicators) or "none",
     )
     return True
-
-
-def _is_sensitive(norm_path: str) -> bool:
-    """path ที่ถือเป็น 'สแกน/สอดแนม' — bait list + /backup (robots ประกาศ Disallow ไว้ ใครเปิด =
-    ตั้งใจ) + อะไรที่ขึ้นต้นด้วย /.git /.env"""
-    return (
-        norm_path in _BAIT_NORM
-        or norm_path.startswith("/backup")
-        or norm_path.startswith("/.git")
-        or norm_path.startswith("/.env")
-    )
 
 
 def _safe_file(url_path: str) -> Path | None:
@@ -379,6 +390,7 @@ async def do_login(
 ):
     """Fake Odoo sign-in: record an attempt and always reject it; never authenticate."""
     ip = _client_ip(request)
+    web_session_id, cookie = _web_session(request)
     # Odoo's login field is named `login`; keep the old `username` alias so any
     # previously bookmarked/tested form continues to be captured.
     values = {
@@ -388,9 +400,9 @@ async def do_login(
         "redirect": redirect,
         "remember": remember,
     }
-    event = _login_event(request, ip, **values)
+    event = _login_event(request, ip, web_session_id, **values)
     await _track_login(event)
-    return HTMLResponse(_login_page_with_error(), status_code=200)
+    return _with_session_cookie(HTMLResponse(_login_page_with_error(), status_code=200), request, cookie)
 
 
 @app.api_route(
@@ -399,38 +411,29 @@ async def do_login(
 )
 async def serve(full_path: str, request: Request):
     path = "/" + full_path
-    ip = _client_ip(request)
+    web_session_id, cookie = _web_session(request)
     norm = path.rstrip("/") or "/"
-    target = request.url.path
-    if request.url.query:
-        target += "?" + _limited(request.url.query, _QUERY_LIMIT)
 
     # /admin (และ /admin/) → หน้า login ปลอม เหมือน nginx เดิม (SME web ทั่วไปทำแบบนี้)
     if norm == "/admin":
-        _track(ip, f"web-scan {request.method} {target}")
-        return RedirectResponse(url="/login.html", status_code=302)
-
-    command = f"web-scan {request.method} {target}" if _is_sensitive(norm) else (
-        f"{request.method} {target}"
-    )
-    _track(ip, command)
+        return _with_session_cookie(RedirectResponse(url="/login.html", status_code=302), request, cookie)
 
     if request.method not in {"GET", "HEAD"}:
-        return PlainTextResponse("404 Not Found\n", status_code=404)
+        return _with_session_cookie(PlainTextResponse("404 Not Found\n", status_code=404), request, cookie)
 
     # Odoo-style canonical login URL; keep /login.html available for continuity.
     if norm == "/web/login":
         login_page = HTML_DIR / "login.html"
         if login_page.is_file():
-            return FileResponse(login_page, media_type="text/html; charset=utf-8")
+            return _with_session_cookie(FileResponse(login_page, media_type="text/html; charset=utf-8"), request, cookie)
 
     f = _safe_file(path)
     if f is None:
-        return PlainTextResponse("404 Not Found\n", status_code=404)
+        return _with_session_cookie(PlainTextResponse("404 Not Found\n", status_code=404), request, cookie)
 
     media = None
     if f.suffix == ".html":
         media = "text/html; charset=utf-8"
     elif f.suffix == ".txt":
         media = "text/plain; charset=utf-8"
-    return FileResponse(f, media_type=media)
+    return _with_session_cookie(FileResponse(f, media_type=media), request, cookie)
