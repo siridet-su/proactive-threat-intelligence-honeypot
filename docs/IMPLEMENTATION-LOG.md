@@ -188,3 +188,81 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   payloads, credentials, or provider secrets are rendered.
 - Rollback: revert the Artifact Intelligence page change; no host rollback is
   required.
+
+### 2026-09-25 — Align backup retention header with dashboard pages
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: remove the backup page's `Data protection / operations`
+  eyebrow so the header follows the simpler title treatment used by the
+  surrounding dashboard pages.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: removed the eyebrow label from the Backup control room
+  header and removed the title's compensating top margin.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: the page is available through the local
+  dev server; automated dashboard tests are not yet run.
+- Not performed / deferred: no production build, deployment, or browser
+  regression sweep beyond the local page check.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the removed eyebrow element and the previous `mt-2`
+  title class, or revert the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks before committing or deploying.
+- Related runbook: `dashboard-v2/README.md`.
+
+### 2026-09-25 — Remove remaining hardware archive eyebrow
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: remove the `Hardware archive` eyebrow from the Rollup
+  backup section and keep the health badge beside the section title.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: moved the existing status badge alongside `Rollup
+  backup` and removed the redundant all-caps section label.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: `npm run lint`, `npx tsc --noEmit`, and
+  `git diff --check` passed after the header updates; the local backup page
+  returned the expected authentication redirect.
+- Not performed / deferred: no production build, deployment, or authenticated
+  browser regression sweep.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the `Hardware archive` label and previous heading wrapper,
+  or revert the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks before committing or deploying.
+- Related runbook: `dashboard-v2/README.md`.
+
+### 2026-09-25 — Align backup retention header with tab layout
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: replace the oversized Backup control room hero card with
+  the flat page-header treatment used by the other dashboard tabs.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: changed the backup page header to a bottom-border layout,
+  restored the shared `Backup & retention` title, retained the concise
+  description and Pi-connected badge, and removed the decorative hero panel.
+  This supersedes the earlier local-only hero-label adjustment in this same
+  uncommitted worktree change.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: `npm run lint`, `npx tsc --noEmit`, and
+  `git diff --check` passed before this final header layout adjustment.
+- Not performed / deferred: no production build, deployment, or authenticated
+  browser regression sweep.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the rounded hero header from the branch base, or revert
+  the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks again before committing or
+  deploying.
+- Related runbook: `dashboard-v2/README.md`.

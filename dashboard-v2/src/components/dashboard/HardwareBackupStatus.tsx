@@ -257,7 +257,7 @@ export function HardwareBackupStatus() {
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Hardware archive</span>
+              <h2 id="hardware-backup-title" className="text-xl font-semibold tracking-tight sm:text-2xl">Rollup backup</h2>
               {presentation && (
                 <span className={`ui-badge text-[10px] ${presentation.className}`} aria-live="polite">
                   <StatusIcon className="h-3 w-3" aria-hidden="true" />
@@ -265,7 +265,6 @@ export function HardwareBackupStatus() {
                 </span>
               )}
             </div>
-            <h2 id="hardware-backup-title" className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">Rollup backup</h2>
             <p className="mt-0.5 text-xs text-text-muted">`hardware_metrics_1m` → private Backblaze B2</p>
           </div>
         </div>

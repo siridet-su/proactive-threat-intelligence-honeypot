@@ -11,7 +11,7 @@ import {
   Database,
   FolderArchive,
   LockKeyhole,
-  ShieldCheck,
+  Radio,
   TimerReset,
 } from "lucide-react";
 
@@ -48,37 +48,35 @@ export default function BackupRetentionPage() {
   const reduceMotion = useReducedMotion();
 
   return (
-    <div className="space-y-6 pb-10">
+    <div className="space-y-5 pb-8">
       <motion.header
-        initial={reduceMotion ? false : { opacity: 0, y: -8 }}
+        initial={reduceMotion ? false : { opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-        className="relative overflow-hidden rounded-[1.25rem] border border-primary-border bg-gradient-to-br from-primary-subtle via-surface to-surface p-5 shadow-[0_14px_42px_color-mix(in_srgb,var(--primary)_10%,transparent)] sm:p-7"
+        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+        className="flex flex-col gap-4 border-b border-border pb-5 lg:flex-row lg:items-end lg:justify-between"
+        aria-labelledby="backup-page-title"
       >
-        <div className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" aria-hidden="true" />
-        <div className="pointer-events-none absolute right-24 top-8 h-2 w-2 rounded-full bg-primary shadow-[0_0_20px_var(--primary)]" aria-hidden="true" />
-        <div className="pointer-events-none absolute right-40 top-20 h-1.5 w-1.5 rounded-full bg-info shadow-[0_0_16px_var(--info)]" aria-hidden="true" />
-
-        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-          <div className="flex min-w-0 items-start gap-4">
-            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl border border-primary-border bg-surface text-primary shadow-sm">
-              <ShieldCheck className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary">Data protection / operations</p>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">Backup control room</h1>
-              <p className="mt-2 max-w-2xl text-sm text-text-muted">See archive coverage, trigger Pi actions, and verify the cloud destination from one focused view.</p>
-              <div className="mt-4 flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-success-border bg-success-subtle px-2.5 py-1 text-success"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-success" aria-hidden="true" />Pi connected</span>
-                <span className="rounded-full border border-border bg-surface/70 px-2.5 py-1">Private archive</span>
-                <span className="rounded-full border border-border bg-surface/70 px-2.5 py-1">30-day lookback</span>
-              </div>
-            </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
+            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            Data protection / operations
           </div>
-          <Link href="/system-health" className="ui-button min-h-10 shrink-0 gap-2 self-start text-xs lg:self-auto">
+          <h1 id="backup-page-title" className="mt-2 text-2xl font-semibold leading-8 tracking-tight text-text sm:text-[28px]">Backup &amp; retention</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-text-muted">Protect retained history, trigger Pi backup actions, and verify the private cloud archive in one view.</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="ui-badge border-success-border bg-success-subtle text-success">
+            <span className="relative flex h-2 w-2" aria-hidden="true">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-50 motion-reduce:hidden" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
+            </span>
+            <Radio className="h-3.5 w-3.5" aria-hidden="true" />
+            Pi connected
+          </span>
+          <Link href="/system-health" className="ui-button min-h-9 shrink-0 gap-2 px-3 text-xs">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             System health
-            <ArrowUpRight className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
           </Link>
         </div>
       </motion.header>
