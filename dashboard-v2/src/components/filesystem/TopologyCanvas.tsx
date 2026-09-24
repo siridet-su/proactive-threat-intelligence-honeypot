@@ -82,6 +82,9 @@ import { getLayoutStorageKeys } from "./layoutPersistence";
 import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
+// Fixed SVG viewBox units; this does not represent physical distance or filesystem scale.
+const LIVE_RADAR_CANVAS_SIZE = 1000;
+const LIVE_RADAR_WAVE_OVERSCAN_PX = 16;
 
 function sameElementBounds(
   left: Record<string, GraphElementBounds>,
@@ -102,59 +105,388 @@ function sameElementBounds(
   });
 }
 
-function HoneypotQuietState({
-  closedSessionCount,
-  streamState,
+type LiveTopologyStandbyMode = "loading" | "listening" | "reconnecting";
+type RadarPoint = { x: number; y: number };
+
+const LIVE_RADAR_SWEEP_DURATION_MS = 9_000;
+const LIVE_RADAR_TRAIL_ANGLE = (48 * Math.PI) / 180;
+const LIVE_RADAR_FULL_TURN = Math.PI * 2;
+type RadarRgb = { red: number; green: number; blue: number };
+
+function readRadarAccent(context: CanvasRenderingContext2D, element: HTMLElement): RadarRgb {
+  const cssColor = getComputedStyle(element).getPropertyValue("--pti-radar-accent").trim();
+  const hexColor = cssColor.match(/^#([\da-f]{6})$/i);
+  if (hexColor) {
+    const value = Number.parseInt(hexColor[1], 16);
+    return {
+      red: (value >> 16) & 255,
+      green: (value >> 8) & 255,
+      blue: value & 255,
+    };
+  }
+
+  const previousFillStyle = context.fillStyle;
+  context.fillStyle = cssColor;
+  const normalizedColor = context.fillStyle;
+  context.fillStyle = previousFillStyle;
+  const channels = normalizedColor.match(/^rgba?\((\d+(?:\.\d+)?)[, ]+\s*(\d+(?:\.\d+)?)[, ]+\s*(\d+(?:\.\d+)?)/i);
+
+  if (!channels) {
+    return document.documentElement.dataset.theme === "dark"
+      ? { red: 251, green: 191, blue: 36 }
+      : { red: 180, green: 83, blue: 9 };
+  }
+  return {
+    red: Number(channels[1]),
+    green: Number(channels[2]),
+    blue: Number(channels[3]),
+  };
+}
+
+function radarRgba({ red, green, blue }: RadarRgb, opacity: number) {
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+}
+
+function normalizeRadarAngle(angle: number) {
+  return ((angle % LIVE_RADAR_FULL_TURN) + LIVE_RADAR_FULL_TURN) % LIVE_RADAR_FULL_TURN;
+}
+
+/** Angle is clockwise from 12 o'clock, matching the radar's sweep direction. */
+function radarPointAtCanvasEdge(width: number, height: number, angle: number): RadarPoint {
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const directionX = Math.sin(angle);
+  const directionY = -Math.cos(angle);
+  const distanceToVerticalEdge = directionX > 0
+    ? (width - centerX) / directionX
+    : directionX < 0
+      ? -centerX / directionX
+      : Number.POSITIVE_INFINITY;
+  const distanceToHorizontalEdge = directionY > 0
+    ? (height - centerY) / directionY
+    : directionY < 0
+      ? -centerY / directionY
+      : Number.POSITIVE_INFINITY;
+  const distance = Math.min(distanceToVerticalEdge, distanceToHorizontalEdge);
+
+  return {
+    x: centerX + directionX * distance,
+    y: centerY + directionY * distance,
+  };
+}
+
+function drawLiveRadarSweep(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  angle: number,
+  accent: RadarRgb,
+) {
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const trailingAngle = angle - LIVE_RADAR_TRAIL_ANGLE;
+  const beamEnd = radarPointAtCanvasEdge(width, height, angle);
+  const trailEnd = radarPointAtCanvasEdge(width, height, trailingAngle);
+  const corners: RadarPoint[] = [
+    { x: 0, y: 0 },
+    { x: width, y: 0 },
+    { x: width, y: height },
+    { x: 0, y: height },
+  ];
+  const cornersAlongTrail = corners
+    .map((corner) => {
+      const cornerAngle = normalizeRadarAngle(Math.atan2(corner.x - centerX, centerY - corner.y));
+      return {
+        ...corner,
+        angleBehindBeam: normalizeRadarAngle(angle - cornerAngle),
+      };
+    })
+    .filter(({ angleBehindBeam }) => angleBehindBeam > 1e-6 && angleBehindBeam < LIVE_RADAR_TRAIL_ANGLE - 1e-6)
+    .sort((left, right) => left.angleBehindBeam - right.angleBehindBeam);
+
+  context.clearRect(0, 0, width, height);
+  context.beginPath();
+  context.moveTo(centerX, centerY);
+  context.lineTo(beamEnd.x, beamEnd.y);
+  for (const corner of cornersAlongTrail) {
+    context.lineTo(corner.x, corner.y);
+  }
+  context.lineTo(trailEnd.x, trailEnd.y);
+  context.closePath();
+
+  const conicStop = LIVE_RADAR_TRAIL_ANGLE / LIVE_RADAR_FULL_TURN;
+  const usesConicGradient = typeof context.createConicGradient === "function";
+  const trailGradient = usesConicGradient
+    ? context.createConicGradient(trailingAngle - Math.PI / 2, centerX, centerY)
+    : context.createLinearGradient(trailEnd.x, trailEnd.y, beamEnd.x, beamEnd.y);
+  const finalStop = usesConicGradient ? conicStop : 1;
+  const trailStops = [
+    { progress: 0, opacity: 0 },
+    { progress: 0.16, opacity: 0.004 },
+    { progress: 0.38, opacity: 0.015 },
+    { progress: 0.58, opacity: 0.04 },
+    { progress: 0.76, opacity: 0.14 },
+    { progress: 0.9, opacity: 0.3 },
+    { progress: 1, opacity: 0.48 },
+  ];
+  for (const stop of trailStops) {
+    trailGradient.addColorStop(finalStop * stop.progress, radarRgba(accent, stop.opacity));
+  }
+
+  // Keep the trailing energy wave inside its sector without the broad, blurred bloom.
+  context.save();
+  context.clip();
+  context.fillStyle = trailGradient;
+  context.fill();
+  context.restore();
+
+  context.beginPath();
+  context.moveTo(centerX, centerY);
+  context.lineTo(beamEnd.x, beamEnd.y);
+
+  context.save();
+  context.shadowColor = radarRgba(accent, 0.42);
+  context.shadowBlur = 9;
+  context.strokeStyle = radarRgba(accent, 0.9);
+  context.lineWidth = 1.5;
+  context.lineCap = "butt";
+  context.stroke();
+  context.restore();
+}
+
+function LiveRadarOverlay({
+  showGrid = true,
+  reducedMotion = false,
 }: {
-  closedSessionCount: number;
-  streamState: StreamState;
+  showGrid?: boolean;
+  reducedMotion?: boolean;
 }) {
-  const isLive = streamState === "live";
-  const retainedLabel = closedSessionCount === 1 ? "1 closed session available" : `${closedSessionCount} closed sessions available`;
+  const radarOverlayRef = useRef<HTMLDivElement>(null);
+  const radarWaveSvgRef = useRef<SVGSVGElement>(null);
+  const radarSweepCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  useLayoutEffect(() => {
+    const overlay = radarOverlayRef.current;
+    if (!overlay) return;
+
+    const updateCornerAngles = () => {
+      const { width, height } = overlay.getBoundingClientRect();
+      if (width <= 0 || height <= 0) return;
+
+      // Match the ray from each rectangular canvas corner to its center.
+      const inwardAngle = (Math.atan2(height, width) * 180) / Math.PI;
+      overlay.style.setProperty("--pti-radar-corner-angle-positive", `${inwardAngle}deg`);
+      overlay.style.setProperty("--pti-radar-corner-angle-negative", `${-inwardAngle}deg`);
+
+      // Keep SVG user units aligned with CSS pixels so this remains a true
+      // circle on rectangular canvases, then overscan the farthest corner.
+      const waveSvg = radarWaveSvgRef.current;
+      const wave = waveSvg?.querySelector<SVGCircleElement>(".pti-live-radar-wave");
+      if (waveSvg && wave) {
+        waveSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        wave.setAttribute("cx", String(width / 2));
+        wave.setAttribute("cy", String(height / 2));
+        wave.setAttribute(
+          "r",
+          String(Math.hypot(width / 2, height / 2) + LIVE_RADAR_WAVE_OVERSCAN_PX),
+        );
+      }
+    };
+
+    updateCornerAngles();
+    const observer = new ResizeObserver(updateCornerAngles);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [reducedMotion]);
+
+  useEffect(() => {
+    if (reducedMotion) return;
+
+    const overlay = radarOverlayRef.current;
+    const canvas = radarSweepCanvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (!overlay || !canvas || !context) return;
+
+    let width = 0;
+    let height = 0;
+    let animationFrame = 0;
+    let animationStartedAt: number | null = null;
+    let lastDrawnAt = 0;
+    let accent = readRadarAccent(context, overlay);
+
+    const refreshAccent = () => {
+      accent = readRadarAccent(context, overlay);
+    };
+
+    const resizeCanvas = () => {
+      const bounds = overlay.getBoundingClientRect();
+      width = bounds.width;
+      height = bounds.height;
+      if (width <= 0 || height <= 0) return;
+
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+      const pixelWidth = Math.max(1, Math.round(width * pixelRatio));
+      const pixelHeight = Math.max(1, Math.round(height * pixelRatio));
+      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
+        canvas.width = pixelWidth;
+        canvas.height = pixelHeight;
+      }
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    };
+
+    resizeCanvas();
+    const observer = new ResizeObserver(resizeCanvas);
+    observer.observe(overlay);
+    const themeObserver = new MutationObserver(refreshAccent);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    window.addEventListener("resize", resizeCanvas);
+
+    const animate = (timestamp: number) => {
+      if (animationStartedAt === null) animationStartedAt = timestamp;
+      if (timestamp - lastDrawnAt >= 1000 / 30 && width > 0 && height > 0) {
+        const elapsed = (timestamp - animationStartedAt) % LIVE_RADAR_SWEEP_DURATION_MS;
+        const angle = (elapsed / LIVE_RADAR_SWEEP_DURATION_MS) * LIVE_RADAR_FULL_TURN;
+        drawLiveRadarSweep(context, width, height, angle, accent);
+        lastDrawnAt = timestamp;
+      }
+      animationFrame = window.requestAnimationFrame(animate);
+    };
+
+    animationFrame = window.requestAnimationFrame(animate);
+    return () => {
+      observer.disconnect();
+      themeObserver.disconnect();
+      window.removeEventListener("resize", resizeCanvas);
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [reducedMotion]);
+
+  return (
+    <div
+      ref={radarOverlayRef}
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      data-testid="live-radar-overlay"
+      data-radar-canvas-size={`${LIVE_RADAR_CANVAS_SIZE}x${LIVE_RADAR_CANVAS_SIZE}`}
+      aria-hidden="true"
+    >
+      {showGrid && <div className="pti-live-radar-grid absolute inset-0" />}
+      <svg
+        className="pti-live-radar-diagonals absolute inset-0 h-full w-full"
+        viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <path
+          className="pti-live-radar-diagonal"
+          d={`M0 0L${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}M${LIVE_RADAR_CANVAS_SIZE} 0L0 ${LIVE_RADAR_CANVAS_SIZE}`}
+        />
+      </svg>
+      <div className="pti-live-radar-crosshair absolute inset-0" />
+      {!reducedMotion && (
+        <svg
+          ref={radarWaveSvgRef}
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
+          preserveAspectRatio="none"
+        >
+          <g className="pti-live-radar-wave-shell">
+            <circle
+              className="pti-live-radar-wave"
+              cx={LIVE_RADAR_CANVAS_SIZE / 2}
+              cy={LIVE_RADAR_CANVAS_SIZE / 2}
+              r={
+                Math.hypot(LIVE_RADAR_CANVAS_SIZE / 2, LIVE_RADAR_CANVAS_SIZE / 2) +
+                LIVE_RADAR_WAVE_OVERSCAN_PX
+              }
+            />
+          </g>
+        </svg>
+      )}
+
+      {!reducedMotion && (
+        <canvas
+          ref={radarSweepCanvasRef}
+          className="pti-live-radar-sweep-canvas absolute inset-0 h-full w-full"
+          aria-hidden="true"
+        />
+      )}
+
+      <span className="pti-live-radar-edge-tick is-top" />
+      <span className="pti-live-radar-edge-tick is-right" />
+      <span className="pti-live-radar-edge-tick is-bottom" />
+      <span className="pti-live-radar-edge-tick is-left" />
+      <span className="pti-live-radar-corner-tick is-top-left" />
+      <span className="pti-live-radar-corner-tick is-top-right" />
+      <span className="pti-live-radar-corner-tick is-bottom-right" />
+      <span className="pti-live-radar-corner-tick is-bottom-left" />
+    </div>
+  );
+}
+
+function LiveTopologyStandby({
+  mode,
+  onReconnect,
+  reducedMotion,
+}: {
+  mode: LiveTopologyStandbyMode;
+  onReconnect?: () => void;
+  reducedMotion: boolean;
+}) {
+  const isReconnecting = mode === "reconnecting";
+  const title =
+    mode === "loading"
+      ? "Loading live topology"
+      : isReconnecting
+        ? "Reconnecting to live activity"
+        : null;
+  const status =
+    mode === "loading"
+      ? "Preparing the latest activity"
+      : isReconnecting
+        ? "Showing the last available topology"
+        : null;
 
   return (
     <section
-      className="relative isolate flex min-h-[25rem] items-center justify-center overflow-hidden rounded-xl border border-border bg-surface px-5 py-10 sm:px-8"
+      className="pti-live-radar relative isolate flex min-h-[25rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-border px-5 py-10 sm:px-8"
       aria-label="Live honeypot activity"
     >
+      <LiveRadarOverlay reducedMotion={reducedMotion} />
       <div
-        className="pointer-events-none absolute inset-0 opacity-50"
-        style={{
-          backgroundImage: "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
-          backgroundSize: "2.5rem 2.5rem",
-          maskImage: "radial-gradient(ellipse at center, black 5%, transparent 72%)",
-        }}
+        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full`}
         aria-hidden="true"
       />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/10" aria-hidden="true" />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/5" aria-hidden="true" />
-      <div className="relative mx-auto flex max-w-lg flex-col items-center rounded-2xl border border-border bg-surface/95 px-6 py-5 text-center shadow-xl backdrop-blur-sm sm:px-8">
-        <div className="relative mb-4 grid h-12 w-12 place-items-center rounded-full border border-success/30 bg-success-subtle text-success shadow-lg">
-          <span className="absolute inset-1.5 rounded-full border border-success/20" aria-hidden="true" />
-          <ScanLine className="h-5 w-5" aria-hidden="true" />
-        </div>
-        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          <span className="ui-badge border-success/30 bg-success-subtle text-success">Honeypot quiet</span>
-          <span className={`ui-badge ${isLive ? "border-success/30 bg-success-subtle text-success" : "border-warning-border bg-warning-subtle text-warning"}`}>
-            <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${isLive ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
-            {isLive ? "Live monitoring" : "Monitoring reconnecting"}
-          </span>
-        </div>
-        <h3 className="text-base font-semibold text-text">No active honeypot sessions</h3>
-        <p className="mt-2 max-w-md text-sm leading-6 text-text-muted">
-          No attacker is currently connected. Live filesystem activity will appear here as soon as a verified session begins.
-        </p>
-        <div className="mt-5 flex flex-wrap justify-center gap-2 text-xs">
-          <span className="rounded-full border border-border bg-surface px-3 py-1.5 font-medium text-text">
-            <span className="mr-1.5 font-mono text-success">0</span> active now
-          </span>
-          {closedSessionCount > 0 && (
-            <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 font-medium text-warning">
-              {retainedLabel} in Directory
-            </span>
+
+      {(title || (isReconnecting && onReconnect)) && (
+        <div className="pti-live-radar-status absolute left-1/2 top-1/2 z-10 flex w-full max-w-lg -translate-x-1/2 flex-col items-center px-6 pt-14 text-center sm:px-8">
+          {title && (
+            <div role="status" aria-live="polite">
+              <h3 className="text-lg font-semibold text-text">{title}</h3>
+              {status && (
+                <p className={`pti-live-radar-status-line is-${mode} mt-2 flex items-center justify-center gap-2 text-sm`}>
+                  <span className="pti-listening-status-dot h-2 w-2 rounded-full" aria-hidden="true" />
+                  {status}
+                </p>
+              )}
+            </div>
+          )}
+
+          {isReconnecting && onReconnect && (
+            <div className="mt-5 flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                onClick={onReconnect}
+                className="pti-live-radar-action is-warning rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Reconnect stream
+              </button>
+            </div>
           )}
         </div>
-      </div>
+      )}
     </section>
   );
 }
@@ -267,6 +599,8 @@ export function TopologyCanvas({
   className,
 }: TopologyCanvasProps) {
   const isAuditMode = presentationContext.mode === "audit";
+  const isEmptyLiveState = !isAuditMode && (!snapshot || snapshot.sessions.length === 0);
+  const showLiveRadarStandby = !isAuditMode && snapshot?.sessions.length === 0;
   const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
   const isFailedHop = activeHop?.isFailedAttempt === true || activeHop?.action === "failed_change";
   const failedHopMessage = isFailedHop
@@ -873,6 +1207,7 @@ export function TopologyCanvas({
           effectiveDensityMode={effectiveDensityMode}
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
+          isEmptyLiveState={isEmptyLiveState}
           isAuditMode={isAuditMode}
           transitionDisplayMode={transitionDisplayMode}
           setTransitionDisplayMode={setTransitionDisplayMode}
@@ -881,7 +1216,7 @@ export function TopologyCanvas({
       </TopologyCanvasHeader>
 
       {regionStatus === "error" && !snapshot ? (
-        <div className="p-5">
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
           <RegionState
             kind="error"
             title="Filesystem activity unavailable"
@@ -889,16 +1224,24 @@ export function TopologyCanvas({
           />
         </div>
       ) : regionStatus === "loading" && !snapshot ? (
-        <div className="p-5">
-          <RegionState
-            kind="loading"
-            title="Mapping Decoy Filesystem Topology..."
-            description="Tracing attacker working directories, file hops, and touch events"
-            variant="topology"
-          />
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
+          {isAuditMode ? (
+            <RegionState
+              kind="loading"
+              title="Loading audit topology..."
+              description="Preparing retained filesystem evidence for replay."
+              variant="topology"
+            />
+          ) : (
+            <LiveTopologyStandby
+              mode="loading"
+              onReconnect={onReconnect}
+              reducedMotion={Boolean(reducedMotion)}
+            />
+          )}
         </div>
       ) : !snapshot?.nodes.length ? (
-        <div className="p-5">
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
           {failedHopMessage && (
             <div
               role="status"
@@ -917,9 +1260,16 @@ export function TopologyCanvas({
             </div>
           )}
           {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
-            <HoneypotQuietState
-              closedSessionCount={snapshot.recentClosedSessions.length}
-              streamState={streamState}
+            <LiveTopologyStandby
+              mode={
+                streamState === "live"
+                  ? "listening"
+                  : streamState === "connecting"
+                    ? "loading"
+                    : "reconnecting"
+              }
+              onReconnect={onReconnect}
+              reducedMotion={Boolean(reducedMotion)}
             />
           ) : (
             <RegionState
@@ -956,16 +1306,22 @@ export function TopologyCanvas({
                 role="region"
                 aria-label="Filesystem topology map workspace. Use arrow keys to pan, scroll or pinch to zoom."
                 onKeyDown={onSurfaceKeyDown}
-                className="relative min-h-[380px] flex-1 overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={`relative min-h-[380px] flex-1 overflow-hidden p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${showLiveRadarStandby ? "pti-live-radar" : "bg-surface-subtle"}`}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerEnd}
                 onPointerCancel={onPointerEnd}
               >
-                <div
-                  className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
-                  aria-hidden="true"
-                />
+                {isAuditMode ? (
+                  <div
+                    className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
+                    aria-hidden="true"
+                  />
+                ) : showLiveRadarStandby ? (
+                  <LiveRadarOverlay showGrid={showGrid} reducedMotion={Boolean(reducedMotion)} />
+                ) : (
+                  showGrid && <div className="pti-live-radar-grid pointer-events-none absolute inset-0" aria-hidden="true" />
+                )}
 
                 <AnimatePresence initial={false}>
                   {!isAuditMode && freshnessState.isDegraded && (
@@ -1084,7 +1440,7 @@ export function TopologyCanvas({
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="absolute origin-top-left overflow-visible"
+                  className={`absolute origin-top-left overflow-visible ${isAuditMode ? "" : "z-10"}`}
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion
