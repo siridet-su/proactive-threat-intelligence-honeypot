@@ -84,7 +84,7 @@ import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
 // Fixed SVG viewBox units; this does not represent physical distance or filesystem scale.
 const LIVE_RADAR_CANVAS_SIZE = 1000;
-const LIVE_RADAR_CANVAS_CORNER_RADIUS_PX = 12;
+const LIVE_RADAR_WAVE_OVERSCAN_PX = 16;
 
 function sameElementBounds(
   left: Record<string, GraphElementBounds>,
@@ -262,6 +262,7 @@ function LiveRadarOverlay({
   reducedMotion?: boolean;
 }) {
   const radarOverlayRef = useRef<HTMLDivElement>(null);
+  const radarWaveSvgRef = useRef<SVGSVGElement>(null);
   const radarSweepCanvasRef = useRef<HTMLCanvasElement>(null);
 
   useLayoutEffect(() => {
@@ -277,24 +278,26 @@ function LiveRadarOverlay({
       overlay.style.setProperty("--pti-radar-corner-angle-positive", `${inwardAngle}deg`);
       overlay.style.setProperty("--pti-radar-corner-angle-negative", `${-inwardAngle}deg`);
 
-      // SVG viewBox units scale with the square plane; derive rx from its physical
-      // canvas radius so both animated waves keep the canvas's rounded corners.
-      const logicalRadius =
-        (LIVE_RADAR_CANVAS_CORNER_RADIUS_PX * LIVE_RADAR_CANVAS_SIZE) / Math.min(width, height);
-      overlay.querySelectorAll<SVGRectElement>(".pti-live-radar-wave").forEach((rect) => {
-        const rectWidth = Number(rect.getAttribute("width"));
-        const rectHeight = Number(rect.getAttribute("height"));
-        const radius = Math.min(logicalRadius, rectWidth / 2, rectHeight / 2);
-        rect.setAttribute("rx", String(radius));
-        rect.setAttribute("ry", String(radius));
-      });
+      // Keep SVG user units aligned with CSS pixels so this remains a true
+      // circle on rectangular canvases, then overscan the farthest corner.
+      const waveSvg = radarWaveSvgRef.current;
+      const wave = waveSvg?.querySelector<SVGCircleElement>(".pti-live-radar-wave");
+      if (waveSvg && wave) {
+        waveSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+        wave.setAttribute("cx", String(width / 2));
+        wave.setAttribute("cy", String(height / 2));
+        wave.setAttribute(
+          "r",
+          String(Math.hypot(width / 2, height / 2) + LIVE_RADAR_WAVE_OVERSCAN_PX),
+        );
+      }
     };
 
     updateCornerAngles();
     const observer = new ResizeObserver(updateCornerAngles);
     observer.observe(overlay);
     return () => observer.disconnect();
-  }, []);
+  }, [reducedMotion]);
 
   useEffect(() => {
     if (reducedMotion) return;
@@ -384,28 +387,22 @@ function LiveRadarOverlay({
       <div className="pti-live-radar-crosshair absolute inset-0" />
       {!reducedMotion && (
         <svg
+          ref={radarWaveSvgRef}
           className="absolute inset-0 h-full w-full"
           viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
-          preserveAspectRatio="xMidYMid meet"
+          preserveAspectRatio="none"
         >
-          <rect
-            className="pti-live-radar-wave is-outer"
-            x="38"
-            y="38"
-            width="924"
-            height="924"
-            rx="18"
-            ry="18"
-          />
-          <rect
-            className="pti-live-radar-wave is-inner"
-            x="168"
-            y="168"
-            width="664"
-            height="664"
-            rx="18"
-            ry="18"
-          />
+          <g className="pti-live-radar-wave-shell">
+            <circle
+              className="pti-live-radar-wave"
+              cx={LIVE_RADAR_CANVAS_SIZE / 2}
+              cy={LIVE_RADAR_CANVAS_SIZE / 2}
+              r={
+                Math.hypot(LIVE_RADAR_CANVAS_SIZE / 2, LIVE_RADAR_CANVAS_SIZE / 2) +
+                LIVE_RADAR_WAVE_OVERSCAN_PX
+              }
+            />
+          </g>
         </svg>
       )}
 

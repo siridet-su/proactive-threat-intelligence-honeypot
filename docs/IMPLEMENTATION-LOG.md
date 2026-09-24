@@ -768,3 +768,33 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the `disabled={isEmptyLiveState && !isTopologyExpanded}` condition on the fullscreen toggle and revert the current-state clarification; no host rollback is required.
 - Follow-up: confirm both fullscreen entry and exit work while the other Live toolbar actions remain disabled.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Make the paired standby radar waves circular
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: change the two expanding empty-state radar pulses from rounded squares to circles without changing their double-beat motion.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `d9f2fbb`; this refinement is uncommitted.
+- Repository changes: replace the outer and inner SVG wave rectangles with centered circles of 462 and 332 logical-unit radii; remove responsive corner-radius calculations that only applied to the former rounded rectangles; preserve the 5.6-second cycle, 620ms inner-wave delay, existing expansion/fade keyframes, reduced-motion handling, and empty-state visibility rules; update `FS-024` current criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; an unauthenticated request to `/filesystem-activity` redirected to login with HTTP 307.
+- Validation performed and outcome: `git diff --check` passed. No authenticated browser rendering or HMR compilation was confirmed for this refinement. No automated tests were run.
+- Not performed / deferred: authenticated visual review of the circular pulses, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG change in the empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the two wave SVG rectangles and their responsive corner-radius calculation, then revert the corresponding current-state criterion; no host rollback is required.
+- Follow-up: review pulse alignment and reduced-motion behavior in the authenticated UI in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Use one dissipating wave across the Live canvas
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: replace the two standby pulses with one circular wave that reaches beyond every canvas corner, loses intensity as it expands, then pauses before its next release.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `d9f2fbb`; this refinement is uncommitted.
+- Repository changes: render one SVG circle; align its viewBox to measured CSS-pixel canvas dimensions so it remains circular on rectangular planes; calculate its radius as half the canvas diagonal plus 16px; ease the expansion to full reach by 80% of a 7-second cycle; reduce stroke opacity and attached glow from strong at the source to faint at the corner, fade it away after it clears the boundary, and leave approximately 0.6 seconds of invisible hold before restarting; preserve empty-state and reduced-motion gating; update `FS-024` current criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development authentication was active during the `/filesystem-activity` request.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles in 90ms; `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of the wave on wide and tall canvases, authenticated screenshot review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG/CSS change in the empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the paired pulse circles, fixed square viewBox, and previous two-wave keyframes; revert the current-state criterion and appended decision/update records; no host rollback is required.
+- Follow-up: inspect circle clipping and the fade/pause cadence at multiple canvas aspect ratios and in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).

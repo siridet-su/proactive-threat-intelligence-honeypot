@@ -317,6 +317,7 @@
   --pti-radar-stroke-width: 1.5px;
   --pti-radar-hub-glow: color-mix(in srgb, var(--primary) 12%, transparent);
   --pti-radar-edge-glow: color-mix(in srgb, var(--primary) 48%, transparent);
+  --pti-radar-wave-glow: color-mix(in srgb, var(--primary) 72%, transparent);
   --pti-radar-control-bg: color-mix(in srgb, var(--surface) 94%, var(--primary));
   color: var(--pti-radar-text);
   background: var(--pti-radar-bg);
@@ -375,21 +376,20 @@
   transform: translateY(-50%);
 }
 
+.pti-live-radar-wave-shell {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pti-radar-wave-expand 7s cubic-bezier(0.18, 0.78, 0.25, 1) infinite both;
+}
+
 .pti-live-radar-wave {
   fill: none;
   stroke: var(--pti-radar-accent);
   stroke-opacity: 0;
-  stroke-width: 1.25;
+  stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: pti-radar-double-wave-outer 5.6s cubic-bezier(0.24, 0.72, 0.28, 1) infinite both;
-}
-
-.pti-live-radar-wave.is-inner {
-  stroke-width: 1;
-  animation-name: pti-radar-double-wave-inner;
-  animation-delay: 620ms;
+  filter: drop-shadow(0 0 14px var(--pti-radar-wave-glow));
+  animation: pti-radar-wave-energy 7s cubic-bezier(0.18, 0.78, 0.25, 1) infinite both;
 }
 
 .pti-live-radar-corner-tick {
@@ -555,48 +555,33 @@
     animation: none;
   }
 
-  .pti-live-radar-wave.is-outer,
-  .pti-live-radar-wave.is-inner {
+  .pti-live-radar-wave-shell,
+  .pti-live-radar-wave {
     animation: none;
     stroke-opacity: 0;
   }
 
 }
 
-@keyframes pti-radar-double-wave-outer {
-  0%, 100% {
-    transform: scale(0.025);
-    stroke-opacity: 0;
+@keyframes pti-radar-wave-expand {
+  0% {
+    transform: scale(0.012);
   }
-  4% {
-    stroke-opacity: 0.42;
-  }
-  34% {
+  80%, 100% {
     transform: scale(1);
-    stroke-opacity: 0.38;
-    animation-timing-function: linear;
-  }
-  53% {
-    transform: scale(1);
-    stroke-opacity: 0;
   }
 }
 
-@keyframes pti-radar-double-wave-inner {
-  0%, 9%, 100% {
-    transform: scale(0.025);
-    stroke-opacity: 0;
+/* The wave clears the corners at 80%, then leaves a 0.63-second quiet gap. */
+@keyframes pti-radar-wave-energy {
+  0% {
+    stroke-opacity: 0.78;
   }
-  14% {
-    stroke-opacity: 0.36;
+  80% {
+    stroke-opacity: 0.14;
+    animation-timing-function: ease-out;
   }
-  48% {
-    transform: scale(1);
-    stroke-opacity: 0.32;
-    animation-timing-function: linear;
-  }
-  72% {
-    transform: scale(1);
+  91%, 100% {
     stroke-opacity: 0;
   }
 }
