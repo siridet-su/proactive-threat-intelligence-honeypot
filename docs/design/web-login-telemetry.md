@@ -107,6 +107,7 @@ when the contract changes incompatibly.
 | `timestamp` | Time the app observed the submission, UTC | Required; keep separate `ingested_at` |
 | `source`, `log_type`, `event_type`, `schema_version` | Producer and schema identity | Fixed values for this event kind |
 | `network.src_ip` | Observed client address | Derive from peer; honor forwarded address only from configured trusted proxies |
+| `network.src_port` | Observed TCP client source port (sensor JSON: `source_port`) | Optional integer 1–65535. Use the socket peer port directly; behind a configured trusted proxy, accept only its overwritten `X-Forwarded-Client-Port`. Missing/invalid values remain absent; this is transient connection metadata, not an identity. |
 | `http.scheme`, `http.method`, `http.path`, `http.query` | Request transport and target/context | Scheme and method are bounded; query/path may themselves contain attack input; scheme drives destination port 80/443 downstream |
 | `http.headers` | Selected Host, User-Agent, Referer, Origin, Accept-Language | Bounded allowlist; do not capture cookies or Authorization |
 | `web_login.database`, `web_login.username`, `web_login.password`, `web_login.redirect`, `web_login.remember` | Values submitted in the login form (source JSON uses `odoo_login`) | Raw Redis preserves all bounded values, including plaintext password and empty strings. Mongo normalization preserves non-empty values; the generic compactor currently omits empty strings. |

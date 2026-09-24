@@ -866,3 +866,47 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [web-corp data access](../integrations/web-corp/DATA-ACCESS.md),
   [dashboard integration](../dashboard-v2/docs/WEB_CORP_HTTP_INTEGRATION.md),
   and [live validation](WEB_CORP_HTTP_LIVE_VALIDATION_20260925.md).
+
+### 2026-09-25 — Preserve Web-corp client source ports
+
+- Status: repository implementation and tests prepared; not deployed.
+- Scope and intent: capture the observed client TCP source port for new
+  Web-corp login attempts and carry it into MongoDB's `network.src_port`,
+  without mislabeling a reverse proxy's own socket port as the client port.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  uncommitted working-tree change.
+- Repository changes: added the optional sensor `source_port` field; added
+  trusted-proxy-only `X-Forwarded-Client-Port` handling; validated and forwarded
+  it as Redis `src_port`; mapped it to MongoDB `network.src_port`; tested the
+  existing dashboard projection; and documented the accepted boundary in
+  ADR-0006, the telemetry design, runbooks, and data-access guide.
+- Host/environment changes actually applied: none. No deployed image/binary,
+  container, systemd unit, database, external Compose file, or proxy config was
+  changed.
+- Runtime/exposure state: no fresh runtime check or restart was performed.
+  Existing Web-corp events are unchanged; this additive optional field requires
+  no MongoDB migration, and historical records cannot be backfilled.
+- Validation performed and outcome: all 14 Web-corp tests passed in a
+  network-disabled container with read-only source; collector and processor
+  `go test ./...` passed; four focused dashboard HTTP tests passed (16 tests);
+  `git diff --check` passed. Tests cover direct, trusted-proxy, and Uvicorn-
+  rewritten peer-port behavior, range validation, Mongo normalization, and the
+  dashboard projection.
+- Not performed / deferred: no new login event was sent to a live sensor,
+  Redis, or MongoDB; no live database query, proxy-header configuration test,
+  image/binary rollout, or service restart was performed.
+- Risks and data handling: source ports are transient and can change under NAT;
+  they are not actor identities. Only a peer in configured
+  `WEB_TRUSTED_PROXY_CIDRS` may assert a forwarded client port, and Uvicorn's
+  `--forwarded-allow-ips` must match that peer set if its middleware rewrites
+  the client scope. The proxy must overwrite the header. Missing or invalid
+  forwarded ports remain absent.
+- Rollback: revert the source, pipeline, tests, ADR, and documentation changes;
+  no runtime rollback is needed because deployment was not performed.
+- Follow-up: deploy the reviewed Web-corp, collector, and processor changes in
+  dependency order, then verify one synthetic event in `honeypot_db.events`
+  without retrieving or recording submitted credentials.
+- Related material: [ADR-0006](adr/ADR-0006-web-client-source-port.md),
+  [web-login telemetry design](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md), and
+  [data-access guide](../integrations/web-corp/DATA-ACCESS.md).

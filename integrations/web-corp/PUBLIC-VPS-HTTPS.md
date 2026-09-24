@@ -120,8 +120,9 @@ WireGuard keys, or credential-bearing data in this repository.
    web-corp backend address/port on the Pi's WireGuard side. At the edge,
    overwrite (do not blindly preserve client-supplied) forwarding headers:
    `X-Forwarded-For` with the actual client address and `X-Forwarded-Proto`
-   with the external scheme. Keep the backend port inaccessible except over
-   the intended tunnel.
+   with the external scheme, and `X-Forwarded-Client-Port` with the original
+   peer port (for Nginx, `$remote_port`). Keep the backend port inaccessible
+   except over the intended tunnel.
 
 6. **Configure and test the trusted-proxy boundary.** The current app records
    `request.url.scheme` in `http.scheme`. Behind a TLS-terminating proxy, its
@@ -130,8 +131,13 @@ WireGuard keys, or credential-bearing data in this repository.
    handling (or equivalent tested middleware) to trust only the actual
    immediate VPS proxy peer as seen by the app/container, and verify that it
    sets both the original client address and external scheme correctly. The
-   app's `WEB_TRUSTED_PROXY_CIDRS` setting only governs its custom
-   `X-Forwarded-For` parsing; it does not by itself set the request scheme.
+   app's `WEB_TRUSTED_PROXY_CIDRS` setting governs its custom
+   `X-Forwarded-For` and `X-Forwarded-Client-Port` parsing; it does not by
+   itself set the request scheme. Configure Uvicorn's `--forwarded-allow-ips`
+   with exactly the same immediate proxy peers so its request rewrite and the
+   app's proxy-port trust boundary agree; never use `*`. A missing/invalid
+   forwarded client port is stored as unknown rather than replaced with the
+   proxy's own socket port.
    Account for any Docker/NAT address translation when identifying the peer.
    Uvicorn's `--forwarded-allow-ips` controls which proxy peers it trusts; see
    its [settings documentation](https://www.uvicorn.org/settings/). Never

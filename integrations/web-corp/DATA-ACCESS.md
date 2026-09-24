@@ -130,6 +130,7 @@ webLoginDb.events.find(
     event_id: 1,
     timestamp: 1,
     "network.src_ip": 1,
+    "network.src_port": 1,
     "network.dst_port": 1,
     "network.service": 1,
     "web_login.database": 1,
@@ -145,6 +146,11 @@ webLoginDb.events.find(
   }
 ).sort({ timestamp: -1 }).limit(20).toArray();
 ```
+
+`network.src_port` is optional connection metadata. New direct-peer events can
+include it; events behind a trusted proxy include the original client port only
+when that proxy overwrites and supplies `X-Forwarded-Client-Port`. Historical
+events cannot be backfilled, so older records may not have this field.
 
 The raw Redis source event preserves empty strings. The processor's normalized
 Mongo/canonical event omits empty strings during compaction, so a missing

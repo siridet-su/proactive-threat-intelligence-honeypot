@@ -52,10 +52,11 @@ func TestNormalizeHTTPSLoginPreservesTransportAndPort(t *testing.T) {
 
 func TestNormalizeWebLoginEventPreservesAdminDataWithoutCommandLeak(t *testing.T) {
 	payload := syntheticWebLoginPayload()
+	payload["source_port"] = float64(49152)
 	values := map[string]any{
 		"source": "web-corp", "log_type": "web_login",
 		"dedup_id": "0123456789abcdef0123456789abcdef",
-		"src_ip":   "198.51.100.20", "dst_ip": "10.58.33.42", "dst_port": "80",
+		"src_ip":   "198.51.100.20", "src_port": "49152", "dst_ip": "10.58.33.42", "dst_port": "80",
 		"sensor_ip": "10.58.33.42", "sensor_name": "test-sensor",
 		"ingested_at": "2026-09-24T12:00:01Z",
 	}
@@ -93,6 +94,21 @@ func TestNormalizeWebLoginEventPreservesAdminDataWithoutCommandLeak(t *testing.T
 	}
 	if getNestedString(event, "network.src_ip") != "198.51.100.20" {
 		t.Fatalf("source IP was not normalized: %#v", event["network"])
+	}
+	if event["network"].(map[string]any)["src_port"] != 49152 {
+		t.Fatalf("source port was not normalized as a numeric field: %#v", event["network"])
+	}
+}
+
+func TestNormalizeWebCorpSourcePortFromRedisEnvelope(t *testing.T) {
+	payload := syntheticWebLoginPayload()
+	values := map[string]any{
+		"source": "web-corp", "log_type": "web_login", "src_ip": "198.51.100.20",
+		"src_port": "52341", "dst_ip": "10.58.33.42", "dst_port": "80",
+	}
+	event := normalizeEvent("raw:web-login", "1-0", values, payload)
+	if event["network"].(map[string]any)["src_port"] != 52341 {
+		t.Fatalf("source port from Redis envelope missing: %#v", event["network"])
 	}
 }
 

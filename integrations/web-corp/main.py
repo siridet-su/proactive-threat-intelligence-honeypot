@@ -156,26 +156,67 @@ TRUSTED_PROXY_NETWORKS = _trusted_proxy_networks()
 app = FastAPI()
 
 
+def _trusted_proxy_peer(request: Request) -> bool:
+    """Return whether the immediate socket peer is an explicitly trusted proxy."""
+    if not request.client:
+        return False
+    try:
+        peer_ip = ipaddress.ip_address(request.client.host.split("%", 1)[0])
+    except ValueError:
+        return False
+    return any(peer_ip in network for network in TRUSTED_PROXY_NETWORKS)
+
+
+def _valid_port(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isascii() or not value.isdecimal():
+            return None
+        value = int(value)
+    if not isinstance(value, int) or not 1 <= value <= 65535:
+        return None
+    return value
+
+
+def _client_port(request: Request) -> int | None:
+    """Return a direct peer port or one asserted by a configured trusted proxy."""
+    if not request.client:
+        return None
+    if _trusted_proxy_peer(request):
+        # The proxy must overwrite this header with its original peer's port.
+        # Missing/invalid values stay unknown; never mislabel the proxy's own
+        # upstream socket port as the attacker's source port.
+        return _valid_port(request.headers.get("x-forwarded-client-port", ""))
+    if (
+        request.client.port == 0
+        and TRUSTED_PROXY_NETWORKS
+        and request.headers.get("x-forwarded-for")
+    ):
+        # Uvicorn's ProxyHeadersMiddleware rewrites a trusted X-Forwarded-For
+        # client to (client_ip, 0) when the header carries no port. In that
+        # deployment, WEB_TRUSTED_PROXY_CIDRS and Uvicorn's forwarded-allow-ips
+        # must contain the same exact proxy peers (never "*").
+        return _valid_port(request.headers.get("x-forwarded-client-port", ""))
+    return _valid_port(request.client.port)
+
+
 def _client_ip(request: Request) -> str:
     # Direct ZeroTier traffic is the normal path. Never trust a caller-supplied
     # X-Forwarded-For unless the immediate peer is configured as a proxy.
     peer = request.client.host if request.client else "0.0.0.0"
     xff = request.headers.get("x-forwarded-for")
-    if xff and TRUSTED_PROXY_NETWORKS:
-        try:
-            peer_ip = ipaddress.ip_address(peer.split("%", 1)[0])
-        except ValueError:
-            peer_ip = None
-        if peer_ip and any(peer_ip in network for network in TRUSTED_PROXY_NETWORKS):
-            # Walk from the proxy-facing end. The first non-proxy address is the
-            # client asserted by the trusted chain; ignore malformed entries.
-            for forwarded in reversed(xff.split(",")[-8:]):
-                try:
-                    candidate = ipaddress.ip_address(forwarded.strip().split("%", 1)[0])
-                except ValueError:
-                    continue
-                if not any(candidate in network for network in TRUSTED_PROXY_NETWORKS):
-                    return str(candidate)
+    if xff and _trusted_proxy_peer(request):
+        # Walk from the proxy-facing end. The first non-proxy address is the
+        # client asserted by the trusted chain; ignore malformed entries.
+        for forwarded in reversed(xff.split(",")[-8:]):
+            try:
+                candidate = ipaddress.ip_address(forwarded.strip().split("%", 1)[0])
+            except ValueError:
+                continue
+            if not any(candidate in network for network in TRUSTED_PROXY_NETWORKS):
+                return str(candidate)
     return peer
 
 
@@ -241,6 +282,7 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
             "+00:00", "Z"
         ),
         "source_ip": ip,
+        "source_port": _client_port(request),
         "http": {
             "scheme": _bounded_login_value(
                 request.url.scheme, "http.scheme", 16, truncated_fields

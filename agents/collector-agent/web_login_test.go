@@ -92,6 +92,48 @@ func TestWebLoginDestinationPortFollowsScheme(t *testing.T) {
 	}
 }
 
+func TestWebLoginSourcePortIsOptionalAndRangeBounded(t *testing.T) {
+	payload := validWebLoginPayload()
+	if port, valid := webLoginSourcePort(payload); !valid || port != "" {
+		t.Fatalf("legacy payload source port = %q, valid = %v; want empty and valid", port, valid)
+	}
+	payload["source_port"] = nil
+	if _, _, err := validateWebLoginPayload(payload); err != nil {
+		t.Fatalf("null optional source port rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		value any
+		want  string
+	}{
+		{value: float64(1), want: "1"},
+		{value: float64(49152), want: "49152"},
+		{value: float64(65535), want: "65535"},
+	} {
+		payload = validWebLoginPayload()
+		payload["source_port"] = test.value
+		if port, valid := webLoginSourcePort(payload); !valid || port != test.want {
+			t.Fatalf("source port %v = %q, valid = %v; want %q and valid", test.value, port, valid, test.want)
+		}
+		if _, _, err := validateWebLoginPayload(payload); err != nil {
+			t.Fatalf("valid source port %v rejected: %v", test.value, err)
+		}
+	}
+
+	for _, invalid := range []any{
+		float64(0), float64(65536), float64(49152.5), float64(-1), "49152", true,
+	} {
+		payload = validWebLoginPayload()
+		payload["source_port"] = invalid
+		if _, valid := webLoginSourcePort(payload); valid {
+			t.Fatalf("invalid source port %v was accepted", invalid)
+		}
+		if _, _, err := validateWebLoginPayload(payload); err == nil {
+			t.Fatalf("invalid source port %v passed payload validation", invalid)
+		}
+	}
+}
+
 func TestValidateWebHTTPPayloadAndSessionBoundary(t *testing.T) {
 	payload := validWebLoginPayload()
 	payload["event"] = "web_http_request"

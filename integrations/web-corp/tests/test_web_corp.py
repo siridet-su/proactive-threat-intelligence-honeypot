@@ -1,11 +1,13 @@
 """In-process tests for the corporate web decoy and its local login spool."""
 
+import ipaddress
 import json
 import os
 import stat
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -74,6 +76,9 @@ class WebCorpTests(TestCase):
         self.assertEqual(event["http"]["user_agent"], "web-corp-test/1.0")
         self.assertEqual(event["http"]["accept_language"], "th-TH")
         self.assertEqual(event["source_ip"], "testclient")
+        self.assertIsInstance(event["source_port"], int)
+        self.assertGreaterEqual(event["source_port"], 1)
+        self.assertLessEqual(event["source_port"], 65535)
         self.assertEqual(event["result"], "rejected")
         self.assertEqual(event["http"]["scheme"], "http")
         self.assertEqual(event["truncated_fields"], [])
@@ -83,6 +88,49 @@ class WebCorpTests(TestCase):
         self.assertEqual(stat.S_IMODE(event_file.stat().st_mode), 0o600)
         writer_lock = Path(self.spool.name) / ".write.lock"
         self.assertEqual(stat.S_IMODE(writer_lock.stat().st_mode), 0o600)
+
+    def test_direct_source_port_comes_from_the_socket_peer(self):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host="198.51.100.10", port=49152),
+            headers={"x-forwarded-client-port": "22"},
+        )
+        self.assertEqual(main._client_port(request), 49152)
+
+    def test_trusted_proxy_source_port_requires_a_valid_forwarded_value(self):
+        with patch.object(
+            main, "TRUSTED_PROXY_NETWORKS", (ipaddress.ip_network("192.0.2.0/24"),)
+        ):
+            request = SimpleNamespace(
+                client=SimpleNamespace(host="192.0.2.10", port=40123),
+                headers={"x-forwarded-client-port": "53124"},
+            )
+            self.assertEqual(main._client_port(request), 53124)
+
+            for forwarded_port in ("", "0", "65536", "53,54", "spoofed"):
+                request.headers["x-forwarded-client-port"] = forwarded_port
+                self.assertIsNone(main._client_port(request), forwarded_port)
+
+    def test_untrusted_forwarded_port_is_ignored(self):
+        request = SimpleNamespace(
+            client=SimpleNamespace(host="198.51.100.10", port=49152),
+            headers={"x-forwarded-client-port": "22"},
+        )
+        self.assertEqual(main._client_port(request), 49152)
+
+    def test_uvicorn_rewritten_trusted_proxy_client_uses_forwarded_port(self):
+        with patch.object(
+            main, "TRUSTED_PROXY_NETWORKS", (ipaddress.ip_network("192.0.2.0/24"),)
+        ):
+            # Uvicorn's proxy middleware replaces the trusted proxy peer with
+            # the forwarded client and uses port 0 when XFF has no port.
+            request = SimpleNamespace(
+                client=SimpleNamespace(host="198.51.100.10", port=0),
+                headers={
+                    "x-forwarded-for": "198.51.100.10",
+                    "x-forwarded-client-port": "53124",
+                },
+            )
+            self.assertEqual(main._client_port(request), 53124)
 
     def test_https_login_records_scheme_and_still_rejects(self):
         with TestClient(main.app, base_url="https://testserver") as client:
