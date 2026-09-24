@@ -320,6 +320,7 @@ def _normalize_model2_item(label: str, item: Mapping[str, Any], top_status: str)
 T1046_NOT_OBSERVED_REASONS = frozenset(
     {
         "t1046_not_observed",
+        "t1046_unbound_sensor_context",
         "t1046_multiservice_scan_evidence_missing",
         "t1046_scan_evidence_invalid",
     }
@@ -365,6 +366,8 @@ def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
                 return False, "t1046_not_observed"
         return False, "t1046_multiservice_scan_evidence_missing"
     if marker.get("observed") is not True:
+        if marker.get("reason") == "t1046_unbound_sensor_context" and marker.get("binding_mode") == "NO_EXACT_MULTISERVICE_BINDING":
+            return False, "t1046_unbound_sensor_context"
         return False, "t1046_not_observed"
     if _clean(marker.get("scope")).upper() not in {
         "MULTISERVICE_SCAN",
@@ -399,7 +402,9 @@ def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
     for field in ("session_id", "run_id", "measurement_id", "episode_id"):
         marker_value = _clean(marker.get(field))
         result_value = _clean(value.get(field))
-        if marker_value and marker_value != result_value:
+        # Source/time coincidence is not a measurement binding. All four
+        # identities must be present on both sides and agree exactly.
+        if not marker_value or not result_value or marker_value != result_value:
             return False, "t1046_scan_evidence_invalid"
     return True, "exact_bound_multiservice_scan"
 

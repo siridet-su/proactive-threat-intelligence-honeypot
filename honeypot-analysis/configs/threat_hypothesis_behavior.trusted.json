@@ -66,7 +66,7 @@
       {
         "artifact_id": "typed-chain-selector-runtime",
         "path": "production/reporting/typed_semantic_chain_selection.py",
-        "sha256": "13bbbb1d3d1e327cb7a3efa9ef088c1577da45f031673d03b2ce9c7b5c506005",
+        "sha256": "dd16e8e34cf731958f88e937c35f263e280e166b7513299d19041cb9ef79e537",
         "purpose": "same-entity, chronological and outcome-bounded chain selection",
         "supports": [
           "attempt-only incomplete hypothesis selection without canonical promotion"

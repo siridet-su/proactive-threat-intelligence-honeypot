@@ -11,7 +11,7 @@ export const SAFE_PROVIDER_CONTEXT_KEYS = new Set([
   "malicious", "suspicious", "harmless", "undetected", "timeout",
   "detection_numerator", "detection_denominator", "meaningful_name",
   "type", "reputation_label", "pulses", "asn", "organization", "isp",
-  "country", "ports", "services", "cpe", "vulnerabilities", "tags",
+  "country", "ports", "services", "service_product_summary", "cpe", "vulnerabilities", "tags",
   "hostnames", "last_update", "abuse_confidence_score", "total_reports",
   "categories", "usage_type", "country_code", "last_reported_at",
 ]);

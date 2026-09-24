@@ -398,6 +398,7 @@ def test_v4_consumers_share_findings_hypotheses_refs_and_provenance(tmp_path: Pa
     )
     summary = _report_summary(report, {})
     assert summary["schema_version"] == "session_assessment.v4"
+    assert summary["ai_enrichment_scope"] == "immutable_deterministic_assessment_at_generation"
     assert report["behavioral_findings"][0]["statement"] in summary["summary"]
     panel = _render_report_panel({
         "report_row": {"payload": report},

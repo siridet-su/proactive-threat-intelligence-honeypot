@@ -376,10 +376,12 @@ def test_threat_stream_ignores_poll_timestamp_but_emits_changed_session(
     handler.end_headers = lambda: None
     handler.wfile = io.BytesIO()
     calls = 0
+    requested_limits: list[int] = []
 
     def snapshot(*_args, **_kwargs):
         nonlocal calls
         calls += 1
+        requested_limits.append(_kwargs["session_limit"])
         return {
             "ok": True,
             "timestamp": f"2026-09-23T00:00:{calls:02d}Z",
@@ -395,6 +397,7 @@ def test_threat_stream_ignores_poll_timestamp_but_emits_changed_session(
 
     frames = handler.wfile.getvalue()
     assert calls >= 3
+    assert set(requested_limits) == {50}
     assert frames.count(b"event: snapshot\n") == 2
     assert frames.startswith(b"event: ready\n")
 

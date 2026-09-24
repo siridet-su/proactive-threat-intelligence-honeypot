@@ -40,6 +40,13 @@ class _Storage:
                 "status": "accepted",
                 "authority": "non_authoritative_advisory_only",
                 "validation": {"status": "accepted", "reason_code": ""},
+                "validated_advisory": {
+                    "abstained": False,
+                    "selected_finding_ids": ["finding_1", "not a safe identifier"],
+                    "selected_relationship_ids": ["relationship_1"],
+                    "ranked_action_ids": ["action_1"],
+                    "provider_notes": "must-not-render",
+                },
                 "rendered_advisory": {
                     "schema_version": "ai_advisory_rendered.v1",
                     "status": "rendered",
@@ -73,6 +80,13 @@ def test_additive_monitor_loader_keeps_ai_separate_and_non_authoritative() -> No
     )
     assert result["ok"] is True
     assert result["advisory"]["authority"] == "non_authoritative_advisory_only"
+    assert result["advisory"]["validated_advisory"] == {
+        "abstained": False,
+        "selected_finding_ids": ["finding_1"],
+        "selected_relationship_ids": ["relationship_1"],
+        "ranked_action_ids": ["action_1"],
+    }
+    assert "provider_notes" not in str(result)
     assert result["advisory"]["shadow_candidates"]["candidates"][0][
         "status"
     ] == "unverified_ai_candidate"

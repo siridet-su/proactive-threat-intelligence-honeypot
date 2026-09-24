@@ -1,7 +1,7 @@
 {
   "schema_version": "external_ti_source_ip_governance.v2",
   "policy_id": "honeypot-thesis-data-lifecycle.source-ip.external-ti",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "status": "ACTIVE_BOUNDED_PRODUCTION",
   "parent_policy": {
     "policy_id": "honeypot-thesis-data-lifecycle",
@@ -120,7 +120,7 @@
   },
   "request_budgets": {
     "minimum_refresh_interval_seconds": 86400,
-    "max_distinct_source_ips_per_utc_day": 100,
+    "max_distinct_source_ips_per_utc_day": 200,
     "max_attempts_per_provider_per_source_ip_per_window": 1,
     "retries": 0,
     "negative_result_cache_seconds": 86400,
@@ -143,9 +143,9 @@
     "cached_context_may_expire_naturally": true
   },
   "activation": {
-    "activation_scope": "bounded production lookups for newly observed eligible source IPs and observed SHA-256 file hashes; source-IP lookups retain a maximum of 100 distinct targets per UTC day",
-    "owner_authorization": "explicit owner direction to activate useful ETI without Censys",
-    "policy_revision_reason": "owner-authorized OTX SHA-256 lookup activation while preserving source-IP eligibility, provider allowlists, data minimization, and non-authoritative output",
+    "activation_scope": "bounded production lookups for newly observed eligible source IPs and observed SHA-256 file hashes; source-IP lookups retain a maximum of 200 distinct targets per UTC day",
+    "owner_authorization": "explicit owner authorization on 2026-09-24 to increase the daily ETI target limit to 200 without deleting proof-guard records",
+    "policy_revision_reason": "daily source-IP quota increase from 100 to 200 for naturally observed public sources; provider allowlists, eligibility, data minimization, and non-authoritative output remain unchanged",
     "runtime_service_config_requires_hash_binding": true,
     "health_check_and_rollback_required": true
   }

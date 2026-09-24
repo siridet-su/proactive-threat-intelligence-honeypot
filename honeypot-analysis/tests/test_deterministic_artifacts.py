@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -150,6 +151,57 @@ def test_pdf_is_byte_deterministic(tmp_path: Path) -> None:
     or importlib.util.find_spec("pypdf") is None,
     reason="optional PDF renderer/parser unavailable",
 )
+def test_pdf_shows_only_exact_session_model2_binding(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    model2 = {
+        "available": True,
+        "availability": "PARTIAL",
+        "status": "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE_SHADOW",
+        "artifact_sha256": "a" * 64,
+        "binding": {
+            "session_id": session["session_id"],
+            "run_id": "run-fixture-1",
+            "measurement_id": "measurement-fixture-1",
+            "episode_id": "episode-fixture-1",
+        },
+        "unavailable_heads": {"T1046": "t1046_not_observed"},
+    }
+    session["ensemble_evidence"] = {
+        "session_id": session["session_id"], "model2": model2,
+        "results": [{
+            "technique_id": "T1110", "model1_result": None,
+            "model2_result": "PRESENT", "model2_relation": "MODEL2_ONLY",
+        }],
+    }
+    bound_dir = tmp_path / "bound"
+    bound_dir.mkdir(mode=0o700)
+    bound_pdf = Path(write_pdf_report(report, session, bound_dir))
+    bound_text = "\n".join(page.extract_text() or "" for page in PdfReader(bound_pdf).pages)
+    assert "Model2 exact-session shadow evidence" in bound_text
+    assert "Model2-only PRESENT" in bound_text
+    assert "not confirmed observed behavior" in " ".join(bound_text.split())
+    assert "PARTIAL" in bound_text
+    assert "run-fixture-1" in bound_text
+    assert "T1046" in bound_text
+    assert "T1110" in bound_text
+    assert "MODEL2_ONLY" in bound_text
+
+    model2["binding"]["session_id"] = "another-session"
+    unbound_dir = tmp_path / "unbound"
+    unbound_dir.mkdir(mode=0o700)
+    unbound_pdf = Path(write_pdf_report(report, session, unbound_dir))
+    unbound_text = "\n".join(page.extract_text() or "" for page in PdfReader(unbound_pdf).pages)
+    assert "No complete exact-session Model2 binding" in unbound_text
+    assert "run-fixture-1" not in unbound_text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
 def test_pdf_keeps_bounded_cwd_and_otx_pulse_context(tmp_path: Path) -> None:
     from pypdf import PdfReader
 
@@ -179,7 +231,8 @@ def test_pdf_keeps_bounded_cwd_and_otx_pulse_context(tmp_path: Path) -> None:
     assert "Filesystem Activity / Working Directory" in text
     assert "/home/test" in text
     assert "/tmp" in text
-    assert "Example botnet pulse" in text
+    # ReportLab may wrap this table cell between "Example" and "botnet".
+    assert "Example botnet pulse" in re.sub(r"\s+", " ", text)
     assert "MUST_NOT_APPEAR_IN_PDF" not in text
 
 
@@ -310,7 +363,7 @@ def test_pdf_presents_bounded_ti_ai_and_separates_internal_network_context(
     assert "TI_AVAILABLE" in text
     assert "virustotal" in text
     assert "Review the recorded evidence before action." in text
-    assert "Latest provider/cache lookup" in text
+    assert "Last checked" in text
     assert "28 Jul 2026, 17:10:30 ICT" in text
     assert "Redacted before persistence" in text
     assert "Internal Infrastructure Context" in text
@@ -360,6 +413,49 @@ def test_pdf_uses_exact_external_ti_api_status_vocabulary(tmp_path: Path) -> Non
     assert "NO_ELIGIBLE_OBSERVABLE" in text
     assert "NO_ELIGIBLE_DATA" not in text
     assert "LOOKUP_PENDING" not in text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
+def test_pdf_shows_reviewed_legacy_source_ip_provider_context(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    external_ti = {
+        "ok": True,
+        "status": "TI_AVAILABLE",
+        "status_reason": "PROVIDER_EVIDENCE_AVAILABLE",
+        "freshness": {"state": "TI_FRESH"},
+        "external_ti_summary": {
+            "status": "TI_AVAILABLE",
+            "status_reason": "PROVIDER_EVIDENCE_AVAILABLE",
+            "source_ip_cache_records_found": 1,
+            "source_ip_cache_policy_bindings": ["LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"],
+            "source_ip_cache_freshness": "FRESH",
+        },
+        "source_ip_cache": [{
+            "provider": "abuseipdb",
+            "lookup_status": "OK",
+            "lookup_at": "2026-09-23T18:47:32Z",
+            "expires_at": "2026-09-24T18:47:32Z",
+            "policy_binding": "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY",
+            "provenance": {"privacy_policy_version": "2.3.0"},
+            "normalized_context": {"abuse_confidence_score": 23, "total_reports": 4},
+        }],
+    }
+    output_dir = tmp_path / "legacy-eti-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(write_pdf_report(report, session, output_dir, external_ti_projection=external_ti))
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+    assert "TI_AVAILABLE" in text
+    assert "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY" in text
+    assert "What the providers reported" in text
+    assert "OK / UNKNOWN" not in text
+    assert "abuse score: 23" in text
+    assert "reports: 4" in text
 
 
 def test_evidence_reference_summary_is_bounded_and_content_addressed() -> None:

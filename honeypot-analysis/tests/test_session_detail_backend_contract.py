@@ -211,6 +211,34 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
     assert '"input": "id"' not in compact_serialized
 
 
+def test_session_model1_advisory_matches_full_and_compact_projection(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(monitor_web, "build_ensemble_from_session_payload", lambda *_args, **_kwargs: {})
+    classification = {
+        "session_id": SESSION_ID,
+        "compound_command_index": 0,
+        "evidence_id": "class-one",
+        "event_timestamp": "2026-09-01T00:00:01Z",
+        "command": "private command text",
+        "s1_advisory": {
+            "status": "loaded", "predicted_technique": "T1033",
+            "score_type": "linear_svc_decision_margin",
+            "decision_score": 0.7,
+        },
+    }
+    storage = DetailStorage(session_payload_extra={"classification_events": [classification, dict(classification, evidence_id="class-two")]})
+    detail = monitor_web.load_dashboard_session_detail(_config(tmp_path), SESSION_ID, _storage=storage)
+    full = session_detail_view(detail)
+    compact = session_detail_view(detail, compact=True)
+    assert full["session_ttp_advisory"] == compact["session_ttp_advisory"]
+    advisory = full["session_ttp_advisory"]
+    assert advisory["assessed_command_events"] == 1
+    assert advisory["techniques"][0]["supporting_command_events"] == 1
+    assert "private command text" not in json.dumps(advisory)
+    assert "decision_score" not in json.dumps(advisory)
+
+
 def test_dashboard_detail_merges_hypothesis_sets_from_report_artifact(
     tmp_path: Path,
     monkeypatch,
