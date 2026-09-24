@@ -21,6 +21,19 @@ func TestSetEventExpiryUsesObservedTimestamp(t *testing.T) {
 	}
 }
 
+func TestSetEventExpiryUsesNormalizedTimestampString(t *testing.T) {
+	observedAt := time.Date(2026, 9, 24, 5, 30, 0, 0, time.UTC)
+	event := map[string]any{"timestamp": observedAt.Format(time.RFC3339Nano)}
+
+	setEventExpiry(event, 30*24*time.Hour)
+
+	expiresAt := event["expires_at"].(time.Time)
+	want := observedAt.Add(30 * 24 * time.Hour)
+	if !expiresAt.Equal(want) {
+		t.Fatalf("expires_at = %s, want %s", expiresAt, want)
+	}
+}
+
 func TestSetHardwareMetricExpiryUsesSampleTimestamp(t *testing.T) {
 	observedAt := time.Date(2026, 8, 26, 1, 2, 3, 0, time.UTC)
 	metric := map[string]interface{}{}

@@ -7,8 +7,8 @@ web-corp door — FastAPI (เขียนใหม่ 2026-09-20 แทน ngin
 ใหม่: เสิร์ฟหน้า/persona บริษัทเดิม (Rattana Trading & Logistics) พร้อม backend ปลอมเพื่อ
   1. เก็บ login attempts ที่ POST /web/login (คง POST /login สำหรับ compatibility)
   2. ดัก path scanning (/.env /wp-admin /phpmyadmin /.git /backup ...) → log เป็น signal "web-scan"
-  3. ส่ง login event แบบรอผลจาก /v1/track; page views ปกติยังส่งแบบ fire-and-forget
-     → phase tracker + classifier Track B เห็นพฤติกรรม web ต่อ IP (session keyed by IP ข้ามประตู)
+  3. เขียน login event ลง restricted local spool เพื่อส่งเข้า Redis/Mongo โดยไม่ปนกับ Core command/session
+     ส่วน page views และ bait-path signals ยังคงส่ง /v1/track แบบ fire-and-forget
 
 คงพฤติกรรมเดิมที่ test_suite/web_corp_behavior_test.py เช็คไว้ทุกข้อ (title, /admin→302 /login.html,
 robots Disallow /backup/, /backup/ listing, fake sql.gz 2202009 bytes, 404 baseline).
@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,14 @@ DECEPTION_CORE_URL = os.environ.get(
     "DECEPTION_CORE_URL", "http://deception-core:9000"
 ).rstrip("/")
 TRACK_URL = DECEPTION_CORE_URL + "/v1/track"
+LOGIN_SPOOL_DIR = os.environ.get("WEB_LOGIN_SPOOL_DIR", "").strip()
+try:
+    LOGIN_SPOOL_MAX_BYTES = max(
+        1024, int(os.environ.get("WEB_LOGIN_SPOOL_MAX_BYTES", str(64 * 1024 * 1024)))
+    )
+except ValueError:
+    LOGIN_SPOOL_MAX_BYTES = 64 * 1024 * 1024
+_LOGIN_SPOOL_LOCK = threading.Lock()
 
 # path ล่อที่สแกนเนอร์/attacker ชอบยิง — เจอ = log เป็น "web-scan" (สัญญาณตั้งใจเจาะ ไม่ใช่ดูเว็บเฉยๆ)
 # เก็บแบบ normalize (ตัด trailing slash) เทียบกับ path ที่เข้ามา
@@ -130,6 +139,14 @@ def _limited(value: str, limit: int = _FIELD_LIMIT) -> str:
     return str(value or "")[:limit]
 
 
+def _bounded_login_value(value: str, field: str, limit: int,
+                         truncated_fields: set[str]) -> str:
+    raw = str(value or "")
+    if len(raw) > limit:
+        truncated_fields.add(field)
+    return raw[:limit]
+
+
 def _sqli_indicators(values: dict[str, str]) -> dict[str, list[str]]:
     indicators = {}
     for field, value in values.items():
@@ -141,12 +158,51 @@ def _sqli_indicators(values: dict[str, str]) -> dict[str, list[str]]:
 
 def _login_event(request: Request, ip: str, *, database: str, login: str,
                  password: str, redirect: str, remember: str) -> dict:
-    query = _limited(request.url.query, _QUERY_LIMIT)
+    truncated_fields: set[str] = set()
+    query = _bounded_login_value(
+        request.url.query, "http.query", _QUERY_LIMIT, truncated_fields
+    )
+    bounded = {
+        "database": _bounded_login_value(
+            database, "odoo_login.database", _FIELD_LIMIT, truncated_fields
+        ),
+        "login": _bounded_login_value(
+            login, "odoo_login.login", _FIELD_LIMIT, truncated_fields
+        ),
+        "password": _bounded_login_value(
+            password, "odoo_login.password", _FIELD_LIMIT, truncated_fields
+        ),
+        "redirect": _bounded_login_value(
+            redirect, "odoo_login.redirect", _FIELD_LIMIT, truncated_fields
+        ),
+        "remember": _bounded_login_value(
+            remember, "odoo_login.remember", 32, truncated_fields
+        ),
+    }
+    http_headers = {
+        "host": _bounded_login_value(
+            request.headers.get("host", ""), "http.host", _HEADER_LIMIT,
+            truncated_fields,
+        ),
+        "user_agent": _bounded_login_value(
+            request.headers.get("user-agent", ""), "http.user_agent", _HEADER_LIMIT,
+            truncated_fields,
+        ),
+        "referer": _bounded_login_value(
+            request.headers.get("referer", ""), "http.referer", _HEADER_LIMIT,
+            truncated_fields,
+        ),
+        "origin": _bounded_login_value(
+            request.headers.get("origin", ""), "http.origin", _HEADER_LIMIT,
+            truncated_fields,
+        ),
+        "accept_language": _bounded_login_value(
+            request.headers.get("accept-language", ""),
+            "http.accept_language", _HEADER_LIMIT, truncated_fields,
+        ),
+    }
     values = {
-        "database": database,
-        "login": login,
-        "password": password,
-        "redirect": redirect,
+        **bounded,
         "query": query,
     }
     return {
@@ -158,25 +214,24 @@ def _login_event(request: Request, ip: str, *, database: str, login: str,
         ),
         "source_ip": ip,
         "http": {
-            "method": request.method,
-            "path": _limited(request.url.path, _QUERY_LIMIT),
-            "query": query,
-            "host": _limited(request.headers.get("host", ""), _HEADER_LIMIT),
-            "user_agent": _limited(request.headers.get("user-agent", ""), _HEADER_LIMIT),
-            "referer": _limited(request.headers.get("referer", ""), _HEADER_LIMIT),
-            "origin": _limited(request.headers.get("origin", ""), _HEADER_LIMIT),
-            "accept_language": _limited(
-                request.headers.get("accept-language", ""), _HEADER_LIMIT
+            "method": _bounded_login_value(
+                request.method, "http.method", 16, truncated_fields
             ),
+            "path": _bounded_login_value(
+                request.url.path, "http.path", _QUERY_LIMIT, truncated_fields
+            ),
+            "query": query,
+            **http_headers,
         },
         "odoo_login": {
-            "database": database,
-            "login": login,
-            "password": password,
-            "redirect": redirect,
-            "remember": remember.lower() in {"1", "true", "on", "yes"},
+            "database": bounded["database"],
+            "login": bounded["login"],
+            "password": bounded["password"],
+            "redirect": bounded["redirect"],
+            "remember": bounded["remember"],
         },
         "sqli_indicators": _sqli_indicators(values),
+        "truncated_fields": sorted(truncated_fields),
         "result": "rejected",
     }
 
@@ -202,15 +257,68 @@ def _track(ip: str, command: str) -> None:
     asyncio.create_task(_call())
 
 
-async def _track_login(ip: str, event: dict) -> bool:
-    """Deliver a structured attempt to the persistent shared event stream."""
-    command = "web-login " + json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+def _spool_login_event(event: dict) -> Path:
+    """Atomically persist one credential-bearing JSONL event for the host collector."""
+    if not LOGIN_SPOOL_DIR:
+        raise RuntimeError("WEB_LOGIN_SPOOL_DIR is not configured")
+
     request_id = event["request_id"]
+    if not re.fullmatch(r"[a-f0-9]{32}", request_id):
+        raise ValueError("invalid login event request_id")
+    spool_dir = Path(LOGIN_SPOOL_DIR)
+    payload = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
+    final_path = spool_dir / f"{request_id}.jsonl"
+
+    with _LOGIN_SPOOL_LOCK:
+        spool_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(spool_dir, 0o700)
+        pending_bytes = 0
+        for path in spool_dir.iterdir():
+            if path.suffix != ".jsonl":
+                continue
+            try:
+                if path.is_file():
+                    pending_bytes += path.stat().st_size
+            except FileNotFoundError:
+                # The host collector may remove an event after its Redis XADD.
+                continue
+        if pending_bytes + len(payload) > LOGIN_SPOOL_MAX_BYTES:
+            raise OSError("web login spool capacity reached")
+        if final_path.exists():
+            return final_path
+
+        temp_path = spool_dir / f".{request_id}.{uuid.uuid4().hex}.tmp"
+        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as spool_file:
+                spool_file.write(payload)
+                spool_file.flush()
+                os.fsync(spool_file.fileno())
+            os.replace(temp_path, final_path)
+            dir_fd = os.open(spool_dir, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except Exception:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+
+    return final_path
+
+
+async def _track_login(event: dict) -> bool:
+    """Persist login events locally; never place credential data in Core commands."""
+    request_id = event["request_id"]
+    ip = event["source_ip"]
     try:
-        await _post_track(ip, command)
+        await asyncio.to_thread(_spool_login_event, event)
     except Exception:
-        # Do not print credential-bearing command/event data into app logs.
-        log.exception("login telemetry delivery failed request_id=%s ip=%s", request_id, ip)
+        # Do not print credential-bearing event data into app logs.
+        log.exception("login telemetry spool write failed request_id=%s ip=%s", request_id, ip)
         return False
     indicators = event["sqli_indicators"]
     log.info(
@@ -274,14 +382,14 @@ async def do_login(
     # Odoo's login field is named `login`; keep the old `username` alias so any
     # previously bookmarked/tested form continues to be captured.
     values = {
-        "database": _limited(db or database),
-        "login": _limited(login or username),
-        "password": _limited(password),
-        "redirect": _limited(redirect),
-        "remember": _limited(remember, 32),
+        "database": db or database,
+        "login": login or username,
+        "password": password,
+        "redirect": redirect,
+        "remember": remember,
     }
     event = _login_event(request, ip, **values)
-    await _track_login(ip, event)
+    await _track_login(event)
     return HTMLResponse(_login_page_with_error(), status_code=200)
 
 

@@ -321,3 +321,140 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   verify event arrival/retention in Core without submitting credentials.
 - Related ADR/runbook: [ADR-0005](adr/ADR-0005-corporate-web-decoy-source.md)
   and [Corporate web decoy runbook](../integrations/web-corp/README.md).
+
+### 2026-09-24 — Document the web-corp login telemetry target design
+
+- Status: design documented; no implementation or deployment performed.
+- Scope and intent: define the proposed capture, delivery, storage, credential
+  handling, analysis, and validation boundaries for fake ERP login attempts.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`; no
+  commit.
+- Repository changes: added
+  [`docs/design/web-login-telemetry.md`](design/web-login-telemetry.md), linked
+  it from the design/documentation indexes and web-corp runbook, and clarified
+  the scoped password-retention exception in the generic decoy telemetry
+  design.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: unchanged. This document does not implement a new
+  collector, Redis stream, Mongo schema, credential access control, or runtime
+  path; the current web-corp-to-Core behavior remains active as previously
+  documented.
+- Validation performed and outcome: documentation links and patch whitespace
+  checked; no runtime service, database, or live login request was touched.
+- Not performed / deferred: no application or Go-agent code changes, no
+  deployment/Compose changes, no event-pipeline test, and no credential
+  retention or Mongo access-policy change.
+- Risks and data handling: the proposed event includes plaintext submitted
+  passwords for authorized honeypot-admin research. Existing event data remains
+  credential-sensitive; this change added no credentials, payload samples, or
+  secrets to the repository.
+- Rollback: revert this documentation-only change; no host state requires
+  rollback.
+- Follow-up: resolve the open design decisions and implement only after the
+  spool, access, retention, and replay gates in the design are satisfied.
+- Related design/runbook: [Web-corp login telemetry design](design/web-login-telemetry.md)
+  and [Corporate web decoy runbook](../integrations/web-corp/README.md).
+
+### 2026-09-24 — Implement and deploy web-corp login telemetry
+
+- Status: active; deployed pipeline checks passed with the scope limitations
+  recorded in the validation note.
+- Scope and intent: route fake ERP login attempts through the existing
+  collector → Redis → processor → MongoDB pipeline, keep the login page
+  permanently rejecting attempts, and keep credential-bearing values out of
+  Deception Core command/session events.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`; not
+  committed.
+- Repository changes: added the web-corp atomic credential-bearing spool;
+  collector validation and `raw:web-login` ingestion; processor normalization,
+  Mongo upsert, password-redacted canonical projection, username/time index,
+  and timestamp-based expiry; and focused tests. Updated current architecture,
+  service/data ownership docs, web-corp runbook, and the design. Added
+  [`web-corp data access guide`](../integrations/web-corp/DATA-ACCESS.md) for
+  retrieving pending container spool data, raw/redacted Redis events, MongoDB
+  records, and legacy Core events. Added
+  [`deployment validation`](validation/2026-09-24-web-login-pipeline.md).
+- Host/environment changes actually applied: edited the unversioned sibling
+  `/home/cpe27/decoy-honeypot/docker-compose.yml` for web-corp only, setting
+  its spool path/cap and mounting
+  `/var/lib/decoy-honeypot/web-login-spool/` into the container. Created the
+  host pending spool directory as `root:root` mode `0700`. Replaced the
+  ignored collector and processor binaries; a final cross-check found and
+  fixed a Unicode character-count boundary mismatch, then rebuilt and
+  restarted only the collector. Pre-deployment and pre-fix binaries are
+  preserved outside the repository under
+  `/var/backups/honeypot/web-login-20260924/`.
+- Runtime/exposure state: restarted only `honeypot-collector.service` and
+  `honeypot-processor.service`, and recreated only the `web-corp` container.
+  At final verification both agent units were active; web-corp was `Up` at
+  `10.58.33.42:80` → container `8080`. Deception Core, Odoo/PostgreSQL, Redis,
+  and other containers were not restarted. No public-interface listener,
+  firewall, or TLS/443 change was made.
+- Validation performed and outcome: collector and processor `go test ./...`
+  passed, including the collector's Unicode length boundary test; five
+  web-corp tests passed in the rebuilt image with networking disabled; Compose
+  validation and image build passed. The final collector and processor units
+  were both active after the collector-only fix. One synthetic
+  SQLi-shaped login was rejected and reached `raw:web-login`; the matching
+  `event:canonical` record omitted the password. The collector drained the
+  pending spool and processor pending count was zero. The processor log is
+  emitted after Mongo upsert and canonical Redis write succeed. See the
+  validation note for the independent-Mongo-query and remote-peer limitations.
+- Not performed / deferred: no separate remote ZeroTier peer test and no
+  direct database-shell read; no Atlas role, encryption, backup-expiry, or TTL
+  deletion audit; no brute-force threshold/derived finding; no migration or
+  cleanup of pre-cutover Core records; no post-login ERP behavior.
+- Risks and data handling: submitted passwords are deliberately retained as
+  plaintext in the pending spool, `raw:web-login`, and the MongoDB
+  `web_login.password` field. The canonical Redis projection omits the field.
+  Treat spool, raw stream, MongoDB queries, and backups as credential-sensitive;
+  never include submitted values in logs, docs, fixtures, or routine queries.
+  A synthetic validation event remains subject to the configured raw-stream
+  and Mongo retention lifecycles.
+- Rollback: restore the pre-deployment collector/processor binaries from the
+  protected backup path and restart only those two units; rebuild/recreate
+  web-corp from the prior reviewed source/image and restore the previous
+  web-corp Compose settings. Keep existing telemetry intact; do not remove the
+  spool, Redis entries, or Mongo records as part of code rollback.
+- Follow-up: independently query a synthetic event from MongoDB and test from
+  an authorized second ZeroTier peer; verify Atlas role/backup controls; decide
+  brute-force analysis policy. Keep the spool and raw Redis query paths
+  restricted to authorized administrators.
+- Related material: [web-login telemetry design](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md),
+  [data access guide](../integrations/web-corp/DATA-ACCESS.md), and
+  [deployment validation](validation/2026-09-24-web-login-pipeline.md).
+
+### 2026-09-24 — Verify a user-submitted web-corp login event
+
+- Status: read-only end-to-end follow-up validation completed.
+- Scope and intent: correlate the user's test login across the raw Redis
+  stream, redacted canonical stream, and MongoDB without reading or recording
+  credential values.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`; this
+  follow-up is included with the implementation commit.
+- Repository changes: updated the validation note and clarified empty-field
+  normalization in the design and data-access guide; no runtime source change.
+- Host/environment changes actually applied: none; no service restart and no
+  database write.
+- Runtime/exposure state: the event arrived from an address distinct from the
+  sensor. Exact client interface/path was not established by the event alone.
+- Validation performed and outcome: matching `web_login_attempt` found in
+  `raw:web-login`, `event:canonical`, and `honeypot_db.events`; outcome was
+  rejected, canonical Redis omitted the password, and Mongo field-existence
+  checks confirmed password/username fields without retrieving their values.
+  The spool was empty and the raw stream consumer had no pending messages.
+  No SQLi indicators were recorded for this login.
+- Not performed / deferred: no raw credential read, no interface-level packet
+  verification, and no TLS/443 test.
+- Risks and data handling: the raw Redis and Mongo records still contain the
+  credential-bearing data as designed. Only metadata and field-presence
+  results were recorded here.
+- Rollback: revert this documentation-only validation entry; runtime data and
+  services are unaffected.
+- Follow-up: decide whether normalized events must preserve empty-string form
+  fields; complete TLS certificate, proxy, and port-80 behavior design before
+  implementing 443.
+- Related material: [deployment validation](validation/2026-09-24-web-login-pipeline.md),
+  [web-login telemetry design](design/web-login-telemetry.md), and
+  [data access guide](../integrations/web-corp/DATA-ACCESS.md).

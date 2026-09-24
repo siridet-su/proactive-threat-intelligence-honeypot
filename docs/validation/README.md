@@ -29,4 +29,5 @@ approval remains an explicit operational decision.
 
 ## Evidence notes
 
+- [Web-corp login pipeline — 2026-09-24](2026-09-24-web-login-pipeline.md): synthetic deployed event verified in raw/redacted Redis paths; pending spool drained and processor acknowledged it after MongoDB write.
 - [Odoo/PostgreSQL data inventory — 2026-09-24](2026-09-24-odoo-postgres-data-inventory.md): read-only schema/row-count snapshot and attachment/filestore consistency check.

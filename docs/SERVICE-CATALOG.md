@@ -1,7 +1,7 @@
 ---
 title: Honeypot service catalog
 status: current
-last_verified: 2026-09-10
+last_verified: 2026-09-24
 ---
 
 # Honeypot service catalog
@@ -17,7 +17,7 @@ an operational change.
 | Cowrie management listener | private overlay | Current | operations | operational logs | Not an attacker-facing decoy. |
 | Admin SSH | Tailscale/ZeroTier only, port 2222 | Current | operations | host audit logs + fail2ban | Key-only, root-disabled; X11 and TCP/agent forwarding disabled. |
 | Legacy web middleware/Odoo facade | Loopback HTTP | Removed 2026-09-24 | Decommissioned | n/a | Middleware container and Compose service were removed; Odoo itself remains loopback-only on port 8069. |
-| Corporate web decoy | HTTP, ZeroTier `10.58.33.42:80` → container `8080` | Current, active | current project | Core `/v1/track` → local persistent event stream; Go/Atlas adapter still required | Source: [`integrations/web-corp/`](../integrations/web-corp/README.md). Sibling Compose remains outside this repository; TLS/443 is not configured. |
+| Corporate web decoy | HTTP, ZeroTier `10.58.33.42:80` → container `8080` | Current, active | current project | Login: bounded container spool → Go collector `raw:web-login` → processor → MongoDB `honeypot_db.events`; page/scan signals remain on Core `/v1/track` | Source/runbook: [`integrations/web-corp/`](../integrations/web-corp/README.md); [data access](../integrations/web-corp/DATA-ACCESS.md). Compose remains outside this repository; TLS/443 is not configured. |
 | OpenCanary HTTP login decoy | HTTP, loopback staging | Prepared, stopped | current project | local rotating JSONL at `/var/log/opencanary/events.jsonl` | HTTP-only `nasLogin`; remote exposure and Redis/Atlas adapter are not enabled. Login fields may contain submitted credentials or SQL payloads. |
 | FTP decoy | FTP + passive range | Current | current project | service-event adapter required | Docker decoy stack. |
 | SMTP sink | SMTP | Current | current project | service-event adapter required | Docker decoy stack. |
@@ -46,7 +46,7 @@ Before exposing a new decoy, add its row with:
 
 ## Event-adapter gap
 
-Cowrie and Zeek already have an intended Go ingestion route. The Docker decoys
-are live but do not yet have a documented common adapter into the same event
-contract. Treat this as a planned integration, not as evidence that all
-attacker activity is already represented in Atlas.
+Cowrie and Zeek use the Go ingestion route. The web-corp login event now has a
+dedicated route into the common event contract; other Docker decoys still need
+adapters. Treat their activity as absent from Atlas until each path is
+implemented and verified.

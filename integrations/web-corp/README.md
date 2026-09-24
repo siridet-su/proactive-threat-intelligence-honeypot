@@ -42,25 +42,44 @@ not a definitive classifier. Every attempt has a timestamp and source IP so
 downstream analysis can count repeated attempts, but the web door does not
 currently enforce or label a brute-force rate threshold.
 
-Events are sent to the existing Core `/v1/track` interface using the `web`
-door. To preserve compatibility with that contract, the structured login JSON
-is embedded after the `web-login ` prefix in the Core `cmd` field. The Core
-persists its event stream on the shared data volume; the raw submitted password
-is therefore credential-sensitive plaintext. Restrict access and set a
-retention policy before exposing the service. The web door's own log only emits
-request ID, source IP, and SQLi-indicator field names, not submitted values.
+Each login attempt is atomically written as one mode-`0600` JSONL file in the
+container's `/var/spool/web-corp-login/pending/` directory. That directory is a
+bind mount from the host's root-only
+`/var/lib/decoy-honeypot/web-login-spool/`. The pending queue is capped at
+64 MiB; app logs contain request ID, source IP, and SQLi-indicator names, never
+submitted values. The host Go collector validates each event, writes it to
+Redis `raw:web-login`, and removes the spool file after Redis accepts it. The
+Go processor then persists the canonical event in MongoDB
+`honeypot_db.events` with the configured 30-day TTL. The raw password is
+credential-sensitive plaintext in the pending spool, raw Redis stream, and
+canonical Mongo event; the `event:canonical` Redis projection omits
+`web_login.password`. Only authorized honeypot admins may inspect credential-
+bearing copies; do not request the password in routine queries.
+
+Login events no longer use Core `/v1/track` and do not enter its IP-keyed
+command/session classifier. Ordinary page and bait-path telemetry still uses
+Core `/v1/track` under the `web` door. Older login events created before this
+cutover may remain in Core's `/data/events.jsonl`; they are not migrated or
+deleted by this change.
 
 The app ignores `X-Forwarded-For` unless the immediate peer matches a network
 listed in `WEB_TRUSTED_PROXY_CIDRS`. The direct ZeroTier listener should leave
 that variable unset. Only configure it when a trusted proxy is introduced and
 its forwarding behavior has been verified.
 
+The event contract and implementation rationale are documented in
+[`docs/design/web-login-telemetry.md`](../../docs/design/web-login-telemetry.md).
+For retrieval commands and the distinction between the pending container spool,
+raw Redis stream, sanitized canonical stream, MongoDB, and legacy Core records,
+see [`DATA-ACCESS.md`](DATA-ACCESS.md).
+
 ## Validation
 
-The request-path tests use FastAPI's in-process test client and mock Core
-transport; they do not create events in the live event store:
+The request-path tests use FastAPI's in-process test client and a temporary
+spool; they do not create events in the live event store:
 
 ```sh
+python3 -m pip install -r integrations/web-corp/requirements.txt
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s integrations/web-corp/tests -v
 ```
@@ -75,16 +94,21 @@ docker compose -f ../decoy-honeypot/docker-compose.yml build web-corp
 
 Building an image does not activate it. Recreating the service and testing via
 the approved ZeroTier path are separate rollout steps; use synthetic values
-only and confirm the event reaches Core before treating collection as active.
+only and verify an event in `raw:web-login` and MongoDB before treating a new
+deployment as complete. See the data-access guide for checks.
 
 ## Rollback and known follow-up
 
-The source move alone does not require a runtime rollback because the container
-image was not rebuilt. If the build context must be reverted before deployment,
-restore the Compose build path and source from the previous reviewed Git state.
-The deployment Compose file remains outside Git, so changes to it must be
-preserved in the operator's deployment backup until the full stack is migrated.
+The current login-pipeline deployment can be rolled back by restoring the
+previous reviewed web-corp source/image and its Compose environment/mount, then
+restoring the pre-deployment collector and processor binaries and restarting
+only those agent units. The external Compose file is not version-controlled;
+record and preserve its previous web-corp block with the deployment backup.
+Keep already collected spool, Redis, and MongoDB records intact during a code
+rollback. Old records previously sent to Core are not migrated by rollback.
 
-Follow-up work: consolidate or parameterize the sibling Compose file, define
-Core event parsing into the canonical telemetry schema, review raw credential
-retention/access, and add a rate-based brute-force detector if required.
+Follow-up work: independently verify a MongoDB record and test from an
+authorized second ZeroTier peer; migrate the sibling Compose file into this
+repository; verify Atlas role/backup expiry for credential-bearing documents;
+configure TLS before adding port 443; and decide whether to add a rate-based
+brute-force detector.

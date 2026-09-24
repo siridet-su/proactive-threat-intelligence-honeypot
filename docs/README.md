@@ -21,6 +21,11 @@ and historical material inherited from the previous team.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 
+The event contract and retrieval steps for fake ERP login attempts are in
+[Web-corp login telemetry](design/web-login-telemetry.md), the
+[web-corp runbook](../integrations/web-corp/README.md), and its
+[data-access guide](../integrations/web-corp/DATA-ACCESS.md).
+
 ## Document status labels
 
 | Label | Meaning |
