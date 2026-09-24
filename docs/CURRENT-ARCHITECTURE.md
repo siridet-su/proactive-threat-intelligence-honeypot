@@ -54,7 +54,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true`. |
-| Retained data backup worker | Active for `hardware_metrics_1m`; multi-target binary deployed, additional targets inactive | The Pi worker writes hardware rollups to private B2 and reports storage/manifest state. `threat_events` and `filesystem_audit` remain inactive because the current upload key is restricted to the `hardware_metrics_1m/` prefix. |
+| Retained data backup worker | Active for `hardware_metrics_1m` and `filesystem_audit`; `threat_events` inactive | The Pi worker writes hardware rollups and the authoritative filesystem audit sources to the private B2 bucket and reports storage/manifest state. `cwd_audit_projection` remains excluded because it is rebuildable; sensitive `threat_events` backup is still an explicit opt-in. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
@@ -85,8 +85,8 @@ Real administrative SSH listens on port 2222 but host-firewall access is limited
 3. Operate asynchronous VirusTotal/AbuseIPDB enrichment through the worker with bounded queue/cache and provider-quota controls.
 4. Complete telemetry adapters for the remaining Docker decoys; web-corp login is integrated.
 5. Deliver post-session/cloud analysis against Atlas-backed canonical events.
-6. Activate additional retained-data backup targets only after the B2 key and
-   sensitive-event policy review described in [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md).
+6. Review the sensitive-event policy described in [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md)
+   before activating the remaining `threat_events` backup target.
 
 ## Out of scope for the current phase
 

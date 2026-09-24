@@ -11,6 +11,17 @@ activation:
 BACKUP_TARGETS=hardware_metrics_1m
 ```
 
+The current Pi activation is deliberately broader than the code default:
+
+```text
+BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit
+```
+
+This was verified on 2026-09-25 after a successful manual run. The
+`threat_events` target remains disabled because its source can contain
+credential-bearing records and still requires the separate sensitive-data
+policy decision.
+
 The supported logical targets are:
 
 | Target | Authoritative sources | B2 prefix | Default |

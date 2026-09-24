@@ -16,8 +16,8 @@ last_verified: 2026-09-25
 | Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | 30-day TTL; optional `threat_events` B2 archive because restricted web-login records may contain credentials |
 | Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
 | Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard history endpoint and reporting | one compact upserted row per sensor/minute, 30-day TTL |
-| Filesystem audit events | MongoDB Atlas `cwd_events` | filesystem activity history and audit replay | authoritative CWD transitions, 30-day TTL; optional `filesystem_audit` B2 archive |
-| Filesystem session state | MongoDB Atlas `cwd_session_state` | live topology and retained session directory | authoritative latest state, 30-day TTL; archived with filesystem audit source |
+| Filesystem audit events | MongoDB Atlas `cwd_events` | filesystem activity history and audit replay | authoritative CWD transitions, 30-day TTL; active `filesystem_audit` B2 archive |
+| Filesystem session state | MongoDB Atlas `cwd_session_state` | live topology and retained session directory | authoritative latest state, 30-day TTL; archived with the active filesystem audit source |
 | Filesystem audit projection | MongoDB Atlas `cwd_audit_projection` | derived audit directory/read model | rebuildable indexed cleanup watermark; not an independent backup source |
 | Backup manifests, requests, and target status | MongoDB Atlas `hardware_backup_manifests`, `hardware_backup_requests`, `backup_target_status` | dashboard and Pi worker | operational control/audit records; do not mix with retained evidence archives |
 | Threat-intelligence results | Atlas enrichment records/projections | dashboard, cloud analysis | cache-aware with expiry |
@@ -81,3 +81,6 @@ authoritative filesystem collections; `cwd_audit_projection` and its readiness
 metadata are excluded because the processor rebuilds them from source records.
 The dashboard's target map reads the worker's `backup_target_status` record, so
 repository support is not presented as host activation.
+
+As of 2026-09-25, the Pi explicitly enables `hardware_metrics_1m` and
+`filesystem_audit`. The sensitive `threat_events` target remains disabled.

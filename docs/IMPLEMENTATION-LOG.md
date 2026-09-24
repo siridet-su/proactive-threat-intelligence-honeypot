@@ -728,3 +728,54 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
   [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md), and
   [current architecture](CURRENT-ARCHITECTURE.md).
+
+### 2026-09-25 — Activate filesystem audit archive on the Pi
+
+- Status: active for `hardware_metrics_1m` and `filesystem_audit`; sensitive
+  `threat_events` remains inactive.
+- Scope and intent: enable the authoritative filesystem audit archive after
+  confirming that the B2 upload credential can write both target prefixes
+  without granting file deletion or read access.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; worker
+  implementation commits `93670fd` and `c1b9393`; this entry and the current
+  state updates are committed with the operational activation record.
+- Repository changes: updated the current architecture, service catalog, data
+  ownership contract, and hardware-backup runbook to distinguish the deployed
+  filesystem target from the still-disabled sensitive threat-event target.
+- Host/environment changes actually applied: preserved the previous Pi
+  environment at
+  `/var/lib/honeypot/hardware-backups/deploy-backups/backup.env.pre-filesystem-retry-20260925`,
+  configured `BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit` in the
+  protected `/etc/honeypot/backup.env`, and restarted
+  `honeypot-hardware-backup-control.service`. The upload credential remains
+  outside the repository; its capability policy is limited to `listFiles` and
+  `writeFiles` for the private archive bucket.
+- Runtime/exposure state: the control service is active, the daily backup timer
+  remains enabled, and the deployed binary SHA-256 is
+  `ec0f051e423ef0f03d1a36927d97bdf0d127c2d78a7daba68d59b64610d67cca`.
+  `threat_events` was not enabled and `BACKUP_ALLOW_SENSITIVE` remains absent.
+- Validation performed and outcome: control startup reported both enabled
+  targets. A manual scheduled run completed successfully for
+  `hardware_metrics_1m` and `filesystem_audit`; filesystem archives were
+  uploaded for 2026-09-09 through 2026-09-22, with empty days skipped, and the
+  B2 storage snapshot was refreshed. The oneshot service exited successfully
+  while the control loop remained active.
+- Not performed / deferred: no sensitive threat-event archive or restore/read
+  operation was run; no direct local B2 listing was possible because the
+  workstation could not resolve the regional Backblaze API hostname. Pi-side
+  authorization and upload logs were verified instead. Dashboard verification
+  requiring an authenticated browser session remains deferred.
+- Risks and data handling: filesystem archives may contain paths, session
+  identifiers, and other audit metadata. The bucket remains private; no
+  credential values or protected configuration contents were copied into the
+  repository or this log.
+- Rollback: restore the protected environment copy above to
+  `/etc/honeypot/backup.env`, remove `filesystem_audit` from `BACKUP_TARGETS`,
+  and restart the control service. Existing B2 objects are retained unless an
+  operator separately applies the cloud lifecycle policy.
+- Follow-up: monitor the next scheduled run and separately review the
+  sensitive-data policy before enabling `threat_events`.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
