@@ -986,7 +986,7 @@ export function TopologyCanvas({
                       <span className="hidden sm:inline text-text-subtle text-xs">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
                       </span>
-                      {onRefresh && (
+                      {isStandaloneExpanded && onRefresh && (
                         <button
                           type="button"
                           onClick={onRefresh}
@@ -995,7 +995,7 @@ export function TopologyCanvas({
                           Refresh snapshot
                         </button>
                       )}
-                      {onReconnect && (
+                      {isStandaloneExpanded && onReconnect && (
                         <button
                           type="button"
                           onClick={onReconnect}

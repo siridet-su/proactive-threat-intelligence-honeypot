@@ -472,7 +472,7 @@ export function TransitionOverlay({
                       className="pti-hop-route-glow"
                     />
                   )}
-                  {state === "current" && (
+                  {state === "current" && reducedMotion && (
                     <circle
                       data-testid="current-transition-indicator"
                       cx={geometry.targetX}
