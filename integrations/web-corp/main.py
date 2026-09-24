@@ -310,8 +310,9 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
 
 
 def _http_event(request: Request, ip: str, web_session_id: str, status_code: int) -> dict:
-    """Durable, credential-free page/bait observation for session chronology."""
-    query = _limited(request.url.query, _QUERY_LIMIT)
+    """Durable page/bait observation with bounded literal query for review."""
+    raw_query = request.url.query
+    query = _limited(raw_query, _QUERY_LIMIT)
     path = _limited(request.url.path, _QUERY_LIMIT)
     safe_path = path if re.fullmatch(r"/[A-Za-z0-9_./-]{0,127}", path) else "[redacted-path]"
     return {
@@ -321,9 +322,10 @@ def _http_event(request: Request, ip: str, web_session_id: str, status_code: int
         "web_session_id": web_session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "source_ip": ip,
-        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "status_code": status_code},
+        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "raw_path": path, "query": query, "status_code": status_code},
         "sqli_indicators": _pattern_indicators({"query": query, "path": path}, _SQLI_RULES),
         "xss_indicators": _pattern_indicators({"query": query, "path": path}, _XSS_RULES),
+        "truncated_fields": ["http.query"] if len(raw_query) > _QUERY_LIMIT else [],
         "bait_path": _is_sensitive(path.rstrip("/") or "/"),
     }
 

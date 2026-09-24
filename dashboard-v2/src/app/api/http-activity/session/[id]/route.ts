@@ -13,9 +13,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const id = (await context.params).id;
   if (!/^[a-f0-9]{32}$/.test(id)) return NextResponse.json({ error: "Invalid HTTP session ID" }, { status: 400, headers });
   try {
-    const items = await getWebHttpSession(id);
-    if (!items) return NextResponse.json({ error: "HTTP session not found" }, { status: 404, headers });
-    return NextResponse.json({ sessionId: id, items, coverage: "Exact Web-corp cookie session; browser continuity is not verified attacker identity." }, { headers });
+    const rawPayloadAccess = operator.role === "Admin";
+    const detail = await getWebHttpSession(id, rawPayloadAccess);
+    if (!detail) return NextResponse.json({ error: "HTTP session not found" }, { status: 404, headers });
+    return NextResponse.json({ sessionId: id, ...detail, rawPayloadAccess, coverage: "Exact Web-corp cookie session; browser continuity is not verified attacker identity." }, { headers });
   } catch {
     return NextResponse.json({ error: "HTTP session detail unavailable" }, { status: 503, headers });
   }

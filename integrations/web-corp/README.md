@@ -41,7 +41,9 @@ HTTP method/path/query, selected request headers (Host, User-Agent, Referer,
 Origin, and Accept-Language), and the submitted database, login, password,
 redirect, and remember values. Values and headers are length-bounded. The
 application does not collect cookies or authorization headers. For non-login
-POST requests it records method/path/query, not the request body.
+requests it records method, safe path, bounded literal path and query, and
+status, not the request body. Earlier non-login events do not have a retained
+literal query/path and cannot be reconstructed from rule IDs.
 
 The service adds heuristic SQLi and XSS indicators to the event (field and rule
 names only); they are triage hints,
@@ -60,13 +62,17 @@ Go processor then persists the canonical event in MongoDB
 `honeypot_db.events` with the configured 30-day TTL. The raw password is
 credential-sensitive plaintext in the pending spool, raw Redis stream, and
 canonical Mongo event; the `event:canonical` Redis projection omits
-`web_login.password`. Only authorized honeypot admins may inspect credential-
-bearing copies; do not request the password in routine queries.
+`web_login.password` and literal `http.query`/`http.raw_path`. Only authorized honeypot admins may inspect credential-
+bearing copies. The dashboard exact-session view can show the bounded literal
+fields only to authenticated Admin operators; the broad activity feed omits
+them, and the HTTP API sends no-store responses. Treat browser screenshots,
+printouts, and copied values as sensitive research evidence.
 
 Login events no longer use Core `/v1/track` and do not enter its IP-keyed
 command/session classifier. Ordinary page and bait-path telemetry still uses
 Core `/v1/track` under the `web` door with redacted path and no query; it also
-enters the restricted spool as a credential-free `web_http_request`. Older login events created before this
+enters the restricted spool as a `web_http_request`, whose literal query may
+contain sensitive submitted data. Older login events created before this
 cutover may remain in Core's `/data/events.jsonl`; they are not migrated or
 deleted by this change.
 

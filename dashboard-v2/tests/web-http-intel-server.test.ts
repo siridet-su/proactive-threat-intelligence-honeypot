@@ -49,19 +49,50 @@ describe("HTTP Mongo read boundary", () => {
 
   it("reads an exact HTTP session with the same safe projection", async () => {
     const id = "0123456789abcdef0123456789abcdef";
-    const toArray = vi.fn().mockResolvedValue([{ source: "web-corp", event_type: "web_http_request", event_id: "evt1", correlation: { web_session_id: id }, network: { src_ip: "10.0.0.1", dst_port: 80 }, http: { method: "GET", path: "/login.html" } }]);
+    const toArray = vi.fn().mockResolvedValue([{ source: "web-corp", event_type: "web_http_request", event_id: "evt1", correlation: { web_session_id: id }, network: { src_ip: "10.0.0.1", dst_port: 80 }, http: { method: "GET", path: "[redacted-path]", raw_path: "/%3Cscript%3E", query: "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E" } }]);
     const limit = vi.fn(() => ({ toArray }));
     const sort = vi.fn(() => ({ limit }));
     find.mockReturnValue({ sort });
     expect(await getWebHttpSession("invalid")).toBeNull();
     expect(find).not.toHaveBeenCalled();
-    const items = await getWebHttpSession(id);
+    const items = await getWebHttpSession(id, true);
     expect(find).toHaveBeenCalledWith(expect.objectContaining({ "correlation.web_session_id": id }), expect.objectContaining({ projection: expect.any(Object) }));
     const projection = find.mock.calls[0]![1].projection as Record<string, number>;
     expect(projection["network.dst_port"]).toBe(1);
-    expect(projection["web_login.password"]).toBeUndefined();
+    expect(projection["web_login.password"]).toBe(1);
+    expect(projection["http.query"]).toBe(1);
     expect(projection["raw.payload"]).toBeUndefined();
     expect(limit).toHaveBeenCalledWith(501);
-    expect(items?.[0]?.destinationPort).toBe(80);
+    expect(items?.items[0]?.destinationPort).toBe(80);
+    expect(items?.payloads[0]?.query).toContain("alert(1)");
+    expect(items?.payloads[0]?.rawPath).toBe("/%3Cscript%3E");
+  });
+
+  it("returns literal login form values only for exact detail, with capture limit markers", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const toArray = vi.fn().mockResolvedValue([{
+      source: "web-corp", event_type: "web_login_attempt", event_id: "login1",
+      correlation: { web_session_id: id },
+      http: { method: "POST", path: "/web/login", query: "from=research" },
+      web_login: { database: "demo", username: "attacker@example.invalid", password: "' OR '1'='1", redirect: "/web", remember: "on" },
+      truncated_fields: ["odoo_login.password"],
+    }]);
+    const limit = vi.fn(() => ({ toArray }));
+    find.mockReturnValue({ sort: vi.fn(() => ({ limit })) });
+    const detail = await getWebHttpSession(id, true);
+    expect(detail?.payloads[0]?.form?.password).toBe("' OR '1'='1");
+    expect(detail?.payloads[0]?.truncatedFields).toContain("odoo_login.password");
+    expect(JSON.stringify(detail?.items)).not.toContain("attacker@example.invalid");
+  });
+
+  it("does not invent a literal query for a historical record", async () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const toArray = vi.fn().mockResolvedValue([{ source: "web-corp", event_type: "web_http_request", event_id: "old1", correlation: { web_session_id: id }, http: { method: "GET", path: "/login.html" } }]);
+    const limit = vi.fn(() => ({ toArray }));
+    find.mockReturnValue({ sort: vi.fn(() => ({ limit })) });
+    expect((await getWebHttpSession(id, true))?.payloads[0]?.query).toBeNull();
+    expect((await getWebHttpSession(id))?.payloads).toEqual([]);
+    const projection = find.mock.calls.at(-1)![1].projection as Record<string, number>;
+    expect(projection["web_login.password"]).toBeUndefined();
   });
 });

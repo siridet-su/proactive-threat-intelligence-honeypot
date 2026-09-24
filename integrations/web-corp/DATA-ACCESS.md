@@ -2,7 +2,9 @@
 
 This guide is for authorized honeypot administrators and developers working
 under that authorization. Login events intentionally retain the submitted
-password as plaintext. Terminal output, Redis responses, Mongo query results,
+password as plaintext. New page events also retain bounded literal URL paths
+and queries, which can themselves contain sensitive values. Terminal output,
+Redis responses, Mongo query results,
 and pending spool files can therefore contain credential-sensitive data. Do
 not paste their contents into tickets, chat, source control, or ordinary logs.
 
@@ -12,8 +14,8 @@ not paste their contents into tickets, chat, source control, or ordinary logs.
 | --- | --- | --- |
 | web-corp container spool `/var/spool/web-corp-login/pending/` | One JSONL file per login attempt, including the submitted password | Retry queue only; collector removes a file after Redis accepts it |
 | Redis `raw:web-login` | Full bounded event in the `payload` field | Transient, bounded stream (maximum length configured by collector, currently 50,000 entries) |
-| MongoDB `honeypot_db.events` | Canonical normalized event; password only at `web_login.password` | Durable event store with the processor's current 30-day TTL |
-| Redis `event:canonical` | Normalized downstream projection without `web_login.password` | Bounded stream for consumers that do not need the raw password |
+| MongoDB `honeypot_db.events` | Canonical normalized event; login password at `web_login.password`, literal URL at `http.query`/`http.raw_path` when captured | Durable event store with the processor's current 30-day TTL |
+| Redis `event:canonical` | Normalized downstream projection without `web_login.password`, `http.query`, or `http.raw_path` | Bounded stream for consumers that do not need literal submitted values |
 | Deception Core container `/data/events.jsonl` | Legacy `/v1/track` records created before cutover; a login command may include the old credential-bearing JSON | Historical only; new web-corp login attempts do not go here |
 
 The event ID/request ID is the same across the app spool filename, raw Redis
@@ -93,7 +95,8 @@ redis-cli -h 127.0.0.1 -p 6379 XREVRANGE event:canonical + - COUNT 10
 ```
 
 `event:canonical` retains request context and SQLi indicator names but omits
-`web_login.password`; use MongoDB for the credential-bearing canonical record.
+`web_login.password`, `http.query`, and `http.raw_path`; use MongoDB for the
+literal submitted fields when authorized.
 If Redis authentication is enabled, use the operator-approved interactive
 credential method. Do not put a Redis password directly in command arguments.
 

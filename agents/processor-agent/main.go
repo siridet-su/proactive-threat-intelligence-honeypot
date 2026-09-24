@@ -445,8 +445,11 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			"origin":          getPayloadString(httpPayload, "origin"),
 			"accept_language": getPayloadString(httpPayload, "accept_language"),
 		}
-		if getPayloadString(payload, "event") == "web_login_attempt" {
+		if _, recorded := httpPayload["query"]; recorded {
 			webHTTP["query"] = getPayloadString(httpPayload, "query")
+		}
+		if _, recorded := httpPayload["raw_path"]; recorded {
+			webHTTP["raw_path"] = getPayloadString(httpPayload, "raw_path")
 		}
 		webAnalysis = map[string]any{
 			"sqli": map[string]any{"indicators": indicators},
@@ -634,6 +637,10 @@ func canonicalEventProjection(event map[string]any, source string) map[string]an
 	}
 	if login, ok := projection["web_login"].(map[string]any); ok {
 		delete(login, "password")
+	}
+	if http, ok := projection["http"].(map[string]any); ok {
+		delete(http, "query")
+		delete(http, "raw_path")
 	}
 	return projection
 }

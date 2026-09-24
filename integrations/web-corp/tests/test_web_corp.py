@@ -158,7 +158,7 @@ class WebCorpTests(TestCase):
         self.assertEqual(http_event["web_session_id"], login_event["web_session_id"])
         self.assertEqual(len(http_event["web_session_id"]), 32)
         self.assertNotIn("odoo_login", http_event)
-        self.assertNotIn("query", http_event["http"])
+        self.assertEqual(http_event["http"]["query"], "")
         self.assertIn("script_tag", login_event["xss_indicators"]["login"])
         self.assertIn("boolean_tautology", login_event["sqli_indicators"]["password"])
         self.assertNotIn("alert(1)", json.dumps(http_event))
@@ -180,16 +180,24 @@ class WebCorpTests(TestCase):
                 stale_response = stale.get("/login.html")
         self.assertNotEqual(stale_response.cookies["web_corp_visit"].split(".")[0], original)
 
-    def test_encoded_url_pattern_is_tagged_without_raw_query_in_http_event_or_core(self):
+    def test_encoded_url_pattern_retains_literal_query_in_http_event_but_not_core(self):
         response = self.client.get("/login.html?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
         self.assertEqual(response.status_code, 200)
         events = [json.loads(path.read_text(encoding="utf-8"))
                   for path in Path(self.spool.name).glob("*.jsonl")]
         self.assertEqual(len(events), 1)
         self.assertIn("script_tag", events[0]["xss_indicators"]["query"])
-        self.assertNotIn("query", events[0]["http"])
-        self.assertNotIn("alert(1)", json.dumps(events[0]))
+        self.assertEqual(events[0]["http"]["raw_path"], "/login.html")
+        self.assertEqual(events[0]["http"]["query"], "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
         self.assertNotIn("alert(1)", str(self.page_track.call_args))
+
+    def test_long_http_query_is_bounded_and_marked(self):
+        response = self.client.get("/login.html?q=" + "x" * 600)
+        self.assertEqual(response.status_code, 200)
+        events = [json.loads(path.read_text(encoding="utf-8"))
+                  for path in Path(self.spool.name).glob("*.jsonl")]
+        self.assertEqual(len(events[0]["http"]["query"]), main._QUERY_LIMIT)
+        self.assertIn("http.query", events[0]["truncated_fields"])
 
 
 if __name__ == "__main__":

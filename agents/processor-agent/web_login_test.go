@@ -103,7 +103,7 @@ func TestWebHTTPEventBindsBrowserContinuityWithoutCredential(t *testing.T) {
 	payload := syntheticWebLoginPayload()
 	payload["event"] = "web_http_request"
 	payload["web_session_id"] = "abcdef0123456789abcdef0123456789"
-	payload["http"] = map[string]any{"method": "GET", "path": "/login.html", "status_code": float64(200)}
+	payload["http"] = map[string]any{"method": "GET", "path": "/login.html", "raw_path": "/login.html", "query": "q=%3Cscript%3E", "status_code": float64(200)}
 	payload["xss_indicators"] = map[string]any{"path": []any{"script_tag"}}
 	delete(payload, "odoo_login")
 	delete(payload, "sqli_indicators")
@@ -122,6 +122,19 @@ func TestWebHTTPEventBindsBrowserContinuityWithoutCredential(t *testing.T) {
 	}
 	if got := getNestedString(event, "session.semantics"); got != "browser_continuity_only" {
 		t.Fatalf("unsafe session semantics: %q", got)
+	}
+	if got := getNestedString(event, "http.query"); got != "q=%3Cscript%3E" {
+		t.Fatalf("literal GET query missing: %q", got)
+	}
+	if got := getNestedString(event, "http.raw_path"); got != "/login.html" {
+		t.Fatalf("literal GET path missing: %q", got)
+	}
+	canonical := canonicalEventProjection(event, "web-corp")
+	if got := getNestedString(canonical, "http.query"); got != "" {
+		t.Fatalf("canonical Redis projection leaked literal query: %q", got)
+	}
+	if got := getNestedString(canonical, "http.raw_path"); got != "" {
+		t.Fatalf("canonical Redis projection leaked literal path: %q", got)
 	}
 	encoded, err := json.Marshal(canonicalEventProjection(event, "web-corp"))
 	if err != nil {
