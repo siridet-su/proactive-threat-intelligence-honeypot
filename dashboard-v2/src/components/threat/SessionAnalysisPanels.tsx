@@ -1512,7 +1512,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
-            <p className="mt-1 text-xs leading-5 text-text-muted">Model1's selected TTP per command, grouped by distinct command event. More supporting commands appear first. This is not a confidence percentage, trusted finding, or response authorization.</p>
+            <p className="mt-1 text-xs leading-5 text-text-muted">Model1&apos;s selected TTP per command, grouped by distinct command event. More supporting commands appear first. This is not a confidence percentage, trusted finding, or response authorization.</p>
           </div>
           <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
         </div>

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { RegionState } from "@/components/ui/RegionState";
+import { cn } from "@/lib/utils";
 import {
   isHardwareBackupStatus,
   type HardwareBackupDay,
@@ -273,11 +274,23 @@ export function HardwareBackupStatus() {
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Last sync</p>
             <p className="mt-0.5 font-mono text-xs tabular-nums text-text-muted">{formatDateTime(data?.generated_at ?? null)}</p>
           </div>
-          <button type="button" onClick={refresh} disabled={loading || refreshing} className="ui-button h-10 min-h-10 w-10 p-0" title="Refresh backup status" aria-label="Refresh backup status">
+          <button type="button" onClick={refresh} disabled={refreshing} className="ui-button h-10 min-h-10 w-10 p-0" title="Refresh backup status" aria-label="Refresh backup status">
             <RefreshCw className={`h-4 w-4 ${refreshing ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
           </button>
         </div>
       </header>
+
+      {/* Scanning Laser Bar when loading, refreshing, or queuing an action */}
+      <div className="h-0.5 w-full bg-border/40 overflow-hidden relative">
+        {(loading || refreshing || actionLoading !== null) && (
+          <div
+            className="absolute inset-y-0 w-56 bg-gradient-to-r from-transparent via-primary to-transparent"
+            style={{
+              animation: "pti-laser-scan 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+            }}
+          />
+        )}
+      </div>
 
       <div className="relative grid xl:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0 p-5 sm:p-6">
@@ -286,7 +299,15 @@ export function HardwareBackupStatus() {
           ) : error && !data ? (
             <RegionState kind="error" title="Backup status unavailable" description={`${error}. Retry when the dashboard can reach MongoDB.`} />
           ) : data && presentation ? (
-            <div className="space-y-6">
+            <div className={cn("space-y-6 relative transition-opacity duration-200", refreshing && "opacity-50")}>
+              {refreshing && (
+                <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-primary-border bg-surface-raised/95 px-3.5 py-2 shadow-xl backdrop-blur-xs">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
+                    <span className="font-mono text-xs font-semibold text-text">Syncing backup manifests…</span>
+                  </div>
+                </div>
+              )}
               {error && <p role="status" className="rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning">Showing the last successful result · {error}</p>}
               <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                 <BackupStat icon={CalendarDays} label="Coverage" value={`${coveragePercent}%`} detail={`${data.summary.successful_days} / ${data.summary.expected_days} days`} tone={coveragePercent === 100 ? "success" : coveragePercent > 70 ? "warning" : "neutral"} />
@@ -321,11 +342,25 @@ export function HardwareBackupStatus() {
               {data.can_control ? (
                 <div className="space-y-2">
                   <button type="button" onClick={() => runAction("run_missing")} disabled={actionDisabled} className="ui-button ui-button-primary min-h-11 w-full justify-between rounded-xl px-3.5 text-xs">
-                    <span className="flex items-center gap-2"><Play className="h-4 w-4" aria-hidden="true" />Run missing days</span>
+                    <span className="flex items-center gap-2">
+                      {actionLoading === "run_missing" ? (
+                        <RefreshCw className="h-4 w-4 animate-spin text-surface" aria-hidden="true" />
+                      ) : (
+                        <Play className="h-4 w-4" aria-hidden="true" />
+                      )}
+                      {actionLoading === "run_missing" ? "Queueing missing days…" : "Run missing days"}
+                    </span>
                     <ArrowUpRight className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
                   </button>
                   <button type="button" onClick={() => runAction("retry_failed")} disabled={actionDisabled} className="ui-button min-h-10 w-full justify-between rounded-xl px-3.5 text-xs">
-                    <span className="flex items-center gap-2"><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Retry failed days</span>
+                    <span className="flex items-center gap-2">
+                      {actionLoading === "retry_failed" ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+                      )}
+                      {actionLoading === "retry_failed" ? "Queueing retry…" : "Retry failed days"}
+                    </span>
                     <span className="font-mono text-[10px] text-text-subtle">AUDITED</span>
                   </button>
                 </div>
@@ -350,12 +385,7 @@ export function HardwareBackupStatus() {
               </div>
             </div>
           ) : (
-            <div className="space-y-4" aria-hidden="true">
-              <div className="ui-skeleton h-5 w-28 rounded-md" />
-              <div className="ui-skeleton h-11 rounded-xl" />
-              <div className="ui-skeleton h-11 rounded-xl" />
-              <div className="ui-skeleton h-32 rounded-xl" />
-            </div>
+            <PiControlSkeleton />
           )}
         </aside>
       </div>
@@ -363,13 +393,156 @@ export function HardwareBackupStatus() {
   );
 }
 
+const BACKUP_STAT_SKELETONS = [
+  { icon: CalendarDays, label: "Coverage", placeholder: "--%", detail: "30 expected days", tone: "neutral" as const },
+  { icon: Database, label: "Archived records", placeholder: "---", detail: "Compressed archives", tone: "info" as const },
+  { icon: HardDrive, label: "Latest archive", placeholder: "---", detail: "Manifest status", tone: "neutral" as const },
+  { icon: Clock3, label: "Last completed", placeholder: "---", detail: "Daily backup window", tone: "primary" as const },
+];
+
 function BackupSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-label="Loading hardware backup status">
+      {/* 4 Realistic Stat Cards */}
       <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-        {Array.from({ length: 4 }, (_, index) => <div key={index} className="ui-skeleton h-[92px] rounded-xl" />)}
+        {BACKUP_STAT_SKELETONS.map((item) => (
+          <div
+            key={item.label}
+            className="group min-w-0 rounded-xl border border-border bg-surface p-3.5 shadow-sm"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg border ${toneClasses[item.tone]}`}>
+                <item.icon className="h-4 w-4" aria-hidden="true" />
+              </span>
+              <span className="h-1.5 w-1.5 rounded-full bg-border-strong animate-pulse" />
+            </div>
+            <p className="mt-3 text-[10px] font-bold uppercase tracking-[0.12em] text-text-subtle">{item.label}</p>
+            <p className="mt-1 truncate font-mono text-lg font-semibold leading-6 tracking-tight text-text">
+              <span className="opacity-60">{item.placeholder}</span>
+            </p>
+            <p className="mt-1 truncate text-[11px] text-text-muted">{item.detail}</p>
+          </div>
+        ))}
       </div>
-      <div className="ui-skeleton h-64 rounded-xl" />
+
+      {/* Realistic Coverage Map Skeleton */}
+      <div className="rounded-xl border border-border bg-surface-subtle/60 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-text">30-day lookback coverage</h3>
+            </div>
+            <p className="text-xs text-text-muted">Daily Pi backups verified against MongoDB and Backblaze B2.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xl font-bold leading-none text-text-subtle/80 animate-pulse">--%</span>
+            <span className="text-xs text-text-subtle">coverage</span>
+          </div>
+        </div>
+
+        {/* 30-day calendar lookback chips */}
+        <div className="mt-5 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-[repeat(15,minmax(0,1fr))]">
+          {Array.from({ length: 30 }, (_, index) => (
+            <div
+              key={index}
+              className="flex min-h-[3.15rem] flex-col items-center justify-center rounded-lg border border-border/70 bg-surface p-1.5"
+            >
+              <span className="text-[9px] font-medium uppercase tracking-wider text-text-subtle/70">Day</span>
+              <span className="font-mono text-xs font-semibold text-text-muted">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span className="mt-1 h-1.5 w-1.5 rounded-full bg-border-strong animate-pulse" />
+            </div>
+          ))}
+        </div>
+
+        {/* Coverage Legend */}
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-[11px] text-text-subtle">
+          <div className="flex flex-wrap items-center gap-3">
+            <LegendDot className="bg-success" label="Success" />
+            <LegendDot className="border border-border bg-surface" label="No records" />
+            <LegendDot className="bg-info" label="In progress" />
+            <LegendDot className="bg-warning" label="Missing" />
+            <LegendDot className="bg-danger" label="Failed" />
+          </div>
+          <div className="h-1.5 min-w-32 flex-1 rounded-full bg-surface-hover sm:max-w-48 overflow-hidden">
+            <div className="h-full w-24 bg-primary/30 animate-pulse rounded-full" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PiControlSkeleton() {
+  return (
+    <div className="space-y-5" aria-hidden="true">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-text-subtle">Control room</p>
+          <h3 className="mt-1 text-sm font-semibold">Pi worker</h3>
+        </div>
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-info-border bg-info-subtle px-2 py-1 text-[10px] font-semibold text-info">
+          <RefreshCw className="h-3 w-3 animate-spin text-info" aria-hidden="true" />
+          Connecting
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        <button
+          type="button"
+          disabled
+          className="ui-button ui-button-primary min-h-11 w-full justify-between rounded-xl px-3.5 text-xs opacity-60 cursor-not-allowed"
+        >
+          <span className="flex items-center gap-2">
+            <Play className="h-4 w-4" aria-hidden="true" />
+            Run missing days
+          </span>
+          <ArrowUpRight className="h-3.5 w-3.5 opacity-70" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          disabled
+          className="ui-button min-h-10 w-full justify-between rounded-xl px-3.5 text-xs opacity-60 cursor-not-allowed"
+        >
+          <span className="flex items-center gap-2">
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            Retry failed days
+          </span>
+          <span className="font-mono text-[10px] text-text-subtle">AUDITED</span>
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg border border-info-border bg-info-subtle text-info">
+              <Cloud className="h-4 w-4" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-text-subtle">Destination</p>
+              <h3 className="mt-0.5 text-xs font-semibold">Backblaze B2</h3>
+            </div>
+          </div>
+          <span className="h-2 w-2 rounded-full bg-border-strong animate-pulse" />
+        </div>
+        <p className="mt-4 font-mono text-2xl font-semibold tracking-tight text-text-subtle/80 animate-pulse">
+          ---.- KiB
+        </p>
+        <p className="mt-1 text-[11px] text-text-muted">Waiting for cloud storage snapshot…</p>
+        <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-[10px] text-text-subtle">
+          <span className="font-mono">pti-backups</span>
+          <span>Checked —</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 border-t border-border pt-4">
+        <MiniFact icon={TimerReset} label="Schedule" value="03:30 daily" />
+        <MiniFact icon={CalendarDays} label="Lookback" value="30 days" />
+        <MiniFact icon={ShieldCheck} label="Safety hold" value="2 days" />
+        <MiniFact icon={Server} label="Source" value="Pi local" />
+      </div>
     </div>
   );
 }
