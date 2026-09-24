@@ -14,7 +14,9 @@ from typing import Any, Mapping
 
 
 sys.path.insert(0, "/opt/honeypot")
-from production.ensemble.evidence import normalize_model2_v5_shadow_result  # noqa: E402
+from production.ensemble.evidence import (  # noqa: E402
+    expected_v5_artifact_sha256, normalize_model2_v5_shadow_result,
+)
 
 
 BRIDGE_REQUEST_SCHEMA = "model2_v5_ensemble_bridge_request.v1"
@@ -84,7 +86,7 @@ def _valid_result(value: Any, *, session_id: str, run_id: str) -> bool:
         normalized = normalize_model2_v5_shadow_result(
             value,
             binding=binding,
-            expected_model_sha256=MODEL2_V5_ARTIFACT_SHA256,
+            expected_model_sha256=expected_v5_artifact_sha256(value),
             expected_feature_contract_sha256=MODEL2_V5_FEATURE_CONTRACT_SHA256,
         )
     except (TypeError, ValueError):

@@ -12,6 +12,8 @@ import {
   type HardwareHistoryRange,
 } from "@/components/dashboard/HardwareHistoryRangePicker";
 import { RegionState } from "@/components/ui/RegionState";
+import { ChartWireframeSkeleton } from "@/components/ui/loaders";
+import { cn } from "@/lib/utils";
 import {
   isHardwareHistoryResponse,
   type HardwareHistoryMetricName,
@@ -270,6 +272,18 @@ export function HardwareHistory() {
         </div>
       </div>
 
+      {/* Scanning Laser Bar when loading or changing range */}
+      <div className="h-0.5 w-full bg-border/40 overflow-hidden relative">
+        {(loading || controlsLoading) && (
+          <div
+            className="absolute inset-y-0 w-56 bg-gradient-to-r from-transparent via-primary to-transparent"
+            style={{
+              animation: "pti-laser-scan 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+            }}
+          />
+        )}
+      </div>
+
       {data && data.series.length > 1 && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-text-muted">
           <span>Sensor</span>
@@ -280,7 +294,7 @@ export function HardwareHistory() {
       )}
 
       {loading && !data ? (
-        <div className="mt-4"><RegionState kind="loading" variant="chart" title="Loading retained history" description="Reading minute rollups." /></div>
+        <HistorySkeleton />
       ) : error && !data ? (
         <div className="mt-4"><RegionState kind="error" title="Hardware history unavailable" description={`${error}. Retry when the database is available.`} /></div>
       ) : !selectedSeries || selectedSeries.points.length === 0 ? (
@@ -322,8 +336,18 @@ export function HardwareHistory() {
             </div>
           </div>
 
-          <div id={`hardware-history-${activeView.key}`} role="tabpanel" className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(250px,0.55fr)]">
-            <div className="min-h-[330px] rounded-xl border border-border bg-surface-subtle p-3.5 sm:p-4">
+          <div id={`hardware-history-${activeView.key}`} role="tabpanel" className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(250px,0.55fr)] relative">
+            {controlsLoading && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-surface/40 backdrop-blur-[1.5px] rounded-xl transition-all">
+                <div className="flex items-center gap-2.5 rounded-xl border border-primary-border bg-surface-raised/95 px-3.5 py-2 shadow-xl">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-primary" aria-hidden="true" />
+                  <span className="font-mono text-xs font-semibold text-text">
+                    Aggregating {range === "custom" ? "custom window" : range} rollups…
+                  </span>
+                </div>
+              </div>
+            )}
+            <div className={cn("min-h-[330px] rounded-xl border border-border bg-surface-subtle p-3.5 sm:p-4 transition-opacity duration-200", controlsLoading && "opacity-40")}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-text">{activeView.label} trend</h3>
@@ -387,5 +411,96 @@ function HistoryChart({ data, lines, domain }: { data: HistoryChartRow[]; lines:
         {lines.map((line) => <Line key={line.dataKey} type="monotone" dataKey={line.dataKey} name={`${line.name} average`} stroke={line.color} strokeWidth={2.2} dot={false} isAnimationActive={false} connectNulls={false} />)}
       </LineChart>
     </ResponsiveContainer>
+  );
+}
+
+function HistorySkeleton() {
+  return (
+    <div className="mt-4 space-y-4" aria-busy="true" aria-label="Loading retained history">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Signal view</p>
+          <p className="mt-1 text-xs text-text-muted">Awaiting minute rollups · 60s buckets</p>
+        </div>
+        <div className="grid grid-cols-3 gap-1 rounded-xl border border-border bg-surface-subtle p-1">
+          {HISTORY_VIEWS.map((item) => {
+            const Icon = item.icon;
+            const selected = item.key === "pressure";
+            return (
+              <div
+                key={item.key}
+                className={`flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2.5 text-xs ${selected ? "bg-primary-subtle font-medium text-primary shadow-[var(--shadow-card)]" : "text-text-muted/60"}`}
+              >
+                <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>{item.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(250px,0.55fr)]">
+        <ChartWireframeSkeleton
+          title="Pressure trend"
+          description="CPU, memory, and storage · average per bucket"
+          lines={[
+            { name: "CPU", color: "var(--chart-1)", fill: "var(--chart-1)", baselineYPercent: 92 },
+            { name: "Memory", color: "var(--chart-6)", baselineYPercent: 68 },
+            { name: "Storage", color: "var(--chart-3)", baselineYPercent: 48 },
+          ]}
+          yTicks={[100, 75, 50, 25, 0]}
+          mode="line"
+          className="min-h-[330px]"
+          chartHeightClassName="h-[250px]"
+        />
+
+        <aside className="rounded-xl border border-border bg-surface-subtle p-3.5 sm:p-4 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-text">Range snapshot</h3>
+              <p className="mt-0.5 text-xs text-text-subtle">Latest average and retained spread</p>
+            </div>
+            <span className="rounded-full bg-surface-hover px-2 py-1 font-mono text-[10px] tabular-nums text-text-subtle">
+              Aggregating…
+            </span>
+          </div>
+
+          <div className="divide-y divide-border/70">
+            {[
+              { name: "CPU", color: "var(--chart-1)", unit: "%" },
+              { name: "Memory", color: "var(--chart-6)", unit: "%" },
+              { name: "Storage", color: "var(--chart-3)", unit: "%" },
+            ].map((metric) => (
+              <div key={metric.name} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: metric.color }} />
+                    <span className="text-xs font-medium text-text">{metric.name}</span>
+                  </div>
+                  <p className="mt-1 font-mono text-[10px] text-text-subtle">min --{metric.unit} · max --{metric.unit}</p>
+                </div>
+                <span className="font-mono text-xs font-semibold tabular-nums text-text-subtle/80 animate-pulse">
+                  --.-{metric.unit}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 border-t border-border pt-3 text-xs">
+            <div className="rounded-lg bg-surface-hover/60 p-2.5">
+              <span className="block text-[10px] uppercase tracking-wider text-text-subtle">Bucket</span>
+              <strong className="mt-1 block font-mono text-text">60s</strong>
+            </div>
+            <div className="rounded-lg bg-surface-hover/60 p-2.5">
+              <span className="block text-[10px] uppercase tracking-wider text-text-subtle">Last point</span>
+              <strong className="mt-1 block truncate font-mono text-text-subtle/80">Awaiting…</strong>
+            </div>
+          </div>
+          <p className="text-[11px] text-text-subtle">
+            Reading minute-level rollups from hardware_metrics_1m.
+          </p>
+        </aside>
+      </div>
+    </div>
   );
 }

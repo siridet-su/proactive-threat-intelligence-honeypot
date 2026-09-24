@@ -7,7 +7,7 @@ not run submitted input or connect to a real authentication backend.
 ## Scope and staged binding
 
 The configuration enables only OpenCanary's HTTP module and its built-in
-`basicLogin` skin. The form submits `username` and `password` fields, which
+`nasLogin` skin. The form submits `username` and `password` fields, which
 OpenCanary records with the request path, source address, and user agent. A
 SQL-injection string submitted in either login field is therefore retained as
 attacker-supplied evidence. Other request paths and unsupported HTTP methods
@@ -52,7 +52,7 @@ After the service and environment have been installed on the Pi:
 ```sh
 sudo systemctl start opencanary.service
 sudo systemctl status opencanary.service --no-pager
-curl -i http://127.0.0.1:8081/
+curl -iL http://127.0.0.1:8081/
 sudo tail -n 20 /var/log/opencanary/events.jsonl
 ```
 

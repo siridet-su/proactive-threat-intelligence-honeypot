@@ -8,7 +8,7 @@
   "git.enabled": false,
   "http.enabled": true,
   "http.port": 8081,
-  "http.skin": "basicLogin",
+  "http.skin": "nasLogin",
   "http.banner": "Apache/2.4.58 (Ubuntu)",
   "http.log_redirect_request": true,
   "http.log_unimplemented_method_requests": true,

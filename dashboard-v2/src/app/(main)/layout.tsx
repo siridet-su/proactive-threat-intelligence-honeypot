@@ -141,6 +141,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (pathname.includes('/malware-vault')) return 'Artifact Intelligence';
     if (pathname.includes('/user-management')) return 'User Management';
     if (pathname.includes('/filesystem-activity')) return 'Filesystem Activity';
+    if (pathname.includes('/http-activity')) return 'HTTP Activity';
     if (pathname.includes('/threat-intel/')) return 'Session Analysis';
     if (pathname.includes('/threat-intel')) return 'Threat Intelligence';
     return 'System Overview';
