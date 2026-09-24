@@ -632,3 +632,50 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related material: [deployment validation](validation/2026-09-24-web-login-pipeline.md),
   [web-login telemetry design](design/web-login-telemetry.md), and
   [data access guide](../integrations/web-corp/DATA-ACCESS.md).
+
+### 2026-09-25 — Prepare multi-target retained-data backup support
+
+- Status: prepared; hardware target remains active on the Pi, additional targets
+  are not deployed or activated.
+- Scope and intent: extend the existing Pi backup worker and dashboard source
+  map so retained threat events and filesystem audit sources can be activated
+  deliberately without presenting repository-only support as live coverage.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; changes are
+  currently uncommitted in the dashboard worktree.
+- Repository changes: added target-aware backup configuration for
+  `hardware_metrics_1m`, `threat_events`, and `filesystem_audit`; added a
+  versioned multi-source gzip JSONL envelope; excluded derived filesystem
+  projections; added `backup_target_status` publication and a dashboard API
+  that drives Active/Planned source cards from worker state; and added the
+  sensitive-target opt-in guard. Updated the backup runbook, current
+  architecture, data ownership, service catalog, systemd descriptions, and
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md).
+- Host/environment changes actually applied: none. No Pi binary, systemd unit,
+  B2 bucket/key, MongoDB data, or dashboard deployment was changed by this
+  repository preparation.
+- Runtime/exposure state: the deployed hardware path remains the only active
+  target. `threat_events` and `filesystem_audit` remain Planned until the Pi
+  environment enables their target IDs, the sensitive-data policy is approved,
+  and the B2 application-key prefixes are updated.
+- Validation performed and outcome: hardware-backup `go test ./...` passed with
+  target/configuration coverage; dashboard `npx tsc --noEmit` and `npm run lint`
+  passed; `git diff --check` passed. MongoDB/B2 integration and restore tests
+  were not run.
+- Not performed / deferred: no sensitive-event archive upload, no filesystem
+  archive upload, no restore/readFiles implementation, no Pi deployment, no
+  B2 key-policy change, and no production dashboard verification.
+- Risks and data handling: `events` may contain restricted credential-bearing
+  web-login fields, so the worker rejects that target unless
+  `BACKUP_ALLOW_SENSITIVE=true`. Do not copy credentials, raw event values, or
+  protected B2 configuration into logs or documentation.
+- Rollback: do not enable the new target IDs on the Pi; for repository review,
+  revert the implementation commit. Existing hardware manifests and B2 objects
+  are not modified by this prepared change.
+- Follow-up: review the private B2 encryption/key-prefix policy, update the Pi
+  environment, deploy the worker, run a bounded filesystem archive first, then
+  verify target status, manifest counts, storage snapshot, and read-only restore
+  handling before enabling sensitive threat events.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).

@@ -5,44 +5,14 @@ import { motion, useReducedMotion } from "framer-motion";
 import {
   Archive,
   ArrowLeft,
-  ArrowUpRight,
   CalendarClock,
-  CheckCircle2,
-  Database,
-  FolderArchive,
   LockKeyhole,
   Radio,
   TimerReset,
 } from "lucide-react";
 
+import { BackupSourceMap } from "@/components/dashboard/BackupSourceMap";
 import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
-
-const sourceCards = [
-  {
-    title: "Hardware rollups",
-    description: "Minute-level history for System Health.",
-    collection: "hardware_metrics_1m",
-    state: "Active",
-    stateClassName: "border-success-border bg-success-subtle text-success",
-    icon: Archive,
-  },
-  {
-    title: "Threat event history",
-    description: "Reserved for long-term investigation evidence.",
-    collection: "event archive",
-    state: "Planned",
-    stateClassName: "border-border bg-surface-subtle text-text-subtle",
-    icon: FolderArchive,
-  },
-  {
-    title: "Filesystem audit history",
-    description: "Reserved for durable activity sessions.",
-    collection: "filesystem archive",
-    state: "Planned",
-    stateClassName: "border-border bg-surface-subtle text-text-subtle",
-    icon: Database,
-  },
-] as const;
 
 export default function BackupRetentionPage() {
   const reduceMotion = useReducedMotion();
@@ -83,43 +53,7 @@ export default function BackupRetentionPage() {
 
       <HardwareBackupStatus />
 
-      <motion.section
-        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: reduceMotion ? 0 : 0.08, ease: [0.22, 1, 0.36, 1] }}
-        aria-labelledby="backup-sources-title"
-      >
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Protection map</p>
-            <h2 id="backup-sources-title" className="mt-1 text-lg font-semibold tracking-tight">Data sources</h2>
-          </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-info-border bg-info-subtle px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-info"><CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />1 active · 2 planned</span>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          {sourceCards.map(({ title, description, collection, state, stateClassName, icon: Icon }, index) => (
-            <motion.article
-              key={title}
-              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: reduceMotion ? 0 : 0.12 + index * 0.06, ease: [0.22, 1, 0.36, 1] }}
-              whileHover={reduceMotion ? undefined : { y: -3 }}
-              className="group rounded-xl border border-border bg-surface p-4 shadow-sm transition-colors duration-200 hover:border-border-strong hover:shadow-md"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <span className="grid h-9 w-9 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary"><Icon className="h-4 w-4" aria-hidden="true" /></span>
-                <span className={`ui-badge text-[10px] ${stateClassName}`}>{state}</span>
-              </div>
-              <h3 className="mt-4 text-sm font-semibold">{title}</h3>
-              <p className="mt-1 text-xs text-text-muted">{description}</p>
-              <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-[10px] text-text-subtle">
-                <span className="truncate font-mono" title={collection}>{collection}</span>
-                <ArrowUpRight className="h-3.5 w-3.5 shrink-0 opacity-0 transition-opacity duration-200 group-hover:opacity-100" aria-hidden="true" />
-              </div>
-            </motion.article>
-          ))}
-        </div>
-      </motion.section>
+      <BackupSourceMap />
 
       <motion.section
         initial={reduceMotion ? false : { opacity: 0, y: 12 }}

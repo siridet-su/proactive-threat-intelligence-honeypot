@@ -202,6 +202,25 @@ export interface HardwareBackupStatus {
   storage: HardwareBackupStorageStatus | null;
 }
 
+export type BackupTargetId = "hardware_metrics_1m" | "threat_events" | "filesystem_audit";
+export type BackupTargetState = "active" | "planned";
+
+export interface BackupTargetStatus {
+  target_id: BackupTargetId;
+  state: BackupTargetState;
+  collections: string[];
+  sensitive: boolean;
+  last_seen_at: string | null;
+  last_completed_at: string | null;
+}
+
+export interface BackupTargetOverview {
+  generated_at: string;
+  active_count: number;
+  planned_count: number;
+  targets: BackupTargetStatus[];
+}
+
 function isNullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
@@ -271,6 +290,26 @@ export function isHardwareBackupStatus(value: unknown): value is HardwareBackupS
     value.days.every(isHardwareBackupDay) &&
     (value.request === null || isHardwareBackupRequest(value.request)) &&
     (value.storage === null || isHardwareBackupStorageStatus(value.storage));
+}
+
+function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {
+  if (!isRecord(value)) return false;
+  return (value.target_id === "hardware_metrics_1m" || value.target_id === "threat_events" || value.target_id === "filesystem_audit") &&
+    (value.state === "active" || value.state === "planned") &&
+    Array.isArray(value.collections) && value.collections.every((collection) => typeof collection === "string") &&
+    typeof value.sensitive === "boolean" &&
+    isNullableString(value.last_seen_at) &&
+    isNullableString(value.last_completed_at);
+}
+
+export function isBackupTargetOverview(value: unknown): value is BackupTargetOverview {
+  if (!isRecord(value) || typeof value.generated_at !== "string" ||
+    typeof value.active_count !== "number" || !Number.isFinite(value.active_count) ||
+    typeof value.planned_count !== "number" || !Number.isFinite(value.planned_count) ||
+    !Array.isArray(value.targets)) {
+    return false;
+  }
+  return value.targets.every(isBackupTargetStatus);
 }
 
 function isHardwareHistoryMetric(value: unknown): value is HardwareHistoryMetric {

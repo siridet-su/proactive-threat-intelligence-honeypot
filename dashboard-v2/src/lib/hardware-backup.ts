@@ -10,6 +10,8 @@ import type {
   HardwareBackupRequestView,
   HardwareBackupStorageStatus,
   HardwareBackupStatus,
+  BackupTargetOverview,
+  BackupTargetState,
 } from "./dashboardTypes";
 
 const BACKUP_COLLECTION = "hardware_backup_manifests";
@@ -20,6 +22,13 @@ const HARDWARE_COLLECTION = "hardware_metrics_1m";
 const LOOKBACK_DAYS = 30;
 const SAFETY_DAYS = 2;
 const MAX_MANIFESTS = 90;
+const TARGET_STATUS_COLLECTION = "backup_target_status";
+
+const BACKUP_TARGET_CATALOG = [
+  { target_id: "hardware_metrics_1m", collections: ["hardware_metrics_1m"], sensitive: false },
+  { target_id: "threat_events", collections: ["events"], sensitive: true },
+  { target_id: "filesystem_audit", collections: ["cwd_events", "cwd_session_state"], sensitive: false },
+] as const;
 
 function asDate(value: unknown): Date | null {
   if (value instanceof Date) return Number.isFinite(value.getTime()) && value.getUTCFullYear() > 1 ? value : null;
@@ -373,5 +382,48 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
     days,
     request: requestView(latestRequest),
     storage: storageSnapshotView(storageSnapshot),
+  };
+}
+
+export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
+  const client = await getMongoClient();
+  const database = client.db(getMongoDatabaseName());
+  const [statusDocuments, ...manifestDocuments] = await Promise.all([
+    database.collection(TARGET_STATUS_COLLECTION).find({
+      target_id: { $in: BACKUP_TARGET_CATALOG.map((target) => target.target_id) },
+      enabled: true,
+    }).project({ target_id: 1, enabled: 1, last_seen_at: 1 }).toArray(),
+    ...BACKUP_TARGET_CATALOG.map((target) => database.collection(BACKUP_COLLECTION).findOne(
+      { $or: [{ target_id: target.target_id }, { collection: target.target_id }] },
+      { projection: { completed_at: 1 }, sort: { completed_at: -1 } },
+    )),
+  ]);
+
+  const liveTargets = new Map<string, Document>();
+  for (const document of statusDocuments) {
+    if (typeof document.target_id === "string") liveTargets.set(document.target_id, document);
+  }
+
+  const targets = BACKUP_TARGET_CATALOG.map((target, index) => {
+    const statusDocument = liveTargets.get(target.target_id);
+    const latestManifest = manifestDocuments[index];
+    const fallbackHardwareActivation = target.target_id === "hardware_metrics_1m" && !statusDocument && latestManifest !== null;
+    const active = Boolean(statusDocument?.enabled) || fallbackHardwareActivation;
+    return {
+      target_id: target.target_id,
+      state: (active ? "active" : "planned") as BackupTargetState,
+      collections: [...target.collections],
+      sensitive: target.sensitive,
+      last_seen_at: dateValue(statusDocument?.last_seen_at),
+      last_completed_at: dateValue(latestManifest?.completed_at),
+    };
+  });
+
+  const activeCount = targets.filter((target) => target.state === "active").length;
+  return {
+    generated_at: new Date().toISOString(),
+    active_count: activeCount,
+    planned_count: targets.length - activeCount,
+    targets,
   };
 }

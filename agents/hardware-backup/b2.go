@@ -35,6 +35,7 @@ type b2AuthorizationResponse struct {
 	Allowed            struct {
 		BucketID   string `json:"bucketId"`
 		BucketName string `json:"bucketName"`
+		NamePrefix string `json:"namePrefix"`
 	} `json:"allowed"`
 }
 
@@ -91,6 +92,14 @@ func NewB2Client(ctx context.Context, cfg Config) (*B2Client, error) {
 		bucketID, err = findB2Bucket(ctx, client, authorization, cfg.B2Bucket)
 		if err != nil {
 			return nil, err
+		}
+	}
+	if prefix := strings.TrimSpace(authorization.Allowed.NamePrefix); prefix != "" {
+		for _, target := range cfg.Targets {
+			targetPrefix := strings.TrimSuffix(target.Prefix, "/") + "/"
+			if !strings.HasPrefix(targetPrefix, prefix) {
+				return nil, fmt.Errorf("B2 key prefix %q does not allow backup target %q", prefix, target.ID)
+			}
 		}
 	}
 
