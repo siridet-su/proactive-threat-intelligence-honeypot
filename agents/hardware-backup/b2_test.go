@@ -18,7 +18,7 @@ func TestStorageUsageSumsUploadVersionsAcrossPages(t *testing.T) {
 		authToken:  "test-token",
 		bucketID:   "test-bucket",
 	}
-	usage, err := client.StorageUsage(context.Background())
+	usage, err := client.StorageUsage(context.Background(), "hardware_metrics_1m/")
 	if err != nil {
 		t.Fatalf("StorageUsage() error = %v", err)
 	}
@@ -33,13 +33,39 @@ func TestStorageUsageSumsUploadVersionsAcrossPages(t *testing.T) {
 	}
 }
 
+func TestAuthorizationUsesV4StorageBucketRestriction(t *testing.T) {
+	var authorization b2AuthorizationResponse
+	authorization.APIInfo.StorageAPI.APIURL = "https://api001.backblazeb2.com"
+	authorization.APIInfo.StorageAPI.Allowed.Buckets = []b2AllowedBucket{
+		{ID: "bucket-id", Name: "pti-honeypot-archives"},
+	}
+
+	if got := authorization.storageAPIURL(); got != "https://api001.backblazeb2.com" {
+		t.Fatalf("storageAPIURL() = %q", got)
+	}
+	if got, err := authorization.bucketIDFor("pti-honeypot-archives"); err != nil || got != "bucket-id" {
+		t.Fatalf("bucketIDFor() = %q, %v", got, err)
+	}
+	if _, err := authorization.bucketIDFor("pti-hardware-backups"); err == nil {
+		t.Fatal("bucketIDFor() accepted an unauthorized bucket")
+	}
+}
+
+func TestAuthorizationUsesAllowedNamePrefix(t *testing.T) {
+	var authorization b2AuthorizationResponse
+	authorization.APIInfo.StorageAPI.Allowed.NamePrefix = "hardware_metrics_1m/"
+	if got := authorization.allowedNamePrefix(); got != "hardware_metrics_1m/" {
+		t.Fatalf("allowedNamePrefix() = %q", got)
+	}
+}
+
 type storageUsageRoundTripper struct {
 	t     *testing.T
 	calls int
 }
 
 func (transport *storageUsageRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
-	if request.URL.Path != "/b2api/v2/b2_list_file_versions" {
+	if request.URL.Path != "/b2api/v4/b2_list_file_versions" {
 		transport.t.Errorf("path = %q, want file versions endpoint", request.URL.Path)
 	}
 	if request.Header.Get("Authorization") != "test-token" {
@@ -51,11 +77,12 @@ func (transport *storageUsageRoundTripper) RoundTrip(request *http.Request) (*ht
 		StartFileName string `json:"startFileName"`
 		StartFileID   string `json:"startFileId"`
 		MaxFileCount  int    `json:"maxFileCount"`
+		Prefix        string `json:"prefix"`
 	}
 	if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 		transport.t.Errorf("decode request: %v", err)
 	}
-	if payload.BucketID != "test-bucket" || payload.MaxFileCount != 1000 {
+	if payload.BucketID != "test-bucket" || payload.MaxFileCount != 1000 || payload.Prefix != "hardware_metrics_1m/" {
 		transport.t.Errorf("request payload = %+v", payload)
 	}
 

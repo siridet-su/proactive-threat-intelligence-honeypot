@@ -12,34 +12,40 @@ import (
 
 const (
 	storageSnapshotCollection    = "b2_storage_snapshots"
-	storageSnapshotSchemaVersion = "pti.b2_storage_snapshot.v1"
+	storageSnapshotSchemaVersion = "pti.b2_storage_snapshot.v2"
 	storageUsageTimeout          = 10 * time.Minute
 )
 
 func refreshStorageSnapshot(ctx context.Context, snapshots *mongo.Collection, cfg Config, b2 *B2Client, targetID string) error {
+	target, ok := backupTarget(targetID)
+	if !ok {
+		return fmt.Errorf("unsupported backup target %q", targetID)
+	}
+
 	usageCtx, cancel := context.WithTimeout(ctx, storageUsageTimeout)
-	usage, err := b2.StorageUsage(usageCtx)
+	usage, err := b2.StorageUsage(usageCtx, target.Prefix+"/")
 	cancel()
 	if err != nil {
 		return err
 	}
 
 	checkedAt := time.Now().UTC()
-	target, ok := backupTarget(targetID)
-	if !ok {
-		return fmt.Errorf("unsupported backup target %q", targetID)
-	}
 	return writeStorageSnapshots(ctx, snapshots, cfg, usage, checkedAt, []BackupTarget{target})
 }
 
 func refreshStorageSnapshots(ctx context.Context, snapshots *mongo.Collection, cfg Config, b2 *B2Client) error {
-	usageCtx, cancel := context.WithTimeout(ctx, storageUsageTimeout)
-	usage, err := b2.StorageUsage(usageCtx)
-	cancel()
-	if err != nil {
-		return err
+	for _, target := range cfg.Targets {
+		usageCtx, cancel := context.WithTimeout(ctx, storageUsageTimeout)
+		usage, err := b2.StorageUsage(usageCtx, target.Prefix+"/")
+		cancel()
+		if err != nil {
+			return fmt.Errorf("read B2 storage usage for %s: %w", target.ID, err)
+		}
+		if err := writeStorageSnapshots(ctx, snapshots, cfg, usage, time.Now().UTC(), []BackupTarget{target}); err != nil {
+			return err
+		}
 	}
-	return writeStorageSnapshots(ctx, snapshots, cfg, usage, time.Now().UTC(), cfg.Targets)
+	return nil
 }
 
 func writeStorageSnapshots(

@@ -54,7 +54,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true`. |
-| Retained data backup worker | Active for `hardware_metrics_1m`; multi-target support prepared | The Pi worker writes hardware rollups to private B2 and reports storage/manifest state. `threat_events` and `filesystem_audit` are repository-supported but remain inactive until the Pi target list, sensitive-data policy, and scoped B2 key are updated. |
+| Retained data backup worker | Active for `hardware_metrics_1m`; multi-target binary deployed, additional targets inactive | The Pi worker writes hardware rollups to private B2 and reports storage/manifest state. `threat_events` and `filesystem_audit` remain inactive because the current upload key is restricted to the `hardware_metrics_1m/` prefix. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |

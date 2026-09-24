@@ -679,3 +679,52 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
   [current architecture](CURRENT-ARCHITECTURE.md), and
   [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Deploy retained-data backup worker to the Pi
+
+- Status: active for `hardware_metrics_1m`; additional targets remain inactive.
+- Scope and intent: install the committed multi-target worker and updated
+  systemd descriptions on the Pi while preserving the existing hardware-only
+  target policy until B2 key scope permits additional prefixes.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; implementation
+  commit `93670fd` plus the Backblaze API correction in this commit.
+- Repository changes: restored Backblaze Native API v4 authorization and
+  storage endpoints that are required by the current B2 account; added v4
+  authorization-shape tests and prefix-scoped storage usage. The current
+  architecture row now reflects the deployed hardware-only state.
+- Host/environment changes actually applied: built a static `linux/arm64`
+  binary, installed it at
+  `/home/cpe27/proactive-threat-intelligence-honeypot/agents/hardware-backup/hardware-backup`,
+  installed the updated scheduled/control unit files, reloaded systemd, and
+  restarted `honeypot-hardware-backup-control.service`. The previous binary
+  and unit files were preserved on the Pi with `.pre-93670fd` suffixes. No
+  source branch merge was performed in the Pi repository.
+- Runtime/exposure state: the control service is active and the daily timer is
+  enabled. `/etc/honeypot/backup.env` continues to use the private
+  `pti-honeypot-archives` bucket and the upload key restricted to
+  `hardware_metrics_1m/`; `BACKUP_TARGETS` is unset, so the worker defaults to
+  the hardware target. `threat_events` and `filesystem_audit` are not active.
+- Validation performed and outcome: the deployed binary SHA-256 is
+  `72c7ce33174ab2ddcdfd9d93156263c012a69c8bb6d9f30d67a250f902471536`;
+  control startup authorized B2 without the previous v2 error; a manual
+  scheduled run completed successfully, uploaded the 2026-09-22 hardware
+  archive, and refreshed the B2 storage snapshot. Local Go tests passed.
+- Not performed / deferred: no filesystem or sensitive threat-event archive
+  was uploaded; no restore operation was run; B2 listing from the local
+  workstation was unavailable because the regional API hostname did not
+  resolve locally. The Pi upload result and service logs were verified.
+- Risks and data handling: the first deployed candidate used the obsolete v2
+  B2 endpoint and was immediately replaced after the control-service log
+  exposed the incompatibility. No credentials or event payloads were copied
+  into the repository or logs.
+- Rollback: stop/restart the control service with the preserved
+  `hardware-backup.pre-93670fd-v2` binary, restore the `.pre-93670fd` unit
+  files if needed, then run `systemctl daemon-reload`; no database rollback is
+  required.
+- Follow-up: create a bucket-scoped upload key or a separately scoped worker
+  for `filesystem_audit/` before enabling that target; keep
+  `BACKUP_ALLOW_SENSITIVE` disabled until the restricted `events` archive
+  policy and restore procedure are approved.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md), and
+  [current architecture](CURRENT-ARCHITECTURE.md).
