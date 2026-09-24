@@ -73,7 +73,7 @@ describe("HTTP Mongo read boundary", () => {
     const toArray = vi.fn().mockResolvedValue([{
       source: "web-corp", event_type: "web_login_attempt", event_id: "login1",
       correlation: { web_session_id: id },
-      http: { method: "POST", path: "/web/login", query: "from=research" },
+      http: { method: "POST", path: "/web/login", query: "from=research", scheme: "http", host: "decoy.invalid", user_agent: "Mozilla/5.0 Firefox/156.0", referer: "http://decoy.invalid/login", origin: "http://decoy.invalid", accept_language: "th-TH" },
       web_login: { database: "demo", username: "attacker@example.invalid", password: "' OR '1'='1", redirect: "/web", remember: "on" },
       truncated_fields: ["odoo_login.password"],
     }]);
@@ -81,8 +81,14 @@ describe("HTTP Mongo read boundary", () => {
     find.mockReturnValue({ sort: vi.fn(() => ({ limit })) });
     const detail = await getWebHttpSession(id, true);
     expect(detail?.payloads[0]?.form?.password).toBe("' OR '1'='1");
+    expect(detail?.payloads[0]?.userAgent).toBe("Mozilla/5.0 Firefox/156.0");
+    expect(detail?.payloads[0]?.host).toBe("decoy.invalid");
+    expect(detail?.payloads[0]?.referer).toBe("http://decoy.invalid/login");
+    expect(detail?.payloads[0]?.origin).toBe("http://decoy.invalid");
+    expect(detail?.payloads[0]?.acceptLanguage).toBe("th-TH");
     expect(detail?.payloads[0]?.truncatedFields).toContain("odoo_login.password");
     expect(JSON.stringify(detail?.items)).not.toContain("attacker@example.invalid");
+    expect(JSON.stringify(detail?.items)).not.toContain("Firefox");
   });
 
   it("does not invent a literal query for a historical record", async () => {
@@ -91,6 +97,7 @@ describe("HTTP Mongo read boundary", () => {
     const limit = vi.fn(() => ({ toArray }));
     find.mockReturnValue({ sort: vi.fn(() => ({ limit })) });
     expect((await getWebHttpSession(id, true))?.payloads[0]?.query).toBeNull();
+    expect((await getWebHttpSession(id, true))?.payloads[0]?.userAgent).toBeNull();
     expect((await getWebHttpSession(id))?.payloads).toEqual([]);
     const projection = find.mock.calls.at(-1)![1].projection as Record<string, number>;
     expect(projection["web_login.password"]).toBeUndefined();

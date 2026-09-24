@@ -4,6 +4,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, ArrowLeft, Fingerprint, Globe2, Printer, RefreshCw, ShieldAlert } from "lucide-react";
 import type { WebHttpCapturedPayload, WebHttpHint } from "@/lib/web-http-intel";
+import { decodedQueryForDisplay, reportedClient } from "@/lib/web-http-presentation";
 
 type HttpDetail = { sessionId: string; items: WebHttpHint[]; payloads: WebHttpCapturedPayload[]; rawPayloadAccess: boolean; coverage: string };
 type TiCache = { provider?: unknown; lookup_status?: unknown; normalized_context?: unknown; lookup_at?: unknown; expires_at?: unknown };
@@ -101,6 +102,10 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
   const rejected = items.filter((item) => item.eventType === "web_login_attempt" && item.outcome === "rejected");
   const signals = [...new Set(items.flatMap((item) => item.signals))];
   const tiStatus = !sourceIp || !eligiblePublicIp(sourceIp) ? "ineligible" : ti.ip === sourceIp ? ti.status : "loading";
+  const reportedUserAgents = [...new Set((detail?.payloads ?? []).map((payload) => payload.userAgent).filter((value): value is string => Boolean(value)))];
+  const reportedClientSummary = reportedUserAgents.length > 1
+    ? `${reportedUserAgents.length} different self-reported clients`
+    : reportedClient(reportedUserAgents[0]);
 
   return <main className="space-y-5 pb-12 print:p-0">
     <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
@@ -127,6 +132,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
         <Metric label="Injection hints" value={String(hinted.length)} />
         <Metric label="Rejected logins" value={String(rejected.length)} />
         <Metric label="Source IP" value={sourceIp ?? (sources.length > 1 ? "Multiple IPs" : "Not recorded")} />
+        {reportedClientSummary && <Metric label="Reported client · unverified" value={reportedClientSummary} />}
       </section>
 
       <section className="rounded-xl border border-border bg-surface p-5">
@@ -135,6 +141,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
           <Metric label="Sensor" value="web-corp" />
           <Metric label="Source endpoint" value={`${sourceIp ?? "Not recorded"}:${items[0]?.sourcePort ?? "port not captured"}`} />
           <Metric label="Destination endpoint" value={`${items[0]?.destinationIp ?? "Not recorded"}:${items[0]?.destinationPort ?? "Not recorded"}`} />
+          <Metric label="Transport / service" value={[items[0]?.transport, items[0]?.service].filter(Boolean).join(" / ") || "Not recorded"} />
           <Metric label="First request" value={formatTime(items[0]?.observedAt ?? "")} />
           <Metric label="Last request" value={formatTime(items.at(-1)?.observedAt ?? "")} />
           <Metric label="Session identity" value="Browser-cookie continuity" />
@@ -144,7 +151,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
 
       <section className="rounded-xl border border-border bg-surface p-5">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-text"><Activity className="h-5 w-5 text-primary" /> Request chronology</h2>
-        <p className="mt-1 text-sm text-text-muted">Observed method, path, response, literal captured request fields, and rule matches. A missing query in an older record cannot be reconstructed from its rule match.</p>
+        <p className="mt-1 text-sm text-text-muted">Observed method, path, response, request metadata, literal submitted fields, and rule matches. User-Agent and related headers are self-reported and may be spoofed. A missing query in an older record cannot be reconstructed from its rule match.</p>
         <ol className="mt-4 max-h-[32rem] space-y-2 overflow-y-auto pr-1">
           {items.map((item, index) => <li key={item.eventId} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
             <div className="flex flex-wrap items-start justify-between gap-2"><p className="font-semibold text-text">{index + 1}. {item.method} {item.path}</p><time className="text-xs text-text-muted">{formatTime(item.observedAt)}</time></div>
@@ -216,6 +223,16 @@ function Metric({ label, value }: { label: string; value: string }) {
 function CapturedRequest({ payload, matches }: { payload?: WebHttpCapturedPayload; matches: WebHttpHint["matches"] }) {
   if (!payload) return <p className="mt-2 text-xs text-text-muted">No stored request fields for this event.</p>;
   const fields = payload.form ? Object.entries(payload.form) : [];
+  const decodedQuery = decodedQueryForDisplay(payload.query);
+  const xssMatches = matches.filter((match) => match.signal === "xss");
+  const requestContext = [
+    ["Scheme", payload.scheme, null],
+    ["Host header", payload.host, "http.host"],
+    ["User-Agent · self-reported", payload.userAgent, "http.user_agent"],
+    ["Referer header", payload.referer, "http.referer"],
+    ["Origin header", payload.origin, "http.origin"],
+    ["Accept-Language", payload.acceptLanguage, "http.accept_language"],
+  ] as const;
   return <div className="mt-3 rounded-lg border border-warning-border bg-surface p-3">
     <p className="text-xs font-semibold uppercase tracking-wide text-warning">Captured request payload · literal values</p>
     <p className="mt-1 text-xs text-text-muted">Matched fields: {matches.length ? matches.map((match) => `${match.field} (${match.signal}_${match.ruleId})`).join(" · ") : "No injection rule match"}</p>
@@ -223,8 +240,30 @@ function CapturedRequest({ payload, matches }: { payload?: WebHttpCapturedPayloa
     <dl className="mt-2 grid gap-2 sm:grid-cols-2">
       <CapturedField label="URL path (literal)" value={payload.rawPath} truncated={false} />
       <CapturedField label="URL query" value={payload.query} truncated={payload.truncatedFields.includes("http.query")} />
+      {decodedQuery && <CapturedField label="URL query · decoded for reading" value={decodedQuery} truncated={payload.truncatedFields.includes("http.query")} />}
       {fields.map(([name, value]) => <CapturedField key={name} label={`Form: ${name}`} value={value} truncated={payload.truncatedFields.includes(`odoo_login.${name}`)} />)}
     </dl>
+    {decodedQuery && <p className="mt-2 text-xs text-text-muted">Decoded text is only a reading aid; the captured URL query above is the literal evidence. Encoded input is never executed by this view.</p>}
+    {xssMatches.length > 0 && <div className="mt-3 rounded-lg border border-warning-border bg-warning-subtle p-3">
+      <p className="text-xs font-semibold text-warning">XSS-pattern input actually submitted</p>
+      {xssMatches.map((match) => {
+        const value = match.field === "query" ? decodedQuery ?? payload.query
+          : match.field === "path" ? payload.rawPath
+          : payload.form?.[match.field] ?? null;
+        return <div key={`${match.field}.${match.ruleId}`} className="mt-2">
+          <p className="text-xs text-text-muted">{match.field} · {match.ruleId}{value === null ? " · original value not stored" : ""}</p>
+          {value !== null && <code className="mt-1 block whitespace-pre-wrap break-all rounded border border-border bg-surface p-2 text-xs text-text">{value}</code>}
+        </div>;
+      })}
+      <p className="mt-2 text-xs text-text-muted">Displayed as inert text, not rendered as HTML. A pattern match is an attempt hint, not proof that a browser executed it.</p>
+    </div>}
+    {requestContext.some(([, value]) => value) && <div className="mt-3 border-t border-border pt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Request context observed by sensor</p>
+      <dl className="mt-2 grid gap-2 sm:grid-cols-2">{requestContext.filter(([, value]) => value).map(([label, value, marker]) =>
+        <CapturedField key={label} label={label} value={value} truncated={marker ? payload.truncatedFields.includes(marker) : false} />
+      )}</dl>
+      {payload.userAgent && <p className="mt-2 text-xs text-text-muted">Client label: {reportedClient(payload.userAgent)}. This is parsed from the self-reported User-Agent, not verified browser identity.</p>}
+    </div>}
     {payload.form && <p className="mt-2 text-xs text-text-muted">Form values are the fields captured by the web-corp login sensor, not a raw multipart or JSON body. Submitted password is shown without masking.</p>}
   </div>;
 }

@@ -215,6 +215,23 @@ def _bounded_login_value(value: str, field: str, limit: int,
     return raw[:limit]
 
 
+def _request_context_headers(request: Request, truncated_fields: set[str]) -> dict[str, str]:
+    """Bounded, self-reported context; never treat these headers as browser identity."""
+    return {
+        key: _bounded_login_value(
+            request.headers.get(header, ""), f"http.{key}", _HEADER_LIMIT,
+            truncated_fields,
+        )
+        for key, header in (
+            ("host", "host"),
+            ("user_agent", "user-agent"),
+            ("referer", "referer"),
+            ("origin", "origin"),
+            ("accept_language", "accept-language"),
+        )
+    }
+
+
 def _sqli_indicators(values: dict[str, str]) -> dict[str, list[str]]:
     indicators = {}
     for field, value in values.items():
@@ -247,28 +264,7 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
             remember, "odoo_login.remember", 32, truncated_fields
         ),
     }
-    http_headers = {
-        "host": _bounded_login_value(
-            request.headers.get("host", ""), "http.host", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "user_agent": _bounded_login_value(
-            request.headers.get("user-agent", ""), "http.user_agent", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "referer": _bounded_login_value(
-            request.headers.get("referer", ""), "http.referer", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "origin": _bounded_login_value(
-            request.headers.get("origin", ""), "http.origin", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "accept_language": _bounded_login_value(
-            request.headers.get("accept-language", ""),
-            "http.accept_language", _HEADER_LIMIT, truncated_fields,
-        ),
-    }
+    http_headers = _request_context_headers(request, truncated_fields)
     values = {
         **bounded,
         "query": query,
@@ -311,8 +307,9 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
 
 def _http_event(request: Request, ip: str, web_session_id: str, status_code: int) -> dict:
     """Durable page/bait observation with bounded literal query for review."""
+    truncated_fields: set[str] = set()
     raw_query = request.url.query
-    query = _limited(raw_query, _QUERY_LIMIT)
+    query = _bounded_login_value(raw_query, "http.query", _QUERY_LIMIT, truncated_fields)
     path = _limited(request.url.path, _QUERY_LIMIT)
     safe_path = path if re.fullmatch(r"/[A-Za-z0-9_./-]{0,127}", path) else "[redacted-path]"
     return {
@@ -322,10 +319,10 @@ def _http_event(request: Request, ip: str, web_session_id: str, status_code: int
         "web_session_id": web_session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "source_ip": ip,
-        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "raw_path": path, "query": query, "status_code": status_code},
+        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "raw_path": path, "query": query, "status_code": status_code, **_request_context_headers(request, truncated_fields)},
         "sqli_indicators": _pattern_indicators({"query": query, "path": path}, _SQLI_RULES),
         "xss_indicators": _pattern_indicators({"query": query, "path": path}, _XSS_RULES),
-        "truncated_fields": ["http.query"] if len(raw_query) > _QUERY_LIMIT else [],
+        "truncated_fields": sorted(truncated_fields),
         "bait_path": _is_sensitive(path.rstrip("/") or "/"),
     }
 

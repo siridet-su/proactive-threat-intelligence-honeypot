@@ -13,6 +13,8 @@ export type WebHttpHint = {
   sourcePort: number | null;
   destinationIp: string | null;
   destinationPort: number | null;
+  transport: string | null;
+  service: string | null;
   method: string;
   path: string;
   statusCode: number | null;
@@ -31,6 +33,12 @@ export type WebHttpCapturedPayload = {
   eventId: string;
   rawPath: string | null;
   query: string | null;
+  scheme: string | null;
+  host: string | null;
+  userAgent: string | null;
+  referer: string | null;
+  origin: string | null;
+  acceptLanguage: string | null;
   form: Record<"database" | "login" | "password" | "redirect" | "remember", string> | null;
   truncatedFields: string[];
 };
@@ -107,6 +115,8 @@ export function projectWebHttpEvent(value: unknown): WebHttpHint | null {
     sourcePort: port(network.src_port),
     destinationIp: /^[0-9a-fA-F:.]{2,45}$/.test(destinationIp) ? destinationIp : null,
     destinationPort: port(network.dst_port),
+    transport: network.protocol === "tcp" || network.protocol === "udp" ? network.protocol : null,
+    service: network.service === "http" || network.service === "https" ? network.service : null,
     method: /^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS)$/.test(method) ? method : "UNKNOWN",
     path,
     statusCode,

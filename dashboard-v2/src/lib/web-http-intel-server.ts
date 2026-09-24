@@ -7,6 +7,7 @@ const HTTP_EVENT_PROJECTION = {
   _id: 0, source: 1, event_type: 1, event_id: 1, timestamp: 1,
   "network.src_ip": 1, "network.src_port": 1,
   "network.dst_ip": 1, "network.dst_port": 1,
+  "network.protocol": 1, "network.service": 1,
   "http.method": 1, "http.path": 1, "http.status_code": 1,
   "analysis.sqli.indicators": 1, "analysis.xss.indicators": 1,
   "correlation.web_session_id": 1, outcome: 1,
@@ -16,6 +17,8 @@ const HTTP_DETAIL_PROJECTION = {
   ...HTTP_EVENT_PROJECTION,
   "http.raw_path": 1,
   "http.query": 1,
+  "http.scheme": 1, "http.host": 1, "http.user_agent": 1,
+  "http.referer": 1, "http.origin": 1, "http.accept_language": 1,
   "web_login.database": 1, "web_login.username": 1,
   "web_login.password": 1, "web_login.redirect": 1, "web_login.remember": 1,
   truncated_fields: 1,
@@ -37,13 +40,19 @@ function captured(value: unknown, eventId: string): WebHttpCapturedPayload {
       : isLogin && typeof http.path === "string" ? http.path.slice(0, 512) : null,
     // The processor may compact empty strings, so null also covers an empty query.
     query: typeof http.query === "string" ? http.query.slice(0, 512) : null,
+    scheme: typeof http.scheme === "string" ? http.scheme.slice(0, 16) : null,
+    host: typeof http.host === "string" ? http.host.slice(0, 256) : null,
+    userAgent: typeof http.user_agent === "string" ? http.user_agent.slice(0, 256) : null,
+    referer: typeof http.referer === "string" ? http.referer.slice(0, 256) : null,
+    origin: typeof http.origin === "string" ? http.origin.slice(0, 256) : null,
+    acceptLanguage: typeof http.accept_language === "string" ? http.accept_language.slice(0, 256) : null,
     form: isLogin ? {
       database: field(login.database, 256), login: field(login.username, 256),
       password: field(login.password, 256), redirect: field(login.redirect, 256),
       remember: field(login.remember, 32),
     } : null,
     truncatedFields: Array.isArray(row.truncated_fields)
-      ? row.truncated_fields.filter((name): name is string => typeof name === "string" && /^(http\.query|odoo_login\.(database|login|password|redirect|remember))$/.test(name))
+      ? row.truncated_fields.filter((name): name is string => typeof name === "string" && /^(http\.(query|host|user_agent|referer|origin|accept_language)|odoo_login\.(database|login|password|redirect|remember))$/.test(name))
       : [],
   };
 }

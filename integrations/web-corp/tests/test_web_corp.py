@@ -181,7 +181,7 @@ class WebCorpTests(TestCase):
         self.assertNotEqual(stale_response.cookies["web_corp_visit"].split(".")[0], original)
 
     def test_encoded_url_pattern_retains_literal_query_in_http_event_but_not_core(self):
-        response = self.client.get("/login.html?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+        response = self.client.get("/login.html?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", headers={"User-Agent": "Mozilla/5.0 Firefox/156.0", "Accept-Language": "th-TH"})
         self.assertEqual(response.status_code, 200)
         events = [json.loads(path.read_text(encoding="utf-8"))
                   for path in Path(self.spool.name).glob("*.jsonl")]
@@ -189,15 +189,19 @@ class WebCorpTests(TestCase):
         self.assertIn("script_tag", events[0]["xss_indicators"]["query"])
         self.assertEqual(events[0]["http"]["raw_path"], "/login.html")
         self.assertEqual(events[0]["http"]["query"], "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+        self.assertEqual(events[0]["http"]["user_agent"], "Mozilla/5.0 Firefox/156.0")
+        self.assertEqual(events[0]["http"]["accept_language"], "th-TH")
         self.assertNotIn("alert(1)", str(self.page_track.call_args))
 
     def test_long_http_query_is_bounded_and_marked(self):
-        response = self.client.get("/login.html?q=" + "x" * 600)
+        response = self.client.get("/login.html?q=" + "x" * 600, headers={"User-Agent": "A" * 300})
         self.assertEqual(response.status_code, 200)
         events = [json.loads(path.read_text(encoding="utf-8"))
                   for path in Path(self.spool.name).glob("*.jsonl")]
         self.assertEqual(len(events[0]["http"]["query"]), main._QUERY_LIMIT)
         self.assertIn("http.query", events[0]["truncated_fields"])
+        self.assertEqual(len(events[0]["http"]["user_agent"]), main._HEADER_LIMIT)
+        self.assertIn("http.user_agent", events[0]["truncated_fields"])
 
 
 if __name__ == "__main__":
