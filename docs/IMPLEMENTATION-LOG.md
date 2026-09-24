@@ -159,3 +159,32 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   required.
 - Follow-up: push the resolved branch for PR review and visually review the
   authenticated dashboard at local port `3001`.
+
+### 2026-09-24 — Renovate Artifact Intelligence workspace
+
+- Status: prepared for review; not deployed to a host.
+- Scope and intent: make the hash-only artifact view easier to scan and expose
+  more investigation context without expanding retention scope or storing raw
+  binaries/payloads.
+- Repository branch and commit/PR: `feat/dashboard-backup-status`; dashboard
+  source changes are currently uncommitted.
+- Repository changes: added indexed-hash, review-flag, evidence-link, and
+  provider-coverage summaries; added current-page signal distribution and
+  review queue; added status filters; and replaced the dense table rows with
+  responsive artifact records showing first/last seen, size, provider expiry,
+  evidence/source/session counts, linked sessions, and VirusTotal actions.
+- Host/environment changes actually applied: none. No API route, MongoDB
+  collection, Pi service, systemd unit, or network exposure was changed.
+- Runtime/exposure state: available from the local dashboard worktree at
+  `http://localhost:3001/malware-vault` after operator authentication.
+- Validation performed and outcome: `npx tsc --noEmit`, `npm run lint`,
+  `npm run build`, `npm test`, and `git diff --check` passed. The test suite
+  reported 797 passing tests, 2 expected failures, and 14 skipped.
+- Not performed / deferred: authenticated browser screenshot review remains
+  deferred; the summary cards intentionally describe the currently loaded page
+  because the existing API does not expose global status aggregates.
+- Risks and data handling: all new presentation values are derived from the
+  existing bounded `ArtifactRecord` response; no raw artifact bytes, raw event
+  payloads, credentials, or provider secrets are rendered.
+- Rollback: revert the Artifact Intelligence page change; no host rollback is
+  required.
