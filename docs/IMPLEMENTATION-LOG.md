@@ -738,3 +738,33 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the crosshair pseudo-element opacity to 0.72 and revert the current-state criterion; no host rollback is required.
 - Follow-up: visually compare the diagonal and perpendicular guide lines at the same zoom level.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Disable topology actions in the Live empty state
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: disable canvas toolbar actions while Live has no session topology, with an exception for exiting an already expanded workspace.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8088dc1`; this refinement is uncommitted.
+- Repository changes: derive an empty-live state for snapshots with no sessions or no snapshot; pass it to `TopologyToolbar`; disable zoom, fit, center, View menu and its appearance/layout options; close an open View menu when the empty state begins; disable fullscreen entry in the empty state but keep fullscreen exit enabled when expanded; style disabled buttons; update `FS-024` current-state criteria and append decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: browser review of disabled styling, re-enabling controls after sessions arrive, and fullscreen exit; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation and control-state change only; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the `isEmptyLiveState` toolbar prop and button guards, restore fullscreen toggle availability, and revert the current-state criterion; no host rollback is required.
+- Follow-up: verify that toolbar controls activate after a session arrives and that the expanded canvas can always be exited.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Keep fullscreen available in the Live empty state
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: correct the empty-state toolbar behavior so fullscreen can be entered as well as exited.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8088dc1`; this clarification is uncommitted.
+- Repository changes: remove the empty-state disabled condition from the fullscreen toggle; preserve disabled states for zoom, fit, center, View, appearance, and layout actions; clarify the current `FS-024` criterion and append a correction to the decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited toolbar and `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: browser review of fullscreen entry and exit from the empty state, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation and control-state change only; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the `disabled={isEmptyLiveState && !isTopologyExpanded}` condition on the fullscreen toggle and revert the current-state clarification; no host rollback is required.
+- Follow-up: confirm both fullscreen entry and exit work while the other Live toolbar actions remain disabled.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).

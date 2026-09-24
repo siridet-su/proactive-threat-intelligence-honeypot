@@ -330,6 +330,11 @@
   opacity: 0.5;
 }
 
+.pti-topology-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .pti-live-radar-diagonals {
   pointer-events: none;
 }

@@ -46,6 +46,7 @@ interface TopologyToolbarProps {
   effectiveDensityMode: TopologyDensityMode;
   densityAnalysisHiddenNodes: number;
   isTopologyExpanded: boolean;
+  isEmptyLiveState: boolean;
   isAuditMode: boolean;
   transitionDisplayMode: TransitionDisplayMode;
   setTransitionDisplayMode: (mode: TransitionDisplayMode) => void;
@@ -77,6 +78,7 @@ export function TopologyToolbar({
   effectiveDensityMode,
   densityAnalysisHiddenNodes,
   isTopologyExpanded,
+  isEmptyLiveState,
   isAuditMode,
   transitionDisplayMode,
   setTransitionDisplayMode,
@@ -105,6 +107,10 @@ export function TopologyToolbar({
     };
   }, [viewMenuOpen]);
 
+  useEffect(() => {
+    if (isEmptyLiveState && viewMenuOpen) setViewMenuOpen(false);
+  }, [isEmptyLiveState, viewMenuOpen]);
+
   // Handle escape for arrange mode in toolbar so we don't have to duplicate layoutMenuOpen state
   useEffect(() => {
     if (!isArrangeMode) return;
@@ -120,7 +126,7 @@ export function TopologyToolbar({
 
   return (
     <div
-      className="flex shrink-0 flex-wrap items-center justify-start sm:justify-end gap-2"
+      className="pti-topology-toolbar flex shrink-0 flex-wrap items-center justify-start sm:justify-end gap-2"
       role="toolbar"
       aria-label="Topology canvas controls"
     >
@@ -135,6 +141,7 @@ export function TopologyToolbar({
           aria-label="Zoom out"
           data-tooltip-label="Zoom out"
           data-keyboard-tooltip
+          disabled={isEmptyLiveState}
           onClick={() => zoomOut()}
         >
           <ZoomOut className="h-3.5 w-3.5" />
@@ -152,6 +159,7 @@ export function TopologyToolbar({
           aria-label="Zoom in"
           data-tooltip-label="Zoom in"
           data-keyboard-tooltip
+          disabled={isEmptyLiveState}
           onClick={() => zoomIn()}
         >
           <ZoomIn className="h-3.5 w-3.5" />
@@ -165,6 +173,7 @@ export function TopologyToolbar({
           aria-label="Fit topology in view"
           data-tooltip-label="Fit topology in view"
           data-keyboard-tooltip
+          disabled={isEmptyLiveState}
           onClick={fitTopology}
         >
           <ScanLine className="h-3.5 w-3.5" />
@@ -175,6 +184,7 @@ export function TopologyToolbar({
           aria-label="Center selected IP"
           data-tooltip-label="Center selected IP"
           data-keyboard-tooltip
+          disabled={isEmptyLiveState}
           onClick={() => {
             // Selection is supplied by the live client stream and can differ
             // from the SSR snapshot. The callback is already a safe no-op
@@ -202,6 +212,7 @@ export function TopologyToolbar({
           aria-label="View settings"
           aria-expanded={viewMenuOpen}
           aria-controls="topology-view-settings"
+          disabled={isEmptyLiveState}
           onClick={() => setViewMenuOpen((current) => !current)}
         >
           <div className="flex items-center gap-1.5">
@@ -230,6 +241,7 @@ export function TopologyToolbar({
               <div className="flex p-1 gap-1">
                 <button
                   type="button"
+                  disabled={isEmptyLiveState}
                   aria-pressed={!isArrangeMode}
                   onClick={() => { setIsArrangeMode(false); setViewMenuOpen(false); }}
                   className={`flex-1 flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
@@ -243,6 +255,7 @@ export function TopologyToolbar({
                 </button>
                 <button
                   type="button"
+                  disabled={isEmptyLiveState}
                   aria-pressed={isArrangeMode}
                   onClick={() => { setIsArrangeMode(true); setViewMenuOpen(false); }}
                   className={`flex-1 flex h-8 items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
@@ -266,6 +279,7 @@ export function TopologyToolbar({
                   <button
                     key={pref}
                     type="button"
+                    disabled={isEmptyLiveState}
                     onClick={() => {
                       setDensityPreference(pref);
                     }}
@@ -305,6 +319,7 @@ export function TopologyToolbar({
                         <button
                           key={mode}
                           type="button"
+                          disabled={isEmptyLiveState}
                           aria-pressed={selected}
                           onClick={() => {
                             setTransitionDisplayMode(mode);
@@ -343,6 +358,7 @@ export function TopologyToolbar({
                     <button
                       key={preference}
                       type="button"
+                      disabled={isEmptyLiveState}
                       aria-pressed={selected}
                       onClick={() => setMinimapPreference(preference)}
                       className={`min-h-8 rounded-md px-2 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
@@ -358,6 +374,7 @@ export function TopologyToolbar({
               </div>
               <button
                 type="button"
+                disabled={isEmptyLiveState}
                 onClick={() => setShowGrid(!showGrid)}
                 className="flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               >
@@ -372,6 +389,7 @@ export function TopologyToolbar({
               {canUndoLayout && (
                 <button
                   type="button"
+                  disabled={isEmptyLiveState}
                   onClick={undoLayoutChange}
                   className="flex min-h-9 w-full items-center gap-2 rounded-lg px-2.5 text-left text-text transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
                 >
@@ -381,6 +399,7 @@ export function TopologyToolbar({
               )}
               <button
                 type="button"
+                disabled={isEmptyLiveState}
                 onClick={() => {
                   autoArrangeTopology();
                   setViewMenuOpen(false);
@@ -393,6 +412,7 @@ export function TopologyToolbar({
               </button>
               <button
                 type="button"
+                disabled={isEmptyLiveState}
                 onClick={() => {
                   resetMapWorkspace();
                   setIsArrangeMode(false);

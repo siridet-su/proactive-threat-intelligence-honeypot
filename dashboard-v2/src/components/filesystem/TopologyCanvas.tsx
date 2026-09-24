@@ -602,6 +602,7 @@ export function TopologyCanvas({
   className,
 }: TopologyCanvasProps) {
   const isAuditMode = presentationContext.mode === "audit";
+  const isEmptyLiveState = !isAuditMode && (!snapshot || snapshot.sessions.length === 0);
   const showLiveRadarStandby = !isAuditMode && snapshot?.sessions.length === 0;
   const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
   const isFailedHop = activeHop?.isFailedAttempt === true || activeHop?.action === "failed_change";
@@ -1209,6 +1210,7 @@ export function TopologyCanvas({
           effectiveDensityMode={effectiveDensityMode}
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
+          isEmptyLiveState={isEmptyLiveState}
           isAuditMode={isAuditMode}
           transitionDisplayMode={transitionDisplayMode}
           setTransitionDisplayMode={setTransitionDisplayMode}
