@@ -1476,6 +1476,9 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const binding = record(model2.binding);
   const unavailableHeads = Object.entries(record(model2.unavailable_heads));
   const results = list(ensemble.results).map(record);
+  const model2OnlyPredictions = hasBoundAvailableModel2(data)
+    ? results.filter((item) => item.model2_relation === "MODEL2_ONLY" && item.model2_result === "PRESENT")
+    : [];
   const model1Only = list(ensemble.model1_only_labels).map(record);
   const recommendations = rankTtpRecommendations(data);
 
@@ -1494,6 +1497,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
       <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
         {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only available heads may corroborate Model1.` : "A session-bound Model2 result is available for comparison with Model1.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
       </Insight>
+      {model2OnlyPredictions.length > 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-sm text-warning">Experimental Model2-only prediction for {model2OnlyPredictions.map((item) => summaryValue(item.technique_id, "unknown technique")).join(", ")}. This is not a confirmed observed behavior, canonical finding, or response instruction; check the session evidence before drawing a conclusion.</p>}
       <MetricStrip fields={[
         ["Model1", model1.applicable === true || recommendations.length > 0 ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
         ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
@@ -1501,7 +1505,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
       ]} />
       {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
         <p className="font-semibold">Why Model2 is partial</p>
-        <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
+        <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
       </div>}
       <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
       {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">

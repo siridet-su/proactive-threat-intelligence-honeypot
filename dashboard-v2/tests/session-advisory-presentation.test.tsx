@@ -79,6 +79,28 @@ describe("session assessment presentation", () => {
     expect(html).toContain("no ensemble corroboration or combined score is claimed");
   });
 
+  it("labels Model2-only predictions as experimental and explains unbound T1046 context", () => {
+    const sessionId = "session_v1_model2_boundary";
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: sessionId,
+      ensemble_evidence: {
+        session_id: sessionId, run_id: "run-1",
+        model1: { applicable: false },
+        model2: {
+          available: true, availability: "PARTIAL", status: "VALID_SHADOW",
+          measurement_id: "measurement-1", episode_id: "episode-1",
+          artifact_sha256: "a".repeat(64), feature_contract_sha256: "b".repeat(64),
+          binding: { session_id: sessionId, run_id: "run-1", measurement_id: "measurement-1", episode_id: "episode-1" },
+          unavailable_heads: { T1046: "t1046_unbound_sensor_context" },
+        },
+        results: [{ technique_id: "T1110", model2_result: "PRESENT", model2_relation: "MODEL2_ONLY" }],
+      },
+    }} />);
+    expect(html).toContain("Experimental Model2-only prediction for T1110");
+    expect(html).toContain("not a confirmed observed behavior, canonical finding");
+    expect(html).toContain("not bound to this Cowrie session");
+  });
+
   it("explains why a session has no bounded hypothesis without promoting context", () => {
     const html = renderToStaticMarkup(<HypothesisSummary data={{
       hypothesis_sets: [], correlated_ttp_hypotheses: [],

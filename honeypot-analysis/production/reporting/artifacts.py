@@ -2345,7 +2345,8 @@ def write_pdf_report(
     if model2_bound:
         story.append(_p(
             "A Model2 shadow result is bound to this session. It is corroboration context only; "
-            "it does not create an observed finding or authorize response.", body,
+            "it does not create an observed finding or authorize response. A Model2-only PRESENT "
+            "label is an experimental prediction, not confirmed observed behavior.", body,
         ))
         model2_rows = [["Field", "Stored value"]]
         for label, selected in (
@@ -2365,6 +2366,20 @@ def write_pdf_report(
                     f"Unavailable Model2 head {str(technique)[:32]}: {str(reason)[:128]}",
                     small,
                 ))
+        comparisons = ensemble.get("results") if isinstance(ensemble, dict) else None
+        if isinstance(comparisons, list):
+            comparison_rows = [["Technique", "Model1", "Model2", "Relation (advisory only)"]]
+            for item in comparisons[:8]:
+                if not isinstance(item, dict):
+                    continue
+                comparison_rows.append([
+                    _value(item.get("technique_id"), limit=24),
+                    _value(item.get("model1_result"), limit=24),
+                    _value(item.get("model2_result"), limit=24),
+                    _value(item.get("model2_relation"), limit=48),
+                ])
+            if len(comparison_rows) > 1:
+                story.append(_table(comparison_rows, [2.5 * cm, 3.0 * cm, 3.0 * cm, 8.5 * cm]))
     else:
         story.append(_p(
             "No complete exact-session Model2 binding was available for this report. "

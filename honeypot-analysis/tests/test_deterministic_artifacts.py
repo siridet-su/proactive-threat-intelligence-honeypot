@@ -170,15 +170,23 @@ def test_pdf_shows_only_exact_session_model2_binding(tmp_path: Path) -> None:
     }
     session["ensemble_evidence"] = {
         "session_id": session["session_id"], "model2": model2,
+        "results": [{
+            "technique_id": "T1110", "model1_result": None,
+            "model2_result": "PRESENT", "model2_relation": "MODEL2_ONLY",
+        }],
     }
     bound_dir = tmp_path / "bound"
     bound_dir.mkdir(mode=0o700)
     bound_pdf = Path(write_pdf_report(report, session, bound_dir))
     bound_text = "\n".join(page.extract_text() or "" for page in PdfReader(bound_pdf).pages)
     assert "Model2 exact-session shadow evidence" in bound_text
+    assert "Model2-only PRESENT" in bound_text
+    assert "not confirmed observed behavior" in " ".join(bound_text.split())
     assert "PARTIAL" in bound_text
     assert "run-fixture-1" in bound_text
     assert "T1046" in bound_text
+    assert "T1110" in bound_text
+    assert "MODEL2_ONLY" in bound_text
 
     model2["binding"]["session_id"] = "another-session"
     unbound_dir = tmp_path / "unbound"
