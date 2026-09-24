@@ -30,6 +30,7 @@ var rawStreams = []string{
 	"raw:zeek:http",
 	"raw:zeek:files",
 	"raw:zeek:notice",
+	"raw:web-login",
 }
 
 type Config struct {
@@ -283,7 +284,8 @@ func processMessage(
 	setEventExpiry(enriched, cfg.EventRetention)
 
 	srcIP := getNestedString(enriched, "network.src_ip")
-	eventJSON := mustJSON(enriched)
+	canonicalProjection := canonicalEventProjection(enriched, source)
+	eventJSON := mustJSON(canonicalProjection)
 
 	eventID := getNestedString(enriched, "event_id")
 	eventType := getNestedString(enriched, "event_type")
@@ -353,6 +355,7 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		getPayloadString(payload, "id.orig_h"),
 		valueToString(values["src_ip"]),
 		getPayloadString(payload, "src_ip"),
+		getPayloadString(payload, "source_ip"),
 	)
 
 	srcPort := anyToString(getPayloadAny(payload, "id.orig_p"))
@@ -382,6 +385,14 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			service = "ssh"
 		}
 	}
+	if source == "web-corp" {
+		if protocol == "" {
+			protocol = "tcp"
+		}
+		if service == "" {
+			service = "http"
+		}
+	}
 
 	if source == "zeek" {
 		if protocol == "" {
@@ -397,6 +408,44 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			if service == "" {
 				service = "ssl"
 			}
+		}
+	}
+
+	webLogin := map[string]any{}
+	webHTTP := map[string]any{}
+	webAnalysis := map[string]any{}
+	requestID := getPayloadString(payload, "request_id")
+	webSessionID := getPayloadString(payload, "web_session_id")
+	if source == "web-corp" {
+		loginPayload, _ := payload["odoo_login"].(map[string]any)
+		httpPayload, _ := payload["http"].(map[string]any)
+		indicators, _ := payload["sqli_indicators"].(map[string]any)
+		xssIndicators, _ := payload["xss_indicators"].(map[string]any)
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			webLogin = map[string]any{
+				"database": getPayloadString(loginPayload, "database"),
+				"username": getPayloadString(loginPayload, "login"),
+				"password": getPayloadString(loginPayload, "password"),
+				"redirect": getPayloadString(loginPayload, "redirect"),
+				"remember": getPayloadAny(loginPayload, "remember"),
+			}
+		}
+		webHTTP = map[string]any{
+			"method":          getPayloadString(httpPayload, "method"),
+			"path":            getPayloadString(httpPayload, "path"),
+			"status_code":     getPayloadAny(httpPayload, "status_code"),
+			"host":            getPayloadString(httpPayload, "host"),
+			"user_agent":      getPayloadString(httpPayload, "user_agent"),
+			"referer":         getPayloadString(httpPayload, "referer"),
+			"origin":          getPayloadString(httpPayload, "origin"),
+			"accept_language": getPayloadString(httpPayload, "accept_language"),
+		}
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			webHTTP["query"] = getPayloadString(httpPayload, "query")
+		}
+		webAnalysis = map[string]any{
+			"sqli": map[string]any{"indicators": indicators},
+			"xss": map[string]any{"indicators": xssIndicators},
 		}
 	}
 
@@ -457,6 +506,10 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 		cowrie["eventid"] = getPayloadString(payload, "eventid")
 		cowrie["duration"] = getPayloadString(payload, "duration")
 	}
+	if source == "web-corp" {
+		delete(identity, "username")
+		delete(identity, "password")
+	}
 
 	if source == "zeek" {
 		zeek["uid"] = getPayloadString(payload, "uid")
@@ -472,6 +525,9 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 	dedupID := valueToString(values["dedup_id"])
 	if dedupID == "" {
 		dedupID = makeEventID(streamName, mustJSON(payload))
+	}
+	if source == "web-corp" && requestID != "" {
+		dedupID = requestID
 	}
 
 	event := map[string]any{
@@ -524,11 +580,57 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 			"redis_stream": streamName,
 			"redis_id":     rawID,
 			"dedup_id":     valueToString(values["dedup_id"]),
-			"payload":      payload,
+			"payload":      rawPayloadForCanonicalEvent(source, payload),
 		},
+	}
+	if source == "web-corp" {
+		event["schema_version"] = getPayloadAny(payload, "schema_version")
+		event["http"] = webHTTP
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			event["web_login"] = webLogin
+		}
+		event["analysis"] = webAnalysis
+		event["outcome"] = getPayloadString(payload, "result")
+		event["truncated_fields"] = getPayloadAny(payload, "truncated_fields")
+		event["correlation"] = map[string]any{"request_id": requestID, "web_session_id": webSessionID}
+		delete(event, "session")
+		if webSessionID != "" {
+			event["session"] = map[string]any{"id": webSessionID, "source": "web-corp", "semantics": "browser_continuity_only"}
+		}
 	}
 
 	return compactMap(event)
+}
+
+func rawPayloadForCanonicalEvent(source string, payload map[string]any) map[string]any {
+	if source != "web-corp" {
+		return payload
+	}
+	copy := make(map[string]any, len(payload))
+	for key, value := range payload {
+		copy[key] = value
+	}
+	if login, ok := payload["odoo_login"].(map[string]any); ok {
+		loginCopy := make(map[string]any, len(login))
+		for key, value := range login {
+			if key != "password" {
+				loginCopy[key] = value
+			}
+		}
+		copy["odoo_login"] = loginCopy
+	}
+	return copy
+}
+
+func canonicalEventProjection(event map[string]any, source string) map[string]any {
+	projection := deepCopy(event)
+	if source != "web-corp" {
+		return projection
+	}
+	if login, ok := projection["web_login"].(map[string]any); ok {
+		delete(login, "password")
+	}
+	return projection
 }
 
 func enrichEvent(event map[string]any, lookups LookupStore) map[string]any {
@@ -796,6 +898,16 @@ func computeRiskScore(
 }
 
 func inferEventType(source string, logType string, payload map[string]any) string {
+	if source == "web-corp" {
+		if getPayloadString(payload, "event") == "web_login_attempt" {
+			return "web_login_attempt"
+		}
+		if getPayloadString(payload, "event") == "web_http_request" {
+			return "web_http_request"
+		}
+		return "web_event"
+	}
+
 	if source == "cowrie" {
 		eventID := getPayloadString(payload, "eventid")
 
@@ -914,6 +1026,7 @@ func (mw *MongoWriter) ensureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "source", Value: 1}, {Key: "event_type", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "network.src_ip", Value: 1}, {Key: "timestamp", Value: -1}}},
+		{Keys: bson.D{{Key: "web_login.username", Value: 1}, {Key: "timestamp", Value: -1}}},
 		{Keys: bson.D{{Key: "session.id", Value: 1}, {Key: "timestamp", Value: 1}}, Options: options.Index().SetSparse(true)},
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 	}

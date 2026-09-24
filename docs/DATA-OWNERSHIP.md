@@ -1,7 +1,7 @@
 ---
 title: Data ownership and event-flow contract
 status: current
-last_verified: 2026-09-10
+last_verified: 2026-09-24
 ---
 
 # Data ownership and event-flow contract
@@ -11,6 +11,7 @@ last_verified: 2026-09-10
 | Data | Authoritative owner | Consumers | Retention intent |
 | --- | --- | --- | --- |
 | Raw Cowrie/Zeek/service logs | origin service | collector/adapter | local, bounded and rotated |
+| Web-corp login spool | web-corp app | host collector | root-only, max 64 MiB pending; delete after successful Redis enqueue |
 | Redis streams | Go telemetry plane | processor and workers | transient, bounded queue |
 | Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | durable project record |
 | Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
@@ -49,7 +50,10 @@ from reaching Atlas.
 ## Privacy and report boundary
 
 - Sanitization happens before attacker credentials or sensitive values leave
-  the source service.
+  the source service by default. The scoped web-corp login exception retains
+  submitted values for honeypot research in the admin-only local telemetry path;
+  see [web-login telemetry design](design/web-login-telemetry.md). It must not
+  flow to external providers or normal dashboard projections.
 - Dashboard and report APIs expose a least-privilege projection, not arbitrary
   raw event documents.
 - Cloud analysis receives only fields required for the approved analysis task.

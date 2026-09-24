@@ -35,6 +35,16 @@ func TestBuildThreatIntelJobsRejectsPrivateAndInvalidValues(t *testing.T) {
 	}
 }
 
+func TestBuildThreatIntelJobsDoesNotEnrichWebLoginCredentials(t *testing.T) {
+	jobs := buildThreatIntelJobs("web-corp", "web-event", "web_login_attempt", "8.8.8.8", map[string]any{
+		"password": "synthetic-test-value",
+		"shasum":   strings.Repeat("a", 64),
+	})
+	if len(jobs) != 0 {
+		t.Fatalf("web login must not enqueue external enrichment jobs: %#v", jobs)
+	}
+}
+
 func TestIsQueryablePublicIP(t *testing.T) {
 	for _, value := range []string{"8.8.8.8", "2001:4860:4860::8888"} {
 		if !isQueryablePublicIP(value) {
