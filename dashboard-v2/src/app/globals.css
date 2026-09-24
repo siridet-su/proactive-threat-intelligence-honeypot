@@ -314,7 +314,7 @@
   --pti-radar-text: var(--text);
   --pti-radar-accent: var(--primary);
   --pti-radar-line: color-mix(in srgb, var(--primary) 16%, transparent);
-  --pti-radar-stroke-width: 2px;
+  --pti-radar-stroke-width: 1.5px;
   --pti-radar-hub-glow: color-mix(in srgb, var(--primary) 12%, transparent);
   --pti-radar-edge-glow: color-mix(in srgb, var(--primary) 48%, transparent);
   --pti-radar-control-bg: color-mix(in srgb, var(--surface) 94%, var(--primary));
@@ -347,7 +347,7 @@
   position: absolute;
   display: block;
   content: "";
-  opacity: 0.72;
+  opacity: 0.2;
   box-shadow: 0 0 6px var(--pti-radar-edge-glow);
   pointer-events: none;
 }

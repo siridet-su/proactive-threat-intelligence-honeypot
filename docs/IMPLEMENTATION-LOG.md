@@ -708,3 +708,33 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: remove the diagonal SVG and style, restore the square emitter radius/class, and revert the corresponding `FS-024` criterion; no host rollback is required.
 - Follow-up: inspect the diagonals against the crosshairs and moving sweep and confirm the circle reads clearly at the origin in both themes.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Thin the perpendicular radar axes
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: reduce the stroke thickness of the continuous perpendicular crosshairs while preserving their existing color, opacity, glow, and alignment with the connected edge ticks.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `cc45e14`; this refinement is uncommitted.
+- Repository changes: reduce the shared crosshair, cardinal edge-tick, and corner-tick stroke width from 2px to 1.5px; keep accent colors and glow unchanged; update the current `FS-024` criterion and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of the slimmer axes at different display scales and themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore `--pti-radar-stroke-width` to `2px` and revert the current-state criterion; no host rollback is required.
+- Follow-up: review that the crosshairs remain visible and match the attached edge ticks at supported display scales.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Match crosshair opacity to diagonal guides
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the perpendicular center axes as faint as the diagonal guides without changing their color or thickness.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `cc45e14`; this refinement is uncommitted.
+- Repository changes: set the perpendicular crosshair opacity to 0.2 to match the diagonal SVG lines; preserve the primary accent color, glow, 1.5px stroke width, and brighter edge ticks; update the current `FS-024` criterion and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review to confirm the perpendicular axes match diagonal-guide faintness in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the crosshair pseudo-element opacity to 0.72 and revert the current-state criterion; no host rollback is required.
+- Follow-up: visually compare the diagonal and perpendicular guide lines at the same zoom level.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
