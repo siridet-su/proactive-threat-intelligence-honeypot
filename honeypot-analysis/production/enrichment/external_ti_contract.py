@@ -36,11 +36,13 @@ SOURCE_IP_AMENDMENT_SCHEMA = "external_ti_source_ip_governance_amendment.v1"
 SOURCE_IP_PRODUCTION_POLICY_VERSION = "2.1.0"
 SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION = "2.2.0"
 SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION = "2.3.0"
+SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION = "2.4.0"
 SOURCE_IP_PRODUCTION_POLICY_VERSIONS = frozenset(
     {
         SOURCE_IP_PRODUCTION_POLICY_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     }
 )
 SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256 = (
@@ -48,6 +50,9 @@ SOURCE_IP_PRODUCTION_POLICY_V2_2_SHA256 = (
 )
 SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256 = (
     "3350b9160d0b798dcd380571e11615a22e2ada20d1d9ba2b91f405d63d786e1c"
+)
+SOURCE_IP_PRODUCTION_POLICY_V2_4_SHA256 = (
+    "0c55e58d7b3b01fb4de9bf5d82fc5f93308cdb2ae4290296d968cbb0780a6f2a"
 )
 SOURCE_IP_PRODUCTION_SCHEMA = "external_ti_source_ip_governance.v2"
 SOURCE_IP_AMENDMENT_SHA256 = "b8e292d9eeb80e10af8695fe4b3e0a74216894191eca9790c8e75182203beace"
@@ -319,6 +324,7 @@ def load_source_ip_governance_amendment(
     if is_production and policy_version in {
         SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     }:
         expected_providers.add("otx")
     if not isinstance(authorized, list) or {
@@ -328,6 +334,7 @@ def load_source_ip_governance_amendment(
     if is_production and policy_version in {
         SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     }:
         transport_review = document.get("provider_transport_review")
         otx_review = (
@@ -351,7 +358,10 @@ def load_source_ip_governance_amendment(
         )
         if (
             not invalid_otx_review
-            and policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION
+            and policy_version in {
+                SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+                SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
+            }
         ):
             invalid_otx_review = any(
                 (
@@ -365,7 +375,10 @@ def load_source_ip_governance_amendment(
             raise ValueError("source-IP OTX transport scope is invalid")
     fields = scope.get("allowed_outbound_fields")
     expected_fields = ["normalized_source_ip"]
-    if policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION:
+    if policy_version in {
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
+    }:
         expected_fields.append("sha256_file_hash")
     if fields != expected_fields:
         raise ValueError("source-IP outbound field scope is invalid")
@@ -402,7 +415,10 @@ def load_source_ip_governance_amendment(
         raise ValueError("source-IP eligibility controls are invalid")
     lifecycle = document.get("privacy_and_data_lifecycle")
     expected_minimization = "normalized_source_ip_only"
-    if policy_version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION:
+    if policy_version in {
+        SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
+    }:
         expected_minimization = "normalized_source_ip_or_sha256_file_hash_only"
     if not isinstance(lifecycle, Mapping) or lifecycle.get("outbound_payload_minimization") != expected_minimization or lifecycle.get("raw_provider_response_persisted") is not False or lifecycle.get("normalized_bounded_fields_only") is not True or lifecycle.get("canonical_mongodb_enrichment_record_write") is not False:
         raise ValueError("source-IP data lifecycle controls are invalid")
@@ -421,7 +437,7 @@ def load_source_ip_governance_amendment(
         )
         if minimum_refresh < 86_400:
             raise ValueError("source-IP production refresh interval is too short")
-        if max_daily_targets < 1 or max_daily_targets > 100:
+        if max_daily_targets < 1 or max_daily_targets > 200:
             raise ValueError("source-IP production daily target limit is invalid")
         if document.get("status") != "ACTIVE_BOUNDED_PRODUCTION":
             raise ValueError("source-IP production policy is not active")
@@ -767,6 +783,7 @@ def _source_ip_policy_authorized(
     if version in {
         SOURCE_IP_PRODUCTION_POLICY_V2_2_VERSION,
         SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+        SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     }:
         required.add("otx")
     if not required.issubset(normalized):

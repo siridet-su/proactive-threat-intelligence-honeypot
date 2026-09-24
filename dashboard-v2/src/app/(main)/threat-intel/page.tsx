@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RefreshStatus, RegionState } from "@/components/ui/RegionState";
 import type {
   DashboardThreatEvent,
   ThreatDirectoryPage,
-  ThreatSeverityFilter,
 } from "@/lib/dashboardTypes";
 import { severityDotClass } from "@/lib/presentation";
 import {
@@ -28,21 +28,12 @@ import {
   Activity,
   Lock,
 } from "lucide-react";
-import { TableStreamSkeleton } from "@/components/ui/loaders";
 import { cn } from "@/lib/utils";
+import { groupWebHttpSessions, type WebHttpHint } from "@/lib/web-http-intel";
 
 type AttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
 
 type RequestStatus = "loading" | "ready" | "error";
-
-const getSeverityFromAttackerType = (type: AttackerTypeFilter): ThreatSeverityFilter => {
-  switch (type) {
-    case "APT": return "Critical";
-    case "Bot": return "High";
-    case "ScriptKiddie": return "Medium";
-    default: return "All";
-  }
-};
 
 // คอมโพเนนต์ดึงข้อมูล Attacker แบบแยก 2 คอลัมน์ (Type, Cmds)
 function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string }) {
@@ -70,7 +61,7 @@ function AttackerContextColumns({ ip, fallback }: { ip: string, fallback: string
             });
           }
         }
-      } catch (error) {
+      } catch {
         // หากดึงไม่ได้ ให้ใช้ fallback
       } finally {
         window.clearTimeout(timeout);
@@ -146,6 +137,24 @@ export default function ThreatIntelPage() {
   const [isPageChanging, setIsPageChanging] = useState(false);
   const [exportStatus, setExportStatus] = useState<string>("");
   const [isExporting, setIsExporting] = useState(false);
+  const [httpItems, setHttpItems] = useState<WebHttpHint[] | null>(null);
+  const [httpError, setHttpError] = useState(false);
+
+  const loadHttp = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch("/api/http-activity", { cache: "no-store", signal });
+      if (!response.ok) throw new Error("HTTP feed unavailable");
+      const payload: unknown = await response.json();
+      if (!payload || typeof payload !== "object" || !Array.isArray((payload as { items?: unknown }).items)) throw new Error("Invalid HTTP feed");
+      if (!signal?.aborted) { setHttpItems((payload as { items: WebHttpHint[] }).items); setHttpError(false); }
+    } catch { if (!signal?.aborted) setHttpError(true); }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => void loadHttp(controller.signal), 0);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [loadHttp]);
 
   useEffect(() => {
     directoryRef.current = directory;
@@ -267,6 +276,7 @@ export default function ThreatIntelPage() {
             onClick={() => {
               void refresh();
               void loadDirectory(true);
+              void loadHttp();
             }}
             className="ui-button min-h-9 px-3 text-xs font-medium"
           >
@@ -278,10 +288,26 @@ export default function ThreatIntelPage() {
 
       {/* KPI Top Cards */}
       <section aria-label="Threat intelligence overview" aria-busy={isInitialLoad} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Total Incursions" value={stats.total.toLocaleString()} description="All retained directory records" icon={Database} tone="info" loading={isDirectoryInitialLoad} unavailable={isDirectoryUnavailable} />
+        <MetricCard label="SSH/Cowrie sessions" value={stats.total.toLocaleString()} description="Retained SSH directory records" icon={Database} tone="info" loading={isDirectoryInitialLoad} unavailable={isDirectoryUnavailable} />
         <MetricCard label="Live Monitor Feed" value={stats.liveBuffer.toLocaleString()} description="Sessions in real-time buffer" icon={Radio} tone="info" loading={isInitialLoad} unavailable={isUnavailable} />
         <MetricCard label="Active Connections" value={stats.activeSessions.toLocaleString()} description="Currently connected to honeypot" icon={Activity} tone="danger" loading={isInitialLoad} unavailable={isUnavailable} />
         <MetricCard label="Live Origin IPs" value={stats.uniqueOrigins.toLocaleString()} description="Distinct sources in live feed" icon={Globe} tone="warning" loading={isInitialLoad} unavailable={isUnavailable} />
+      </section>
+
+      <section className="ui-panel border border-border bg-surface p-5 shadow-xs" aria-labelledby="http-directory-title">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><p className="text-xs font-semibold uppercase tracking-wider text-primary">HTTP / Web-corp</p><h2 id="http-directory-title" className="mt-1 text-lg font-semibold text-text">Web request sessions</h2></div>
+          <Link href="/http-activity" className="text-sm text-primary hover:underline">View request chronology →</Link>
+        </div>
+        <p className="mt-2 text-sm text-text-muted">Recent browser-cookie sessions; separate from SSH/Cowrie sessions. SQLi and XSS are review hints, not confirmed exploits or Model1 predictions.</p>
+        {httpError && <p role="alert" className="mt-3 text-sm text-warning">HTTP sessions could not be refreshed. SSH directory remains available.</p>}
+        {!httpItems && !httpError && <p role="status" className="mt-3 text-sm text-text-muted">Loading HTTP sessions…</p>}
+        {httpItems && (httpItems.length ? <div className="mt-4 grid gap-2 lg:grid-cols-2">{groupWebHttpSessions(httpItems).filter((item) => item.id).slice(0, 8).map((item) => <Link key={item.id} href={`/threat-intel/http/${item.id}`} className="rounded-lg border border-border bg-surface-subtle p-3 transition hover:border-primary/50 hover:bg-surface">
+          <div className="flex items-center justify-between gap-2"><span className="font-semibold text-text">HTTP session {item.id?.slice(0, 8)}…</span><span className="text-xs text-text-muted">{item.events.length} request(s)</span></div>
+          <p className="mt-1 text-xs text-text-muted">{item.sourceIps.join(", ")} · {item.lastObservedAt}</p>
+          <p className="mt-2 text-xs text-warning">{item.events.filter((event) => event.signals.length).length} injection hint(s) · review only</p>
+        </Link>)}</div> : <p className="mt-3 text-sm text-text-muted">No stored HTTP requests are visible.</p>)}
+        <p className="mt-3 text-xs text-text-muted">This preview covers the latest 50 HTTP records. Open an exact session for its full bounded chronology (up to 500 events).</p>
       </section>
 
       {/* Main Full-Width Incursion Directory Table */}
@@ -607,13 +633,23 @@ function DirectoryResults({ sessions }: { sessions: DashboardThreatEvent[] }) {
         <tbody className="divide-y divide-border/60 cursor-pointer">
           {sessions.map((session) => {
             let dwellTime = "Not recorded";
+
             if (session.duration === "Active" || session.session_status === "active") {
               dwellTime = "Active";
-            } else if (session.end_time && session.timestamp) {
-              const seconds = Math.max(0, Math.round((Date.parse(String(session.end_time)) - Date.parse(String(session.timestamp))) / 1000));
-              if (Number.isFinite(seconds)) dwellTime = `${seconds}s`;
-            } else if (session.duration !== "Closed" && session.duration !== "Active") {
-              dwellTime = session.duration;
+            } else {
+              // กรณีที่ 1: มี end_time ส่งมาให้คำนวณ
+              if (session.end_time && session.timestamp) {
+                const seconds = Math.max(0, Math.round((Date.parse(String(session.end_time)) - Date.parse(String(session.timestamp))) / 1000));
+                if (Number.isFinite(seconds)) dwellTime = `${seconds}s`;
+              }
+              // กรณีที่ 2: duration ส่งมาเป็นตัวเลข (เช่น 45.12)
+              else if (typeof session.duration === "number" || (!isNaN(Number(session.duration)) && String(session.duration).trim() !== "")) {
+                dwellTime = `${Math.round(Number(session.duration))}s`;
+              }
+              // กรณีที่ 3: ส่งมาเป็น String สำเร็จรูปที่ไม่ใช่คำว่า Closed
+              else if (typeof session.duration === "string" && session.duration !== "Closed" && session.duration !== "Unknown") {
+                dwellTime = session.duration;
+              }
             }
 
             return (

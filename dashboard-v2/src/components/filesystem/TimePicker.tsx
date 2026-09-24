@@ -9,9 +9,10 @@ export interface TimePickerProps {
   onChange: (date: Date) => void;
   label: string;
   variant?: "start" | "end";
+  compact?: boolean;
 }
 
-export function TimePicker({ date, onChange, label, variant = "start" }: TimePickerProps) {
+export function TimePicker({ date, onChange, label, variant = "start", compact = false }: TimePickerProps) {
   const hourInputRef = React.useRef<HTMLInputElement>(null);
   const minuteInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -165,7 +166,7 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
     })();
 
   return (
-    <div className="flex flex-col gap-2 p-2.5 rounded-xl bg-surface border border-border/70 shadow-2xs hover:border-border-strong transition-colors">
+    <div className={`flex flex-col rounded-xl bg-surface border border-border/70 transition-colors hover:border-border-strong ${compact ? "gap-1.5 p-2" : "gap-2 p-2.5 shadow-2xs"}`}>
       {/* Row with Label and Digital Input */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -182,7 +183,7 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
         </div>
 
         {/* Digital LCD Time Box */}
-        <div className="flex items-center bg-surface-subtle border border-border/80 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 rounded-lg px-2 py-0.5 shadow-2xs transition-all">
+        <div className={`flex items-center bg-surface-subtle border border-border/80 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20 rounded-lg shadow-2xs transition-all ${compact ? "px-1.5 py-0" : "px-2 py-0.5"}`}>
           <input
             ref={hourInputRef}
             type="text"
@@ -192,7 +193,7 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
             onChange={handleHourChange}
             onBlur={handleHourBlur}
             onKeyDown={handleHourKeyDown}
-            className="w-6 text-center font-mono text-sm font-bold text-text bg-transparent outline-hidden"
+            className={`${compact ? "w-5 text-xs" : "w-6 text-sm"} text-center font-mono font-bold text-text bg-transparent outline-hidden`}
             aria-label={`${label} hour`}
           />
           <span className="text-text-subtle font-mono text-xs font-bold select-none px-0.5">:</span>
@@ -205,7 +206,7 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
             onChange={handleMinuteChange}
             onBlur={handleMinuteBlur}
             onKeyDown={handleMinuteKeyDown}
-            className="w-6 text-center font-mono text-sm font-bold text-text bg-transparent outline-hidden"
+            className={`${compact ? "w-5 text-xs" : "w-6 text-sm"} text-center font-mono font-bold text-text bg-transparent outline-hidden`}
             aria-label={`${label} minute`}
           />
 
@@ -231,12 +232,12 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
       </div>
 
       {/* Quick Chips below */}
-      <div className="grid grid-cols-2 gap-2 pt-1">
+      <div className={`grid grid-cols-2 ${compact ? "gap-1 pt-0.5" : "gap-2 pt-1"}`}>
         {!isStart && (
           <button
             type="button"
             onClick={handleSetNow}
-            className={`h-8 flex items-center justify-center rounded-lg text-xs font-mono cursor-pointer transition-all ${
+            className={`${compact ? "h-7 rounded-md text-xs" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
               isNow
                 ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                 : "bg-surface-subtle hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"
@@ -252,7 +253,7 @@ export function TimePicker({ date, onChange, label, variant = "start" }: TimePic
               key={qp.label}
               type="button"
               onClick={() => commitTime(qp.h, qp.m)}
-              className={`h-8 flex items-center justify-center rounded-lg text-xs font-mono cursor-pointer transition-all ${
+              className={`${compact ? "h-7 rounded-md text-xs" : "h-8 rounded-lg text-xs"} flex items-center justify-center font-mono cursor-pointer transition-all ${
                 isSelected
                   ? "bg-primary-subtle text-primary border border-primary/40 font-semibold shadow-2xs"
                   : "bg-surface-subtle hover:bg-surface-hover text-text-muted hover:text-text border border-border/70 font-medium"

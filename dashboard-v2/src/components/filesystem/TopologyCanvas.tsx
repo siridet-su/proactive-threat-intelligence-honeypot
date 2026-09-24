@@ -34,7 +34,11 @@ import type {
 import { TopologyToolbar } from "./TopologyToolbar";
 import { TopologySummaryBar } from "./TopologySummaryBar";
 import { TopologyMinimap } from "./TopologyMinimap";
-import { TransitionLegend, TransitionOverlay } from "./TransitionOverlay";
+import {
+  TransitionLegend,
+  TransitionOverlay,
+  type TransitionDisplayMode,
+} from "./TransitionOverlay";
 import type { VerifiedCwdTransition } from "./filesystemTransitions";
 import {
   deriveMinimapVisibility,
@@ -290,6 +294,7 @@ export function TopologyCanvas({
 
   const [nodeElementBounds, setNodeElementBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutElementBounds, setCalloutElementBounds] = useState<Record<string, GraphElementBounds>>({});
+  const [calloutAnchorBounds, setCalloutAnchorBounds] = useState<Record<string, GraphElementBounds>>({});
   const [calloutLayoutBounds, setCalloutLayoutBounds] = useState<Record<string, GraphElementBounds>>({});
 
   const mapSurfaceRef = useRef<HTMLDivElement>(null);
@@ -348,11 +353,14 @@ export function TopologyCanvas({
     onClearElementBounds: () => {
       setNodeElementBounds({});
       setCalloutElementBounds({});
+      setCalloutAnchorBounds({});
+      setCalloutLayoutBounds({});
     },
   });
 
   const [densityPreference, setDensityPreference] = useState<TopologyDensityPreference>("auto");
   const [minimapPreference, setMinimapPreference] = useState<MinimapVisibilityPreference>("auto");
+  const [transitionDisplayMode, setTransitionDisplayMode] = useState<TransitionDisplayMode>("current");
 
   // Render limits state
   const [isSourcesExpanded, setIsSourcesExpanded] = useState(false);
@@ -570,9 +578,11 @@ export function TopologyCanvas({
       [...calloutElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
     );
     const calloutBySourceIp = new Map(graphCallouts.map((callout) => [callout.sourceIp, callout]));
-    const measuredCalloutAnchors = Object.fromEntries(
-      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => {
-        const anchorBounds = toRelativeBounds(element);
+    const measuredCalloutAnchors: Record<string, GraphElementBounds> = Object.fromEntries(
+      [...calloutAnchorElementRefs.current.entries()].map(([sourceIp, element]) => [sourceIp, toRelativeBounds(element)]),
+    );
+    const measuredCalloutLayouts: Record<string, GraphElementBounds> = Object.fromEntries(
+      Object.entries(measuredCalloutAnchors).map(([sourceIp, anchorBounds]) => {
         const callout = calloutBySourceIp.get(sourceIp);
         const reservedDisclosureHeight = estimateExpandedCalloutDisclosureHeight(callout?.sessions.length ?? 1);
         const reservedDisclosurePercent = (reservedDisclosureHeight / plane.offsetHeight) * 100;
@@ -588,11 +598,12 @@ export function TopologyCanvas({
     );
     setNodeElementBounds((current) => sameElementBounds(current, measuredNodes) ? current : measuredNodes);
     setCalloutElementBounds((current) => sameElementBounds(current, measuredCallouts) ? current : measuredCallouts);
-    setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
+    setCalloutAnchorBounds((current) => sameElementBounds(current, measuredCalloutAnchors) ? current : measuredCalloutAnchors);
+    setCalloutLayoutBounds((current) => sameElementBounds(current, measuredCalloutLayouts) ? current : measuredCalloutLayouts);
   }, [graphCallouts]);
 
-  // Connector endpoints use rendered bounds, including their actual centers. This keeps a line
-  // attached to the same visual edge in compact, expanded, zoomed, and manually arranged views.
+  // Source connectors use the stable header bounds. The full-card bounds remain
+  // separate for overlap detection, while layout bounds reserve disclosure space.
   useLayoutEffect(() => {
     measureElementBounds();
     const plane = graphPlaneRef.current;
@@ -863,6 +874,8 @@ export function TopologyCanvas({
           densityAnalysisHiddenNodes={densityAnalysis.hiddenNodes}
           isTopologyExpanded={isTopologyExpanded}
           isAuditMode={isAuditMode}
+          transitionDisplayMode={transitionDisplayMode}
+          setTransitionDisplayMode={setTransitionDisplayMode}
           handleToggleExpand={handleToggleExpand}
         />
       </TopologyCanvasHeader>
@@ -973,7 +986,7 @@ export function TopologyCanvas({
                       <span className="hidden sm:inline text-text-subtle text-xs">
                         (Threshold: {Math.round(staleThresholdMs / 1000)}s)
                       </span>
-                      {onRefresh && (
+                      {isStandaloneExpanded && onRefresh && (
                         <button
                           type="button"
                           onClick={onRefresh}
@@ -982,7 +995,7 @@ export function TopologyCanvas({
                           Refresh snapshot
                         </button>
                       )}
-                      {onReconnect && (
+                      {isStandaloneExpanded && onReconnect && (
                         <button
                           type="button"
                           onClick={onReconnect}
@@ -1065,7 +1078,9 @@ export function TopologyCanvas({
                   </div>
                 )}
 
-                {(displayedTransitions.length > 0 || currentTransition) && <TransitionLegend />}
+                {(displayedTransitions.length > 0 || currentTransition) && (
+                  <TransitionLegend displayMode={transitionDisplayMode} />
+                )}
 
                 <motion.div
                   ref={graphPlaneRef}
@@ -1154,7 +1169,7 @@ export function TopologyCanvas({
                                 node,
                                 position,
                                 nodeElementBounds[node.path],
-                                calloutElementBounds[callout.sourceIp],
+                                calloutAnchorBounds[callout.sourceIp],
                               );
                               const controlX = (endpoint.startX + endpoint.endX) / 2;
                               const routePath = `M ${endpoint.startX} ${endpoint.startY} C ${controlX} ${endpoint.startY}, ${controlX} ${endpoint.endY}, ${endpoint.endX} ${endpoint.endY}`;
@@ -1170,8 +1185,12 @@ export function TopologyCanvas({
                                     }
                                     fill="none"
                                     stroke={isPrimarySelected ? "var(--primary)" : isClusterSelected ? "var(--primary)" : "var(--border-strong)"}
-                                    strokeOpacity={isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
-                                    strokeWidth={isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
+                                    strokeOpacity={isAuditMode && currentTransition
+                                      ? isPrimarySelected ? 0.32 : isClusterSelected ? 0.24 : 0.18
+                                      : isPrimarySelected ? 1 : isClusterSelected ? 0.68 : 0.45}
+                                    strokeWidth={isAuditMode && currentTransition
+                                      ? isPrimarySelected ? "0.24" : "0.18"
+                                      : isPrimarySelected ? "0.42" : isClusterSelected ? "0.28" : "0.2"}
                                     strokeDasharray={isPrimarySelected ? "none" : isClusterSelected ? "1.5 1.5" : "0.75 1.6"}
                                     data-source-connection={callout.sourceIp}
                                     data-source-target-path={path}
@@ -1210,6 +1229,7 @@ export function TopologyCanvas({
                           : TOPOLOGY_TRANSITION
                       }
                       showLegend={false}
+                      displayMode={transitionDisplayMode}
                     />
                   )}
                   {failedHopMessage && failedAnnotationNode && (

@@ -6,8 +6,8 @@ import hashlib
 from pathlib import Path
 
 from production.enrichment.external_ti_contract import (
-    SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256,
-    SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_V2_4_SHA256,
+    SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     load_source_ip_governance_amendment,
 )
 from production.enrichment.external_ti_proof_guard import (
@@ -33,15 +33,15 @@ def _storage(tmp_path: Path) -> SQLiteStorage:
 
 def test_production_policy_is_hash_bound_and_bounded() -> None:
     digest = hashlib.sha256(POLICY_PATH.read_bytes()).hexdigest()
-    assert digest == SOURCE_IP_PRODUCTION_POLICY_V2_3_SHA256
+    assert digest == SOURCE_IP_PRODUCTION_POLICY_V2_4_SHA256
     policy = load_source_ip_governance_amendment(
         str(POLICY_PATH),
         expected_sha256=digest,
     )
-    assert policy.version == SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION
+    assert policy.version == SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION
     assert policy.continuous_processing is True
     assert policy.minimum_refresh_interval_seconds == 86_400
-    assert policy.max_distinct_source_ips_per_utc_day == 100
+    assert policy.max_distinct_source_ips_per_utc_day == 200
     assert policy.canonical_mongodb_enrichment_record_write is False
     assert set(policy.authorized_providers) == {"abuseipdb", "otx", "shodan_official"}
     assert policy.allowed_outbound_fields == (
@@ -160,6 +160,40 @@ def test_daily_quota_uses_all_slots_before_failing_closed(tmp_path: Path) -> Non
     )
     assert not exhausted.allowed
     assert exhausted.code == "DAILY_QUOTA_EXHAUSTED"
+
+
+def test_reviewed_200_target_increase_preserves_prior_daily_claims(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    original = ExternalTIProductionGuard(
+        storage, "production-eti-v2", PROOF_GUARD_MODE_REAL,
+        max_daily_targets=100,
+    )
+    for suffix in range(1, 101):
+        decision = original.claim_for_provider(
+            "abuseipdb", f"11.0.0.{suffix}",
+            cutoff_utc="2026-09-18T00:00:00Z",
+            first_observed_at="2026-09-18T01:00:00Z",
+        )
+        assert decision.allowed
+        assert original.complete_provider("abuseipdb", "NO_DATA", http_status=200)
+
+    revised = ExternalTIProductionGuard(
+        storage, "production-eti-v2", PROOF_GUARD_MODE_REAL,
+        max_daily_targets=200,
+    )
+    for suffix in range(101, 201):
+        extra = revised.claim_for_provider(
+            "abuseipdb", f"11.0.0.{suffix}",
+            cutoff_utc="2026-09-18T00:00:00Z",
+            first_observed_at="2026-09-18T02:00:00Z",
+        )
+        assert extra.allowed
+        assert revised.complete_provider("abuseipdb", "NO_DATA", http_status=200)
+    assert not revised.claim_for_provider(
+        "abuseipdb", "11.0.0.201",
+        cutoff_utc="2026-09-18T00:00:00Z",
+        first_observed_at="2026-09-18T03:00:00Z",
+    ).allowed
 
 
 def test_guard_rows_never_store_plain_source_ip(tmp_path: Path) -> None:

@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Honeypot Hardware Rollup Backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=5m
+Persistent=true
+Unit=honeypot-hardware-backup.service
+
+[Install]
+WantedBy=timers.target

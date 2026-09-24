@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import type { GraphCallout, TopologyDensityMode, TopologyDensityPreference } from "./filesystemUtils";
 import type { MinimapVisibilityPreference } from "./topologyDensity";
+import type { TransitionDisplayMode } from "./TransitionOverlay";
 
 interface TopologyToolbarProps {
   zoom: number;
@@ -46,6 +47,8 @@ interface TopologyToolbarProps {
   densityAnalysisHiddenNodes: number;
   isTopologyExpanded: boolean;
   isAuditMode: boolean;
+  transitionDisplayMode: TransitionDisplayMode;
+  setTransitionDisplayMode: (mode: TransitionDisplayMode) => void;
   handleToggleExpand: () => void;
 }
 
@@ -75,6 +78,8 @@ export function TopologyToolbar({
   densityAnalysisHiddenNodes,
   isTopologyExpanded,
   isAuditMode,
+  transitionDisplayMode,
+  setTransitionDisplayMode,
   handleToggleExpand,
 }: TopologyToolbarProps) {
   const viewMenuRef = useRef<HTMLDivElement>(null);
@@ -281,6 +286,43 @@ export function TopologyToolbar({
                 <div className="mt-1 border-t border-border pt-1 px-2 py-1 text-xs text-text-subtle">
                   {densityAnalysisHiddenNodes} {densityAnalysisHiddenNodes === 1 ? "path" : "paths"} aggregated
                 </div>
+              )}
+
+              {isAuditMode && (
+                <>
+                  <div className="my-1 h-px bg-border" aria-hidden="true" />
+                  <div className="px-2 py-1 text-xs font-medium text-text-muted">
+                    Replay Paths
+                  </div>
+                  <div role="group" aria-label="Transition visibility" className="space-y-0.5 px-1 pb-1">
+                    {([
+                      ["current", "Current hop"],
+                      ["trail", "Current + trail"],
+                      ["all", "All transitions"],
+                    ] as const).map(([mode, label]) => {
+                      const selected = transitionDisplayMode === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          aria-pressed={selected}
+                          onClick={() => {
+                            setTransitionDisplayMode(mode);
+                            setViewMenuOpen(false);
+                          }}
+                          className={`flex min-h-8 w-full items-center justify-between rounded-lg px-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${
+                            selected
+                              ? "bg-primary-subtle font-medium text-primary"
+                              : "text-text hover:bg-surface-hover"
+                          }`}
+                        >
+                          <span>{label}</span>
+                          {selected && <Check className="h-3.5 w-3.5 text-primary" aria-hidden="true" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
               )}
 
               <div className="my-1 h-px bg-border" aria-hidden="true" />

@@ -676,7 +676,10 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
   const [activeTab, setActiveTab] = useState("session-overview");
 
-  const detailData = boundDetail.sessionId === sessionId ? boundDetail.data : {};
+  const detailData = useMemo(
+    () => (boundDetail.sessionId === sessionId ? boundDetail.data : {}),
+    [boundDetail.sessionId, boundDetail.data, sessionId],
+  );
   const currentLiveCommandState = liveCommandState.sessionId === sessionId
     ? liveCommandState
     : { sessionId, commands: [], active: false };

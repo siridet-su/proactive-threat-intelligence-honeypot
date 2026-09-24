@@ -15,6 +15,8 @@ from production.enrichment.external_ti_contract import (
     SOURCE_IP_ENRICHMENT_MODE,
     SOURCE_IP_POLICY_ID,
     SOURCE_IP_POLICY_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION,
+    SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION,
     SOURCE_IP_PRODUCTION_POLICY_VERSIONS,
     build_external_ti_evidence,
     default_external_ti_provider_configs,
@@ -421,6 +423,16 @@ def _lookup_governed_source_ip_cache(
     provenance = cache_entry.get("provenance")
     if not isinstance(provenance, Mapping):
         return None
+    # A reviewed daily-quota increase does not invalidate still-fresh,
+    # otherwise-identical provider evidence recorded under the immediately
+    # preceding production policy. This is read-only historical context;
+    # _source_ip_cache_policy_binding labels it LEGACY rather than CURRENT.
+    accepted_policy_versions = {
+        str(getattr(governance, "version", "") or ""),
+        SOURCE_IP_POLICY_VERSION,
+    }
+    if str(getattr(governance, "version", "") or "") == SOURCE_IP_PRODUCTION_POLICY_V2_4_VERSION:
+        accepted_policy_versions.add(SOURCE_IP_PRODUCTION_POLICY_V2_3_VERSION)
     if (
         str(cache_entry.get("provider") or "").strip().lower() != name
         or str(cache_entry.get("normalized_observable_identity") or "")
@@ -434,10 +446,7 @@ def _lookup_governed_source_ip_cache(
         or str(provenance.get("privacy_policy_identity") or "")
         != SOURCE_IP_POLICY_ID
         or str(provenance.get("privacy_policy_version") or "")
-        not in {
-            str(getattr(governance, "version", "") or ""),
-            SOURCE_IP_POLICY_VERSION,
-        }
+        not in accepted_policy_versions
         or str(provenance.get("authority") or "") != EXTERNAL_TI_AUTHORITY
         or str(provenance.get("cache_authority") or "")
         != SOURCE_IP_CACHE_AUTHORITY

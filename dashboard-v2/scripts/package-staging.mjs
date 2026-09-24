@@ -236,8 +236,10 @@ if (!/^[A-Za-z0-9._-]{1,128}$/.test(runId)) fail("CI run ID contains unsafe char
 
 const lockSha256 = sha256File(lockPath);
 const buildId = process.env.NEXT_PUBLIC_DASHBOARD_BUILD_ID || commit;
+const deploymentEnvironment = (process.env.DASHBOARD_PACKAGE_ENVIRONMENT || "staging").trim().toLowerCase();
+if (!["staging", "production"].includes(deploymentEnvironment)) fail("unsupported dashboard package environment");
 const deploymentLabel = (process.env.NEXT_PUBLIC_DASHBOARD_DEPLOYMENT_LABEL || "STAGING").trim().toUpperCase();
-if (deploymentLabel !== "STAGING") fail("staging packages must be built with the STAGING label");
+if (deploymentLabel !== deploymentEnvironment.toUpperCase()) fail("dashboard package environment and build label differ");
 
 try {
   await mkdir(outputRoot, { recursive: true, mode: 0o700 });
@@ -315,7 +317,7 @@ try {
 
   const metadata = {
     schema_version: "dashboard-v2-staging-artifact.v1",
-    deployment_environment: "staging",
+    deployment_environment: deploymentEnvironment,
     deployment_label: deploymentLabel,
     build_id: buildId,
     git_commit_sha: commit,
@@ -344,7 +346,7 @@ try {
     fail("build metadata write failed");
   }
 
-  const archiveName = `dashboard-v2-staging-${commit}.tar.gz`;
+  const archiveName = `dashboard-v2-${deploymentEnvironment}-${commit}.tar.gz`;
   const archivePath = join(outputRoot, archiveName);
   await runArchive(packageRoot, archivePath, includePublic);
   let archiveValidation;

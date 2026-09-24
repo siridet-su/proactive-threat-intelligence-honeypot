@@ -30,6 +30,7 @@ import {
 } from "@/lib/external-ti-presentation";
 import { projectAdminCommandRecords } from "@/lib/session-command-projection";
 import { projectContextualHypotheses } from "@/lib/contextual-hypothesis-presentation";
+import { hasBoundModel2, rankTtpRecommendations } from "@/lib/model-ttp-ranking";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -648,7 +649,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
               <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
                 <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(mapping.tactic, "Tactic not recorded")}</span>
                 <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(authority.decision || mapping.authority, "Advisory only")}</span>
-                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1: {summaryValue(advisory.predicted_technique)}</span>}
+                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1 advisory: {summaryValue(advisory.predicted_technique)}</span>}
               </div>
               <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
             </li>
@@ -657,7 +658,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
       </ol></ScrollPanel>}
       <div className="rounded-xl border border-primary-border bg-primary-subtle/50 p-3">
         <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mapping details</p>
+          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mappings</p>
           <span className="ui-badge text-[10px]">{trustedMappings.length}</span>
         </div>
         {trustedMappings.length ? (
@@ -977,6 +978,31 @@ function tiTimestampLabel(value: unknown): string {
   }).format(timestamp);
 }
 
+function providerName(value: unknown): string {
+  const name = String(value || "").toLowerCase();
+  return ({ abuseipdb: "AbuseIPDB", otx: "AlienVault OTX", shodan_official: "Shodan" } as Record<string, string>)[name] || readableCode(value);
+}
+
+function providerResult(provider: unknown, normalized: JsonRecord): string {
+  const name = String(provider || "").toLowerCase();
+  if (name === "abuseipdb") {
+    const score = hasMeaningfulValue(normalized.abuse_confidence_score) ? `${display(normalized.abuse_confidence_score)}/100` : "not reported";
+    const reports = hasMeaningfulValue(normalized.total_reports) ? `${display(normalized.total_reports)} community reports` : "report count unavailable";
+    return `AbuseIPDB score: ${score} · ${reports}. This is provider reputation, not model confidence.`;
+  }
+  if (name === "otx") {
+    const pulses = list(normalized.pulses).map(record);
+    const count = hasMeaningfulValue(normalized.pulse_count) ? display(normalized.pulse_count) : String(pulses.length);
+    return `OTX pulse matches: ${count}. A pulse match is third-party context, not confirmed session behavior.`;
+  }
+  if (name === "shodan_official") {
+    const ports = list(normalized.ports).slice(0, 8).map(String).join(", ");
+    const asn = hasMeaningfulValue(normalized.asn) ? `ASN ${display(normalized.asn)}` : "ASN not reported";
+    return `Internet-facing host context: ${ports ? `ports ${ports}` : "ports not reported"} · ${asn}. These are not ports observed in Cowrie.`;
+  }
+  return "Provider context is stored; inspect the details below for its bounded result.";
+}
+
 function ProviderContextRows({
   evidence,
   cache,
@@ -1072,17 +1098,21 @@ function ProviderContextRows({
         );
       })}
       {cache.slice(0, 20).map((item, index) => {
-        const context = selectedProviderFields(item.normalized_context);
+        const normalized = record(item.normalized_context);
+        const context = selectedProviderFields(normalized).filter(([key]) => key !== "pulses");
+        const pulses = list(normalized.pulses).map(record);
         const freshness = sourceIpCacheFreshness(item, asOf);
         return (
-          <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+          <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono font-semibold text-text">{summaryValue(item.provider, "provider unavailable")} cache</span>
-              <span className="ui-badge text-[11px]">{tiLookupState(item, freshness)}</span>
+              <span className="text-base font-semibold text-text">{providerName(item.provider)}</span>
+              <span className="ui-badge text-xs">{freshnessLabel(freshness)}</span>
             </div>
-            <p className="mt-1 text-text-muted">lookup: {summaryValue(item.lookup_at, "Not recorded")} · expires: {summaryValue(item.expires_at, "Not recorded")} · freshness: {freshnessLabel(freshness)}</p>
+            <p className="mt-2 text-sm leading-6 text-text">{providerResult(item.provider, normalized)}</p>
+            {item.provider === "otx" && pulses.length > 0 && <p className="mt-1 text-sm text-text-muted">Example: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
+            <p className="mt-2 text-xs text-text-muted">Checked {tiTimestampLabel(item.lookup_at)} · valid until {tiTimestampLabel(item.expires_at)}</p>
             <TraceabilityDetails
-              title="Cached provider and observable details"
+              title="Lookup provenance and technical details"
               fields={[
                 ["Provider", summaryValue(item.provider, "Not recorded")],
                 ["Observable", summaryValue(item.observable_value || observable.value, "Not recorded")],
@@ -1096,7 +1126,12 @@ function ProviderContextRows({
                 ["Data age", dataAge(item.lookup_at)],
               ]}
             />
-            {context.length > 0 && <p className="mt-1 text-text-muted">normalized context: {context.map(([key, value]) => `${key.replaceAll("_", " ")}=${value}`).join(" · ")}</p>}
+            {context.length > 0 && <details className="mt-3 rounded-lg border border-border p-3 text-sm"><summary className="cursor-pointer font-medium text-text">Additional provider fields</summary><dl className="mt-3 grid gap-2 sm:grid-cols-2">{context.slice(0, 12).map(([key, value]) => (
+              <div key={key} className="rounded-md border border-border bg-surface-subtle p-2">
+                <dt className="text-xs text-text-subtle">{readableCode(key)}</dt>
+                <dd className="mt-1 break-words text-sm text-text">{value}</dd>
+              </div>
+            ))}</dl></details>}
           </div>
         );
       })}
@@ -1187,13 +1222,17 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
   );
 }
 
-function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonRecord; observableData: JsonRecord }) {
+export function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonRecord; observableData: JsonRecord }) {
   const sessionCounts = record(sessionData.counts);
   const observableCounts = record(observableData.counts);
   const summary = { ...record(sessionData.external_ti_summary), ...record(observableData.external_ti_summary) };
   const entities = list(sessionData.shared_entities).map(record);
   const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
-  const cache = [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)].map(record);
+  const cache = Array.from(new Map(
+    [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)]
+      .map(record)
+      .map((item) => [`${label(item.provider)}:${label(item.cache_key)}:${label(item.lookup_at)}`, item] as const),
+  ).values());
   const providerStatus = { ...record(sessionData.provider_status), ...record(observableData.provider_status) };
   const jobSummary = record(sessionData.enrichment_job_summary);
   const jobStatusCounts = record(jobSummary.status_counts);
@@ -1220,7 +1259,7 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   return (
     <>
       <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
-        {evidence.length || cache.length ? `${evidence.length} stored provider finding${evidence.length === 1 ? "" : "s"} and ${cache.length} source-IP cache result${cache.length === 1 ? "" : "s"}. Check freshness before using this context.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+        {evidence.length || cache.length ? `${cache.length} source-IP provider lookup result${cache.length === 1 ? "" : "s"} and ${evidence.length} separately linked finding${evidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
       </Insight>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
@@ -1229,8 +1268,8 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
       </div>
       <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Provider findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
-        ["Cached results", countOf(cache.length)],
+        ["Linked findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Provider lookups", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
       ]} />
       {jobSummary.pending === true && (
@@ -1245,7 +1284,7 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
         </p>
       )}
       {entities.length > 0 && <ScrollPanel title="Shared entities" count={entities.length} height="max-h-64"><ObservableList items={entities} empty="No shared entities are recorded." /></ScrollPanel>}
-      <ScrollPanel title="Provider results and freshness" count={evidence.length + cache.length} height="max-h-96">
+      <ScrollPanel title="What the providers reported" count={evidence.length + cache.length} height="max-h-[32rem]">
         <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
       </ScrollPanel>
       {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (
@@ -1256,7 +1295,20 @@ function ExternalTiSummary({ sessionData, observableData }: { sessionData: JsonR
   );
 }
 
-function HypothesisSummary({ data }: { data: JsonRecord }) {
+function hypothesisGateExplanation(value: unknown): string {
+  const code = String(value || "");
+  return ({
+    effect_status_not_eligible: "The observed command did not confirm the required effect.",
+    outcome_not_eligible: "The recorded outcome did not confirm success.",
+    additional_operation_not_activated: "A required follow-up operation was not observed.",
+    no_fact_for_activated_family: "No matching behavior fact was recorded.",
+    canonical_finding_not_emitted_after_match: "A selector matched but no canonical finding was emitted; review the assessment pipeline.",
+    typed_semantic_evaluation_unavailable: "The typed behavior check was unavailable.",
+    semantic_selector_error: "The behavior selector failed; review processing logs.",
+  } as Record<string, string>)[code] || readableCode(code);
+}
+
+export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const reportSummary = record(data.report_summary);
   const hypotheses = list(data.correlated_ttp_hypotheses);
@@ -1269,6 +1321,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
   const reports = list(data.reports);
   const canonicalCount = list(sessionAssessment.canonical_finding_ids).length;
   const relationshipCount = Number(sessionGraph.relationship_edges || 0);
+  const missingEvidence = list(sessionAssessment.missing_evidence).slice(0, 4);
   return (
     <div className="space-y-3">
       <Insight title="Assessment outcome" tone={hypothesisSets.length ? "primary" : "warning"}>
@@ -1279,6 +1332,11 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
         ["Canonical findings", String(canonicalCount)],
         ["TTP context", String(contextualHypotheses.length)],
       ]} />
+      {hypothesisSets.length === 0 && missingEvidence.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
+        <p className="font-semibold">Why no hypothesis was established</p>
+        <ul className="mt-2 list-inside list-disc space-y-1">{missingEvidence.map((reason, index) => <li key={`${String(reason)}-${index}`}>{hypothesisGateExplanation(reason)}</li>)}</ul>
+        <p className="mt-2 text-xs text-text-muted">These are assessment gates, not missing classification records. An observed command is not proof that its effect succeeded.</p>
+      </div>}
       {sessionFamilies.length > 0 && (
         <ScrollPanel title="Behavior checks across this session" count={sessionFamilies.length} height="max-h-80">
           <p className="mb-2 px-1 text-[11px] text-text-muted">Each behavior family shows whether observed evidence passed its review gate.</p>
@@ -1290,7 +1348,7 @@ function HypothesisSummary({ data }: { data: JsonRecord }) {
                   <span className={`ui-badge ${list(family.finding_ids).length ? "border-primary-border bg-primary-subtle text-primary" : ""}`}>{readableCode(family.status || "not evaluated")}</span>
                 </div>
                 <div className="mt-2 flex gap-3 text-text-muted"><span>{countOf(family.observed_fact_count)} observations</span><span>{countOf(list(family.finding_ids).length)} findings</span></div>
-                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Still needed: {list(family.missing_evidence).map(readableCode).join(", ")}</p>}
+                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Gate: {list(family.missing_evidence).map(hypothesisGateExplanation).join(" ")}</p>}
               </li>
             ))}
           </ul>
@@ -1416,10 +1474,15 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const model1 = record(ensemble.model1);
   const model2 = record(ensemble.model2);
   const binding = record(model2.binding);
+  const unavailableHeads = Object.entries(record(model2.unavailable_heads));
   const results = list(ensemble.results).map(record);
+  const model2OnlyPredictions = hasBoundAvailableModel2(data)
+    ? results.filter((item) => item.model2_relation === "MODEL2_ONLY" && item.model2_result === "PRESENT")
+    : [];
   const model1Only = list(ensemble.model1_only_labels).map(record);
+  const recommendations = rankTtpRecommendations(data);
 
-  if (!hasMeaningfulRecord(ensemble)) {
+  if (!hasMeaningfulRecord(ensemble) && recommendations.length === 0) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
   }
 
@@ -1432,21 +1495,47 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   return (
     <div className="space-y-3">
       <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
-        {hasBoundAvailableModel2(data) ? "A session-bound Model2 result is available for comparison with Model1." : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
+        {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only available heads may corroborate Model1.` : "A session-bound Model2 result is available for comparison with Model1.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
       </Insight>
+      {model2OnlyPredictions.length > 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-sm text-warning">Experimental Model2-only prediction for {model2OnlyPredictions.map((item) => summaryValue(item.technique_id, "unknown technique")).join(", ")}. This is not a confirmed observed behavior, canonical finding, or response instruction; check the session evidence before drawing a conclusion.</p>}
       <MetricStrip fields={[
-        ["Model1", model1.applicable === true ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
+        ["Model1", model1.applicable === true || recommendations.length > 0 ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
         ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
         ["Comparisons", String(results.length)],
       ]} />
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 only adds a comparison when its result is bound to this session; model scores are not combined.</p>
+      {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
+        <p className="font-semibold">Why Model2 is partial</p>
+        <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
+      </div>}
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
+      {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
+            <p className="mt-1 text-xs leading-5 text-text-muted">Model1&apos;s selected TTP per command, grouped by distinct command event. More supporting commands appear first. This is not a confidence percentage, trusted finding, or response authorization.</p>
+          </div>
+          <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
+        </div>
+        <ol className="mt-3 grid gap-2 sm:grid-cols-2">
+          {recommendations.map((item) => <li key={item.techniqueId} className="rounded-lg border border-border bg-surface p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-text">#{item.rank} <span className="font-mono">{item.techniqueId}</span></span>
+              <span className="ui-badge text-[10px]">{item.model2Support === "corroborates" ? "Model2 supports" : item.model2Support === "does_not_support" ? "Model2 does not support" : item.model2Support === "not_supported" ? "Model2 does not cover this TTP" : "Model2 unavailable"}</span>
+            </div>
+            <p className="mt-1 text-xs text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support this Model1 suggestion.</p>
+            {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command refs: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
+            {item.model2Support === "does_not_support" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT for its independent head; review before drawing a conclusion.</p>}
+          </li>)}
+        </ol>
+        <p className="mt-2 text-[11px] text-text-subtle">Method: count distinct command events by selected Model1 TTP. Repeated classifications for one command count once. Model2 is a separate bound-session comparison; no RRF or score fusion is applied.</p>
+      </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">
           {results.map((item, index) => (
             <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
-                <span className="ui-badge text-[11px]">{readableCode(item.evidence_state || "comparison unavailable")}</span>
+                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
               </div>
               <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
                 <span>Model1: <span className="font-medium text-text">{readableCode(item.model1_result || "not applicable")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
@@ -1481,14 +1570,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
 }
 
 export function hasBoundAvailableModel2(data: JsonRecord): boolean {
-  const ensemble = record(data.ensemble_evidence);
-  const model2 = record(ensemble.model2);
-  const binding = record(model2.binding);
-  const sessionId = label(data.session_id || record(data.overview).session_id, "");
-  return model2.available === true
-    && Boolean(sessionId)
-    && label(binding.session_id, "") === sessionId
-    && Boolean(label(binding.run_id || ensemble.run_id, ""));
+  return hasBoundModel2(data);
 }
 
 export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {
@@ -1498,11 +1580,21 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   const safety = record(advisory.safety);
   const rendered = record(advisory.rendered_advisory);
   const paragraphs = list(rendered.paragraphs).map(record);
+  const validated = record(advisory.validated_advisory);
   const guidance = record(guidanceData.response_guidance);
   const guidanceFindings = list(guidance.findings).map(record);
   const guidanceActions = list(guidance.advisory_actions).map(record);
-  const selectedFindingIds = new Set(paragraphs.flatMap((item) => list(item.finding_ids).map((id) => label(id, ""))).filter(Boolean));
-  const selectedActionIds = new Set(paragraphs.flatMap((item) => list(item.action_ids).map((id) => label(id, ""))).filter(Boolean));
+  // Provider selections are validated and stored independently of the optional
+  // rendered policy templates. Empty paragraphs must not erase those choices.
+  const selectedFindingIds = new Set([
+    ...list(validated.selected_finding_ids),
+    ...paragraphs.flatMap((item) => list(item.finding_ids)),
+  ].map((id) => label(id, "")).filter(Boolean));
+  const selectedActionIds = new Set([
+    ...list(validated.ranked_action_ids),
+    ...paragraphs.flatMap((item) => list(item.action_ids)),
+  ].map((id) => label(id, "")).filter(Boolean));
+  const selectedRelationshipCount = list(validated.selected_relationship_ids).length;
   const selectedFindings = guidanceFindings.filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
   const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
   const inaccurateNarrative = selectedFindings.length > 0 && paragraphs.some((item) => label(item.text, "").includes("canonical finding"));
@@ -1510,21 +1602,22 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   return (
     <div className="space-y-3">
       <Insight title="What AI actually did" tone={hasSelection ? "primary" : "warning"}>
-        {hasSelection ? `AI reviewed ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
+        {hasSelection ? `AI selected ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for review${selectedRelationshipCount ? `, with ${selectedRelationshipCount} relationship${selectedRelationshipCount === 1 ? "" : "s"}` : ""}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
       </Insight>
+      {hasSelection && paragraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The AI selection is stored, but no rendered narrative was recorded. The linked evidence and actions below come from the verified guidance record.</p>}
       {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
         {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
           <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{label(item.finding_type, "Response-guidance finding")}</span></div>
           {summaryValue(item.statement, "Statement unavailable")}
         </article>)}
         {selectedActions.map((item) => <article key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle/50 p-3 text-sm text-text">
-          <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing manual action</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
+          <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing action selected for review</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
           <p className="font-semibold">{summaryValue(item.description, "Action description unavailable")}</p>
           {hasMeaningfulValue(item.rationale) && <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(item.rationale)}</p>}
         </article>)}
       </ScrollPanel>}
       {(selectedFindingIds.size > selectedFindings.length || selectedActionIds.size > selectedActions.length) && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">Some AI selections could not be matched to the stored evidence or action details.</p>}
-      {inaccurateNarrative && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but the linked evidence is a response-guidance finding. The item shown above comes from the verified guidance record.</p>}
+      {inaccurateNarrative && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but its selected ID belongs to response guidance. The item shown above comes from the verified guidance record.</p>}
       <MoreDetails title="AI provider, validation and original response">
         <SummaryGrid fields={[
           ["Status", summaryValue(data.status, "Unavailable")],
@@ -1591,10 +1684,11 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
   );
 }
 
-function ProvenanceSummary({ value }: { value: JsonRecord }) {
+export function ProvenanceSummary({ value }: { value: JsonRecord }) {
   const reportSummary = record(value.report_summary);
   const errors = record(value.errors);
   const nonEmptyErrors = Object.values(errors).filter(hasMeaningfulValue).length;
+  const currentAiStatus = summaryValue(reportSummary.current_ai_advisory_status, "Not available");
   return (
     <>
       <Insight title="Evidence trail" tone={nonEmptyErrors ? "warning" : "primary"}>
@@ -1604,7 +1698,9 @@ function ProvenanceSummary({ value }: { value: JsonRecord }) {
         ["Analysis jobs", countOf(list(value.analysis_jobs).length)],
         ["Report summary", hasMeaningfulRecord(reportSummary) ? "Ready" : "Empty"],
         ["Processing errors", countOf(nonEmptyErrors)],
+        ["Current AI advisory", readableCode(currentAiStatus)],
       ]} />
+      {hasMeaningfulRecord(reportSummary) && <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text-muted">The immutable assessment was generated without AI enrichment ({summaryValue(reportSummary.ai_enriched, "not recorded")}). Current AI advisory: <span className="font-semibold text-text">{readableCode(currentAiStatus)}</span>. The advisory is stored separately and may arrive later; it does not rewrite the original assessment.</p>}
       <div className="mt-3"><MoreDetails title="Schema, session ID and processing details">
       <SummaryGrid fields={[
         ["Schema", summaryValue(value.schema_version, "Not recorded")],
@@ -1638,6 +1734,9 @@ export function SessionAnalysisPanels({
   useEffect(() => {
     let cancelled = false;
     let pollTimer: number | undefined;
+    let tiPollTimer: number | undefined;
+    let tiPollInFlight = false;
+    let tiPollAttempts = 0;
     let pollInFlight = false;
     let lastDetail: JsonRecord = {};
     const allCapabilities = [
@@ -1656,6 +1755,29 @@ export function SessionAnalysisPanels({
     ] as const;
     const primaryCapabilities = ["detail", "commands", "next-distinct", "session-ti"] as const;
     const pollCapabilities = ["detail", "commands", "next-distinct"] as const;
+
+    const stopTiPoll = () => {
+      if (tiPollTimer !== undefined) window.clearInterval(tiPollTimer);
+      tiPollTimer = undefined;
+    };
+    const startTiPoll = (initial: CapabilityResult | undefined) => {
+      if (label(initial?.data.status, "").toUpperCase() !== "TI_PENDING") return;
+      tiPollTimer = window.setInterval(async () => {
+        if (cancelled || tiPollInFlight) return;
+        tiPollInFlight = true;
+        try {
+          const refreshed = await fetchCapability("session-ti", sessionId);
+          if (cancelled) return;
+          apply([["session-ti", refreshed]]);
+          tiPollAttempts += 1;
+          if (label(refreshed.data.status, "").toUpperCase() !== "TI_PENDING" || tiPollAttempts >= 12) {
+            stopTiPoll();
+          }
+        } finally {
+          tiPollInFlight = false;
+        }
+      }, 5_000);
+    };
 
     const unavailable = (reason: string): CapabilityResult => terminalResult("unavailable", reason);
     const notApplicable = (reason: string): CapabilityResult => terminalResult("not_applicable", reason);
@@ -1723,6 +1845,7 @@ export function SessionAnalysisPanels({
         setResults(Object.fromEntries(allCapabilities.map((capability) => [capability, { ...initialResult }])));
       }
       apply(entries);
+      startTiPoll(entries.find(([capability]) => capability === "session-ti")?.[1]);
       const detailEntry = entries.find(([capability]) => capability === "detail");
       if (!detailEntry || detailEntry[1].state !== "ready") {
         const detailReason = detailEntry?.[1].reason || "The exact-session detail projection failed";
@@ -1781,6 +1904,7 @@ export function SessionAnalysisPanels({
     return () => {
       cancelled = true;
       if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      stopTiPoll();
     };
   }, [sessionId, onDetail, onLiveInteraction, onNextDistinct]);
 

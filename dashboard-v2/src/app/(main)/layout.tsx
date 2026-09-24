@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Home, Menu, X, FolderTree } from "lucide-react";
+import { Users, ShieldCheck, LayoutDashboard, Brain, Clock, LogOut, ArrowLeft, Bug, User, Settings, Activity, Home, Menu, X, FolderTree, Archive } from "lucide-react";
 import { useCallback, useEffect, useState, useRef, type KeyboardEvent } from "react";
 
 import ThemeToggle from "@/components/theme/ThemeToggle";
@@ -137,9 +137,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const getPageTitle = () => {
     if (pathname.includes('/profile')) return 'User Profile';
     if (pathname.includes('/system-health')) return 'System Health';
+    if (pathname.includes('/backup-retention')) return 'Backup & Retention';
     if (pathname.includes('/malware-vault')) return 'Artifact Intelligence';
     if (pathname.includes('/user-management')) return 'User Management';
     if (pathname.includes('/filesystem-activity')) return 'Filesystem Activity';
+    if (pathname.includes('/http-activity')) return 'HTTP Activity';
     if (pathname.includes('/threat-intel/')) return 'Session Analysis';
     if (pathname.includes('/threat-intel')) return 'Threat Intelligence';
     return 'System Overview';
@@ -161,6 +163,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           { href: "/filesystem-activity", title: "Filesystem Activity", icon: FolderTree, active: pathname.includes("/filesystem-activity") },
           { href: "/malware-vault", title: "Artifact Intelligence", icon: Bug, active: pathname.includes("/malware-vault") },
           { href: "/system-health", title: "System Health", icon: Activity, active: pathname.includes("/system-health") },
+          { href: "/backup-retention", title: "Backup & Retention", icon: Archive, active: pathname.includes("/backup-retention") },
           ...((userRole === "Admin" || userRole === "admin") ? [{ href: "/user-management", title: "User Management", icon: Users, active: pathname.includes("/user-management") }] : []),
         ].map(({ href, title, icon: Icon, active }) => (
           <Link key={href} href={href} className="ui-nav-link" aria-current={active ? "page" : undefined} onClick={() => closeNavigation()}>

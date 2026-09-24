@@ -91,3 +91,39 @@ func TestWebLoginDestinationPortFollowsScheme(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateWebHTTPPayloadAndSessionBoundary(t *testing.T) {
+	payload := validWebLoginPayload()
+	payload["event"] = "web_http_request"
+	payload["web_session_id"] = "abcdef0123456789abcdef0123456789"
+	payload["http"] = map[string]any{"method": "GET", "path": "/login.html", "status_code": float64(200)}
+	delete(payload, "odoo_login")
+	delete(payload, "result")
+	if _, _, err := validateWebLoginPayload(payload); err != nil {
+		t.Fatalf("safe web HTTP event rejected: %v", err)
+	}
+	payload["http"].(map[string]any)["query"] = "q=%3Cscript%3E"
+	payload["http"].(map[string]any)["raw_path"] = "/login.html"
+	if _, _, err := validateWebLoginPayload(payload); err != nil {
+		t.Fatalf("bounded literal URL should be accepted: %v", err)
+	}
+	payload["http"].(map[string]any)["query"] = strings.Repeat("x", 513)
+	if _, _, err := validateWebLoginPayload(payload); err == nil {
+		t.Fatal("oversized query must be rejected")
+	}
+	payload["http"].(map[string]any)["query"] = "q=test"
+	payload["http"].(map[string]any)["raw_path"] = 42
+	if _, _, err := validateWebLoginPayload(payload); err == nil {
+		t.Fatal("non-string raw path must be rejected")
+	}
+	delete(payload["http"].(map[string]any), "raw_path")
+	payload["odoo_login"] = map[string]any{"password": "synthetic-secret"}
+	if _, _, err := validateWebLoginPayload(payload); err == nil {
+		t.Fatal("HTTP page event must not contain login credentials")
+	}
+	delete(payload, "odoo_login")
+	payload["web_session_id"] = "invalid"
+	if _, _, err := validateWebLoginPayload(payload); err == nil {
+		t.Fatal("invalid web session ID must be rejected")
+	}
+}

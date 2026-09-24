@@ -9,6 +9,12 @@ Existing legacy `hardware_metrics` documents are retained as historical/archive
 data; the active pipeline neither reads nor writes that collection, so no
 migration is required for the current live or history dashboard paths.
 
+The current Pi deployment has `honeypot-ti-worker.service` enabled and running
+(verified 2026-09-24). The processor emits validated TI jobs when
+`THREAT_INTEL_ENABLED=true`; the worker uses a bounded Redis stream, cache, and
+provider-quota controls. The disabled posture recorded in the 2026-09-10
+validation documents is historical.
+
 ## Context
 
 The project is an educational demonstration, not a continuously operated SOC.
@@ -28,7 +34,7 @@ Cowrie / Zeek / hardware sample
       → hardware_live fixed 30-slot ring
       → hardware_metrics_1m min/avg/max rollup
       → ti:jobs for validated IP/SHA-256 observables
-  → ti-worker (intentionally disabled until approved)
+  → ti-worker (active on Pi; bounded queue/cache/quota controls)
   → cloud dashboard reads live hardware and history from MongoDB
 ```
 

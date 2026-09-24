@@ -40,6 +40,7 @@ from production.api.security import (
 )
 from production.classification.classification_evaluation import classification_metrics
 from production.ensemble.evidence import build_ensemble_from_session_payload
+from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
 from production.enrichment.external_ti_session import (
     OBSERVABLE_TI_SCHEMA,
     SESSION_TI_SCHEMA,
@@ -49,6 +50,7 @@ from production.enrichment.external_ti_session import (
     build_session_ti_projection,
 )
 from production.correlation.session_ttp_correlation import build_observed_tactic_path
+from production.ai_advisory.presentation import advisory_presentation
 from production.utils.config import ProductionConfig
 from production.prediction_next_distinct_poc.dashboard_adapter import (
     LABEL_ORDER as NEXT_DISTINCT_LABEL_ORDER,
@@ -89,7 +91,10 @@ from production.storage import open_storage, safe_database_descriptor
 
 DEFAULT_REPORTS_DIR = "./runtime/reports"
 DEFAULT_REFRESH_SECONDS = 5
-DEFAULT_SESSION_LIMIT = 500
+# A 500-document Mongo sort exceeds the deployment's in-memory sort limit
+# (OperationFailure 292). The overview/SSE feed only needs a recent window;
+# total and active counts are queried separately. Keep explicit pagination.
+DEFAULT_SESSION_LIMIT = 50
 MAX_SESSIONS = 5000
 MAX_EVENTS = 50
 MAX_SESSION_EVENTS = 500
@@ -2020,6 +2025,7 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
                 f"{len(hypothesis_sets)} falsifiable hypothesis sets"
             ),
             "ai_enriched": "false",
+            "ai_enrichment_scope": "immutable_deterministic_assessment_at_generation",
             "analysis_mode": "deterministic_session_assessment_v4",
             "semantic_coverage": _text(
                 coverage.get("coverage_status") or "unavailable"
@@ -2105,6 +2111,24 @@ def _report_summary(report_payload: Dict[str, Any], artifact_payload: Dict[str, 
             or ""
         ),
     }
+
+
+def _report_summary_with_current_ai(
+    config: MonitorConfig,
+    storage: Any,
+    session_id: str,
+    report_payload: Dict[str, Any],
+    artifact_payload: Dict[str, Any],
+) -> Dict[str, str]:
+    """Keep immutable assessment AI scope separate from late advisory state."""
+
+    summary = _report_summary(report_payload, artifact_payload)
+    projection = load_ai_advisory_detail(config, session_id, _storage=storage) if report_payload else {}
+    summary["current_ai_advisory_status"] = _text(
+        (projection.get("status") if isinstance(projection, dict) else "") or "not_available"
+    )
+    summary["current_ai_advisory_scope"] = "separate_late_bound_advisory"
+    return summary
 
 
 def _hypothesis_artifact_paths(
@@ -2948,6 +2972,9 @@ def load_dashboard_session_detail(
         if projected_duration is not None:
             overview["recorded_duration"] = overview.get("duration") or ""
             overview["duration"] = projected_duration
+    report_summary = _report_summary_with_current_ai(
+        config, storage, clean_session_id, report_payload, {},
+    )
     detail = {
         "ok": True,
         "schema_version": DASHBOARD_SESSION_DETAIL_SCHEMA,
@@ -2965,6 +2992,9 @@ def load_dashboard_session_detail(
         "commands": payload.get("commands") or [],
         "authentication_activity": authentication_activity,
         "classification_events": payload.get("classification_events") or [],
+        "session_ttp_advisory": summarize_session_model1_ttp(
+            payload.get("classification_events"), session_id=clean_session_id
+        ),
         "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
@@ -2993,7 +3023,7 @@ def load_dashboard_session_detail(
         "observable_sightings": [_row_with_payload(row) for row in sighting_rows],
         "analysis_jobs": [_row_with_payload(row) for row in job_rows],
         "reports": [_row_with_payload(row) for row in report_rows],
-        "report_summary": _report_summary(report_payload, {}),
+        "report_summary": report_summary,
         "response_guidance": response_guidance,
         "errors": {
             table: message
@@ -3710,6 +3740,9 @@ def load_session_detail(
         configured_policy_path=config.response_guidance_policy_path,
     )
     primary_response_guidance = historical_response_guidance or current_policy_reevaluation
+    report_summary = _report_summary_with_current_ai(
+        config, storage, session_id, report_payload, artifact_payload,
+    )
     detail = {
         "ok": True,
         "timestamp": utc_now(),
@@ -3753,7 +3786,7 @@ def load_session_detail(
         "enrichment_jobs": [_row_with_payload(row) for row in enrichment_job_rows],
         "analysis_jobs": [_row_with_payload(row) for row in job_rows],
         "reports": [_row_with_payload(row) for row in report_rows],
-        "report_summary": _report_summary(report_payload, artifact_payload),
+        "report_summary": report_summary,
         "report_recommendations": report_recommendations,
         "response_guidance": primary_response_guidance,
         "historical_response_guidance": historical_response_guidance,
@@ -3864,6 +3897,41 @@ def load_ai_advisory_detail(
             "timestamp": utc_now(),
         }
     payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    stored_selection = (
+        payload.get("validated_advisory")
+        if isinstance(payload.get("validated_advisory"), dict)
+        and str(payload.get("status") or "").lower() == "accepted"
+        and str((payload.get("validation") or {}).get("status") or "").lower() == "accepted"
+        else {}
+    )
+
+    def selected_refs(key: str) -> List[str]:
+        values = stored_selection.get(key)
+        if not isinstance(values, list):
+            return []
+        return [
+            value for value in values[:20]
+            if isinstance(value, str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value)
+        ]
+
+    public_selection = {
+        "abstained": stored_selection.get("abstained") is True,
+        "selected_finding_ids": selected_refs("selected_finding_ids"),
+        "selected_relationship_ids": selected_refs("selected_relationship_ids"),
+        "ranked_action_ids": selected_refs("ranked_action_ids"),
+    } if stored_selection else {}
+    try:
+        display_report = _complete_report_payload(report_payload, config.reports_dir)
+    except (OSError, ValueError):
+        # An unreadable artifact cannot grant a canonical label. The display
+        # projection will mark selected references unresolved instead.
+        display_report = report_payload
+    presentation = advisory_presentation(
+        payload.get("rendered_advisory") or {},
+        public_selection,
+        display_report,
+    )
     shadow = payload.get("shadow_candidates")
     shadow = shadow if isinstance(shadow, dict) else {}
     raw_candidates = shadow.get("candidates")
@@ -3932,7 +4000,9 @@ def load_ai_advisory_detail(
             "status": payload.get("status"),
             "authority": payload.get("authority"),
             "validation": payload.get("validation") or {},
+            "validated_advisory": public_selection,
             "rendered_advisory": payload.get("rendered_advisory") or {},
+            "presentation": presentation,
             "shadow_candidates": shadow or {
                 "schema_version": "ai_shadow_candidate_set.v1",
                 "candidates": [],

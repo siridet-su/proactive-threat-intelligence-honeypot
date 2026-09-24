@@ -2,13 +2,19 @@
 
 This guide is for authorized honeypot administrators and developers working
 under that authorization. Login events intentionally retain the submitted
-password as plaintext. Terminal output, Redis responses, Mongo query results,
-and pending spool files can therefore contain credential-sensitive data. Do
-not paste their contents into tickets, chat, source control, or ordinary logs.
-The current web-corp app emits telemetry only for login POSTs. Page views,
-scans, unrelated POSTs, and 404s are not captured; the app does not call
-Deception Core. The persisted event path is not yet exposed through a dedicated
-dashboard view, so use the authorized retrieval steps below.
+password as plaintext and may also retain a bounded query from the login URL.
+Historical `web_http_request` records may contain bounded literal paths and
+queries. The current app emits telemetry only for login POSTs: page views,
+scans, unrelated POSTs, and 404s are not captured, and the app does not call
+Deception Core. Terminal output, Redis responses, Mongo query results, and
+pending spool files can contain credential-sensitive data. Do not paste their
+contents into tickets, chat, source control, or ordinary logs.
+The GCP dashboard `/http-activity` read-side queries `honeypot_db.events`; it
+does not consume Redis directly or write MongoDB. The production projection
+and unauthenticated API boundary were checked on 2026-09-25, but authenticated
+browser rendering was not exercised. The broad feed omits submitted values;
+the exact-session detail API exposes captured fields only to an authenticated
+Admin. Use the authorized retrieval steps below if the dashboard is unavailable.
 
 ## Where data lives
 
@@ -16,8 +22,9 @@ dashboard view, so use the authorized retrieval steps below.
 | --- | --- | --- |
 | web-corp container spool `/var/spool/web-corp-login/pending/` | One JSONL file per login attempt, including the submitted password | Retry queue only; collector removes a file after Redis accepts it |
 | Redis `raw:web-login` | Full bounded event in the `payload` field | Transient, bounded stream (maximum length configured by collector, currently 50,000 entries) |
-| MongoDB `honeypot_db.events` | Canonical normalized event; password only at `web_login.password` | Durable event store with the processor's current 30-day TTL |
-| Redis `event:canonical` | Normalized downstream projection without `web_login.password` | Bounded stream for consumers that do not need the raw password |
+| MongoDB `honeypot_db.events` | Canonical normalized event; login password at `web_login.password`, login URL query at `http.query`; older page events may also have `http.raw_path`/`http.query` | Durable event store with the processor's current 30-day TTL |
+| Redis `event:canonical` | Normalized downstream projection without `web_login.password`, `http.query`, or `http.raw_path` | Bounded stream for consumers that do not need literal submitted values |
+| GCP dashboard `/http-activity` | Read-only projection of Web-corp login attempts and retained page events; detail endpoint returns captured payload fields only to Admin | Authenticated, no-store API; production projection/auth boundary checked 2026-09-25, authenticated browser render not exercised |
 | Deception Core container `/data/events.jsonl` | Historical `/v1/track` records from the prior web-corp implementation; may include credential-bearing login commands and page/scan events | Historical only; the current web-corp app does not call Core |
 
 The event ID/request ID is the same across the app spool filename, raw Redis
@@ -103,7 +110,8 @@ redis-cli -h 127.0.0.1 -p 6379 XREVRANGE event:canonical + - COUNT 10
 ```
 
 `event:canonical` retains request context and SQLi indicator names but omits
-`web_login.password`; use MongoDB for the credential-bearing canonical record.
+`web_login.password`, `http.query`, and `http.raw_path`; use MongoDB for the
+literal submitted fields when authorized.
 If Redis authentication is enabled, use the operator-approved interactive
 credential method. Do not put a Redis password directly in command arguments.
 

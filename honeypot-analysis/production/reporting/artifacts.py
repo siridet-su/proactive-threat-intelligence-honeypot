@@ -27,6 +27,8 @@ from production.utils.serialization import stable_id, stable_json
 from production.reporting.response_guidance_v3 import validate_response_guidance_v3
 from production.reporting.artifact_privacy import sanitize_artifact_boundary
 from production.enrichment.external_ti_session import TI_STATUS_REASON_TEXT
+from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
+from production.ai_advisory.presentation import advisory_presentation
 
 
 TI_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_DNS, "my-ti-pipeline.local")
@@ -1786,8 +1788,13 @@ def write_pdf_report(
         if validation_status not in {"accepted", "valid"}:
             return []
         rendered = advisory.get("rendered_advisory") if isinstance(advisory.get("rendered_advisory"), dict) else {}
+        presentation = advisory_presentation(
+            rendered,
+            advisory.get("validated_advisory") or {},
+            report,
+        )
         texts: List[str] = []
-        for item in rendered.get("paragraphs") or []:
+        for item in presentation.get("paragraphs") or []:
             if isinstance(item, dict) and str(item.get("text") or "").strip():
                 texts.append(str(item.get("text")).strip())
         for item in rendered.get("sections") or []:
@@ -1811,7 +1818,12 @@ def write_pdf_report(
             if isinstance(advisory.get("rendered_advisory"), dict)
             else {}
         )
-        selections = advisory.get("template_selections")
+        validated = (
+            advisory.get("validated_advisory")
+            if isinstance(advisory.get("validated_advisory"), dict)
+            else advisory
+        )
+        selections = validated.get("template_selections")
         if not isinstance(selections, list):
             selections = rendered.get("paragraphs")
         if not isinstance(selections, list):
@@ -1833,9 +1845,9 @@ def write_pdf_report(
             return result
 
         template_ids: List[str] = []
-        finding_ids: List[str] = _ids(advisory.get("selected_finding_ids"))
-        action_ids: List[str] = _ids(advisory.get("ranked_action_ids"))
-        relationship_ids: List[str] = []
+        finding_ids: List[str] = _ids(validated.get("selected_finding_ids"))
+        action_ids: List[str] = _ids(validated.get("ranked_action_ids"))
+        relationship_ids: List[str] = _ids(validated.get("selected_relationship_ids"))
         limitation_codes: List[str] = _ids(advisory.get("limitation_codes"))
         reason_codes: List[str] = _ids(advisory.get("reason_codes"))
         finding_families: List[str] = []
@@ -2298,6 +2310,83 @@ def write_pdf_report(
     else:
         story.append(_p("No evidence-layer summary was recorded for this session.", body))
 
+    model1_advisory = summarize_session_model1_ttp(
+        session_payload.get("classification_events"), session_id=str(session_id)
+    )
+    story.append(_p("Model1 command-level advisory (not an observed finding)", h2))
+    story.append(_p(
+        f"{model1_advisory['assessed_command_events']} distinct command event(s) with usable Model1 predictions. "
+        "Counts rank items for manual investigation only; they are not confidence or ATT&CK findings. "
+        "Model2 binary heads are not ranked or numerically fused here.",
+        body,
+    ))
+    model1_rows = [["Technique", "Supporting commands", "Command references"]]
+    for item in model1_advisory["techniques"][:20]:
+        model1_rows.append([
+            item["technique_id"],
+            str(item["supporting_command_events"]),
+            ", ".join(ref["command_ref"] for ref in item["evidence_refs"][:8]),
+        ])
+    if len(model1_rows) > 1:
+        story.append(_table(model1_rows, [3.0 * cm, 4.0 * cm, 10.0 * cm]))
+    else:
+        story.append(_p("No deduplicated command-level Model1 advisory is available.", body))
+
+    story.append(_p("Model2 exact-session shadow evidence", h2))
+    model2 = ensemble.get("model2") if isinstance(ensemble, dict) else None
+    model2 = model2 if isinstance(model2, dict) else {}
+    binding = model2.get("binding") if isinstance(model2.get("binding"), dict) else {}
+    model2_bound = (
+        model2.get("available") is True
+        and str(binding.get("session_id") or "") == str(session_id)
+        and all(str(binding.get(key) or "").strip()
+                for key in ("run_id", "measurement_id", "episode_id"))
+    )
+    if model2_bound:
+        story.append(_p(
+            "A Model2 shadow result is bound to this session. It is corroboration context only; "
+            "it does not create an observed finding or authorize response. A Model2-only PRESENT "
+            "label is an experimental prediction, not confirmed observed behavior.", body,
+        ))
+        model2_rows = [["Field", "Stored value"]]
+        for label, selected in (
+            ("Availability", model2.get("availability")),
+            ("Status", model2.get("status")),
+            ("Artifact SHA-256", model2.get("artifact_sha256")),
+            ("Run ID", binding.get("run_id")),
+            ("Measurement ID", binding.get("measurement_id")),
+            ("Episode ID", binding.get("episode_id")),
+        ):
+            model2_rows.append([label, _value(selected, limit=128)])
+        story.append(_table(model2_rows, [5.0 * cm, 12.0 * cm]))
+        unavailable_heads = model2.get("unavailable_heads")
+        if isinstance(unavailable_heads, dict) and unavailable_heads:
+            for technique, reason in list(sorted(unavailable_heads.items()))[:8]:
+                story.append(_p(
+                    f"Unavailable Model2 head {str(technique)[:32]}: {str(reason)[:128]}",
+                    small,
+                ))
+        comparisons = ensemble.get("results") if isinstance(ensemble, dict) else None
+        if isinstance(comparisons, list):
+            comparison_rows = [["Technique", "Model1", "Model2", "Relation (advisory only)"]]
+            for item in comparisons[:8]:
+                if not isinstance(item, dict):
+                    continue
+                comparison_rows.append([
+                    _value(item.get("technique_id"), limit=24),
+                    _value(item.get("model1_result"), limit=24),
+                    _value(item.get("model2_result"), limit=24),
+                    _value(item.get("model2_relation"), limit=48),
+                ])
+            if len(comparison_rows) > 1:
+                story.append(_table(comparison_rows, [2.5 * cm, 3.0 * cm, 3.0 * cm, 8.5 * cm]))
+    else:
+        story.append(_p(
+            "No complete exact-session Model2 binding was available for this report. "
+            "Model1 remains the primary classifier; Model2 corroboration is not claimed.",
+            body,
+        ))
+
     story.append(_p(f"2.{4 + cwd_section_offset} Trusted Technique Mappings", h2))
     sources = session_payload.get("ttp_sources", {})
     technique_rows = [[
@@ -2527,44 +2616,31 @@ def write_pdf_report(
                 return counts.get(count_key)
             return None
 
-        eligible_types = external_summary.get("eligible_observable_types")
-        if not isinstance(eligible_types, list):
-            eligible_types = counts.get("eligible_observable_types")
+        cache_count = _ti_count("source_ip_cache_records_found", "source_ip_cache_records")
+        story.append(_p(
+            f"Provider context: {cache_count if cache_count is not None else 'no'} source-IP lookup results; "
+            f"{_ti_count('evidence_returned', 'evidence_returned') or 0} separately linked findings. "
+            f"{ti_status_reason_text}",
+            body,
+        ))
         ti_rows = [
-            ["TI field", "Recorded value"],
-            ["Projection status", ti_display_status],
-            ["State reason", ti_display_status_reason],
-            ["State explanation", ti_status_reason_text],
+            ["At a glance", "Recorded result"],
+            ["Intelligence state", ti_display_status],
             ["Freshness", _ti_display_status(freshness.get("state"))],
-            ["Latest provider/cache lookup", _format_timestamp(latest_ti_retrieval)],
-            ["Provider/cache result age", _freshness_age(latest_ti_retrieval, generated_at)],
+            ["Last checked", _format_timestamp(latest_ti_retrieval)],
             ["Eligible observables", _ti_count("eligible_observable_count", "eligible_observables")],
-            ["Eligible types", ", ".join(str(item) for item in eligible_types or []) or None],
-            ["Stored records / evidence", (
-                f"{_ti_count('records_found', 'records_found')} / "
-                f"{_ti_count('evidence_returned', 'evidence_returned')}"
-                if _ti_count("records_found", "records_found") is not None
-                or _ti_count("evidence_returned", "evidence_returned") is not None
-                else None
-            )],
-            ["Source-IP cache records", _ti_count("source_ip_cache_records_found", "source_ip_cache_records")],
-            ["Source-IP cache policy binding", ", ".join(
-                str(item)
-                for item in (
-                    external_summary.get("source_ip_cache_policy_bindings")
-                    or []
-                )
-            ) or None],
-            ["Source-IP cache freshness", external_summary.get("source_ip_cache_freshness")],
-            ["Latest source-IP cache lookup", _format_timestamp(
-                external_summary.get("source_ip_cache_latest_lookup_at")
-            )],
-            ["Shared entities", _ti_count("shared_entity_count", "shared_entities")],
-            ["Authority", external_summary.get("authority") or "CONTEXT_ONLY"],
+            ["Provider results", cache_count],
         ]
         if external_context.get("ok") is False:
             ti_rows.append(["Projection status", "Projection unavailable"])
         story.append(_table(ti_rows, [5.2 * cm, 11.8 * cm]))
+        policy_bindings = external_summary.get("source_ip_cache_policy_bindings") or []
+        if policy_bindings:
+            story.append(_p(
+                "Audit: provider results are non-authoritative context. Policy binding: "
+                + ", ".join(str(item) for item in policy_bindings[:3]),
+                small,
+            ))
 
         provider_rows = [["Provider", "Status", "Lookup / finding", "Records", "Freshness"]]
         provider_status = external_context.get("provider_status")
@@ -2596,7 +2672,7 @@ def write_pdf_report(
                 _table(provider_rows, [3.3 * cm, 3.0 * cm, 4.6 * cm, 2.0 * cm, 4.1 * cm]),
             ])
 
-        evidence_rows = [["Provider", "Observable", "Finding", "Summary / freshness"]]
+        evidence_rows = [["Provider / source", "What the provider reported", "Checked / freshness"]]
         for evidence in (external_context.get("evidence") or [])[:10]:
             if not isinstance(evidence, dict):
                 continue
@@ -2617,13 +2693,9 @@ def write_pdf_report(
             )
             evidence_rows.append([
                 provider,
-                observable_text,
-                f"{evidence.get('lookup_status') or '—'} / {evidence.get('finding_state') or '—'}",
-                (
-                    f"{_external_evidence_details(evidence)}; "
-                    f"{evidence.get('freshness_state') or 'freshness unavailable'}; "
-                    f"retrieved {_format_timestamp(evidence.get('retrieved_at'))}"
-                ),
+                f"{observable_text}: {_external_evidence_details(evidence)}",
+                (f"{_format_timestamp(evidence.get('retrieved_at'))}; "
+                 f"{evidence.get('freshness_state') or 'freshness unavailable'}"),
             ])
         remaining_evidence = max(0, 10 - len(evidence_rows) + 1)
         for cache_item in (external_context.get("source_ip_cache") or [])[:remaining_evidence]:
@@ -2636,28 +2708,21 @@ def write_pdf_report(
             if not isinstance(normalized_context, dict):
                 normalized_context = {}
             lookup_status = str(cache_item.get("lookup_status") or "UNAVAILABLE").strip()
-            finding_state = str(
-                normalized_context.get("finding_state")
-                or normalized_context.get("status")
-                or "UNKNOWN"
-            ).strip()
-            binding = str(
-                cache_item.get("policy_binding")
-                or "LEGACY_NON_AUTHORITATIVE_CONTEXT_ONLY"
-            )
+            if lookup_status != "OK":
+                result = f"Lookup status: {lookup_status}. No provider finding is inferred."
+            else:
+                result = _external_evidence_details({"normalized_extension": normalized_context})
+            cache_freshness = str(cache_item.get("freshness_state") or external_summary.get("source_ip_cache_freshness") or "not recorded")
             evidence_rows.append([
-                provider,
-                "session source IP",
-                f"{lookup_status} / {finding_state}",
-                (
-                    f"{_external_evidence_details({'normalized_extension': normalized_context})}; "
-                    f"{binding}; retrieved {_format_timestamp(cache_item.get('lookup_at'))}"
-                ),
+                f"{provider} (source IP)",
+                result,
+                f"{_format_timestamp(cache_item.get('lookup_at'))}; {cache_freshness}",
             ])
         if len(evidence_rows) > 1:
             story.extend([
-                _p("Bounded provider evidence (maximum 10 rows)", h2),
-                _table(evidence_rows, [2.8 * cm, 4.9 * cm, 3.7 * cm, 5.6 * cm]),
+                _p("What the providers reported (maximum 10 results)", h2),
+                _p("These are third-party observations about the source or artifact, not proof of activity in this Cowrie session. Provider reputation scores are not model confidence.", body),
+                _table(evidence_rows, [3.5 * cm, 9.3 * cm, 4.2 * cm]),
             ])
         else:
             story.append(_p(
@@ -2690,6 +2755,7 @@ def write_pdf_report(
                 ("templates", selection_summary["templates"]),
                 ("findings", selection_summary["finding_ids"]),
                 ("actions", selection_summary["action_ids"]),
+                ("relationships", selection_summary["relationship_ids"]),
                 ("limitations", selection_summary["limitation_codes"]),
                 ("reasons", selection_summary["reason_codes"]),
             )
@@ -2705,10 +2771,16 @@ def write_pdf_report(
                 story.append(_p(advisory_text, body, limit=1200))
         else:
             story.append(_p(
-                "No validated advisory narrative is available for the current canonical assessment. "
-                "The canonical evidence and policy guidance remain authoritative.",
+                "No rendered advisory narrative was stored. Validated AI selections, "
+                "when listed above, remain available for analyst review; the canonical "
+                "evidence and policy guidance remain authoritative.",
                 body,
             ))
+        story.append(_p(
+            "This AI projection is read at PDF generation time and may be newer than "
+            "the immutable deterministic assessment stored when the session closed.",
+            small,
+        ))
     else:
         story.append(_p("No separate AI advisory projection was available for this session.", body))
 

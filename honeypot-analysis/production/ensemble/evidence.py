@@ -30,6 +30,27 @@ MODEL2_V5_COMPLETED_EVIDENCE_SCHEMA = "model2_v5_completed_run_evidence.v1"
 MODEL2_V5_SHADOW_STATUS = "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE_SHADOW"
 MODEL2_V5_ARTIFACT_SHA256 = "104d4c77a3e1536b847561abb19fc7c0d6d7dc0111cd98d1ff2d9c9d74a2ed1a"
 MODEL2_V5_FEATURE_CONTRACT_SHA256 = "cf985643ce89c3d1f86f6c45943c3ba3af6cf13c60c4b41e215c7c7bc8990a20"
+MODEL2_BACKEND_POC_ARTIFACT_SHA256 = "127a5b0bd18b0f7b76a8bcce6a51294db554220045ffc2a19c4cd16bb72e9316"
+MODEL2_BACKEND_POC_VERSION = "MODEL2_V5_BACKEND_SSH_ONLY_EXPERIMENTAL_POC_20260924_V1"
+MODEL2_BACKEND_POC_PROJECTION_SHA256 = "2679fe6ff98c833ed497597e37f26fa05a6bc428aba7df561bb828fbf3fee80f"
+
+
+def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
+    """Allow exact old history and one explicit experimental replacement only."""
+    actual = _clean(value.get("model_artifact_sha256")).lower()
+    version = _clean(value.get("model_version"))
+    if version == MODEL2_BACKEND_POC_VERSION:
+        if (actual != MODEL2_BACKEND_POC_ARTIFACT_SHA256
+                or value.get("quality_status") != "EXPERIMENTAL_POC_UNVALIDATED"
+                or value.get("input_projection_contract_sha256") != MODEL2_BACKEND_POC_PROJECTION_SHA256
+                or value.get("source_feature_contract_sha256") != MODEL2_V5_FEATURE_CONTRACT_SHA256):
+            raise EnsembleContractError("experimental Model2 artifact/projection identity mismatch")
+        return MODEL2_BACKEND_POC_ARTIFACT_SHA256
+    if actual == MODEL2_V5_ARTIFACT_SHA256:
+        return MODEL2_V5_ARTIFACT_SHA256
+    raise EnsembleContractError("unrecognized Model2 artifact identity")
+
+
 MODEL2_V5_RESULT_ROOT = Path("/var/lib/model2-v7/results")
 MODEL2_V5_BRIDGE_SOCKET = Path("/run/model2-v7-ensemble/bridge.sock")
 SHARED_TECHNIQUES = ("T1105", "T1046", "T1110")
@@ -320,6 +341,7 @@ def _normalize_model2_item(label: str, item: Mapping[str, Any], top_status: str)
 T1046_NOT_OBSERVED_REASONS = frozenset(
     {
         "t1046_not_observed",
+        "t1046_unbound_sensor_context",
         "t1046_multiservice_scan_evidence_missing",
         "t1046_scan_evidence_invalid",
     }
@@ -365,6 +387,8 @@ def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
                 return False, "t1046_not_observed"
         return False, "t1046_multiservice_scan_evidence_missing"
     if marker.get("observed") is not True:
+        if marker.get("reason") == "t1046_unbound_sensor_context" and marker.get("binding_mode") == "NO_EXACT_MULTISERVICE_BINDING":
+            return False, "t1046_unbound_sensor_context"
         return False, "t1046_not_observed"
     if _clean(marker.get("scope")).upper() not in {
         "MULTISERVICE_SCAN",
@@ -399,7 +423,9 @@ def _t1046_observation_status(value: Mapping[str, Any]) -> tuple[bool, str]:
     for field in ("session_id", "run_id", "measurement_id", "episode_id"):
         marker_value = _clean(marker.get(field))
         result_value = _clean(value.get(field))
-        if marker_value and marker_value != result_value:
+        # Source/time coincidence is not a measurement binding. All four
+        # identities must be present on both sides and agree exactly.
+        if not marker_value or not result_value or marker_value != result_value:
             return False, "t1046_scan_evidence_invalid"
     return True, "exact_bound_multiservice_scan"
 
@@ -622,6 +648,8 @@ def normalize_model2_v5_shadow_result(
         "artifact_sha256": expected_model,
         "feature_contract_sha256": expected_features,
         "model_version": _clean(value.get("model_version")),
+        "quality_status": _clean(value.get("quality_status")) or "LEGACY_EXPERIMENTAL_SHADOW",
+        "input_projection_contract_sha256": _clean(value.get("input_projection_contract_sha256")),
         "one_model": True,
         "one_inference_call": True,
         "independent_binary_heads": False,
@@ -745,7 +773,7 @@ def _normalize_bound_result(
         normalized = normalize_model2_v5_shadow_result(
             value,
             binding=binding,
-            expected_model_sha256=MODEL2_V5_ARTIFACT_SHA256,
+            expected_model_sha256=expected_v5_artifact_sha256(value),
             expected_feature_contract_sha256=MODEL2_V5_FEATURE_CONTRACT_SHA256,
         )
     except EnsembleContractError:

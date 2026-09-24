@@ -187,6 +187,23 @@ def _bounded_login_value(value: str, field: str, limit: int,
     return raw[:limit]
 
 
+def _request_context_headers(request: Request, truncated_fields: set[str]) -> dict[str, str]:
+    """Bounded, self-reported context; never treat these headers as browser identity."""
+    return {
+        key: _bounded_login_value(
+            request.headers.get(header, ""), f"http.{key}", _HEADER_LIMIT,
+            truncated_fields,
+        )
+        for key, header in (
+            ("host", "host"),
+            ("user_agent", "user-agent"),
+            ("referer", "referer"),
+            ("origin", "origin"),
+            ("accept_language", "accept-language"),
+        )
+    }
+
+
 def _login_event(request: Request, ip: str, web_session_id: str, *, database: str, login: str,
                  password: str, redirect: str, remember: str) -> dict:
     truncated_fields: set[str] = set()
@@ -210,28 +227,7 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
             remember, "odoo_login.remember", 32, truncated_fields
         ),
     }
-    http_headers = {
-        "host": _bounded_login_value(
-            request.headers.get("host", ""), "http.host", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "user_agent": _bounded_login_value(
-            request.headers.get("user-agent", ""), "http.user_agent", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "referer": _bounded_login_value(
-            request.headers.get("referer", ""), "http.referer", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "origin": _bounded_login_value(
-            request.headers.get("origin", ""), "http.origin", _HEADER_LIMIT,
-            truncated_fields,
-        ),
-        "accept_language": _bounded_login_value(
-            request.headers.get("accept-language", ""),
-            "http.accept_language", _HEADER_LIMIT, truncated_fields,
-        ),
-    }
+    http_headers = _request_context_headers(request, truncated_fields)
     values = {
         **bounded,
         "query": query,

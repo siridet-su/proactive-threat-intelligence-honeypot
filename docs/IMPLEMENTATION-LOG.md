@@ -91,6 +91,103 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related ADR/runbook: [ADR-0004](adr/ADR-0004-opencanary-http-login.md) and
   [OpenCanary runbook](../integrations/opencanary/README.md).
 
+### 2026-09-24 — Merge focused filesystem replay visualization into main
+
+- Status: prepared and merged into repository `main`; not deployed to a host.
+- Scope and intent: integrate the completed filesystem visualization branch,
+  including stable source connector geometry, collision-aware verified CWD
+  transition routing, a current-hop-first replay view, and synchronized transfer
+  and destination-impact effects.
+- Repository branch and commit/PR: source branch
+  `feat/filesystem-visualization-semantics`; merge commit recorded in Git history.
+- Repository changes: the audit canvas now defaults to the selected current hop,
+  provides optional previous-trail and all-transition comparison modes, keeps the
+  complete accessible transition sequence, restores the six-layer light packet
+  and impact wave, omits the redundant current-hop arrowhead, and retains
+  directional arrows for non-current events only in all-transition mode. The
+  splitter pointer suite now installs its own in-memory Storage stub so Node 26's
+  unavailable global `localStorage` accessor cannot leak state or fail setup.
+- Host/environment changes actually applied: none. No dashboard process,
+  systemd unit, reverse proxy, database, Pi service, or network exposure was
+  changed.
+- Runtime/exposure state: repository implementation only; production deployment
+  and activation were not performed in this change.
+- Validation performed and outcome: focused splitter suite passed 6/6; full
+  Vitest passed 797 tests with 2 expected failures and 14 skipped; ESLint passed
+  with zero errors; webpack production build passed and generated 19/19 static
+  pages; Chromium filesystem browser suite passed 15/15; `git diff --check`
+  passed. Add/add conflicts in five hardware-backup files were resolved by
+  preserving the newer `main` versions from the completed backup PR.
+- Not performed / deferred: no host deployment or external exposure test was
+  performed. A later visual refinement may reduce endpoint-ring/glow density;
+  it is intentionally not part of this merge.
+- Risks and data handling: no telemetry authority, API schema, retained evidence,
+  secrets, attacker payloads, or protected configuration were changed. Visual
+  density modes change presentation only; event identity and chronology remain
+  available to assistive technology.
+- Rollback: revert the merge commit on `main`; no host rollback is required for
+  this repository-only change.
+- Follow-up: visually evaluate whether the animated destination should suppress
+  its static endpoint ring while preserving the reduced-motion fallback.
+- Related ADR/runbook: filesystem semantics and validation evidence are recorded
+  in
+[`dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md`](../dashboard-v2/docs/FILESYSTEM_ACTIVITY_VISUALIZATION_IMPLEMENTATION_PLAN.md).
+
+### 2026-09-24 — Refine backup worktree dashboard UI
+
+- Status: prepared for review; not deployed to a host.
+- Scope and intent: preserve the backup control-room feature while improving
+  the System Health information hierarchy and custom history range interaction.
+- Repository branch and commit/PR: `feat/dashboard-backup-status`; UI work is
+  based on commits `cd84a77` and `51182f6` and is being reconciled with the
+  current `main` branch.
+- Repository changes: renovated live hardware telemetry, moved Source activity
+  to a full-width section, kept retained history as a separate region, made the
+  custom date range highlight continuous across start/middle/end days, and
+  retained the backup action/progress and B2 status surfaces.
+- Host/environment changes actually applied: none. No Pi service, systemd unit,
+  database, reverse proxy, or network exposure was changed.
+- Runtime/exposure state: available only from the local dashboard worktree on
+  port `3001` for authenticated review.
+- Validation performed and outcome: `npx tsc --noEmit`, `npm run lint`,
+  `npm test`, `npm run build`, and `git diff --check` passed after the
+  main-branch reconciliation. The test suite reported 797 passing tests, 2
+  expected failures, and 14 skipped; ESLint has no new errors.
+- Not performed / deferred: no host deployment or external exposure test was
+  performed.
+- Rollback: revert the merge/feature commit on this branch; no host rollback is
+  required.
+- Follow-up: push the resolved branch for PR review and visually review the
+  authenticated dashboard at local port `3001`.
+
+### 2026-09-24 — Renovate Artifact Intelligence workspace
+
+- Status: prepared for review; not deployed to a host.
+- Scope and intent: make the hash-only artifact view easier to scan and expose
+  more investigation context without expanding retention scope or storing raw
+  binaries/payloads.
+- Repository branch and commit/PR: `feat/dashboard-backup-status`; dashboard
+  source changes are currently uncommitted.
+- Repository changes: added indexed-hash, review-flag, evidence-link, and
+  provider-coverage summaries; added current-page signal distribution and
+  review queue; added status filters; and replaced the dense table rows with
+  responsive artifact records showing first/last seen, size, provider expiry,
+  evidence/source/session counts, linked sessions, and VirusTotal actions.
+- Host/environment changes actually applied: none. No API route, MongoDB
+  collection, Pi service, systemd unit, or network exposure was changed.
+- Runtime/exposure state: available from the local dashboard worktree at
+  `http://localhost:3001/malware-vault` after operator authentication.
+- Validation performed and outcome: `npx tsc --noEmit`, `npm run lint`,
+  `npm run build`, `npm test`, and `git diff --check` passed. The test suite
+  reported 797 passing tests, 2 expected failures, and 14 skipped.
+- Not performed / deferred: authenticated browser screenshot review remains
+  deferred; the summary cards intentionally describe the currently loaded page
+  because the existing API does not expose global status aggregates.
+- Risks and data handling: all new presentation values are derived from the
+  existing bounded `ArtifactRecord` response; no raw artifact bytes, raw event
+  payloads, credentials, or provider secrets are rendered.
+- Rollback: revert the Artifact Intelligence page change; no host rollback is
+  required.
 ### 2026-09-24 — Correct the HTTP skin and verify local event capture
 
 - Status: corrected and locally verified; service returned to stopped/disabled.
@@ -724,3 +821,48 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related docs: [current architecture](CURRENT-ARCHITECTURE.md),
   [service catalog](SERVICE-CATALOG.md), and
   [TI design](design/threat-intelligence.md).
+
+### 2026-09-25 — Merge latest main and preserve login-only producer scope
+
+- Status: source and documentation merge prepared; no host service changes.
+- Scope and intent: bring the feature branch up to the fetched `origin/main`
+  (`ca9d7dd0`) while keeping the current web-corp producer limited to rejected
+  login POST telemetry.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  merge commit pending at the time of this entry.
+- Repository changes: retained main's read-only GCP `/http-activity`
+  dashboard/API and dashboard evidence; reconciled current docs to distinguish
+  that read-side from the login-only sensor producer. Kept bounded ingestion
+  support for older `web_http_request` records, but did not restore page/scan
+  event production, Core `/v1/track`, or XSS indicators. TI-worker state remains
+  active as documented on main.
+- Host/environment changes actually applied: no containers, systemd units,
+  firewall rules, or external Compose files changed. Created a byte-verified
+  temporary copy of the six pre-existing untracked hardware-backup binaries at
+  `/tmp/honeypot-hardware-backup-pre-merge.tcFpE6/`; the originals remained in
+  place and unmodified.
+- Runtime/exposure state: unchanged by the merge. Web-corp remains HTTP-only on
+  the Pi with login-only app telemetry; the dashboard's last production
+  projection/auth-boundary validation is captured in the main-branch
+  validation record, and authenticated browser rendering remains unverified.
+- Validation performed and outcome: collector and processor `go test ./...`
+  passed; all 10 web-corp unit tests passed in a network-disabled container;
+  five focused dashboard HTTP activity test files passed (18 tests); staged
+  diff whitespace checks passed.
+- Not performed / deferred: no live login POST, authenticated dashboard
+  browser test, provider request, host service restart, or public exposure
+  change.
+- Risks and data handling: existing local binary backups remain untracked and
+  are excluded from commits; the temporary copy contains only those local
+  artifacts. Historical page events may still be readable in Mongo/dashboard,
+  but the current app creates no new page events.
+- Rollback: no runtime rollback is needed. Retain the feature checkpoint
+  `3ef9454d`; revert the merge commit only after reviewing its complete upstream
+  file set and confirming the backup worktree is preserved.
+- Follow-up: verify authenticated dashboard rendering with synthetic login
+  data; continue to keep FTP/SMTP, direct-Pi HTTPS, and page/scan telemetry
+  outside the active producer scope unless separately approved.
+- Related docs: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-corp data access](../integrations/web-corp/DATA-ACCESS.md),
+  [dashboard integration](../dashboard-v2/docs/WEB_CORP_HTTP_INTEGRATION.md),
+  and [live validation](WEB_CORP_HTTP_LIVE_VALIDATION_20260925.md).

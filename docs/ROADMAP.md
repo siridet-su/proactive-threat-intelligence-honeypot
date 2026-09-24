@@ -1,7 +1,7 @@
 ---
 title: Project roadmap
 status: target
-last_verified: 2026-09-15
+last_verified: 2026-09-24
 ---
 
 # Project roadmap
@@ -34,14 +34,16 @@ last_verified: 2026-09-15
 - Establish migration/parity criteria before retiring the legacy sensor
   forwarder.
 
-## Phase 3 — Threat intelligence
+## Phase 3 — Threat intelligence (baseline implemented)
 
-- Introduce a separate asynchronous TI worker, not synchronous calls inside
+- Operate the separate asynchronous TI worker, not synchronous calls inside
   the processor hot path.
 - Query AbuseIPDB only for validated public source IPs.
 - Query VirusTotal by observed SHA-256 first; no automatic file upload.
 - Persist normalized, cache-expiring enrichment and expose status to the
   dashboard.
+- Keep Redis queue bounds, deduplication, cache expiry, and provider quotas
+  under explicit operational review as traffic and provider plans change.
 
 ## Phase 4 — Post-session/cloud analysis
 

@@ -34,9 +34,11 @@ class WebCorpTests(TestCase):
         self.spool.cleanup()
 
     def _last_login_event(self):
-        event_files = sorted(Path(self.spool.name).glob("*.jsonl"))
-        self.assertTrue(event_files, "login event was not written to the spool")
-        return json.loads(event_files[-1].read_text(encoding="utf-8"))
+        events = [json.loads(path.read_text(encoding="utf-8"))
+                  for path in Path(self.spool.name).glob("*.jsonl")]
+        login_events = [item for item in events if item.get("event") == "web_login_attempt"]
+        self.assertTrue(login_events, "login event was not written to the spool")
+        return login_events[-1]
 
     def test_odoo_login_page_and_structured_attempt(self):
         page = self.client.get("/web/login")
@@ -159,6 +161,53 @@ class WebCorpTests(TestCase):
             )
         self.assertEqual(response.status_code, 200)
         self.assertIn("อีเมลหรือรหัสผ่านไม่ถูกต้อง", response.text)
+        self.assertEqual(list(Path(self.spool.name).glob("*.jsonl")), [])
+
+    def test_http_page_and_form_attempt_share_server_issued_session(self):
+        page = self.client.get("/login.html")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("httponly", page.headers["set-cookie"].lower())
+        self.assertIn("samesite=lax", page.headers["set-cookie"].lower())
+        self.assertEqual(list(Path(self.spool.name).glob("*.jsonl")), [])
+        page_session_id = page.cookies.get("web_corp_visit").split(".")[0]
+        login = self.client.post(
+            "/web/login",
+            data={"login": "synthetic-user", "password": "' OR 'a'='a' --"},
+        )
+        self.assertEqual(login.status_code, 200)
+        events = [json.loads(path.read_text(encoding="utf-8"))
+                  for path in Path(self.spool.name).glob("*.jsonl")]
+        self.assertEqual(len(events), 1)
+        login_event = events[0]
+        self.assertEqual(login_event["event"], "web_login_attempt")
+        self.assertEqual(login_event["web_session_id"], page_session_id)
+        self.assertEqual(len(login_event["web_session_id"]), 32)
+        self.assertNotIn("xss_indicators", login_event)
+        self.assertIn("boolean_tautology", login_event["sqli_indicators"]["password"])
+
+    def test_forged_and_expired_browser_session_rotate(self):
+        first = self.client.get("/login.html")
+        cookie = first.cookies.get("web_corp_visit")
+        self.assertIsNotNone(cookie)
+        original = cookie.split(".")[0]
+
+        with TestClient(main.app, cookies={"web_corp_visit": str(cookie) + "forged"}) as attacker:
+            forged_response = attacker.get("/login.html")
+        self.assertNotEqual(forged_response.cookies["web_corp_visit"].split(".")[0], original)
+
+        with patch.object(main.time, "time", return_value=main.time.time() + 1801):
+            with TestClient(main.app, cookies={"web_corp_visit": str(cookie)}) as stale:
+                stale_response = stale.get("/login.html")
+        self.assertNotEqual(stale_response.cookies["web_corp_visit"].split(".")[0], original)
+        self.assertEqual(list(Path(self.spool.name).glob("*.jsonl")), [])
+
+    def test_page_queries_and_bait_requests_are_not_recorded(self):
+        self.assertEqual(
+            self.client.get("/login.html?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E").status_code,
+            200,
+        )
+        self.assertEqual(self.client.get("/wp-admin").status_code, 404)
+        self.assertEqual(self.client.get("/missing?q=" + "x" * 600).status_code, 404)
         self.assertEqual(list(Path(self.spool.name).glob("*.jsonl")), [])
 
 

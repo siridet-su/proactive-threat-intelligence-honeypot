@@ -451,6 +451,61 @@ def test_t1046_source_time_marker_without_exact_identity_fails_closed() -> None:
     assert normalized["outputs"]["T1046"]["result"] is None
 
 
+def test_t1046_unbound_sensor_context_remains_unavailable() -> None:
+    result = _v5_result()
+    result["t1046_observation"] = {
+        "observed": False,
+        "scope": "NONE",
+        "binding_mode": "NO_EXACT_MULTISERVICE_BINDING",
+        "reason": "t1046_unbound_sensor_context",
+        "flow_uids": [],
+        "destination_ports": [],
+    }
+    normalized = normalize_model2_v5_shadow_result(
+        result,
+        binding={
+            "session_id": "session-a", "run_id": "run-a",
+            "measurement_id": "measurement-a", "episode_id": "episode-a",
+        },
+        expected_model_sha256="c" * 64,
+        expected_feature_contract_sha256="d" * 64,
+    )
+    assert normalized["availability"] == "PARTIAL"
+    assert normalized["unavailable_heads"] == {"T1046": "t1046_unbound_sensor_context"}
+    assert normalized["outputs"]["T1046"]["result"] is None
+
+
+def test_t1046_claimed_exact_binding_without_identity_fails_closed() -> None:
+    result = _v5_result()
+    result["t1046_observation"] = {
+        "observed": True,
+        "scope": "MULTISERVICE_SCAN",
+        "binding_mode": "EXACT_MEASUREMENT_IDENTITY",
+        "pcap_binding": "PASS",
+        "zeek_binding": "PASS",
+        "source_ip_only_binding": False,
+        "cross_session_contamination": "NO",
+        "flow_uids": ["flow-a", "flow-b"],
+        "destination_ports": [80, 443],
+        # A sensor receipt without measurement identities is insufficient.
+    }
+    normalized = normalize_model2_v5_shadow_result(
+        result,
+        binding={
+            "session_id": "session-a",
+            "run_id": "run-a",
+            "measurement_id": "measurement-a",
+            "episode_id": "episode-a",
+        },
+        expected_model_sha256="c" * 64,
+        expected_feature_contract_sha256="d" * 64,
+    )
+
+    assert normalized["availability"] == "PARTIAL"
+    assert normalized["unavailable_heads"] == {"T1046": "t1046_scan_evidence_invalid"}
+    assert normalized["outputs"]["T1046"]["result"] is None
+
+
 def test_v5_result_rejects_cross_session_identity() -> None:
     with pytest.raises(CrossSessionEvidenceError):
         normalize_model2_v5_shadow_result(
@@ -502,3 +557,44 @@ def test_bound_v5_builder_requires_all_production_identities() -> None:
     assert value["model2"]["episode_id"] == "episode-a"
     assert value["ensemble_authority"] == "ADVISORY_ONLY"
     assert value["fused_score"] is None
+
+
+def test_model2_artifact_registry_preserves_old_history() -> None:
+    value = {"model_version": "MODEL2_V5_STYLE_UNIFIED_PRODUCTION_NATIVE_20260915_32F_V4",
+             "model_artifact_sha256": evidence_module.MODEL2_V5_ARTIFACT_SHA256}
+    assert evidence_module.expected_v5_artifact_sha256(value) == evidence_module.MODEL2_V5_ARTIFACT_SHA256
+
+
+def test_model2_poc_registry_requires_projection_and_quality_marker() -> None:
+    value = {
+        "model_version": evidence_module.MODEL2_BACKEND_POC_VERSION,
+        "model_artifact_sha256": evidence_module.MODEL2_BACKEND_POC_ARTIFACT_SHA256,
+        "quality_status": "EXPERIMENTAL_POC_UNVALIDATED",
+        "input_projection_contract_sha256": evidence_module.MODEL2_BACKEND_POC_PROJECTION_SHA256,
+        "source_feature_contract_sha256": evidence_module.MODEL2_V5_FEATURE_CONTRACT_SHA256,
+    }
+    assert evidence_module.expected_v5_artifact_sha256(value) == evidence_module.MODEL2_BACKEND_POC_ARTIFACT_SHA256
+    for missing in ("quality_status", "input_projection_contract_sha256", "source_feature_contract_sha256"):
+        altered = dict(value)
+        altered.pop(missing)
+        with pytest.raises(EnsembleContractError):
+            evidence_module.expected_v5_artifact_sha256(altered)
+
+    result = _v5_result()
+    result.update(value)
+    result["feature_contract_sha256"] = evidence_module.MODEL2_V5_FEATURE_CONTRACT_SHA256
+    normalized = normalize_model2_v5_shadow_result(
+        result,
+        binding={"session_id": "session-a", "run_id": "run-a",
+                 "measurement_id": "measurement-a", "episode_id": "episode-a"},
+        expected_model_sha256=evidence_module.expected_v5_artifact_sha256(result),
+        expected_feature_contract_sha256=evidence_module.MODEL2_V5_FEATURE_CONTRACT_SHA256,
+    )
+    assert normalized["available"] is True
+    assert normalized["quality_status"] == "EXPERIMENTAL_POC_UNVALIDATED"
+    assert normalized["input_projection_contract_sha256"] == evidence_module.MODEL2_BACKEND_POC_PROJECTION_SHA256
+
+
+def test_model2_artifact_registry_rejects_unknown_digest() -> None:
+    with pytest.raises(EnsembleContractError):
+        evidence_module.expected_v5_artifact_sha256({"model_version": "unknown", "model_artifact_sha256": "f" * 64})

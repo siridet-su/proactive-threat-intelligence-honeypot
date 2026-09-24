@@ -1455,11 +1455,18 @@ def _chains(
             if relationship["source_fact_id"] in component
             and relationship["target_fact_id"] in component
         ]
+        component_facts = [fact_by_id[item] for item in component]
+        source_ordered = all(
+            fact.get("source_index") is not None for fact in component_facts
+        )
         ordered_facts = sorted(
-            (fact_by_id[item] for item in component),
+            component_facts,
             key=lambda item: (
-                int(item.get("sequence_index") or 0),
-                int(item.get("source_index") or 0),
+                int(item.get("source_index") or 0) if source_ordered
+                else int(item.get("sequence_index") or 0),
+                int(item.get("sequence_index") or 0) if source_ordered
+                else int(item.get("source_index") or 0),
+                item["fact_id"],
             ),
         )
         operation_refs = _texts(

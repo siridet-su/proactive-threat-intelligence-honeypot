@@ -31,7 +31,7 @@ Odoo or execute attacker-supplied SQL.
 | HTTP persona | The Odoo-style ERP login page and compatibility routes are served on ZeroTier `:80` → container `:8080`. Bait paths still receive their configured static response or 404. | Only login POSTs generate application telemetry. GET/HEAD, scans, unrelated POSTs, and 404s are not recorded; Uvicorn access logging is disabled. |
 | HTTPS | The direct Pi HTTPS container on ZeroTier `:443` is stopped. Publicly trusted HTTPS via a VPS IP and private WireGuard backend is documented as a target. | The self-signed Pi certificate is not a current listener. The VPS target is not deployed; see the [public-VPS HTTPS runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md). |
 | Login collection | Each login form submission records a bounded event with UTC timestamp, request ID, source IP, scheme, method/path/query, selected headers (including User-Agent), and submitted login form fields. | Sensitive submitted values, including the password, are retained in the restricted raw spool/Redis/Mongo path as documented in the [login telemetry design](web-login-telemetry.md). Cookies and Authorization headers are not collected. |
-| Delivery and storage | The active HTTP app writes to the restricted host spool; the collector publishes to `raw:web-login` and the processor persists to MongoDB `honeypot_db.events`; `event:canonical` omits the password. | Web-corp no longer calls Deception Core. The pipeline stores events in MongoDB, but the dashboard does not yet provide a web-login investigation view. |
+| Delivery and storage | The active HTTP app writes login attempts to the restricted host spool; the collector publishes to `raw:web-login` and the processor persists to MongoDB `honeypot_db.events`; `event:canonical` omits credential-bearing fields. | Web-corp no longer calls Deception Core. The GCP dashboard has a read-only `/http-activity` view/API for login and retained historical page events. Its production Mongo projection and unauthenticated API boundary were checked on 2026-09-25, but an authenticated browser render was not exercised. |
 | Brute-force evidence | Attempts include time, source IP, and submitted login value, so an analyst can query and count repeated attempts. | No rate threshold, automated brute-force finding, alert, slowdown, or lockout is active. Capturing attempts is not the same as detecting or responding to brute force. |
 | SQL-injection evidence | The app attaches heuristic SQLi indicator labels to login events; submitted input is never evaluated as SQL. | Indicators are triage hints, not a complete or precision-validated SQLi detector. No SQL reaches Odoo/PostgreSQL. |
 | Response and backend isolation | Login attempts are rejected regardless of credentials or payload. Odoo/PostgreSQL are not contacted by the web-corp login handler. | The decoy does not verify credentials or pass a login through to the real ERP. |
@@ -47,9 +47,10 @@ instructions are maintained in the [web-corp login telemetry design](web-login-t
 - Design a fake post-submission ERP landing/workspace with synthetic records
   and safe, non-persistent interactions. This is optional post-login
   deception; it must not become real Odoo authentication.
-- Decide whether to add a configurable brute-force analysis job, derived
-  findings, dashboards, or alerts. First define time windows, grouping,
-  thresholds, and false-positive handling.
+- Verify the authenticated dashboard view with synthetic login events. Any
+  configurable brute-force analysis job, derived findings, or alerts remain
+  future work; first define time windows, grouping, thresholds, and
+  false-positive handling.
 - Evaluate and tune SQLi indicator quality against a safe test corpus; keep
   it observational and never execute submitted expressions.
 - Decide whether to collect page views, bait-path scans, or other non-login
@@ -77,6 +78,7 @@ needs its own review, validation, and implementation-log entry.
 HTTP login POST -> web-corp -> restricted spool -> Go collector
                  -> Redis raw:web-login -> processor -> MongoDB honeypot_db.events
                  -> Redis event:canonical (password omitted)
+                 -> read-only GCP dashboard /http-activity
 
 GET / HEAD / scan / 404 -> page response only; no app event or access log
 ```
