@@ -349,7 +349,7 @@ describe("FSV-007B: separate verified transition overlay", () => {
     expect(container.querySelector('[data-testid="transition-impact-wave"]')).toBeNull();
   });
 
-  it("paints the current endpoint indicator behind the transition arrowhead", async () => {
+  it("uses the moving packet and impact wave without stacking a static endpoint ring", async () => {
     await act(async () => {
       root.render(createElement(TransitionOverlay, {
         transitions,
@@ -363,11 +363,12 @@ describe("FSV-007B: separate verified transition overlay", () => {
 
     const currentPath = container.querySelector('[data-transition-event-id="cross-two"][data-transition-kind="directed"]');
     const indicator = container.querySelector('[data-testid="current-transition-indicator"]');
-    const pulse = container.querySelector('[data-testid="transition-current-pulse"]');
+    const packet = container.querySelector('[data-testid="transition-travel-packet"]');
+    const impactWave = container.querySelector('[data-testid="transition-impact-wave"]');
     expect(currentPath).not.toBeNull();
-    expect(indicator).not.toBeNull();
-    expect(pulse).not.toBeNull();
-    expect(indicator!.compareDocumentPosition(currentPath!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(indicator).toBeNull();
+    expect(packet).not.toBeNull();
+    expect(impactWave).not.toBeNull();
   });
 
   it("exposes a legend and chronological accessible sequence that match every rendered state", async () => {

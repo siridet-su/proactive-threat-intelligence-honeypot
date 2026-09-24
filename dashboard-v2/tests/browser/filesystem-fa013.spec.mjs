@@ -440,6 +440,7 @@ test.describe("FA-013 real-browser evidence", () => {
       await expect(revisit).not.toHaveAttribute("marker-end", /.+/);
       await expect(overlay.locator('[data-transition-kind="directed"]')).toHaveCount(1);
       await expect(overlay.locator('[data-transition-hop-label="true"]')).toHaveCount(0);
+      await expect(overlay.locator('[data-testid="current-transition-indicator"]')).toHaveCount(0);
       await expect(overlay.locator('[data-testid="transition-impact-wave"]')).toHaveCount(1);
       const transferAnimation = await overlay.evaluate((element) => ({
         packetName: getComputedStyle(element.querySelector(".pti-hop-packet-core")).animationName,
