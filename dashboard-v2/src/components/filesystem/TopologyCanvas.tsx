@@ -19,6 +19,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -82,6 +83,8 @@ import { getLayoutStorageKeys } from "./layoutPersistence";
 import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
+// Fixed SVG viewBox units; this does not represent physical distance or filesystem scale.
+const LIVE_RADAR_CANVAS_SIZE = 1000;
 
 function sameElementBounds(
   left: Record<string, GraphElementBounds>,
@@ -102,58 +105,198 @@ function sameElementBounds(
   });
 }
 
-function HoneypotQuietState({
-  closedSessionCount,
-  streamState,
+type LiveTopologyStandbyMode = "loading" | "listening" | "reconnecting";
+
+function LiveRadarOverlay({
+  showGrid = true,
+  reducedMotion = false,
 }: {
-  closedSessionCount: number;
-  streamState: StreamState;
+  showGrid?: boolean;
+  reducedMotion?: boolean;
 }) {
-  const isLive = streamState === "live";
-  const retainedLabel = closedSessionCount === 1 ? "1 closed session available" : `${closedSessionCount} closed sessions available`;
+  const sweepGradientId = `live-radar-sweep-${useId().replace(/:/g, "")}`;
+  const radarOverlayRef = useRef<HTMLDivElement>(null);
+  const [radarViewportSize, setRadarViewportSize] = useState({
+    width: LIVE_RADAR_CANVAS_SIZE,
+    height: LIVE_RADAR_CANVAS_SIZE,
+  });
+
+  useLayoutEffect(() => {
+    const overlay = radarOverlayRef.current;
+    if (!overlay) return;
+
+    const updateViewportSize = () => {
+      const bounds = overlay.getBoundingClientRect();
+      const width = Math.round(bounds.width);
+      const height = Math.round(bounds.height);
+      if (width <= 0 || height <= 0) return;
+
+      setRadarViewportSize((current) =>
+        current.width === width && current.height === height
+          ? current
+          : { width, height },
+      );
+    };
+
+    updateViewportSize();
+    const observer = new ResizeObserver(updateViewportSize);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, []);
+
+  const sweepCenterX = radarViewportSize.width / 2;
+  const sweepCenterY = radarViewportSize.height / 2;
+  const sweepRadius = Math.hypot(radarViewportSize.width, radarViewportSize.height) / 2 + 12;
+  const beamEndX = sweepCenterX;
+  const beamEndY = sweepCenterY - sweepRadius;
+  const trailingEdgeAngle = (-138 * Math.PI) / 180;
+  const trailEndX = sweepCenterX + Math.cos(trailingEdgeAngle) * sweepRadius;
+  const trailEndY = sweepCenterY + Math.sin(trailingEdgeAngle) * sweepRadius;
+
+  return (
+    <div
+      ref={radarOverlayRef}
+      className="pointer-events-none absolute inset-0 overflow-hidden"
+      data-testid="live-radar-overlay"
+      data-radar-canvas-size={`${LIVE_RADAR_CANVAS_SIZE}x${LIVE_RADAR_CANVAS_SIZE}`}
+      aria-hidden="true"
+    >
+      {showGrid && <div className="pti-live-radar-grid absolute inset-0" />}
+      <svg
+        className="absolute inset-0 h-full w-full"
+        viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <rect className="pti-live-radar-range is-outer" x="38" y="38" width="924" height="924" />
+        <rect className="pti-live-radar-range" x="168" y="168" width="664" height="664" />
+        <rect className="pti-live-radar-range" x="298" y="298" width="404" height="404" />
+        <rect className="pti-live-radar-range is-inner" x="428" y="428" width="144" height="144" />
+        <path className="pti-live-radar-axis" d="M500 38V962 M38 500H962" />
+        <rect className="pti-live-radar-origin" x="486" y="486" width="28" height="28" />
+      </svg>
+
+      {!reducedMotion && (
+        <svg
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${radarViewportSize.width} ${radarViewportSize.height}`}
+          preserveAspectRatio="none"
+          aria-hidden="true"
+        >
+          <defs>
+            <linearGradient
+              id={sweepGradientId}
+              x1={trailEndX}
+              y1={trailEndY}
+              x2={beamEndX}
+              y2={beamEndY}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="var(--pti-radar-accent)" stopOpacity="0" />
+              <stop offset="58%" stopColor="var(--pti-radar-accent)" stopOpacity="0.04" />
+              <stop offset="100%" stopColor="var(--pti-radar-accent)" stopOpacity="0.48" />
+            </linearGradient>
+          </defs>
+          <g className="pti-live-radar-sweep-rotation">
+            <path
+              className="pti-live-radar-sweep-wedge"
+              d={`M ${sweepCenterX} ${sweepCenterY} L ${beamEndX} ${beamEndY} A ${sweepRadius} ${sweepRadius} 0 0 0 ${trailEndX} ${trailEndY} Z`}
+              fill={`url(#${sweepGradientId})`}
+            />
+            <path
+              className="pti-live-radar-sweep-beam"
+              d={`M ${sweepCenterX} ${sweepCenterY} L ${beamEndX} ${beamEndY}`}
+            />
+          </g>
+        </svg>
+      )}
+
+      <span className="pti-live-radar-edge-tick is-top" />
+      <span className="pti-live-radar-edge-tick is-right" />
+      <span className="pti-live-radar-edge-tick is-bottom" />
+      <span className="pti-live-radar-edge-tick is-left" />
+
+      <div className="pti-live-radar-readout absolute left-4 top-4 sm:left-5 sm:top-5">
+        <span>LIVE SENSOR</span>
+        <span className="opacity-60">CWD TELEMETRY</span>
+      </div>
+      <div className="pti-live-radar-readout absolute bottom-4 left-4 sm:bottom-5 sm:left-5">
+        <span>RADAR PLANE</span>
+        <span className="opacity-60">{LIVE_RADAR_CANVAS_SIZE} × {LIVE_RADAR_CANVAS_SIZE}</span>
+      </div>
+    </div>
+  );
+}
+
+function LiveTopologyStandby({
+  mode,
+  closedSessionCount,
+  onOpenRetainedSessions,
+  onReconnect,
+  reducedMotion,
+}: {
+  mode: LiveTopologyStandbyMode;
+  closedSessionCount: number;
+  onOpenRetainedSessions?: () => void;
+  onReconnect?: () => void;
+  reducedMotion: boolean;
+}) {
+  const isListening = mode === "listening";
+  const isReconnecting = mode === "reconnecting";
+  const retainedLabel = closedSessionCount === 1 ? "View 1 retained session" : `View ${closedSessionCount} retained sessions`;
+  const title =
+    mode === "loading"
+      ? "Opening live topology"
+      : isListening
+        ? "Listening for sessions"
+        : "Restoring live stream";
+  const status =
+    mode === "loading"
+      ? "Snapshot + SSE connecting"
+      : isListening
+        ? "SSE connected"
+        : "Last snapshot preserved";
 
   return (
     <section
-      className="relative isolate flex min-h-[25rem] items-center justify-center overflow-hidden rounded-xl border border-border bg-surface px-5 py-10 sm:px-8"
+      className="pti-live-radar relative isolate flex min-h-[25rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-border px-5 py-10 sm:px-8"
       aria-label="Live honeypot activity"
     >
-      <div
-        className="pointer-events-none absolute inset-0 opacity-50"
-        style={{
-          backgroundImage: "linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)",
-          backgroundSize: "2.5rem 2.5rem",
-          maskImage: "radial-gradient(ellipse at center, black 5%, transparent 72%)",
-        }}
-        aria-hidden="true"
-      />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-56 w-56 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/10" aria-hidden="true" />
-      <div className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full border border-success/5" aria-hidden="true" />
-      <div className="relative mx-auto flex max-w-lg flex-col items-center rounded-2xl border border-border bg-surface/95 px-6 py-5 text-center shadow-xl backdrop-blur-sm sm:px-8">
-        <div className="relative mb-4 grid h-12 w-12 place-items-center rounded-full border border-success/30 bg-success-subtle text-success shadow-lg">
-          <span className="absolute inset-1.5 rounded-full border border-success/20" aria-hidden="true" />
-          <ScanLine className="h-5 w-5" aria-hidden="true" />
+      <LiveRadarOverlay reducedMotion={reducedMotion} />
+      <div className="pti-live-radar-status relative z-10 mx-auto flex max-w-lg flex-col items-center px-6 py-5 text-center sm:px-8">
+        <div className={`pti-live-radar-hub is-${mode} relative mb-5 grid h-16 w-16 place-items-center`} aria-hidden="true">
+          <HardDrive className="h-6 w-6" />
         </div>
-        <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
-          <span className="ui-badge border-success/30 bg-success-subtle text-success">Honeypot quiet</span>
-          <span className={`ui-badge ${isLive ? "border-success/30 bg-success-subtle text-success" : "border-warning-border bg-warning-subtle text-warning"}`}>
-            <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${isLive ? "bg-success" : "bg-warning"}`} aria-hidden="true" />
-            {isLive ? "Live monitoring" : "Monitoring reconnecting"}
-          </span>
+
+        <div role="status" aria-live="polite">
+          <h3 className="text-lg font-semibold text-text">{title}</h3>
+          <p className={`pti-live-radar-status-line is-${mode} mt-2 flex items-center justify-center gap-2 text-sm`}>
+            <span className="pti-listening-status-dot h-2 w-2 rounded-full" aria-hidden="true" />
+            {status}
+          </p>
         </div>
-        <h3 className="text-base font-semibold text-text">No active honeypot sessions</h3>
-        <p className="mt-2 max-w-md text-sm leading-6 text-text-muted">
-          No attacker is currently connected. Live filesystem activity will appear here as soon as a verified session begins.
-        </p>
-        <div className="mt-5 flex flex-wrap justify-center gap-2 text-xs">
-          <span className="rounded-full border border-border bg-surface px-3 py-1.5 font-medium text-text">
-            <span className="mr-1.5 font-mono text-success">0</span> active now
-          </span>
-          {closedSessionCount > 0 && (
-            <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 font-medium text-warning">
-              {retainedLabel} in Directory
-            </span>
-          )}
-        </div>
+
+        {(closedSessionCount > 0 || (isReconnecting && onReconnect)) && (
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {closedSessionCount > 0 && onOpenRetainedSessions && (
+              <button
+                type="button"
+                onClick={onOpenRetainedSessions}
+                className="pti-live-radar-action rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                {retainedLabel}
+              </button>
+            )}
+            {isReconnecting && onReconnect && (
+              <button
+                type="button"
+                onClick={onReconnect}
+                className="pti-live-radar-action is-warning rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+              >
+                Reconnect stream
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -236,6 +379,7 @@ export interface TopologyCanvasProps {
   onToggleExpand?: () => void;
   onRefresh?: () => void;
   onReconnect?: () => void;
+  onOpenRetainedSessions?: () => void;
   staleThresholdMs: number;
   presentationContext: TopologyPresentationContext;
   isResizingContainer?: boolean;
@@ -261,6 +405,7 @@ export function TopologyCanvas({
   onToggleExpand,
   onRefresh,
   onReconnect,
+  onOpenRetainedSessions,
   staleThresholdMs,
   presentationContext,
   isResizingContainer = false,
@@ -881,7 +1026,7 @@ export function TopologyCanvas({
       </TopologyCanvasHeader>
 
       {regionStatus === "error" && !snapshot ? (
-        <div className="p-5">
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
           <RegionState
             kind="error"
             title="Filesystem activity unavailable"
@@ -889,16 +1034,25 @@ export function TopologyCanvas({
           />
         </div>
       ) : regionStatus === "loading" && !snapshot ? (
-        <div className="p-5">
-          <RegionState
-            kind="loading"
-            title="Mapping Decoy Filesystem Topology..."
-            description="Tracing attacker working directories, file hops, and touch events"
-            variant="topology"
-          />
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
+          {isAuditMode ? (
+            <RegionState
+              kind="loading"
+              title="Loading audit topology..."
+              description="Preparing retained filesystem evidence for replay."
+              variant="topology"
+            />
+          ) : (
+            <LiveTopologyStandby
+              mode="loading"
+              closedSessionCount={0}
+              onReconnect={onReconnect}
+              reducedMotion={Boolean(reducedMotion)}
+            />
+          )}
         </div>
       ) : !snapshot?.nodes.length ? (
-        <div className="p-5">
+        <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
           {failedHopMessage && (
             <div
               role="status"
@@ -917,9 +1071,18 @@ export function TopologyCanvas({
             </div>
           )}
           {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
-            <HoneypotQuietState
+            <LiveTopologyStandby
+              mode={
+                streamState === "live"
+                  ? "listening"
+                  : streamState === "connecting"
+                    ? "loading"
+                    : "reconnecting"
+              }
               closedSessionCount={snapshot.recentClosedSessions.length}
-              streamState={streamState}
+              onOpenRetainedSessions={onOpenRetainedSessions}
+              onReconnect={onReconnect}
+              reducedMotion={Boolean(reducedMotion)}
             />
           ) : (
             <RegionState
@@ -956,16 +1119,20 @@ export function TopologyCanvas({
                 role="region"
                 aria-label="Filesystem topology map workspace. Use arrow keys to pan, scroll or pinch to zoom."
                 onKeyDown={onSurfaceKeyDown}
-                className="relative min-h-[380px] flex-1 overflow-hidden bg-surface-subtle p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                className={`relative min-h-[380px] flex-1 overflow-hidden p-5 sm:p-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring ${isAuditMode ? "bg-surface-subtle" : "pti-live-radar"}`}
                 onPointerDown={onPointerDown}
                 onPointerMove={onPointerMove}
                 onPointerUp={onPointerEnd}
                 onPointerCancel={onPointerEnd}
               >
-                <div
-                  className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
-                  aria-hidden="true"
-                />
+                {isAuditMode ? (
+                  <div
+                    className={`pointer-events-none absolute inset-0 transition-opacity duration-300 [background-image:linear-gradient(var(--border)_1px,transparent_1px),linear-gradient(90deg,var(--border)_1px,transparent_1px)] [background-size:28px_28px] ${showGrid ? "opacity-50" : "opacity-0"}`}
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <LiveRadarOverlay showGrid={showGrid} reducedMotion={Boolean(reducedMotion)} />
+                )}
 
                 <AnimatePresence initial={false}>
                   {!isAuditMode && freshnessState.isDegraded && (
@@ -1084,7 +1251,7 @@ export function TopologyCanvas({
 
                 <motion.div
                   ref={graphPlaneRef}
-                  className="absolute origin-top-left overflow-visible"
+                  className={`absolute origin-top-left overflow-visible ${isAuditMode ? "" : "z-10"}`}
                   animate={reducedMotion ? undefined : { x: pan.x, y: pan.y, scale: zoom }}
                   style={
                     reducedMotion

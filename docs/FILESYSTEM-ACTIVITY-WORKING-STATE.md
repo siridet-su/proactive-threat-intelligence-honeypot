@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity live working state
 status: active
-last_updated: 2026-09-20
+last_updated: 2026-09-24
 owner: Dashboard Filesystem workstream
 ---
 
@@ -45,6 +45,10 @@ Reproducible test results belong in [`validation/`](validation/).
 
 There is no active FA remediation item. `FA-001` through `FA-016` are all
 accepted `DONE`.
+
+`FS-024` is the current product UX addition: a standardized square radar plane
+that fills the available Live topology panel, with a circular sweep rotating
+around its center. It does not reopen or change any FA evidence contract.
 
 `FS-007` is `DONE`: FA-001, FA-002, FA-011, and accepted FA-016 jointly
 complete the live-topology/Audit-directory separation and its bounded,
@@ -118,6 +122,7 @@ These remain product backlog items and are not the active remediation focus.
 | `FS-021` | `TODO` | Exact historical transition overlay. | Repeated visits and lateral jumps are represented as actual event transitions rather than only first-visit node badges. | Backlog; not part of FA-014. |
 | `FS-022` | `TODO` | Correlated command and file telemetry. | Command/file events are shown only when joined by authoritative identifiers, with provenance and explicit unavailable states. | Backlog; not part of FA-014. |
 | `FS-023` | `TODO` | Forensic export and shareable evidence links. | Exported JSON/CSV preserves session, event IDs, timestamps, status, and filter scope; shared links open the same session/hop without embedding sensitive data. | Backlog; not part of FA-014. |
+| `FS-024` | `IN PROGRESS` | Add a full-surface square radar treatment to Live topology. | Establish a 1000×1000 logical radar plane that fills the available Live panel; keep square range lines and canvas-edge ticks; size the circular sweep to reach the canvas bounds; render a fading energy trail behind a crisp beam with no front glow; keep topology controls interactive, leave Audit presentation unchanged, and respect reduced-motion preferences. | Implemented in the local dashboard; HMR compiled. Authenticated browser review and responsive visual acceptance remain deferred. |
 
 ## Deferred outside this workstream
 
@@ -164,6 +169,10 @@ claims about the 2026-09-15 historical baseline.
 
 | Date | Decision | Reason |
 | --- | --- | --- |
+| 2026-09-24 | Live topology uses a `1000×1000` logical square radar plane centered within the responsive canvas; Audit retains its existing map treatment. | The range frames must stay square at any viewport ratio, while the radar grid can fill the complete Live workspace without implying geography or changing evidence. |
+| 2026-09-24 | In the empty Live state, the radar plane expands to the remaining panel height and a sweep rotates from the center; reduced-motion preferences disable the sweep. | This uses the available workspace while preserving square geometry and avoiding animation for users who request reduced motion. |
+| 2026-09-24 | Place the four accent ticks at the actual canvas edges; keep the square range frames centered. | Edge ticks should anchor the full responsive canvas even when the square radar plane is letterboxed by a wide viewport. |
+| 2026-09-24 | Size the circular sweep using the measured canvas dimensions and render a fading trail behind its beam; keep the beam itself unglowed. | The scan should traverse the full responsive plane while its energy glow follows behind the leading line. |
 | 2026-09-15 | Start with `FS-001`; defer visual additions until Audit filtering is authoritative. | Incorrect result sets would invalidate later selection, count, and topology UX. |
 | 2026-09-15 | Keep this tracker separate from design and validation evidence. | Work status changes frequently; architecture and evidence must remain durable and independently reviewable. |
 | 2026-09-19 | Accept FA-015 and move the sole remediation focus to FA-016; preserve FS-007 as PARTIAL. | Large-collection optimization is now the only remaining FA item; FS-007 cannot be accepted until FA-016 passes final audit. |
@@ -172,6 +181,10 @@ claims about the 2026-09-15 historical baseline.
 
 | Date | Change | Evidence |
 | --- | --- | --- |
+| 2026-09-24 | Refined `FS-024`: expand the Live standby canvas to the available panel height and rotate a circular radar sweep about its center. | Next.js HMR compiled the edited modules; no host or telemetry behavior changed. |
+| 2026-09-24 | Refined `FS-024`: move the four accent ticks from the centered square frame to the actual canvas edges. | HMR compilation and whitespace validation are recorded with the implementation entry; no host or telemetry behavior changed. |
+| 2026-09-24 | Refined `FS-024`: extend the circular sweep to the full canvas and add a fading energy trail behind the beam. | HMR compilation is recorded with the implementation entry; no host or telemetry behavior changed. |
+| 2026-09-24 | Started `FS-024`: define the standard square radar plane and add a live-only radar overlay to the topology canvas. | User requested the Live workspace use a full-screen square radar treatment; no telemetry or API contract changes are in scope. |
 | 2026-09-19 | Continued only FA-016: made history projection an event-level durable outbox, separated current-state/history ownership, blocked rejected observed payloads from seeding or clearing readiness, and covered old canonical/legacy writers after the v2 marker. | Clean preflight at audited `60a73c4`; `git fetch origin --prune` succeeded; `origin/main` was already an ancestor; isolated integration passed 12 dashboard tests and executed 9 production FA-016 Mongo tests plus 2 target-safety tests; dashboard execution plans remained bounded and steady-state reconciliation performed zero `cwd_events` reads. Full dashboard tests, lint, build, diff check, and all five Go modules passed. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-19 | Continued only FA-016: exact cursor-aware overflow composition, generation-owned readiness/CAS with bounded execution evidence, stale/late history crash recovery, padded canonical convergence, and deterministic race barriers. | Clean start at `5aeb4c0`; initial sandbox fetch failure and approved successful retry are recorded in validation evidence; `origin/main` was already an ancestor; dashboard baseline passed; isolated FA-016 integration passed 12 dashboard tests and six processor tests; full dashboard and five-module Go validation passed. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending final re-audit. |
 | 2026-09-19 | Accepted FA-015 on `725102189587477bd9eafe13c8ac2d6e2e97e20c` and continued FA-016 as the sole current focus; remediation commit `54c872b` was created without rewriting prior history; retained FS-007 as PARTIAL. | FA-015 validation is recorded in [`docs/validation/FA-015-change-hygiene.md`](validation/FA-015-change-hygiene.md); FA-016 remediation evidence is recorded in [`docs/validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md) and remains pending final re-audit. |
