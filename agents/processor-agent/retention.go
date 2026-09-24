@@ -36,7 +36,13 @@ func expiryAt(observedAt time.Time, retention time.Duration) time.Time {
 }
 
 func setEventExpiry(event map[string]any, retention time.Duration) {
-	observedAt, _ := event["timestamp"].(time.Time)
+	var observedAt time.Time
+	switch value := event["timestamp"].(type) {
+	case time.Time:
+		observedAt = value
+	case string:
+		observedAt, _ = time.Parse(time.RFC3339Nano, value)
+	}
 	event["expires_at"] = expiryAt(observedAt, retention)
 }
 

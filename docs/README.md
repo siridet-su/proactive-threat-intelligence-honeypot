@@ -19,6 +19,12 @@ and historical material inherited from the previous team.
    artifact handling, and threat-intelligence boundaries.
 8. [Architecture decisions](adr/) — durable decisions and their rationale.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
+10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
+
+The event contract and retrieval steps for fake ERP login attempts are in
+[Web-corp login telemetry](design/web-login-telemetry.md), the
+[web-corp runbook](../integrations/web-corp/README.md), and its
+[data-access guide](../integrations/web-corp/DATA-ACCESS.md).
 
 ## Document status labels
 
@@ -53,6 +59,8 @@ and historical material inherited from the previous team.
 - `honeypot-analysis/` is the active post-session/cloud-analysis workstream.
 - `old-dashboard-2025/`, `maintenance/`, and `docs/logs/` contain inherited
   history and snapshots, not current operational instructions.
-- `../decoy-honeypot/docker-compose.yml` is currently the deployment source of
-  truth for the Docker decoy stack. A dedicated design/runbook will be added
-  before that configuration is materially changed.
+- `../decoy-honeypot/docker-compose.yml` remains the deployment source of truth
+  for the Docker decoy stack, outside this Git worktree. The corporate web
+  application source is tracked in [`integrations/web-corp/`](../integrations/web-corp/README.md);
+  its build-context decision is recorded in [ADR-0005](adr/ADR-0005-corporate-web-decoy-source.md).
+  Consolidation of the full Compose stack is deferred.

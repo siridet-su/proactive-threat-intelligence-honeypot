@@ -32,6 +32,12 @@ that can be correlated in MongoDB Atlas with Cowrie and Zeek observations.
 No adapter emits passwords, message bodies, uploaded artifact bytes, database
 secrets, or internal configuration values by default.
 
+The fake ERP login honeypot is an explicit, narrowly scoped exception to that
+default: its [web-login telemetry design](web-login-telemetry.md) retains
+submitted login values, including passwords, for honeypot research. Those
+credential-bearing events are restricted to authorized honeypot admins and
+must not be copied into generic command/session data or external enrichment.
+
 ## Adapter contract
 
 Each service writes structured JSON to its own local log or an authenticated

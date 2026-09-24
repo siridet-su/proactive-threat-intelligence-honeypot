@@ -45,7 +45,8 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | --- | --- | --- |
 | Cowrie SSH/Telnet | Active | Attacker-facing deception service with manifest-bound sanitized output and hash-only artifact retention. |
 | Docker decoy stack | Active | Web, FTP, SMTP, Odoo/PostgreSQL, and deception-core services. |
-| OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `basicLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
+| Web-corp login telemetry | Active | Dedicated pending spool → `raw:web-login` → processor → MongoDB `honeypot_db.events`; raw password stays out of Core commands and the `event:canonical` projection. |
+| OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true`. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
@@ -76,7 +77,7 @@ Real administrative SSH listens on port 2222 but host-firewall access is limited
 1. Stabilize the adaptive Cowrie boundary on a non-public staging listener.
 2. Maintain the active Go telemetry pipeline and monitor Redis consumer lag.
 3. Operate asynchronous VirusTotal/AbuseIPDB enrichment through the worker with bounded queue/cache and provider-quota controls.
-4. Define a common event contract for Cowrie, Zeek, and each Docker decoy.
+4. Complete telemetry adapters for the remaining Docker decoys; web-corp login is integrated.
 5. Deliver post-session/cloud analysis against Atlas-backed canonical events.
 
 ## Out of scope for the current phase
