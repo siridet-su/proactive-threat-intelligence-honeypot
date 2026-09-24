@@ -3,9 +3,9 @@
 import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, ArrowLeft, Fingerprint, Globe2, Printer, RefreshCw, ShieldAlert } from "lucide-react";
-import type { WebHttpHint } from "@/lib/web-http-intel";
+import type { WebHttpCapturedPayload, WebHttpHint } from "@/lib/web-http-intel";
 
-type HttpDetail = { sessionId: string; items: WebHttpHint[]; coverage: string };
+type HttpDetail = { sessionId: string; items: WebHttpHint[]; payloads: WebHttpCapturedPayload[]; rawPayloadAccess: boolean; coverage: string };
 type TiCache = { provider?: unknown; lookup_status?: unknown; normalized_context?: unknown; lookup_at?: unknown; expires_at?: unknown };
 type TiResult = { ip: string | null; status: "loading" | "ready" | "none" | "error"; caches: TiCache[] };
 
@@ -40,6 +40,20 @@ function formatTime(value: string): string {
 
 function signalName(value: "sqli" | "xss"): string { return value === "sqli" ? "SQL injection pattern" : "XSS pattern"; }
 
+const RULE_EXPLANATIONS: Record<string, string> = {
+  sqli_sql_comment: "SQL comment marker: may try to ignore the rest of a query.",
+  sqli_union_select: "UNION SELECT syntax: may try to combine another query result.",
+  sqli_boolean_tautology: "Boolean comparison: may try to change a query condition.",
+  sqli_time_delay: "Time-delay function: may probe whether a database evaluates the input.",
+  sqli_database_metadata: "Database catalog name: may probe schema information.",
+  sqli_stacked_statement: "Statement separator followed by SQL: may try a second statement.",
+  sqli_sql_keyword: "SQL-related keyword: weak pattern on its own; inspect the full field.",
+  xss_script_tag: "Script tag: may try to make a browser run injected JavaScript.",
+  xss_event_handler: "HTML event handler: may try to run code when an event fires.",
+  xss_javascript_scheme: "JavaScript URL scheme: may try to execute code when a link is used.",
+  xss_svg_script: "SVG load handler: may try to run code when SVG is rendered.",
+};
+
 export default function HttpSessionDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [detail, setDetail] = useState<HttpDetail | null>(null);
@@ -55,7 +69,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
         if (!response.ok) throw new Error("detail unavailable");
         const value: unknown = await response.json();
         const data = safeRecord(value);
-        if (data.sessionId !== id || !Array.isArray(data.items)) throw new Error("invalid detail");
+        if (data.sessionId !== id || !Array.isArray(data.items) || !Array.isArray(data.payloads) || typeof data.rawPayloadAccess !== "boolean") throw new Error("invalid detail");
         setDetail(data as HttpDetail);
         setState("ready");
       }).catch(() => { if (!controller.signal.aborted) setState("error"); });
@@ -63,6 +77,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
   }, [id]);
 
   const items = useMemo(() => detail?.items ?? [], [detail]);
+  const capturedByEvent = useMemo(() => new Map((detail?.payloads ?? []).map((payload) => [payload.eventId, payload])), [detail]);
   const sources = useMemo(() => [...new Set(items.map((item) => item.sourceIp).filter((ip) => ip !== "unavailable"))], [items]);
   const sourceIp = sources.length === 1 ? sources[0] : null;
   useEffect(() => {
@@ -104,7 +119,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
     {detail && <>
       <section className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
         <p className="flex items-center gap-2 font-semibold"><ShieldAlert className="h-4 w-4" /> Evidence boundary</p>
-        <p className="mt-1">This ID links requests by browser cookie only, not verified attacker identity. SQLi/XSS are rule-based attempt hints; T1190 is a review candidate, not a confirmed exploit, model prediction, or trusted ATT&amp;CK finding. Credentials and submitted payloads are never displayed.</p>
+        <p className="mt-1">This ID links requests by browser cookie only, not verified attacker identity. SQLi/XSS are rule-based attempt hints; T1190 is a review candidate, not a confirmed exploit, model prediction, or trusted ATT&amp;CK finding. {detail.rawPayloadAccess ? "Captured query and login fields below are literal submitted data, including passwords. Handle printed or copied copies as sensitive research evidence." : "Literal request fields, including submitted passwords, are available to Admin operators only."}</p>
       </section>
 
       <section aria-label="HTTP session overview" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -129,13 +144,14 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
 
       <section className="rounded-xl border border-border bg-surface p-5">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-text"><Activity className="h-5 w-5 text-primary" /> Request chronology</h2>
-        <p className="mt-1 text-sm text-text-muted">Observed method, safe path, response status, and matched rule names. Query values and passwords are excluded.</p>
+        <p className="mt-1 text-sm text-text-muted">Observed method, path, response, literal captured request fields, and rule matches. A missing query in an older record cannot be reconstructed from its rule match.</p>
         <ol className="mt-4 max-h-[32rem] space-y-2 overflow-y-auto pr-1">
           {items.map((item, index) => <li key={item.eventId} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
             <div className="flex flex-wrap items-start justify-between gap-2"><p className="font-semibold text-text">{index + 1}. {item.method} {item.path}</p><time className="text-xs text-text-muted">{formatTime(item.observedAt)}</time></div>
             <p className="mt-1 text-xs text-text-muted">{item.eventType === "web_login_attempt" ? `Login ${item.outcome}` : `HTTP ${item.statusCode ?? "status unavailable"}`} · {item.sourceIp}</p>
             {item.signals.length > 0 && <p className="mt-2 text-xs text-warning">{item.signals.map(signalName).join(" · ")} · T1190 review candidate only</p>}
             {item.matches.length > 0 && <p className="mt-1 text-xs text-text-muted">Matched: {item.matches.map((match) => `${match.field} / ${match.signal}_${match.ruleId}`).join(", ")}</p>}
+            {detail.rawPayloadAccess ? <CapturedRequest payload={capturedByEvent.get(item.eventId)} matches={item.matches} /> : <p className="mt-2 text-xs text-text-muted">Literal payload fields require an Admin account.</p>}
           </li>)}
         </ol>
       </section>
@@ -144,7 +160,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-lg font-semibold text-text">Observed access</h2>
           <div className="mt-3 grid gap-2 sm:grid-cols-2"><Metric label="Login attempts" value={String(items.filter((item) => item.eventType === "web_login_attempt").length)} /><Metric label="Rejected attempts" value={String(rejected.length)} /></div>
-          <p className="mt-3 text-sm text-text-muted">Only the recorded outcome is shown. Submitted email, username, and password are excluded from the dashboard projection.</p>
+          <p className="mt-3 text-sm text-text-muted">Submitted login fields are available in the exact request chronology above. A rejected login does not establish account compromise.</p>
         </div>
         <div className="rounded-xl border border-border bg-surface p-5">
           <h2 className="text-lg font-semibold text-text">TTP review context</h2>
@@ -195,4 +211,27 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="min-w-0 rounded-lg border border-border bg-surface-subtle p-3"><p className="text-xs uppercase tracking-wide text-text-muted">{label}</p><p className="mt-1 break-words font-semibold text-text">{value}</p></div>;
+}
+
+function CapturedRequest({ payload, matches }: { payload?: WebHttpCapturedPayload; matches: WebHttpHint["matches"] }) {
+  if (!payload) return <p className="mt-2 text-xs text-text-muted">No stored request fields for this event.</p>;
+  const fields = payload.form ? Object.entries(payload.form) : [];
+  return <div className="mt-3 rounded-lg border border-warning-border bg-surface p-3">
+    <p className="text-xs font-semibold uppercase tracking-wide text-warning">Captured request payload · literal values</p>
+    <p className="mt-1 text-xs text-text-muted">Matched fields: {matches.length ? matches.map((match) => `${match.field} (${match.signal}_${match.ruleId})`).join(" · ") : "No injection rule match"}</p>
+    {matches.length > 0 && <ul className="mt-2 space-y-1 text-xs text-text">{matches.map((match) => <li key={`${match.field}.${match.signal}.${match.ruleId}`}><span className="font-semibold">{match.field}:</span> {RULE_EXPLANATIONS[`${match.signal}_${match.ruleId}`] ?? "Rule matched; inspect the captured field."}</li>)}</ul>}
+    <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+      <CapturedField label="URL path (literal)" value={payload.rawPath} truncated={false} />
+      <CapturedField label="URL query" value={payload.query} truncated={payload.truncatedFields.includes("http.query")} />
+      {fields.map(([name, value]) => <CapturedField key={name} label={`Form: ${name}`} value={value} truncated={payload.truncatedFields.includes(`odoo_login.${name}`)} />)}
+    </dl>
+    {payload.form && <p className="mt-2 text-xs text-text-muted">Form values are the fields captured by the web-corp login sensor, not a raw multipart or JSON body. Submitted password is shown without masking.</p>}
+  </div>;
+}
+
+function CapturedField({ label, value, truncated }: { label: string; value: string | null; truncated: boolean }) {
+  return <div className="min-w-0 rounded border border-border p-2">
+    <dt className="text-xs font-semibold text-text-muted">{label}{truncated ? " · truncated at capture" : ""}</dt>
+    <dd className="mt-1 whitespace-pre-wrap break-all font-mono text-xs text-text">{value === null ? "Not stored or empty" : value === "" ? "(empty)" : value}</dd>
+  </div>;
 }

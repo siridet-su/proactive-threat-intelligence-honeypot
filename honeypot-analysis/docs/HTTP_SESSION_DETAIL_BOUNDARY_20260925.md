@@ -10,8 +10,14 @@ The detail view shows request chronology, source/destination endpoints where
 recorded, login outcomes, rule IDs, a contextual T1190 review candidate, a
 non-authoritative hypothesis, manual-only investigation guidance, and stored
 ETI for the exact single public source IP when the existing monitor's
-observable-TI projection has eligible sightings. It omits raw query values,
-cookies, credentials, payloads, SSH command panels, Cowrie deception content,
+observable-TI projection has eligible sightings. The authenticated exact-detail
+API additionally shows literal captured URL path, query and login form fields
+to authenticated Admin operators only,
+including submitted passwords, with capture truncation markers. The broad
+HTTP activity feed does not return those fields. Historical non-login GET
+events have no stored query or unsanitized path and cannot be reconstructed;
+new sensor events capture both up to 512 characters. No full HTTP body is retained.
+It omits cookies, SSH command panels, Cowrie deception content,
 Model1/Model2 predictions, and ungenerated forecasts. The HTTP collector does
 not currently retain the source port, so the UI says so rather than inventing
 one. Printing is a read-side convenience, not an immutable PDF report.
@@ -28,6 +34,13 @@ SQLi/XSS hints are sensor-computed rule matches on submitted requests. They
 do not show that an exploit succeeded. T1190 is a review candidate, not a
 canonical finding or Model1 prediction. Neither response guidance nor the
 print view authorizes automated action.
+
+Captured fields are sensitive research data: the exact-detail API is Admin-only
+for raw fields and authenticated for ordinary event detail,
+and non-cacheable; browser print/export includes visible values. This is not a
+verbatim wire-level HTTP request, only the fields actually persisted by the
+sensor. React text rendering is used, never HTML interpretation of a submitted
+payload.
 
 Acceptance checks: unauthenticated exact-session API returns 401; malformed
 IDs return 400; missing exact sessions return 404; only allowlisted fields

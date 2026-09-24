@@ -26,6 +26,15 @@ export type WebHttpHint = {
   exploitConfirmed: false;
 };
 
+/** Exact captured request fields, returned only by the authenticated detail API. */
+export type WebHttpCapturedPayload = {
+  eventId: string;
+  rawPath: string | null;
+  query: string | null;
+  form: Record<"database" | "login" | "password" | "redirect" | "remember", string> | null;
+  truncatedFields: string[];
+};
+
 const SQLI_RULES = new Set([
   "sql_comment", "union_select", "boolean_tautology", "time_delay",
   "database_metadata", "stacked_statement", "sql_keyword",
