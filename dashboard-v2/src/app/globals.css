@@ -309,68 +309,120 @@
 }
 
 .pti-live-radar {
-  --pti-radar-bg: #071510;
-  --pti-radar-text: #ddffec;
-  --pti-radar-accent: #63efa7;
-  --pti-radar-line: rgb(99 239 167 / 20%);
+  --pti-radar-canvas-radius: 12px;
+  --pti-radar-bg: var(--surface);
+  --pti-radar-text: var(--text);
+  --pti-radar-accent: var(--primary);
+  --pti-radar-line: color-mix(in srgb, var(--primary) 16%, transparent);
+  --pti-radar-stroke-width: 2px;
+  --pti-radar-hub-glow: color-mix(in srgb, var(--primary) 12%, transparent);
+  --pti-radar-edge-glow: color-mix(in srgb, var(--primary) 48%, transparent);
+  --pti-radar-control-bg: color-mix(in srgb, var(--surface) 94%, var(--primary));
   color: var(--pti-radar-text);
-  background:
-    linear-gradient(90deg, transparent 0%, rgb(21 116 75 / 7%) 34%, rgb(21 116 75 / 13%) 50%, rgb(21 116 75 / 7%) 66%, transparent 100%),
-    linear-gradient(0deg, transparent 0%, rgb(21 116 75 / 7%) 34%, rgb(21 116 75 / 13%) 50%, rgb(21 116 75 / 7%) 66%, transparent 100%),
-    linear-gradient(135deg, rgb(5 25 17 / 50%), transparent 45%, rgb(5 25 17 / 32%)),
-    var(--pti-radar-bg);
+  background: var(--pti-radar-bg);
 }
 
 .pti-live-radar-grid {
   background-image:
-    linear-gradient(var(--pti-radar-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--pti-radar-line) 1px, transparent 1px),
-    linear-gradient(180deg, transparent 49.9%, rgb(99 239 167 / 9%) 50%, transparent 50.1%),
-    linear-gradient(90deg, transparent 49.9%, rgb(99 239 167 / 9%) 50%, transparent 50.1%);
-  background-size: 2.5rem 2.5rem, 2.5rem 2.5rem, 100% 100%, 100% 100%;
-  opacity: 0.62;
+    linear-gradient(var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px);
+  background-size: 2.5rem 2.5rem, 2.5rem 2.5rem;
+  opacity: 0.5;
 }
 
-.pti-live-radar-range,
-.pti-live-radar-axis,
-.pti-live-radar-origin {
-  vector-effect: non-scaling-stroke;
+.pti-live-radar-crosshair::before,
+.pti-live-radar-crosshair::after {
+  position: absolute;
+  display: block;
+  content: "";
+  opacity: 0.72;
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
+  pointer-events: none;
 }
 
-.pti-live-radar-range {
-  fill: rgb(99 239 167 / 1.2%);
-  stroke: rgb(99 239 167 / 24%);
-  stroke-width: 1;
+.pti-live-radar-crosshair::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  transform: translateX(-50%);
 }
 
-.pti-live-radar-range.is-outer {
+.pti-live-radar-crosshair::after {
+  right: 0;
+  left: 0;
+  top: 50%;
+  height: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  transform: translateY(-50%);
+}
+
+.pti-live-radar-wave {
   fill: none;
-  stroke: rgb(99 239 167 / 40%);
+  stroke: var(--pti-radar-accent);
+  stroke-opacity: 0;
   stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pti-radar-double-wave-outer 5.6s cubic-bezier(0.24, 0.72, 0.28, 1) infinite both;
 }
 
-.pti-live-radar-range.is-inner {
-  fill: rgb(99 239 167 / 4%);
-  stroke: rgb(99 239 167 / 34%);
-  stroke-dasharray: 3 7;
-}
-
-.pti-live-radar-axis {
-  fill: none;
-  stroke: rgb(99 239 167 / 19%);
-  stroke-dasharray: 2 9;
+.pti-live-radar-wave.is-inner {
   stroke-width: 1;
+  animation-name: pti-radar-double-wave-inner;
+  animation-delay: 620ms;
+}
+
+.pti-live-radar-corner-tick {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  width: 2rem;
+  height: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  opacity: 0.72;
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
+}
+
+.pti-live-radar-corner-tick.is-top-left {
+  top: -1px;
+  left: 0;
+  transform: rotate(var(--pti-radar-corner-angle-positive));
+  transform-origin: left center;
+}
+
+.pti-live-radar-corner-tick.is-top-right {
+  top: -1px;
+  right: 0;
+  transform: rotate(var(--pti-radar-corner-angle-negative));
+  transform-origin: right center;
+}
+
+.pti-live-radar-corner-tick.is-bottom-right {
+  right: 0;
+  bottom: -1px;
+  transform: rotate(var(--pti-radar-corner-angle-positive));
+  transform-origin: right center;
+}
+
+.pti-live-radar-corner-tick.is-bottom-left {
+  bottom: -1px;
+  left: 0;
+  transform: rotate(var(--pti-radar-corner-angle-negative));
+  transform-origin: left center;
 }
 
 .pti-live-radar-edge-tick {
   position: absolute;
   z-index: 1;
   display: block;
-  width: 1.5px;
+  width: var(--pti-radar-stroke-width);
   height: 2rem;
   background: var(--pti-radar-accent);
   opacity: 0.72;
-  box-shadow: 0 0 6px rgb(99 239 167 / 55%);
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
 }
 
 .pti-live-radar-edge-tick.is-top {
@@ -383,7 +435,7 @@
   top: 50%;
   right: 0;
   width: 2rem;
-  height: 1.5px;
+  height: var(--pti-radar-stroke-width);
   transform: translateY(-50%);
 }
 
@@ -397,46 +449,12 @@
   top: 50%;
   left: 0;
   width: 2rem;
-  height: 1.5px;
+  height: var(--pti-radar-stroke-width);
   transform: translateY(-50%);
 }
 
-.pti-live-radar-sweep-rotation {
-  transform-box: view-box;
-  transform-origin: 50% 50%;
-  animation: pti-radar-sweep 9s linear infinite;
-}
-
-.pti-live-radar-sweep-wedge {
-  opacity: 0.9;
-}
-
-.pti-live-radar-sweep-beam {
-  fill: none;
-  stroke: var(--pti-radar-accent);
-  stroke-opacity: 0.82;
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-
-.pti-live-radar-origin {
-  fill: rgb(99 239 167 / 10%);
-  stroke: var(--pti-radar-accent);
-  stroke-width: 1.4;
-}
-
-.pti-live-radar-readout {
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 0.18rem;
-  color: var(--pti-radar-accent);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  line-height: 1.35;
-  text-shadow: 0 1px 8px var(--pti-radar-bg);
+.pti-live-radar-sweep-canvas {
+  display: block;
 }
 
 .pti-live-radar-status h3 {
@@ -450,7 +468,7 @@
 
 .pti-live-radar-status-line.is-loading,
 .pti-live-radar-status-line.is-reconnecting {
-  color: #ffd28c;
+  color: var(--warning);
 }
 
 .pti-live-radar-status-line .pti-listening-status-dot {
@@ -461,74 +479,108 @@
 }
 
 .pti-live-radar-hub {
-  border: 1px solid rgb(99 239 167 / 72%);
-  color: var(--pti-radar-accent);
-  background: rgb(99 239 167 / 9%);
-  box-shadow: inset 0 0 0 6px rgb(99 239 167 / 4%), 0 0 2rem rgb(99 239 167 / 12%);
+  --pti-radar-hub-emitter: var(--pti-radar-accent);
+  border: 1px solid color-mix(in srgb, var(--pti-radar-hub-emitter) 70%, var(--surface));
+  border-radius: var(--pti-radar-canvas-radius);
+  color: var(--surface);
+  background: var(--pti-radar-hub-emitter);
+  box-shadow: 0 0 1.25rem var(--pti-radar-hub-glow);
 }
 
-.pti-live-radar-hub::before,
-.pti-live-radar-hub::after {
-  position: absolute;
-  content: "";
-  pointer-events: none;
-}
-
-.pti-live-radar-hub::before {
-  inset: 7px;
-  border: 1px dashed rgb(99 239 167 / 30%);
-}
-
-.pti-live-radar-hub::after {
-  inset: -8px;
-  border: 1px solid rgb(99 239 167 / 18%);
-}
-
-.pti-live-radar-hub.is-loading {
-  color: #ffd28c;
-  border-color: rgb(255 210 140 / 70%);
-}
-
+.pti-live-radar-hub.is-loading,
 .pti-live-radar-hub.is-reconnecting {
-  color: #ffd28c;
-  border-color: rgb(255 210 140 / 70%);
-  background: rgb(255 210 140 / 8%);
+  --pti-radar-hub-emitter: var(--warning);
+  --pti-radar-hub-glow: color-mix(in srgb, var(--warning) 12%, transparent);
 }
 
 .pti-live-radar-action {
-  border-color: rgb(99 239 167 / 40%);
+  border-color: color-mix(in srgb, var(--primary) 42%, transparent);
   color: var(--pti-radar-text);
-  background: rgb(8 35 24 / 90%);
+  background: var(--pti-radar-control-bg);
 }
 
 .pti-live-radar-action:hover {
   border-color: var(--pti-radar-accent);
-  background: rgb(12 53 35 / 96%);
+  background: color-mix(in srgb, var(--surface) 88%, var(--primary));
 }
 
 .pti-live-radar-action.is-warning {
-  border-color: rgb(255 210 140 / 48%);
-  color: #ffe0ad;
-  background: rgb(54 39 18 / 88%);
+  border-color: var(--warning-border);
+  color: var(--warning);
+  background: var(--warning-subtle);
 }
 
 .pti-live-radar-action.is-warning:hover {
-  background: rgb(78 53 21 / 96%);
+  background: color-mix(in srgb, var(--warning-subtle) 78%, var(--warning));
+}
+
+.pti-retained-session-shortcut::after {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  display: grid;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding-inline: 0.2rem;
+  place-items: center;
+  border: 1px solid var(--surface);
+  border-radius: 9999px;
+  background: var(--success);
+  color: var(--surface);
+  content: attr(data-count);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pti-live-radar-sweep-rotation,
   .pti-live-radar-status-line .pti-listening-status-dot {
     animation: none;
   }
+
+  .pti-live-radar-wave.is-outer,
+  .pti-live-radar-wave.is-inner {
+    animation: none;
+    stroke-opacity: 0;
+  }
+
 }
 
-@keyframes pti-radar-sweep {
-  from {
-    transform: rotate(0deg);
+@keyframes pti-radar-double-wave-outer {
+  0%, 100% {
+    transform: scale(0.025);
+    stroke-opacity: 0;
   }
-  to {
-    transform: rotate(360deg);
+  4% {
+    stroke-opacity: 0.42;
+  }
+  34% {
+    transform: scale(1);
+    stroke-opacity: 0.38;
+    animation-timing-function: linear;
+  }
+  53% {
+    transform: scale(1);
+    stroke-opacity: 0;
+  }
+}
+
+@keyframes pti-radar-double-wave-inner {
+  0%, 9%, 100% {
+    transform: scale(0.025);
+    stroke-opacity: 0;
+  }
+  14% {
+    stroke-opacity: 0.36;
+  }
+  48% {
+    transform: scale(1);
+    stroke-opacity: 0.32;
+    animation-timing-function: linear;
+  }
+  72% {
+    transform: scale(1);
+    stroke-opacity: 0;
   }
 }
 
