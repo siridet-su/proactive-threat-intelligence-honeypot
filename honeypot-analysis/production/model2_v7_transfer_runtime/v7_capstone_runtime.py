@@ -39,6 +39,7 @@ from v7_common import (  # noqa: E402
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA  # noqa: E402
 from v7_transfer_binding import transfer_tuple_allowed  # noqa: E402
 from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples, unbound_sensor_context_present  # noqa: E402
+from model2_backend_poc_runtime import load_backend_poc, infer_backend_poc  # noqa: E402
 
 
 _v6_sanitized_event = v6.sanitized_event
@@ -62,6 +63,7 @@ ARTIFACT_SHA256 = "622f50709ed621e0dfcf6088392c0eb19adda53484636ba4208ae82c20ce7
 CANDIDATE_SHA256 = "51526097888e55d670832ea4cf9eca24c7c0036c05453e580280c504e5ce51b7"
 V5_UNIFIED_ARTIFACT_SHA256 = "104d4c77a3e1536b847561abb19fc7c0d6d7dc0111cd98d1ff2d9c9d74a2ed1a"
 V5_UNIFIED_CANDIDATE_SHA256 = "ce1b2d7bd25423226ed675d83493d5f69e5a7061deb96d955a03de94587552ac"
+BACKEND_POC_ARTIFACT_SHA256 = "127a5b0bd18b0f7b76a8bcce6a51294db554220045ffc2a19c4cd16bb72e9316"
 BINDING_SHA256 = "2aa0cfebe1298943517610c3e62e0c9a38651ea93b65747dc69250d814b26c7b"
 CAPSTONE_PUBLIC_IP = "10.148.0.2"
 BACKEND_SOURCE_HOST = "10.58.33.6"
@@ -92,8 +94,9 @@ class Coordinator(v6.Coordinator):
     def __init__(self, config: Mapping[str, Any]) -> None:
         self.collection_enabled = bool(config.get("collection_enabled", False))
         self.model_adapter = str(config.get("model_adapter", "v7"))
-        if self.model_adapter not in {"v7", "v5_unified"}:
+        if self.model_adapter not in {"v7", "v5_unified", "v5_backend_poc"}:
             raise V7BoundaryError("model_adapter_invalid")
+        self.poc_artifact_path = pathlib.Path(str(config["poc_artifact_path"])) if self.model_adapter == "v5_backend_poc" else None
         self.feature_schema_path = pathlib.Path(str(config["feature_schema_path"]))
         self.runtime_contract_path = pathlib.Path(str(config["runtime_contract_path"]))
         self.binding_contract_path = pathlib.Path(str(config["binding_contract_path"]))
@@ -103,7 +106,14 @@ class Coordinator(v6.Coordinator):
         self.collection_rows.mkdir(parents=True, exist_ok=True)
         self.model = None
         if self.shadow_enabled:
-            if self.model_adapter == "v5_unified":
+            if self.model_adapter == "v5_backend_poc":
+                self.model = load_backend_poc(
+                    base_artifact_path=self.artifact_path,
+                    feature_schema_path=self.feature_schema_path,
+                    poc_artifact_path=self.poc_artifact_path,
+                    expected_poc_sha256=BACKEND_POC_ARTIFACT_SHA256,
+                )
+            elif self.model_adapter == "v5_unified":
                 self.model = load_v5_unified_model(
                     self.artifact_path,
                     feature_schema_path=self.feature_schema_path,
@@ -121,13 +131,16 @@ class Coordinator(v6.Coordinator):
         if sha256_file(self.binding_contract_path) != BINDING_SHA256:
             raise V7BoundaryError("binding_contract_sha256_mismatch")
         if self.shadow_enabled:
-            expected_artifact = V5_UNIFIED_ARTIFACT_SHA256 if self.model_adapter == "v5_unified" else ARTIFACT_SHA256
+            expected_artifact = V5_UNIFIED_ARTIFACT_SHA256 if self.model_adapter in {"v5_unified", "v5_backend_poc"} else ARTIFACT_SHA256
             if sha256_file(self.artifact_path) != expected_artifact:
                 raise V7BoundaryError("artifact_sha256_mismatch")
             artifact = json.loads(self.artifact_path.read_text(encoding="utf-8"))
-            expected_candidate = V5_UNIFIED_CANDIDATE_SHA256 if self.model_adapter == "v5_unified" else CANDIDATE_SHA256
+            expected_candidate = V5_UNIFIED_CANDIDATE_SHA256 if self.model_adapter in {"v5_unified", "v5_backend_poc"} else CANDIDATE_SHA256
             if artifact.get("candidate_sha256") != expected_candidate:
                 raise V7BoundaryError("candidate_sha256_mismatch")
+            if self.model_adapter == "v5_backend_poc":
+                if self.poc_artifact_path is None or sha256_file(self.poc_artifact_path) != BACKEND_POC_ARTIFACT_SHA256:
+                    raise V7BoundaryError("poc_artifact_sha256_mismatch")
 
     def _write_collection_row(self, run_id: str, row: Mapping[str, Any]) -> None:
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", run_id):
@@ -141,7 +154,7 @@ class Coordinator(v6.Coordinator):
         os.replace(temp, final)
 
     def unavailable(self, *, message_id: str, reason: str, session_id: str = "", run_id: str = "") -> dict[str, Any]:
-        if self.model_adapter == "v5_unified":
+        if self.model_adapter in {"v5_unified", "v5_backend_poc"}:
             result = {
                 "schema_version": "model2_v5_style_unified_production_native_shadow_result.v1",
                 "status": "MODEL2_UNAVAILABLE", "availability": "UNAVAILABLE",
@@ -369,7 +382,9 @@ class Coordinator(v6.Coordinator):
             if self.shadow_enabled:
                 if self.model is None:
                     raise V7BoundaryError("shadow_model_not_loaded")
-                if self.model_adapter == "v5_unified":
+                if self.model_adapter == "v5_backend_poc":
+                    result = infer_backend_poc(row, self.model)
+                elif self.model_adapter == "v5_unified":
                     result = infer_v5_unified_shadow(row, self.model)
                 else:
                     result = infer_shadow(row, self.model)
@@ -386,7 +401,7 @@ class Coordinator(v6.Coordinator):
                 "session_id": session_id, "run_id": run_id, "measurement_id": measurement_id, "episode_id": episode_id,
                 "pcap_binding": "PASS", "zeek_binding": "PASS", "feature_materialization": "PASS",
                 "source_binding": "PASS", "session_binding": "PASS", "run_id_binding": "PASS",
-                "feature_count": 32 if self.collection_enabled or self.model_adapter == "v5_unified" else 27,
+                "feature_count": 32 if self.collection_enabled or self.model_adapter in {"v5_unified", "v5_backend_poc"} else 27,
                 "source_feature_count": 32, "zero_fill": False,
                 "source_ip_only_binding": False, "cross_session_contamination": "NO",
                 "proxy_v1_delivery": "PASS", "capture_sha256": pcap_evidence["sha256"],
