@@ -206,11 +206,15 @@ describe("FA-013 production component evidence", () => {
       selectedPath: null,
       onSelectSession: () => {},
       onSelectPath: () => {},
+      onRefresh: () => {},
+      onReconnect: () => {},
       staleThresholdMs: 30_000,
       presentationContext: { mode: "live" },
     })));
     expect(container.textContent).toContain("Degraded connection");
     expect(container.textContent).toContain("Showing retained snapshot");
+    expect(container.textContent).not.toContain("Refresh snapshot");
+    expect(container.textContent).not.toContain("Reconnect now");
     expect(container.textContent).not.toContain("Offline");
     expect(vi.getTimerCount()).toBe(0);
   });
