@@ -359,6 +359,12 @@ func normalizeEvent(streamName string, rawID string, values map[string]any, payl
 	)
 
 	srcPort := anyToString(getPayloadAny(payload, "id.orig_p"))
+	if source == "web-corp" {
+		srcPort = firstNonEmpty(
+			anyToString(getPayloadAny(payload, "source_port")),
+			valueToString(values["src_port"]),
+		)
+	}
 
 	dstIP := firstNonEmpty(
 		getPayloadString(payload, "id.resp_h"),

@@ -9,36 +9,31 @@ last_verified: 2026-09-25
 ## Purpose and scope
 
 This is one inherited-and-evolving multi-service honeypot project. The present
-development focus is the adaptive SSH shell delivered through Cowrie. Existing
-and future web, Odoo/CloudSQL-like, FTP, and SMTP decoys remain part of the
-same deception surface.
+development focus is the adaptive SSH shell delivered through Cowrie. The
+active web scope is limited to capturing rejected ERP-style login attempts;
+Odoo, direct-Pi HTTPS, FTP, and SMTP are stopped/future work.
 
 The project does not execute attacker-controlled commands or malware on the
 Raspberry Pi host.
 
 ## System view
 
-```text
-Attacker
-  |
-  +-- Cowrie SSH / Telnet ---------------------------+
-  +-- Docker decoy services (web, FTP, SMTP, Odoo) --+-- telemetry --> Go pipeline
-  +-- Network traffic observed by Zeek --------------+                     |
-                                                                      Redis streams
-                                                                           |
-                                                                      Go processor
-                                                                           |
-                                                                     MongoDB Atlas
-                                                                           |
-                                                             post-session/cloud analysis
-                                                                           |
-                                                                     dashboard/report
+Cowrie SSH/Telnet and Zeek observations flow through the Go collector, Redis,
+and processor to MongoDB Atlas; TI enrichment and analysis are separate
+downstream consumers.
 
-Retained MongoDB sources with an enabled target
-  -> Pi backup control/scheduled worker
-  -> gzip Extended JSON Lines
-  -> private Backblaze B2 archive
-```
+Web-corp serves HTTP on ZeroTier `10.58.33.42:80` → container `:8080`; `8080`
+is not a host-published listener. Only login POSTs produce app telemetry and
+flow through the restricted spool, Go pipeline, Redis, and MongoDB Atlas.
+Page/scan requests receive page responses without app telemetry or Uvicorn
+access logs. The Pi's direct-TLS `:443` container is stopped; a trusted VPS
+HTTPS edge is target work. FTP, SMTP, and Odoo containers are stopped. Deception
+Core on loopback `:9000` and PostgreSQL on loopback `:5432` remain active as
+Cowrie dependencies; neither is exposed as a public database/web service.
+
+Retained MongoDB sources with an enabled target flow through the Pi backup
+control/scheduled worker into gzip Extended JSON Lines in the private
+Backblaze B2 archive.
 
 The legacy sensor forwarder remains active as an inherited parallel path. It
 must not be expanded as part of new features. Its retirement or migration is a
@@ -49,14 +44,17 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | Component | State | Notes |
 | --- | --- | --- |
 | Cowrie SSH/Telnet | Active | Attacker-facing deception service with manifest-bound sanitized output and hash-only artifact retention. |
-| Docker decoy stack | Active | Web, FTP, SMTP, Odoo/PostgreSQL, and deception-core services. |
-| Web-corp login telemetry | Active | Dedicated pending spool → `raw:web-login` → processor → MongoDB `honeypot_db.events`; raw password stays out of Core commands and the `event:canonical` projection. |
+| Docker decoy stack | Partial | Web-corp HTTP, PostgreSQL, and Deception Core containers active; direct HTTPS, Odoo, FTP, and SMTP containers stopped. |
+| Web-corp HTTP login decoy | Active | ZeroTier `:80` → container `:8080`; only login POSTs generate new app telemetry. Restricted spool → `raw:web-login` → processor → MongoDB `honeypot_db.events`; raw password stays out of Core commands and `event:canonical`. Old `web_http_request` records remain ingestible. |
+| Web-corp HTTPS | Stopped on Pi | Direct self-signed TLS container on ZeroTier `:443` stopped 2026-09-25. Public-VPS HTTPS/WireGuard runbook is a not-deployed target. |
+| Odoo, FTP, SMTP | Stopped / future | Odoo and the FTP/SMTP containers are stopped. Tracked FTP/SMTP sources remain future work pending event adapters and dashboard integration. |
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
-| Go collector/processor/hardware agents | Active | Hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true`. |
+| Go collector/processor/hardware agents | Active | Login pipeline uses collector/processor; hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs only for eligible observables when `THREAT_INTEL_ENABLED=true`. |
 | Retained data backup worker | Active for `hardware_metrics_1m`, `filesystem_audit`, and `threat_events` | The Pi worker writes the three approved retention targets to the private B2 bucket and reports storage/manifest state. `cwd_audit_projection` remains excluded because it is rebuildable; the sensitive threat-event archive is enabled under the reviewed private-bucket policy. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
-| TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. |
+| TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
+| Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
 | Post-session/cloud analysis | Target workstream | Under active development. |
 | Hailo/Ollama runtime | Experimental candidate | Not the current Cowrie execution path. |
@@ -82,8 +80,8 @@ Real administrative SSH listens on port 2222 but host-firewall access is limited
 
 1. Stabilize the adaptive Cowrie boundary on a non-public staging listener.
 2. Maintain the active Go telemetry pipeline and monitor Redis consumer lag.
-3. Operate asynchronous VirusTotal/AbuseIPDB enrichment through the worker with bounded queue/cache and provider-quota controls.
-4. Complete telemetry adapters for the remaining Docker decoys; web-corp login is integrated.
+3. Operate asynchronous VirusTotal/AbuseIPDB enrichment through the active worker with bounded queue/cache and provider-quota controls.
+4. Verify authenticated dashboard review of web-corp login events; keep FTP/SMTP adapters as future work.
 5. Deliver post-session/cloud analysis against Atlas-backed canonical events.
 6. Monitor all enabled retained-data backup targets, manifests, and B2 storage
    health; revisit the sensitive-event policy before changing the `threat_events`

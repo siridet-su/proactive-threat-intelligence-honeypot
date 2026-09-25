@@ -48,6 +48,70 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-24 — Confirm canonical backup control-plane decisions
+
+- Status: planning decisions approved; implementation not started.
+- Scope and intent: clarify that the canonical backup control database records
+  dashboard requests, worker progress, archive manifests, hashes, and
+  verification results; it is not a second copy of canonical event data.
+- Repository branch and commit/PR: current working branch; documentation is
+  uncommitted.
+- Repository changes: updated the living canonical backup plan with the
+  cloud-neutral activation posture, B2 least-privilege roles, separate
+  operational control database direction, illustrative request/manifest
+  contracts, and the approved initial archive scope.
+- Host/environment changes actually applied: none. No GCP runner, B2 key,
+  Mongo role, TTL index, scheduler, or purge operation was changed.
+- Runtime/exposure state: code is to be prepared for later cloud activation;
+  no canonical archive worker is active.
+- Validation performed and outcome: documentation diff checks pass; no data
+  export or source-database mutation was performed.
+- Not performed / deferred: final control database name, activation cloud,
+  prediction snapshot policy, external TI archive profile, restore format, and
+  purge approval role remain open decisions.
+- Risks and data handling: upload workers must not receive `deleteFiles`; the
+  restore role remains read-only. Control records contain no event payloads or
+  secrets.
+- Rollback: revert the uncommitted documentation changes; no host rollback is
+  required.
+- Follow-up: implement the policy and control contracts in an isolated branch,
+  then run a dry-run selector before any B2 upload.
+- Related ADR/runbook: [canonical backup and retention implementation plan](design/canonical-backup-retention-implementation-plan.md).
+
+### 2026-09-24 — Prepare canonical backup and retention implementation plan
+
+- Status: plan prepared; no implementation or retention action activated.
+- Scope and intent: define a policy-aware archive lifecycle for
+  `honeypot_canonical_v1` so canonical evidence can move to compressed B2
+  storage without introducing unsafe database-wide TTL deletion.
+- Repository branch and commit/PR: current working branch; plan is currently
+  uncommitted.
+- Repository changes: added the living
+  [`canonical backup and retention implementation plan`](design/canonical-backup-retention-implementation-plan.md)
+  and linked it from the design index. The plan records the verified live
+  collection inventory, canonical/legacy authority boundaries, archive
+  manifest contract, dependency gates, worker placement, rollout phases, and
+  purge rollback requirements.
+- Host/environment changes actually applied: none. No MongoDB collection,
+  TTL index, B2 object, Pi service, systemd unit, scheduler, or purge operation
+  was changed.
+- Runtime/exposure state: no canonical archive worker is installed or active;
+  the existing backup worker remains scoped to `honeypot_db.hardware_metrics_1m`.
+- Validation performed and outcome: read-only Mongo metadata and identity
+  checks were performed; no document values or secrets were recorded. The plan
+  distinguishes exact `event_id` overlap from shared observable values.
+- Not performed / deferred: no archive export, B2 upload, restore rehearsal,
+  dashboard change, policy activation, or deletion was performed.
+- Risks and data handling: the current canonical database has runtime external
+  TI collections that are not in the 31-entry schema manifest; reconciliation
+  is a Phase 1 gate. Canonical purge remains disabled until backup and restore
+  evidence exist.
+- Rollback: remove the uncommitted plan/index changes; no host rollback is
+  required.
+- Follow-up: approve the runner host, retention windows, archive format,
+  manifest location, and purge authority before Phase 1 implementation.
+- Related ADR/runbook: [canonical backup and retention implementation plan](design/canonical-backup-retention-implementation-plan.md).
+
 ### 2026-09-24 — Prepare OpenCanary HTTP login honeypot on the Pi
 
 - Status: installed and configured; service intentionally stopped and disabled.
@@ -869,3 +933,920 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
   [current architecture](CURRENT-ARCHITECTURE.md), and
   [data ownership](DATA-OWNERSHIP.md).
+### 2026-09-24 — Track FTP and SMTP decoy sources in the repository
+
+- Status: source/build-context migration completed; running containers were not
+  recreated.
+- Scope and intent: make the FTP and SMTP implementations, dependencies,
+  Dockerfiles, and operating notes reviewable in this repository without
+  changing their exposure or sending test credentials/mail.
+- Repository branch and commit/PR: feat/opencanary-web-login-honeypot; local
+  working-tree changes, not committed.
+- Repository changes: added integrations/ftp and integrations/smtp with
+  pinned dependencies and runbooks; clarified current event ownership and
+  updated the stale TI-worker status from disabled to active based on the
+  user-confirmed runtime state. The FTP track-failure debug log no longer
+  includes the command string, which can contain an attempted password.
+- Host/environment changes: changed the unversioned sibling
+  /home/cpe27/decoy-honeypot/docker-compose.yml FTP and SMTP build contexts to
+  the tracked integration directories. The shared FTP VFS schema remains a
+  read-only external mount because it is shared with Core and contains
+  credential-like decoy configuration. Original sibling source files were
+  left in place; Compose now builds from the repository source.
+- Runtime/exposure state: images were built locally from the repository
+  sources, but no running container was recreated or restarted. The existing
+  FTP service remained bound to ZeroTier port 21 and passive ports 30000-30009;
+  SMTP remained loopback-only on host port 25.
+  The updated Compose file is outside this Git repository and therefore is
+  not itself tracked by this commit/worktree.
+- Validation performed and outcome: Compose config validation passed; both
+  images built from the new contexts; both image entrypoints passed Python
+  syntax compilation in network-disabled temporary containers. Read-only
+  checks confirmed the running FTP process, its banner, its Core health
+  dependency, and the four bait filenames. No FTP login/LIST/RETR or SMTP
+  message test was performed.
+- Not performed / deferred: no service restart, no live transaction test, no
+  SMTP-to-telemetry adapter, and no migration of the shared VFS schema.
+- Risks and data handling: FTP failed-login activity sent to Core includes the
+  submitted username/password, so Core event/session stores are sensitive.
+  The container still runs as root internally and its FTP banner duplicates
+  the 220 code. SMTP records envelope metadata and byte count but discards
+  the message body.
+- Rollback: restore the sibling Compose build contexts to its previous local
+  doors/ftp and doors/smtp directories; running containers and their data
+  were not changed.
+- Follow-up: decide whether to split the shared VFS credential/config data
+  from the Core persona schema, fix the FTP banner and container user,
+  configure health checks, add FTP/SMTP event adapters, and version the full
+  decoy-stack deployment Compose file.
+
+### 2026-09-24 — Clarify current and future HTTP decoy scope
+
+- Status: documentation-only clarification; runtime behavior unchanged.
+- Scope and intent: make the active web-corp login-collection purpose distinct
+  from optional future interactive ERP deception and other HTTP enhancements.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree changes, not committed.
+- Repository changes: added the HTTP current/future scope document and linked
+  it from the docs index, web-corp runbook, login telemetry design, and service
+  catalog.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: unchanged; web-corp continues to accept HTTP on the
+  configured ZeroTier listener, always reject login attempts, and keep login
+  telemetry separate from Deception Core page/bait events.
+- Validation performed and outcome: documentation cross-links and factual
+  claims reviewed against the existing runbook, design, service catalog, and
+  architecture snapshot; no service or data-path test was run.
+- Not performed / deferred: no code, deployment, service restart, TLS setup,
+  brute-force detector, SQLi rule tuning, or post-login ERP simulation.
+- Risks and data handling: existing raw login events remain credential-
+  sensitive; this documentation change did not query or copy event data.
+- Rollback: revert this documentation-only entry and the linked HTTP scope
+  documentation changes; runtime is unaffected.
+- Follow-up: any future HTTP capability requires a separate design and
+  implementation-log entry before deployment.
+- Related ADR/runbook: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry design](design/web-login-telemetry.md), and
+  [web-corp runbook](../integrations/web-corp/README.md).
+
+### 2026-09-24 — Add ZeroTier HTTPS listener for web-corp
+
+- Status: deployed and verified; HTTP remains active alongside HTTPS.
+- Scope and intent: serve the existing web-corp persona over TLS on ZeroTier
+  port 443 without adding a reverse proxy or connecting login requests to Odoo.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree changes, not committed.
+- Repository changes: added a direct-TLS web-corp app service definition to
+  the sibling Compose file; the app records `http.scheme`, coordinates shared
+  spool writers with `flock`, and the collector/processor preserve HTTPS scheme
+  and destination port/service metadata. Added tests and updated the HTTP
+  scope, telemetry design, runbook, architecture snapshot, and service catalog.
+- Host/environment changes actually applied: generated a self-signed RSA
+  certificate for SAN `IP:10.58.33.42` at
+  `/var/lib/decoy-honeypot/web-corp-tls/tls.crt`; its private key is outside
+  Git at `tls.key` (directory mode `0700`, key `0400`, certificate `0444`).
+  Updated the unversioned sibling
+  `/home/cpe27/decoy-honeypot/docker-compose.yml` and rebuilt/recreated
+  `web-corp`; started the new `web-corp-https` service. No UFW rule or public
+  interface binding was added. Replaced the ignored collector and processor
+  binaries after preserving both prior versions under the protected
+  `/var/backups/honeypot/web-https-20260924/` directory, then restarted only
+  `honeypot-collector.service` and `honeypot-processor.service`.
+- Runtime/exposure state: HTTP is still bound to `10.58.33.42:80` → container
+  `8080`; HTTPS is bound to `10.58.33.42:443` → container `8443`. The same app
+  serves both; HTTPS negotiates TLS 1.3. The certificate expires
+  `2027-09-24` and is self-signed, so client verification correctly reports
+  `self-signed certificate` until a trusted certificate is installed.
+- Validation performed and outcome: Compose config validation passed; six
+  web-corp unit tests passed in an isolated, network-disabled container;
+  collector-agent and processor-agent Go test suites passed. HTTP and HTTPS
+  `/web/login` returned 200 and identical body SHA-256; a later HTTPS
+  `/robots.txt` returned 200 and its Core `/v1/track` request succeeded.
+  OpenSSL confirmed TLS 1.3 and the IP SAN. No login credentials were sent to
+  the live service.
+- Not performed / deferred: no end-to-end HTTPS login POST through the live
+  Redis/Mongo pipeline, second-peer ZeroTier test, publicly trusted
+  certificate, or certificate renewal automation.
+- Risks and data handling: the self-signed certificate causes a browser trust
+  warning; replace it before expiry if a trusted DNS identity becomes
+  available. The private key remains outside Git. Both app containers share
+  the credential-bearing spool; a mode-`0600` process lock serializes writes.
+  One initial page-tracking request timed out while services were just starting;
+  Core health then returned 200 and the later tracking retry succeeded.
+- Rollback: stop/remove only `web-corp-https` and its port-443 mapping to
+  disable HTTPS while leaving HTTP intact. Preserve the external certificate
+  directory and the sibling Compose backup; collected telemetry is unchanged.
+- Follow-up: renew/replace the self-signed certificate before expiry, test
+  from an authorized second ZeroTier peer, and track the sibling Compose file
+  in a separate scoped change.
+- Related ADR/runbook: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry design](design/web-login-telemetry.md), and
+  [web-corp runbook](../integrations/web-corp/README.md) and
+  [HTTPS validation evidence](validation/2026-09-24-web-corp-https.md).
+
+### 2026-09-24 — Document publicly trusted HTTPS target on a VPS
+
+- Status: target runbook documented; no deployment or approval to expose a
+  public listener was made by this documentation change.
+- Scope and intent: explain how a future public-IP certificate and VPS TLS
+  edge could serve web-corp while keeping its Pi backend behind WireGuard.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  local working-tree change, not committed.
+- Repository changes: added
+  [`integrations/web-corp/PUBLIC-VPS-HTTPS.md`](../integrations/web-corp/PUBLIC-VPS-HTTPS.md)
+  with prerequisites, IP certificate/renewal steps, exposure boundary,
+  forwarding-header requirements, validation, rollback, and credential-data
+  cautions. Linked it from the web-corp runbook, HTTP scope, and docs index.
+- Host/environment changes actually applied: none. No VPS, Pi, certificate,
+  firewall, WireGuard, proxy, or service configuration was changed.
+- Runtime/exposure state: unchanged. The Pi remains ZeroTier-only on HTTP/HTTPS;
+  HTTPS still uses its self-signed certificate. No public endpoint was created.
+- Validation performed and outcome: reviewed the runbook against the current
+  web-corp request fields and proxy trust behavior; official Let's Encrypt,
+  Certbot, and Uvicorn documentation was checked for IP-certificate lifetime,
+  client support, and trusted forwarded headers. Targeted `git diff --check`
+  passed for the modified tracked docs; the new untracked runbook was reviewed
+  for whitespace and its referenced local documents exist.
+- Not performed / deferred: no certificate request, external VPS login,
+  WireGuard route/firewall change, proxy deployment, live login POST, or
+  renewal dry-run was performed.
+- Risks and data handling: a future public endpoint would receive real-world
+  scans and potentially credential-bearing submissions. Existing spool, raw
+  Redis, MongoDB, and backups remain sensitive; the runbook requires synthetic
+  validation and a restricted public exposure boundary.
+- Rollback: revert the documentation-only changes; no host state requires
+  rollback.
+- Follow-up: select a VPS/public IP and peer addresses; verify current ACME
+  client support and automated six-day renewal; review firewall and proxy trust
+  boundaries; then separately approve and validate implementation.
+- Addendum: this target supersedes earlier follow-up wording in this log that
+  implied a publicly trusted DNS name was required before replacing the
+  self-signed certificate. A publicly trusted IP certificate is now an option;
+  its short validity and client-support caveats are recorded in the runbook.
+- Related runbooks/design: [public-VPS HTTPS runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md),
+  [HTTP decoy scope](design/http-decoy-scope.md), and
+  [current web-corp runbook](../integrations/web-corp/README.md).
+
+### 2026-09-25 — Narrow web-corp telemetry and stop inactive decoys
+
+- Status: login-only HTTP behavior deployed; out-of-scope web services stopped.
+- Scope and intent: retain the web-corp login honeypot for brute-force and
+  SQLi observation while removing page/scan telemetry from the active web path.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  changes remain uncommitted.
+- Repository changes: removed the web-corp Deception Core `/v1/track` client,
+  page/scan spool events, and current XSS indicators; kept static persona and
+  login compatibility routes. Disabled Uvicorn access logging. Updated the
+  current-state/service docs to classify Pi HTTPS, Odoo, FTP, and SMTP as
+  stopped/future work; documented the internal-only `:8080` app port, the
+  dashboard query gap, and the external Compose-file restart caveat. Existing
+  page/scan compatibility remains in the Go pipeline for prior spool or Redis
+  entries; the updated app produces no new events of that type. Removed
+  generated `.next`, `next-env.d.ts`, `.pytest_cache`, and Python
+  `__pycache__` output; retained node_modules, environment files, binaries,
+  backups, archives, and installed packages.
+- Host/environment changes actually applied: stopped only the web-corp HTTPS,
+  Odoo, FTP, and SMTP containers; rebuilt the web-corp image and recreated only
+  the HTTP `web-corp` container. Container data/volumes were not deleted.
+  Cowrie, Zeek, collector, processor, TI, hardware, response-agent, PostgreSQL,
+  and Deception Core were left running; PostgreSQL and Core are retained for
+  Cowrie integrations. No source/deployment file outside this repository was
+  edited. Docker reported FTP/SMTP exit code 137 (`OOMKilled=false`), indicating
+  they exceeded the graceful stop timeout; Odoo and HTTPS exited with code 0.
+- Runtime/exposure state: `10.58.33.42:80` maps to container `:8080`; host
+  `:8080` and Pi `:443` have no listener. FTP/SMTP/Odoo containers are exited.
+  PostgreSQL and Deception Core remain bound to loopback. The external Compose
+  file still declares stopped services, so an unrestricted full-stack `up`
+  could reactivate them.
+- Validation performed and outcome: rebuilt `decoy-honeypot-web-corp`; all 7
+  web-corp tests passed inside that image, including proof that page GETs,
+  bait paths, 404s, and unrelated POSTs create no spool events, while SQLi-like
+  login input is tagged and always rejected. Live HTTP GET returned 200;
+  container command includes `--no-access-log`; `ss` showed only port 80 for
+  web-corp (no host 8080 or 443). Cowrie, Zeek, collector, processor, TI,
+  hardware, and response-agent units reported active. `go test ./...` passed
+  in both Go agent directories; `git diff --check` passed.
+- Not performed / deferred: no live login POST was made, to avoid adding a new
+  credential-bearing record to Redis/MongoDB; no VPS/HTTPS rollout, FTP/SMTP
+  protocol test, Odoo test, dashboard query/view, or full-stack Compose start.
+  Host Python lacked FastAPI; the same suite was run successfully inside the
+  built application image.
+- Risks and data handling: historical Core and Mongo/Redis records are not
+  migrated or deleted and may include prior page/scan or credential-bearing
+  data. The sibling Compose source remains external and still defines stopped
+  services. Port 8080 is an internal app port, not a separate host exposure.
+- Rollback: restore the prior web-corp image/source and recreate only the
+  `web-corp` HTTP service. Do not start the full Compose stack as a rollback;
+  stopped service state is intentional. Existing telemetry and volumes remain
+  untouched.
+- Follow-up: migrate/clean up the external Compose definitions (including the
+  web-corp Core dependency and disabled services); provide an authorized
+  dashboard/API path to persisted login events; separately design the VPS
+  HTTPS boundary; add graceful shutdown handling for FTP/SMTP before any
+  reactivation; keep FTP/SMTP adapters and post-login deception future work.
+- Related runbooks/design: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-login telemetry](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md), and the
+  [service catalog](SERVICE-CATALOG.md).
+
+### 2026-09-25 — Reconcile current-state documentation with active TI worker
+
+- Status: documentation-only reconciliation; no runtime changes.
+- Scope and intent: align this branch's current architecture and service
+  catalog with the active TI-worker state and operating controls already
+  documented on `main`.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  pending scoped commit.
+- Repository changes: recorded the worker as enabled/running (last verified
+  2026-09-24), documented validated `ti:jobs` processing and queue/cache/
+  provider-quota controls, and corrected the stale priority that said to keep
+  enrichment disabled. Web-corp login remains outside TI enrichment.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: no new runtime check was performed; the documented
+  worker state is the existing 2026-09-24 verification and user-confirmed
+  normal operation.
+- Validation performed and outcome: compared current-state wording with
+  `origin/main`; checked the processor's `THREAT_INTEL_ENABLED` and `ti:jobs`
+  configuration references; `git diff --check` passed.
+- Not performed / deferred: no TI service restart, provider request, queue
+  inspection, or host configuration change.
+- Risks and data handling: no credentials or event data were accessed or added.
+- Rollback: revert this documentation-only reconciliation; runtime is
+  unaffected.
+- Follow-up: verify runtime status separately before making operational
+  changes; retain this current-state wording unless the worker policy changes.
+- Related docs: [current architecture](CURRENT-ARCHITECTURE.md),
+  [service catalog](SERVICE-CATALOG.md), and
+  [TI design](design/threat-intelligence.md).
+
+### 2026-09-25 — Merge latest main and preserve login-only producer scope
+
+- Status: source and documentation merge prepared; no host service changes.
+- Scope and intent: bring the feature branch up to the fetched `origin/main`
+  (`ca9d7dd0`) while keeping the current web-corp producer limited to rejected
+  login POST telemetry.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  merge commit pending at the time of this entry.
+- Repository changes: retained main's read-only GCP `/http-activity`
+  dashboard/API and dashboard evidence; reconciled current docs to distinguish
+  that read-side from the login-only sensor producer. Kept bounded ingestion
+  support for older `web_http_request` records, but did not restore page/scan
+  event production, Core `/v1/track`, or XSS indicators. TI-worker state remains
+  active as documented on main.
+- Host/environment changes actually applied: no containers, systemd units,
+  firewall rules, or external Compose files changed. Created a byte-verified
+  temporary copy of the six pre-existing untracked hardware-backup binaries at
+  `/tmp/honeypot-hardware-backup-pre-merge.tcFpE6/`; the originals remained in
+  place and unmodified.
+- Runtime/exposure state: unchanged by the merge. Web-corp remains HTTP-only on
+  the Pi with login-only app telemetry; the dashboard's last production
+  projection/auth-boundary validation is captured in the main-branch
+  validation record, and authenticated browser rendering remains unverified.
+- Validation performed and outcome: collector and processor `go test ./...`
+  passed; all 10 web-corp unit tests passed in a network-disabled container;
+  five focused dashboard HTTP activity test files passed (18 tests); staged
+  diff whitespace checks passed.
+- Not performed / deferred: no live login POST, authenticated dashboard
+  browser test, provider request, host service restart, or public exposure
+  change.
+- Risks and data handling: existing local binary backups remain untracked and
+  are excluded from commits; the temporary copy contains only those local
+  artifacts. Historical page events may still be readable in Mongo/dashboard,
+  but the current app creates no new page events.
+- Rollback: no runtime rollback is needed. Retain the feature checkpoint
+  `3ef9454d`; revert the merge commit only after reviewing its complete upstream
+  file set and confirming the backup worktree is preserved.
+- Follow-up: verify authenticated dashboard rendering with synthetic login
+  data; continue to keep FTP/SMTP, direct-Pi HTTPS, and page/scan telemetry
+  outside the active producer scope unless separately approved.
+- Related docs: [HTTP decoy scope](design/http-decoy-scope.md),
+  [web-corp data access](../integrations/web-corp/DATA-ACCESS.md),
+  [dashboard integration](../dashboard-v2/docs/WEB_CORP_HTTP_INTEGRATION.md),
+  and [live validation](WEB_CORP_HTTP_LIVE_VALIDATION_20260925.md).
+
+### 2026-09-25 — Preserve Web-corp client source ports
+
+- Status: repository implementation and tests prepared; not deployed.
+- Scope and intent: capture the observed client TCP source port for new
+  Web-corp login attempts and carry it into MongoDB's `network.src_port`,
+  without mislabeling a reverse proxy's own socket port as the client port.
+- Repository branch and commit/PR: `feat/opencanary-web-login-honeypot`;
+  uncommitted working-tree change.
+- Repository changes: added the optional sensor `source_port` field; added
+  trusted-proxy-only `X-Forwarded-Client-Port` handling; validated and forwarded
+  it as Redis `src_port`; mapped it to MongoDB `network.src_port`; tested the
+  existing dashboard projection; and documented the accepted boundary in
+  ADR-0006, the telemetry design, runbooks, and data-access guide.
+- Host/environment changes actually applied: none. No deployed image/binary,
+  container, systemd unit, database, external Compose file, or proxy config was
+  changed.
+- Runtime/exposure state: no fresh runtime check or restart was performed.
+  Existing Web-corp events are unchanged; this additive optional field requires
+  no MongoDB migration, and historical records cannot be backfilled.
+- Validation performed and outcome: all 14 Web-corp tests passed in a
+  network-disabled container with read-only source; collector and processor
+  `go test ./...` passed; four focused dashboard HTTP tests passed (16 tests);
+  `git diff --check` passed. Tests cover direct, trusted-proxy, and Uvicorn-
+  rewritten peer-port behavior, range validation, Mongo normalization, and the
+  dashboard projection.
+- Not performed / deferred: no new login event was sent to a live sensor,
+  Redis, or MongoDB; no live database query, proxy-header configuration test,
+  image/binary rollout, or service restart was performed.
+- Risks and data handling: source ports are transient and can change under NAT;
+  they are not actor identities. Only a peer in configured
+  `WEB_TRUSTED_PROXY_CIDRS` may assert a forwarded client port, and Uvicorn's
+  `--forwarded-allow-ips` must match that peer set if its middleware rewrites
+  the client scope. The proxy must overwrite the header. Missing or invalid
+  forwarded ports remain absent.
+- Rollback: revert the source, pipeline, tests, ADR, and documentation changes;
+  no runtime rollback is needed because deployment was not performed.
+- Follow-up: deploy the reviewed Web-corp, collector, and processor changes in
+  dependency order, then verify one synthetic event in `honeypot_db.events`
+  without retrieving or recording submitted credentials.
+- Related material: [ADR-0006](adr/ADR-0006-web-client-source-port.md),
+  [web-login telemetry design](design/web-login-telemetry.md),
+  [web-corp runbook](../integrations/web-corp/README.md), and
+  [data-access guide](../integrations/web-corp/DATA-ACCESS.md).
+
+### 2026-09-25 — Deploy Web-corp client source-port pipeline
+
+- Status: deployed; live login-event verification pending.
+- Runtime change: built the `web-corp` image from commit `60125598`, atomically
+  replaced the collector and processor binaries, restarted only
+  `honeypot-processor.service`, `honeypot-collector.service`, and the `web-corp`
+  container. The HTTPS container and unrelated services were left untouched.
+- Validation: Compose config check passed; collector and processor Go tests
+  passed; 14 Web-corp tests passed in an isolated network-disabled container;
+  the running app contains `_client_port` and emits `source_port`; both agents
+  are active; `GET /web/login` returned HTTP 200.
+- Data impact: no live login POST or DB write was made. The earlier record
+  remains without `network.src_port`; it cannot be backfilled. Confirm the field
+  with a projected MongoDB query after the next authorized login attempt.
+- Rollback: prior collector and processor executables are preserved under
+  `/tmp/web-source-port-rollout.ycLTz2/` pending end-to-end confirmation.
+- Detailed evidence: [source-port rollout validation](validation/2026-09-25-web-client-source-port-rollout.md).
+### 2026-09-24 — Add a square radar canvas to Live Filesystem Activity
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: give the Live topology a full-surface submarine-style radar treatment with square range frames, while leaving the Audit view and telemetry semantics unchanged.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8e83688`; this work is uncommitted.
+- Repository changes: define a standard `1000×1000` logical radar plane; add a live-only square range overlay, square grid, center axes, status readouts, and a sweep that is omitted when reduced motion is requested; add `FS-024` to the Filesystem Activity working state.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js dev server remains active on port `3000`; the edited page was served after HMR compilation. The development server reported that `AUTH_SESSION_SECRET` is unset and used its development-only fallback; this is not production activation.
+- Validation performed and outcome: Next.js dev HMR compiled the changed modules and `/filesystem-activity` returned HTTP 200. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review across desktop/mobile sizes, light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only change; no API, MongoDB query, path evidence, or telemetry authority changed. The radar plane is a visual coordinate system, not geographic or filesystem scale.
+- Rollback: remove the `LIVE_RADAR_CANVAS_SIZE`/`LiveRadarOverlay` additions and corresponding radar styles while preserving prior uncommitted edits in the same files; no host rollback is required.
+- Follow-up: visually review the authenticated Live canvas at supported wide and narrow viewport sizes, including reduced-motion mode, before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Fill the Live radar plane and rotate its sweep
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: use the remaining Live topology panel height for the empty-state radar plane and make its sweep rotate around the center.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8e83688`; this work is uncommitted.
+- Repository changes: let the Live standby wrapper and canvas grow within the topology panel; animate a circular sweep wedge and beam around the center of the standardized square canvas; disable sweep animation for reduced-motion preferences; update `FS-024` current-state criteria and decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js dev server remains active on port `3000`; HMR compiled the edited modules.
+- Validation performed and outcome: Next.js dev HMR compiled successfully. No automated tests were run.
+- Not performed / deferred: authenticated browser screenshot review, responsive and light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only change; no API, MongoDB query, path evidence, or telemetry authority changed. The square radar plane is a visual coordinate system, not geographic or filesystem scale.
+- Rollback: revert the standby flex sizing and `pti-live-radar-sweep-*` animation rules and markup; no host rollback is required.
+- Follow-up: visually review the authenticated Live canvas at supported viewport sizes and confirm reduced-motion behavior before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Extend the Live sweep across the full canvas
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: rotate a circular radar sweep from the canvas center out to the full responsive canvas bounds, with an energy trail behind its leading line.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8e83688`; this work is uncommitted.
+- Repository changes: measure the Live overlay with `ResizeObserver`; render the rotating sweep in a viewport-sized SVG with a radius reaching beyond the canvas corners; fade the green trail from transparent at its trailing edge toward the beam; remove the beam's front glow; update the `FS-024` current-state record.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js dev server remains active on port `3000`; HMR compiled the edited modules and the authenticated `/filesystem-activity` page returned HTTP 200.
+- Validation performed and outcome: HMR compilation and authenticated page response succeeded; `git diff --check` passed for the edited source and documentation files. No automated tests were run.
+- Not performed / deferred: new authenticated screenshot review, responsive and light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only change; the observer only sizes the visual sweep to its container; no API, MongoDB query, path evidence, or telemetry authority changed.
+- Rollback: remove the radar overlay size observer and dynamic sweep SVG/gradient styles; no host rollback is required.
+- Follow-up: visually review the trail direction, full-canvas coverage, and no-glow beam at supported viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Anchor Live radar ticks to canvas edges
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: align the four cardinal accent ticks with the full responsive canvas while keeping square radar range frames centered.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8e83688`; this work is uncommitted.
+- Repository changes: replace ticks attached to the outer square frame with four edge-positioned marks spanning inward from the top, right, bottom, and left canvas boundaries; update `FS-024` criteria and decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js dev server remains active on port `3000`; HMR compiled the edited modules and the authenticated `/filesystem-activity` page returned HTTP 200.
+- Validation performed and outcome: HMR compilation and authenticated page response succeeded; `git diff --check` passed for the edited source and documentation files. No automated tests were run.
+- Not performed / deferred: new authenticated screenshot review, responsive and light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only change; no API, MongoDB query, path evidence, or telemetry authority changed.
+- Rollback: restore the SVG frame-bound tick path and remove the `.pti-live-radar-edge-tick` markup/styles; no host rollback is required.
+- Follow-up: visually review edge alignment at supported viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Calculate the radar wake against the canvas boundary
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the circular beam end at the first rectangle edge for each heading and shape its trailing energy wake from the same angle-dependent boundary intersections.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: calculate the beam endpoint from the nearest canvas edge on every animation frame; trace the wake's outer contour along the corresponding rectangle boundary, including crossed corners; use a conic opacity gradient that is strongest at the beam and fades backward; clip the wake bloom behind the beam and keep the beam itself unglowed; render at up to 30 frames per second and stop the canvas animation for reduced-motion users.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js dev server remains active on port `3000`; HMR compiled the edited modules and the authenticated `/filesystem-activity` page returned HTTP 200.
+- Validation performed and outcome: Next.js dev HMR compilation and authenticated page response succeeded. No automated tests were run.
+- Not performed / deferred: screenshot review at cardinal directions and corners, responsive/light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only change; no API, MongoDB query, path evidence, or telemetry authority changed. Canvas drawing is limited to the decorative radar sweep.
+- Rollback: restore the SVG sweep from commit `865c23e` and remove the boundary-intersection helpers and canvas animation; no host rollback is required.
+- Follow-up: visually inspect the wake as the beam crosses all four edge centers and corners before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Record the accepted Live radar design commit (addendum)
+
+- Addendum: the initial square radar, full-height Live plane, full-canvas sweep, and canvas-edge ticks from the earlier `FS-024` entries were committed on this branch as `865c23e` (`feat(filesystem): add full-canvas radar sweep`). Their earlier `uncommitted` status reflects the state before that commit.
+- Current repository state: the rectangle-boundary wake refinement recorded immediately above is a separate uncommitted change based on `865c23e`.
+- Host/environment changes actually applied: none; the radar design remains local and is not deployed.
+
+### 2026-09-24 — Smooth the Live radar wake and soften its center axes
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the trailing energy glow taper more smoothly and reduce the dashed center axes showing through its transparent edge.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: add a multi-stop opacity ramp to the trailing wake, remove its extra overlapping fill pass, keep a clipped soft bloom behind the crisp beam, and reduce center-axis contrast; update the `FS-024` current-state criteria and decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active on port `3000`; HMR compiled the edited modules.
+- Validation performed and outcome: Next.js development HMR compilation succeeded. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review, responsive/light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only canvas/CSS change; no API, MongoDB query, path evidence, or telemetry authority changed. The dashed center axes remain decorative radar guides.
+- Rollback: restore the radar gradient and axis styles in `TopologyCanvas.tsx` and `globals.css`; no host rollback is required.
+- Follow-up: inspect the wake at several headings and canvas aspect ratios before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-24 — Simplify the Live radar frame and status layout
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: reduce visual clutter around the Live radar and keep retained-session access with the Session Audit controls.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: retain only the outer and one inner square frame; soften the grid and inner frame; remove corner diagnostics and extra center outlines; use one outlined HardDrive beacon; hide the duplicate listening connection label visually while preserving its accessible status; move retained-session access to a compact History/count control beside the view tabs; update the existing component evidence test to cover its new location.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active on port `3000`; HMR compiled the changed application modules and `/filesystem-activity` returned HTTP 200 from the authenticated browser session.
+- Validation performed and outcome: HMR compilation and authenticated page response succeeded. The existing test was updated but no automated tests were run.
+- Not performed / deferred: authenticated screenshot review, responsive/light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only radar and toolbar changes; no API, MongoDB query, path evidence, or telemetry authority changed. The count uses the same bounded recent-closed-session snapshot already shown by the prior shortcut.
+- Rollback: restore the Live range/readout/beacon markup in `TopologyCanvas.tsx`, the retained-session control in `FilesystemPageHeader.tsx`, and matching radar styles; no host rollback is required.
+- Follow-up: review the compact Session control and two-frame radar at desktop and narrow viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Center the Live radar emitter
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the source of the rotating sweep visibly coincide with the square canvas's geometric center.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: pin a small outlined Radar icon to the canvas center independently of the listening text; move status copy beneath the beacon; add one faint circular pulse ring that becomes static under reduced-motion preferences; update the `FS-024` current-state criteria and decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server is active at `http://localhost:3000`; it reports that `AUTH_SESSION_SECRET` is missing and uses its development-only fallback. The protected filesystem route redirects unauthenticated requests to login.
+- Validation performed and outcome: `npm run dev` reached `Ready`; an unauthenticated `curl -I http://localhost:3000/filesystem-activity` returned HTTP 307 to `/login`; the authenticated browser session then loaded `/filesystem-activity` with HTTP 200. No automated tests were run.
+- Not performed / deferred: screenshot review, responsive/light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only canvas/CSS change; no API, MongoDB query, path evidence, or telemetry authority changed. The pulse is decorative and does not represent a session event.
+- Rollback: restore the standby beacon/status layout in `TopologyCanvas.tsx` and its pulse styles in `globals.css`; no host rollback is required.
+- Follow-up: review that the sweep meets the beacon cleanly and that the status block remains legible at narrow viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Add a breathing cue to the Live listening title
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: give the empty Live state a quiet visual cue that it is actively waiting for sessions.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: animate only the `Listening for sessions` title between 0.88 and full opacity on a 2.8-second cycle coordinated with the emitter pulse; disable the title animation for reduced-motion preferences; update the `FS-024` current-state criteria and decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server is active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: HMR compiled the edited page and the authenticated `/filesystem-activity` page returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: screenshot review, responsive/light/dark visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only title animation; no API, MongoDB query, path evidence, or telemetry authority changed. The opacity animation communicates the listening state and does not represent a session event.
+- Rollback: remove the listening-title animation class in `TopologyCanvas.tsx` and its keyframes/reduced-motion rule in `globals.css`; no host rollback is required.
+- Follow-up: visually confirm the title breath remains subtle beside the emitter pulse before marking `FS-024` done.
+- Related ADR/runbook: no operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Match the Live radar palette to the dashboard theme
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the Live radar feel native to both dashboard themes, using the existing brick-orange primary in light mode and bright-brass primary in dark mode.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: replace fixed green radar surfaces, grid, frames, axes, hub, edge ticks, status accents, and canvas sweep with system theme tokens; refresh the Canvas sweep color when `data-theme` changes; update the `FS-024` acceptance record and decision/update logs.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited styles and component; the dev server served `/filesystem-activity` with HTTP 200; `git diff --check` passed; a targeted search found no remaining fixed green radar colors. No automated tests were run.
+- Not performed / deferred: paired authenticated light/dark screenshot review, responsive visual review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS and canvas change; no API, MongoDB query, path evidence, or telemetry authority changed.
+- Rollback: restore the fixed radar colors in `globals.css` and the sweep palette in `TopologyCanvas.tsx`; no host rollback is required.
+- Follow-up: review the radar surface and sweep in both themes at wide and narrow viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Connect Live radar crosshairs and enlarge its emitter
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the four cardinal edge ticks read as one radar crosshair through the sweep origin and give the center emitter more visual weight without adding synthetic activity.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: draw subtle continuous perpendicular crosshairs across the full Live canvas beneath the sweep; remove the redundant square-only axes; enlarge the centered Radar icon and hub; omit transport status from the listening state and replace protocol-specific transient copy with operator-facing text; update `FS-024` current state, decisions, and update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `git diff --check` passed; a targeted search found no transport-status text or obsolete square-only axes in the Live radar. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of the crosshair and emitter at wide/narrow sizes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS and copy change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the SVG center axis and original emitter dimensions/status copy in `TopologyCanvas.tsx` and `globals.css`; no host rollback is required.
+- Follow-up: visually review crosshair alignment with the four edge ticks and verify the enlarged emitter remains centered under both aspect ratios before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Match Live radar crosshair weight and soften the wake
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: match the crossing axis weight to the cardinal edge markers and keep the sweep wake from appearing as a broad cloud.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: set both continuous crosshair strokes to `1.5px`, matching the edge ticks; lower the multi-stop wake opacity and reduce its clipped bloom opacity and blur; update the `FS-024` acceptance record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated styles and Canvas component; the dev server served `/filesystem-activity` with HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of crosshair weight and wake strength at wide/narrow sizes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS and Canvas appearance change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the crosshair width/height and sweep trail stops/bloom settings in `globals.css` and `TopologyCanvas.tsx`; no host rollback is required.
+- Follow-up: confirm the crosshair joins the edge ticks cleanly and the wake remains visible but restrained before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Increase Live radar crosshair visibility
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the perpendicular center axes visible while preserving the requested edge-tick stroke thickness.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: retain `1.5px` crosshair strokes to match the cardinal edge ticks and raise the primary-color axis contrast from 7% to 22%; update the `FS-024` current-state criterion and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated theme styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review in both themes and at wide/narrow sizes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore `--pti-radar-axis` to its previous 7% mix in `globals.css`; no host rollback is required.
+- Follow-up: confirm the crosshairs are visible and remain 1.5px across supported display scales before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Unify the Live radar edge and crosshair strokes
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the full-canvas crosshair look exactly as substantial as the short cardinal markers where it reaches the plane boundary.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: define a shared `2px` radar stroke width and apply the same primary color, 72% opacity, and edge glow to the crosshairs and edge ticks; update the `FS-024` acceptance record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated styles; the dev server served `/filesystem-activity` with HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: screenshot review to compare the now-shared stroke treatment in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the prior per-element crosshair and edge-tick stroke styles and remove `--pti-radar-stroke-width`; no host rollback is required.
+- Follow-up: compare the continuous axes against all four edge ticks in the browser before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Put diagonal radar markers at the canvas corners
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: place the four diagonal registration marks at the full responsive canvas corners, outside the centered square range frame.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: remove the diagonal marks from the square SVG frame and add short 45-degree accent marks inset from each actual canvas corner; update the `FS-024` current-state record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the overlay and styles; the dev server served `/filesystem-activity` with HTTP 200; `git diff --check` passed; a targeted search confirmed the marks are no longer attached to the square SVG frame. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review at wide and narrow aspect ratios, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS/SVG overlay change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the four `.pti-live-radar-corner-tick` spans and restore the SVG corner path; no host rollback is required.
+- Follow-up: verify the marks sit near the actual panel corners at both wide and tall canvas ratios before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Extend diagonal radar marks to the canvas edges
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: remove the visible gap between each diagonal corner mark and the canvas boundary while respecting the rounded canvas corners.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: reposition and lengthen each diagonal mark so its endpoints meet the adjoining straight canvas edges past the rounded-corner cutout; keep the marks attached to the responsive canvas, outside the square range frame; update the `FS-024` current-state record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated corner mark styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review to confirm the marks meet the rounded canvas boundary across wide and narrow aspect ratios, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS adjustment; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the previous `.pti-live-radar-corner-tick` inset and length in `globals.css`; no host rollback is required.
+- Follow-up: inspect all four corner marks at the actual viewport sizes before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Aim Live radar corner marks inward at 45 degrees
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make each short diagonal mark emerge inward from an actual responsive canvas corner at a 45-degree angle.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: rotate and anchor the four corner ticks at the corresponding canvas edges so each points inward; retain the shared accent stroke style and keep the square range frames unchanged; update the `FS-024` current-state record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated corner-mark styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of the 45-degree rays at wide and narrow aspect ratios, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS adjustment; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the previous `.pti-live-radar-corner-tick` dimensions and inset transforms in `globals.css`; no host rollback is required.
+- Follow-up: visually confirm each ray emerges from its canvas corner and points into the plane at 45 degrees before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Calculate corner rays for the responsive canvas ratio
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: align each short corner ray with the exact sweep direction from the canvas center to its corresponding rectangular canvas corner.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: measure the Live overlay with `ResizeObserver`, calculate the inward corner angle as `atan2(height, width)`, and expose signed angles to the four corner ticks; recompute on every size change, including reduced-motion mode, so the marks remain collinear with the responsive radar sweep; update the `FS-024` current-state record and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated component and styles; the dev server served `/filesystem-activity` with HTTP 200; `git diff --check` passed; a targeted search confirmed there is no fixed 45-degree corner transform. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review at multiple canvas aspect ratios and in reduced-motion mode, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only angle calculation; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the angle-measuring `useLayoutEffect` in `TopologyCanvas.tsx` and restore fixed corner transforms in `globals.css`; no host rollback is required.
+- Follow-up: check that each corner tick overlays its sweep direction at wide and tall canvas ratios before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Soften the Live radar wake again
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: preserve the gentle breathing listening label while making the sweep's trailing haze less prominent.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: reduce the wake gradient's peak opacity from 0.20 to 0.14, lower its intermediate opacity stops, and reduce the clipped bloom from 0.08 opacity / 12px blur to 0.05 opacity / 8px blur; preserve the crisp 0.9-opacity beam and the existing 2.8-second listening-title breath; update the `FS-024` criterion and decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the changes; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed. An unauthenticated direct fetch redirected with HTTP 307. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of wake strength in both themes and at wide/narrow aspect ratios, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas styling change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the prior trail-stop opacity values and clipped bloom to 0.08 opacity / 12px blur in `TopologyCanvas.tsx`; no host rollback is required.
+- Follow-up: visually confirm the wake remains visible but quieter than the beam in both themes before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Replace the radar glyph with a rounded-square double pulse
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the radar's center and paired outgoing waves use the same rounded-square geometry as the range frames and canvas.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: remove the center Radar icon and its circular pseudo-element pulse; use a solid 32×32 accent emitter with the canvas's 12px corner radius; animate two outlined rounded-square waves in one 3.2-second cycle, with the outer wave reaching the 924-unit frame quickly and the delayed inner wave reaching the 664-unit frame more slowly; calculate SVG corner radii from the responsive plane scale so both waves align with their range frames; omit both waves when reduced motion is requested; update `FS-024` acceptance and design history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the component and styles; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated visual review of the double-beat timing, frame alignment, and rounded corners in both themes and at wide/narrow canvas ratios; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas/SVG/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the Radar glyph and circular hub pulse in `TopologyCanvas.tsx` and its hub/pulse rules in `globals.css`; remove the paired SVG wave frames and their responsive-radius updates; no host rollback is required.
+- Follow-up: inspect the two pulse landings on the existing outer and inner frames, especially on non-square canvas sizes and with reduced motion enabled.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Remove the solid center radar emitter
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: leave the center open and let the repeating rounded-square waves define the radar origin.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: remove the solid center block and its theme-specific emitter styling; preserve the paired rounded-square waves, their responsive frame-aligned corner radii, double-beat timing, reduced-motion behavior, and the breathing listening title; update the `FS-024` current-state criterion and append the superseding design decision.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the component and styles; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed; a targeted search confirmed the removed emitter styles and variables have no remaining references. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of the open center and wave alignment in both themes and at wide/narrow canvas ratios, reduced-motion review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas/SVG/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the center emitter element and `.pti-live-radar-hub` rules in `TopologyCanvas.tsx` and `globals.css`; no host rollback is required.
+- Follow-up: inspect the open center during both beats and confirm the wave outlines still land on their matching frames before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Remove persistent radar range frames
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: remove the two static square boxes behind the waves while preserving the center emitter and the animated double pulse.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: restore the solid 32×32 accent emitter without an icon; remove the persistent outer and inner range-frame SVGs and their CSS; keep the paired animated square outlines at their existing 924-unit and 664-unit reaches, with their responsive rounded corners and double-beat timing; update the `FS-024` criterion and append the clarification to design history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the component and styles; `git diff --check` passed; a targeted search confirmed no persistent range-frame elements or styles remain and the center emitter is present. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of the waves without static frames, corner alignment in both themes and at wide/narrow canvas ratios, reduced-motion review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the two `.pti-live-radar-range` SVG rectangles and their CSS rules; remove the center emitter element and styles only if reverting all changes from this refinement is desired; no host rollback is required.
+- Follow-up: inspect the two pulse extents after static range frames are removed and ensure the center emitter remains visible before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Slow and lengthen the radar double pulse
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make both rounded-square wave fronts easier to follow, keep a gradual fade at each full reach, and leave a longer pause before the next pair.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: extend the wave cycle from 3.2 to 5.6 seconds; move the outer wave to full scale at 34% and fade it linearly through 53%; delay the inner wave by 620ms, move it to full scale at 48%, and fade it linearly through 72%; preserve the outer-first/inner-second cadence, both range extents, the center emitter, rounded corners, and reduced-motion behavior; update the `FS-024` criterion and append the design decision.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated styles; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated visual review of both pulse timings, full-reach fades, and the longer pause in both themes and at wide/narrow canvas ratios, reduced-motion review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS animation change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the wave animation duration to 3.2 seconds, inner delay to 480ms, and the previous keyframe stops; no host rollback is required.
+- Follow-up: review the two complete cycles visually to confirm the fade feels gradual and the longer interval still reads as a paired pulse.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Simplify the Live listening state and sweep glow
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: remove steady-state status copy and the broad sector-shaped sweep haze while keeping a glow attached to the moving beam.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: omit the “Listening for sessions” title and its empty status wrapper in the steady listening mode while preserving loading/reconnect messages and the reconnect action; remove the sweep's conic/linear gradient sector and clipped fog fill; retain the boundary-calculated crisp sweep stroke with a 9px Canvas shadow glow; remove the static center radial haze and the unused listening-title breath styles; update the `FS-024` criterion and append the design decision.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated component; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review of the clean listening state, beam glow, loading/reconnect copy, both themes, and reduced-motion behavior; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas/SVG/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the listening title and breath styles, centered radial background haze, and sweep-sector gradient/clip fill in `TopologyCanvas.tsx` and `globals.css`; no host rollback is required.
+- Follow-up: review that the beam still reads clearly at all sweep angles without a surrounding haze and that reconnect/loading remain legible.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Keep the moving radar wake without the broad haze
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: retain the low-opacity wave that follows the rotating beam while removing the broad, separately blurred fog effect; keep the steady listening title absent.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: restore the clipped 48-degree multi-stop gradient wake behind the beam, fading from 0.14 opacity at the beam to transparent at the tail; do not apply an extra shadow blur to the wake; preserve the 9px shadow glow on the crisp moving beam, the removed static center radial haze, the absent steady-state listening title, and loading/reconnect copy; append a clarification to the `FS-024` design history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated component and styles; `git diff --check` passed; a targeted source scan confirmed the moving gradient wake remains and the broad fill blur and steady-state listening title are absent. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review to confirm the wake remains visible without reading as fog, the listening center stays uncluttered, and loading/reconnect copy remains legible; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas/SVG/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the extra clipped wake shadow blur and centered radial haze only if that presentation is preferred; restore the listening title only if the steady-state text is desired again; no host rollback is required.
+- Follow-up: visually review the wake through a full 360-degree turn in both themes before marking `FS-024` done.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Stop radar scanning when a session is present
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the moving radar scan a standby treatment and clear it as soon as the live snapshot contains session activity.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: pass live snapshot session presence to `LiveRadarOverlay`; when one or more sessions exist, unmount the sweep canvas and both animated pulse outlines and stop their animation effect, while preserving the grid and crosshairs; include scan state in the rounded-corner measurement effect so pulse corners are recalculated if scanning resumes; update the `FS-024` criterion and append the design decision.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the updated component; the active browser request to `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated browser review of scan removal on the first arriving session, behavior when session data clears, and loading/standby states; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only conditional rendering; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the `scanning` prop and guards from `LiveRadarOverlay` and the live snapshot call site; no host rollback is required.
+- Follow-up: confirm the scan stays absent while a session exists and returns only after the live snapshot has no sessions.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Hide the entire standby radar plane on live activity
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: treat the full colored radar plane and all of its decoration as empty/standby UI; show the normal map surface once session data is present.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: derive one `showLiveRadarStandby` state from live mode and an empty session snapshot; apply `pti-live-radar` and mount its grid, crosshairs, edge/corner ticks, sweep, and pulses only in standby; use `bg-surface-subtle` and render no radar overlay when live sessions exist; preserve the audit grid behavior; update the `FS-024` acceptance criterion and append the clarification to design history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: pending HMR confirmation and `git diff --check`; no automated tests were run.
+- Not performed / deferred: authenticated browser review of all radar decoration disappearing when live sessions arrive and returning on an empty snapshot; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only conditional rendering and surface-class change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the `pti-live-radar` class and `LiveRadarOverlay` unconditionally in the populated live map; no host rollback is required.
+- Follow-up: confirm populated live snapshots show only the standard map canvas while zero-session standby still displays the full radar plane.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Restore the View-controlled background grid on active topology
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: preserve the neutral map grid as an operator-controlled canvas option while keeping standby-only radar effects out of populated topology.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: render the neutral `--border` background grid on populated live topology only while View > Show background grid is enabled; keep the primary-colored standby radar surface, themed grid, crosshairs, corner/edge marks, sweep, and pulse waves limited to the empty standby state; leave Audit grid behavior unchanged; clarify the current `FS-024` acceptance criteria and append a design/update record. This entry records completion of the pending HMR validation from the preceding refinement without rewriting that historical note.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated browser review of the View toggle with and without sessions, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only canvas rendering; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the populated-live `pti-live-radar-grid` branch and restore the no-overlay condition; no host rollback is required.
+- Follow-up: confirm in the browser that Show background grid toggles the neutral grid with active sessions while all themed standby radar decoration stays absent.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Restore sweep wake strength on a neutral radar plane
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: restore the brighter gradient wake behind the sweep and remove the primary-color wash from the empty-state radar background.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `865c23e`; this refinement is uncommitted.
+- Repository changes: restore the Canvas wake's multi-stop gradient to a 0.48 peak opacity while retaining a smooth fade from its trailing edge; replace the layered radar background tints with the solid theme surface token, which is white in light theme and dark in dark theme; update the current `FS-024` criteria and append the decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of the stronger wake and plain background in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only Canvas/CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the wake's previous 0.14 peak opacity and the layered primary-color background gradients; no host rollback is required.
+- Follow-up: inspect the sweep wake in empty standby in light and dark themes and confirm the solid canvas makes the wake provide the scene's localized brightness.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Add diagonal guides and a circular radar emitter
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: try two corner-to-corner diagonal guides through the radar origin and change the filled center emitter from a square to a circle.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3173531`; this refinement is uncommitted.
+- Repository changes: add two low-contrast SVG diagonal lines that span the canvas corners, pass through its exact center, and adapt to the canvas aspect ratio; render the solid 32×32 primary-color center emitter as a circle; keep the rounded-square pulse waves unchanged; update the current `FS-024` criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of diagonal contrast and circle alignment in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG/CSS change in empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the diagonal SVG and style, restore the square emitter radius/class, and revert the corresponding `FS-024` criterion; no host rollback is required.
+- Follow-up: inspect the diagonals against the crosshairs and moving sweep and confirm the circle reads clearly at the origin in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Thin the perpendicular radar axes
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: reduce the stroke thickness of the continuous perpendicular crosshairs while preserving their existing color, opacity, glow, and alignment with the connected edge ticks.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `cc45e14`; this refinement is uncommitted.
+- Repository changes: reduce the shared crosshair, cardinal edge-tick, and corner-tick stroke width from 2px to 1.5px; keep accent colors and glow unchanged; update the current `FS-024` criterion and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of the slimmer axes at different display scales and themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore `--pti-radar-stroke-width` to `2px` and revert the current-state criterion; no host rollback is required.
+- Follow-up: review that the crosshairs remain visible and match the attached edge ticks at supported display scales.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Match crosshair opacity to diagonal guides
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: make the perpendicular center axes as faint as the diagonal guides without changing their color or thickness.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `cc45e14`; this refinement is uncommitted.
+- Repository changes: set the perpendicular crosshair opacity to 0.2 to match the diagonal SVG lines; preserve the primary accent color, glow, 1.5px stroke width, and brighter edge ticks; update the current `FS-024` criterion and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review to confirm the perpendicular axes match diagonal-guide faintness in both themes, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only CSS change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the crosshair pseudo-element opacity to 0.72 and revert the current-state criterion; no host rollback is required.
+- Follow-up: visually compare the diagonal and perpendicular guide lines at the same zoom level.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Disable topology actions in the Live empty state
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: disable canvas toolbar actions while Live has no session topology, with an exception for exiting an already expanded workspace.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8088dc1`; this refinement is uncommitted.
+- Repository changes: derive an empty-live state for snapshots with no sessions or no snapshot; pass it to `TopologyToolbar`; disable zoom, fit, center, View menu and its appearance/layout options; close an open View menu when the empty state begins; disable fullscreen entry in the empty state but keep fullscreen exit enabled when expanded; style disabled buttons; update `FS-024` current-state criteria and append decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: browser review of disabled styling, re-enabling controls after sessions arrive, and fullscreen exit; lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation and control-state change only; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: remove the `isEmptyLiveState` toolbar prop and button guards, restore fullscreen toggle availability, and revert the current-state criterion; no host rollback is required.
+- Follow-up: verify that toolbar controls activate after a session arrives and that the expanded canvas can always be exited.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Keep fullscreen available in the Live empty state
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: correct the empty-state toolbar behavior so fullscreen can be entered as well as exited.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `8088dc1`; this clarification is uncommitted.
+- Repository changes: remove the empty-state disabled condition from the fullscreen toggle; preserve disabled states for zoom, fit, center, View, appearance, and layout actions; clarify the current `FS-024` criterion and append a correction to the decision/update history.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development-only auth fallback is in use.
+- Validation performed and outcome: Next.js HMR compiled the edited toolbar and `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: browser review of fullscreen entry and exit from the empty state, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation and control-state change only; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the `disabled={isEmptyLiveState && !isTopologyExpanded}` condition on the fullscreen toggle and revert the current-state clarification; no host rollback is required.
+- Follow-up: confirm both fullscreen entry and exit work while the other Live toolbar actions remain disabled.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Make the paired standby radar waves circular
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: change the two expanding empty-state radar pulses from rounded squares to circles without changing their double-beat motion.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `d9f2fbb`; this refinement is uncommitted.
+- Repository changes: replace the outer and inner SVG wave rectangles with centered circles of 462 and 332 logical-unit radii; remove responsive corner-radius calculations that only applied to the former rounded rectangles; preserve the 5.6-second cycle, 620ms inner-wave delay, existing expansion/fade keyframes, reduced-motion handling, and empty-state visibility rules; update `FS-024` current criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; an unauthenticated request to `/filesystem-activity` redirected to login with HTTP 307.
+- Validation performed and outcome: `git diff --check` passed. No authenticated browser rendering or HMR compilation was confirmed for this refinement. No automated tests were run.
+- Not performed / deferred: authenticated visual review of the circular pulses, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG change in the empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the two wave SVG rectangles and their responsive corner-radius calculation, then revert the corresponding current-state criterion; no host rollback is required.
+- Follow-up: review pulse alignment and reduced-motion behavior in the authenticated UI in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Use one dissipating wave across the Live canvas
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: replace the two standby pulses with one circular wave that reaches beyond every canvas corner, loses intensity as it expands, then pauses before its next release.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `d9f2fbb`; this refinement is uncommitted.
+- Repository changes: render one SVG circle; align its viewBox to measured CSS-pixel canvas dimensions so it remains circular on rectangular planes; calculate its radius as half the canvas diagonal plus 16px; ease the expansion to full reach by 80% of a 7-second cycle; reduce stroke opacity and attached glow from strong at the source to faint at the corner, fade it away after it clears the boundary, and leave approximately 0.6 seconds of invisible hold before restarting; preserve empty-state and reduced-motion gating; update `FS-024` current criteria and append design/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: the local `dashboard-v2` Next.js development server remains active at `http://localhost:3000`; development authentication was active during the `/filesystem-activity` request.
+- Validation performed and outcome: Next.js HMR compiled the edited component and styles in 90ms; `/filesystem-activity` returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: visual review of the wave on wide and tall canvases, authenticated screenshot review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only SVG/CSS change in the empty-state radar; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: restore the paired pulse circles, fixed square viewBox, and previous two-wave keyframes; revert the current-state criterion and appended decision/update records; no host rollback is required.
+- Follow-up: inspect circle clipping and the fade/pause cadence at multiple canvas aspect ratios and in both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).

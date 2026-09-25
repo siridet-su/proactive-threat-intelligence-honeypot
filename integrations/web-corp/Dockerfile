@@ -14,4 +14,4 @@ RUN head -c 2202009 /dev/urandom > /app/html/backup/odoo_production_2026-06-30.s
 
 EXPOSE 8080
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--no-access-log"]

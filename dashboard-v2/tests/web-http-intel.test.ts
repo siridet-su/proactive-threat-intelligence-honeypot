@@ -5,7 +5,7 @@ function event(overrides: Record<string, unknown> = {}) {
   return {
     source: "web-corp", event_type: "web_login_attempt", event_id: "abc123",
     timestamp: "2026-09-24T10:00:00Z", outcome: "rejected",
-    network: { src_ip: "198.51.100.8" },
+    network: { src_ip: "198.51.100.8", src_port: 49152 },
     http: { method: "POST", path: "/web/login", query: "" },
     ...overrides,
   };
@@ -45,6 +45,10 @@ describe("Web-corp read-only HTTP hints", () => {
     const output = projectWebHttpEvent(event());
     expect(output?.signals).toEqual([]);
     expect(output?.ttpCandidate).toBeNull();
+  });
+
+  it("projects a captured TCP source port as connection metadata", () => {
+    expect(projectWebHttpEvent(event())?.sourcePort).toBe(49152);
   });
 
   it("rejects other sources and event types", () => {

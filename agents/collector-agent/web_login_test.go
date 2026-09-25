@@ -12,7 +12,7 @@ func validWebLoginPayload() map[string]any {
 		"request_id":     "0123456789abcdef0123456789abcdef",
 		"timestamp":      "2026-09-24T12:00:00.000Z",
 		"source_ip":      "198.51.100.20",
-		"http":           map[string]any{"method": "POST", "path": "/web/login"},
+		"http":           map[string]any{"scheme": "http", "method": "POST", "path": "/web/login"},
 		"odoo_login": map[string]any{
 			"database": "synthetic-db", "login": "test-user", "password": "synthetic-test-value",
 			"redirect": "/web", "remember": "1",
@@ -55,6 +55,7 @@ func TestValidateWebLoginPayloadRejectsInvalidMetadata(t *testing.T) {
 		{name: "invalid id", change: func(p map[string]any) { p["request_id"] = "../bad" }},
 		{name: "invalid timestamp", change: func(p map[string]any) { p["timestamp"] = "yesterday" }},
 		{name: "invalid source ip", change: func(p map[string]any) { p["source_ip"] = "not-an-ip" }},
+		{name: "invalid HTTP scheme", change: func(p map[string]any) { p["http"].(map[string]any)["scheme"] = "ftp" }},
 		{name: "accepted result", change: func(p map[string]any) { p["result"] = "accepted" }},
 		{name: "missing login object", change: func(p map[string]any) { delete(p, "odoo_login") }},
 	}
@@ -69,12 +70,75 @@ func TestValidateWebLoginPayloadRejectsInvalidMetadata(t *testing.T) {
 	}
 }
 
+func TestWebLoginDestinationPortFollowsScheme(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		scheme string
+		want   string
+	}{
+		{name: "legacy event defaults to HTTP", want: "80"},
+		{name: "HTTP", scheme: "http", want: "80"},
+		{name: "HTTPS", scheme: "https", want: "443"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			payload := validWebLoginPayload()
+			if test.scheme != "" {
+				payload["http"].(map[string]any)["scheme"] = test.scheme
+			}
+			if got := webLoginDestinationPort(payload); got != test.want {
+				t.Fatalf("destination port = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestWebLoginSourcePortIsOptionalAndRangeBounded(t *testing.T) {
+	payload := validWebLoginPayload()
+	if port, valid := webLoginSourcePort(payload); !valid || port != "" {
+		t.Fatalf("legacy payload source port = %q, valid = %v; want empty and valid", port, valid)
+	}
+	payload["source_port"] = nil
+	if _, _, err := validateWebLoginPayload(payload); err != nil {
+		t.Fatalf("null optional source port rejected: %v", err)
+	}
+
+	for _, test := range []struct {
+		value any
+		want  string
+	}{
+		{value: float64(1), want: "1"},
+		{value: float64(49152), want: "49152"},
+		{value: float64(65535), want: "65535"},
+	} {
+		payload = validWebLoginPayload()
+		payload["source_port"] = test.value
+		if port, valid := webLoginSourcePort(payload); !valid || port != test.want {
+			t.Fatalf("source port %v = %q, valid = %v; want %q and valid", test.value, port, valid, test.want)
+		}
+		if _, _, err := validateWebLoginPayload(payload); err != nil {
+			t.Fatalf("valid source port %v rejected: %v", test.value, err)
+		}
+	}
+
+	for _, invalid := range []any{
+		float64(0), float64(65536), float64(49152.5), float64(-1), "49152", true,
+	} {
+		payload = validWebLoginPayload()
+		payload["source_port"] = invalid
+		if _, valid := webLoginSourcePort(payload); valid {
+			t.Fatalf("invalid source port %v was accepted", invalid)
+		}
+		if _, _, err := validateWebLoginPayload(payload); err == nil {
+			t.Fatalf("invalid source port %v passed payload validation", invalid)
+		}
+	}
+}
+
 func TestValidateWebHTTPPayloadAndSessionBoundary(t *testing.T) {
 	payload := validWebLoginPayload()
 	payload["event"] = "web_http_request"
 	payload["web_session_id"] = "abcdef0123456789abcdef0123456789"
 	payload["http"] = map[string]any{"method": "GET", "path": "/login.html", "status_code": float64(200)}
-	payload["xss_indicators"] = map[string]any{"query": []any{"script_tag"}}
 	delete(payload, "odoo_login")
 	delete(payload, "result")
 	if _, _, err := validateWebLoginPayload(payload); err != nil {

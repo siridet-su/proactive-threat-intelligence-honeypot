@@ -5,10 +5,10 @@ web-corp door — FastAPI (เขียนใหม่ 2026-09-20 แทน ngin
 (JS ฝั่ง client ล้วน ไม่มี backend จริง) — จับพฤติกรรม attacker ไม่ได้เลย
 
 ใหม่: เสิร์ฟหน้า/persona บริษัทเดิม (Rattana Trading & Logistics) พร้อม backend ปลอมเพื่อ
-  1. เก็บ login attempts ที่ POST /web/login (คง POST /login สำหรับ compatibility)
-  2. ดัก path scanning (/.env /wp-admin /phpmyadmin /.git /backup ...) → log เป็น signal "web-scan"
-  3. เขียน login event ลง restricted local spool เพื่อส่งเข้า Redis/Mongo โดยไม่ปนกับ Core command/session
-     ส่วน page views และ bait-path signals ยังคงส่ง /v1/track แบบ fire-and-forget
+  1. เก็บเฉพาะ login attempts ที่ POST /web/login (คง POST /login สำหรับ compatibility)
+  2. ปฏิเสธทุก login และไม่ส่งค่าที่กรอกไปยัง Odoo/PostgreSQL
+  3. ส่ง login event ผ่าน restricted local spool เข้า Redis/Mongo; page views, scans และ 404
+     ไม่ถูกบันทึกเป็น telemetry ของแอป
 
 คงพฤติกรรมเดิมที่ test_suite/web_corp_behavior_test.py เช็คไว้ทุกข้อ (title, /admin→302 /login.html,
 robots Disallow /backup/, /backup/ listing, fake sql.gz 2202009 bytes, 404 baseline).
@@ -32,7 +32,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote_plus
 
-import httpx
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import (
     FileResponse,
@@ -45,10 +44,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("web-corp")
 
 HTML_DIR = Path(os.environ.get("WEB_HTML_DIR", "/app/html"))
-DECEPTION_CORE_URL = os.environ.get(
-    "DECEPTION_CORE_URL", "http://deception-core:9000"
-).rstrip("/")
-TRACK_URL = DECEPTION_CORE_URL + "/v1/track"
 LOGIN_SPOOL_DIR = os.environ.get("WEB_LOGIN_SPOOL_DIR", "").strip()
 try:
     LOGIN_SPOOL_MAX_BYTES = max(
@@ -63,17 +58,6 @@ _WEB_SESSION_IDLE_SECONDS = 30 * 60
 _WEB_SESSION_MAX_SECONDS = 24 * 60 * 60
 _SESSION_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
-# path ล่อที่สแกนเนอร์/attacker ชอบยิง — เจอ = log เป็น "web-scan" (สัญญาณตั้งใจเจาะ ไม่ใช่ดูเว็บเฉยๆ)
-# เก็บแบบ normalize (ตัด trailing slash) เทียบกับ path ที่เข้ามา
-BAIT_PATHS = {
-    "/.env", "/.git/config", "/.git/HEAD", "/wp-admin", "/wp-login.php",
-    "/phpmyadmin", "/phpMyAdmin", "/administrator", "/server-status",
-    "/.aws/credentials", "/config.php", "/shell.php", "/vendor", "/.ssh/id_rsa",
-    "/actuator", "/actuator/env", "/console", "/adminer.php", "/.env.bak",
-    "/web/database/manager", "/web/database/selector", "/web/dataset/call_kw",
-    "/web/session/authenticate", "/jsonrpc", "/xmlrpc/2/common", "/xmlrpc/2/object",
-}
-_BAIT_NORM = {p.rstrip("/") or "/" for p in BAIT_PATHS}
 _FIELD_LIMIT = 256
 _HEADER_LIMIT = 256
 _QUERY_LIMIT = 512
@@ -102,14 +86,6 @@ _SQLI_RULES = (
         re.IGNORECASE,
     )),
 )
-_XSS_RULES = (
-    ("script_tag", re.compile(r"<\s*script\b", re.IGNORECASE)),
-    ("event_handler", re.compile(r"<\s*[a-z][^>]{0,128}\bon(?:error|load|click|focus)\s*=", re.IGNORECASE)),
-    ("javascript_scheme", re.compile(r"\bjavascript\s*:", re.IGNORECASE)),
-    ("svg_script", re.compile(r"<\s*svg\b[^>]{0,128}\bonload\s*=", re.IGNORECASE)),
-)
-
-
 def _web_session(request: Request) -> tuple[str, str]:
     """Return a sensor-issued continuity ID and refreshed, signed cookie.
 
@@ -180,31 +156,68 @@ TRUSTED_PROXY_NETWORKS = _trusted_proxy_networks()
 app = FastAPI()
 
 
+def _trusted_proxy_peer(request: Request) -> bool:
+    """Return whether the immediate socket peer is an explicitly trusted proxy."""
+    if not request.client:
+        return False
+    try:
+        peer_ip = ipaddress.ip_address(request.client.host.split("%", 1)[0])
+    except ValueError:
+        return False
+    return any(peer_ip in network for network in TRUSTED_PROXY_NETWORKS)
+
+
+def _valid_port(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        if not value.isascii() or not value.isdecimal():
+            return None
+        value = int(value)
+    if not isinstance(value, int) or not 1 <= value <= 65535:
+        return None
+    return value
+
+
+def _client_port(request: Request) -> int | None:
+    """Return a direct peer port or one asserted by a configured trusted proxy."""
+    if not request.client:
+        return None
+    if _trusted_proxy_peer(request):
+        # The proxy must overwrite this header with its original peer's port.
+        # Missing/invalid values stay unknown; never mislabel the proxy's own
+        # upstream socket port as the attacker's source port.
+        return _valid_port(request.headers.get("x-forwarded-client-port", ""))
+    if (
+        request.client.port == 0
+        and TRUSTED_PROXY_NETWORKS
+        and request.headers.get("x-forwarded-for")
+    ):
+        # Uvicorn's ProxyHeadersMiddleware rewrites a trusted X-Forwarded-For
+        # client to (client_ip, 0) when the header carries no port. In that
+        # deployment, WEB_TRUSTED_PROXY_CIDRS and Uvicorn's forwarded-allow-ips
+        # must contain the same exact proxy peers (never "*").
+        return _valid_port(request.headers.get("x-forwarded-client-port", ""))
+    return _valid_port(request.client.port)
+
+
 def _client_ip(request: Request) -> str:
     # Direct ZeroTier traffic is the normal path. Never trust a caller-supplied
     # X-Forwarded-For unless the immediate peer is configured as a proxy.
     peer = request.client.host if request.client else "0.0.0.0"
     xff = request.headers.get("x-forwarded-for")
-    if xff and TRUSTED_PROXY_NETWORKS:
-        try:
-            peer_ip = ipaddress.ip_address(peer.split("%", 1)[0])
-        except ValueError:
-            peer_ip = None
-        if peer_ip and any(peer_ip in network for network in TRUSTED_PROXY_NETWORKS):
-            # Walk from the proxy-facing end. The first non-proxy address is the
-            # client asserted by the trusted chain; ignore malformed entries.
-            for forwarded in reversed(xff.split(",")[-8:]):
-                try:
-                    candidate = ipaddress.ip_address(forwarded.strip().split("%", 1)[0])
-                except ValueError:
-                    continue
-                if not any(candidate in network for network in TRUSTED_PROXY_NETWORKS):
-                    return str(candidate)
+    if xff and _trusted_proxy_peer(request):
+        # Walk from the proxy-facing end. The first non-proxy address is the
+        # client asserted by the trusted chain; ignore malformed entries.
+        for forwarded in reversed(xff.split(",")[-8:]):
+            try:
+                candidate = ipaddress.ip_address(forwarded.strip().split("%", 1)[0])
+            except ValueError:
+                continue
+            if not any(candidate in network for network in TRUSTED_PROXY_NETWORKS):
+                return str(candidate)
     return peer
-
-
-def _limited(value: str, limit: int = _FIELD_LIMIT) -> str:
-    return str(value or "")[:limit]
 
 
 def _bounded_login_value(value: str, field: str, limit: int,
@@ -230,15 +243,6 @@ def _request_context_headers(request: Request, truncated_fields: set[str]) -> di
             ("accept_language", "accept-language"),
         )
     }
-
-
-def _sqli_indicators(values: dict[str, str]) -> dict[str, list[str]]:
-    indicators = {}
-    for field, value in values.items():
-        matches = [name for name, pattern in _SQLI_RULES if pattern.search(value)]
-        if matches:
-            indicators[field] = matches
-    return indicators
 
 
 def _login_event(request: Request, ip: str, web_session_id: str, *, database: str, login: str,
@@ -278,6 +282,7 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
             "+00:00", "Z"
         ),
         "source_ip": ip,
+        "source_port": _client_port(request),
         "http": {
             "scheme": _bounded_login_value(
                 request.url.scheme, "http.scheme", 16, truncated_fields
@@ -299,60 +304,9 @@ def _login_event(request: Request, ip: str, web_session_id: str, *, database: st
             "remember": bounded["remember"],
         },
         "sqli_indicators": _pattern_indicators(values, _SQLI_RULES),
-        "xss_indicators": _pattern_indicators(values, _XSS_RULES),
         "truncated_fields": sorted(truncated_fields),
         "result": "rejected",
     }
-
-
-def _http_event(request: Request, ip: str, web_session_id: str, status_code: int) -> dict:
-    """Durable page/bait observation with bounded literal query for review."""
-    truncated_fields: set[str] = set()
-    raw_query = request.url.query
-    query = _bounded_login_value(raw_query, "http.query", _QUERY_LIMIT, truncated_fields)
-    path = _limited(request.url.path, _QUERY_LIMIT)
-    safe_path = path if re.fullmatch(r"/[A-Za-z0-9_./-]{0,127}", path) else "[redacted-path]"
-    return {
-        "schema_version": 1,
-        "event": "web_http_request",
-        "request_id": uuid.uuid4().hex,
-        "web_session_id": web_session_id,
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
-        "source_ip": ip,
-        "http": {"scheme": request.url.scheme, "method": request.method, "path": safe_path, "raw_path": path, "query": query, "status_code": status_code, **_request_context_headers(request, truncated_fields)},
-        "sqli_indicators": _pattern_indicators({"query": query, "path": path}, _SQLI_RULES),
-        "xss_indicators": _pattern_indicators({"query": query, "path": path}, _XSS_RULES),
-        "truncated_fields": sorted(truncated_fields),
-        "bait_path": _is_sensitive(path.rstrip("/") or "/"),
-    }
-
-
-async def _record_http_event(event: dict) -> None:
-    try:
-        await asyncio.to_thread(_spool_login_event, event)
-    except Exception:
-        log.exception("HTTP telemetry spool write failed request_id=%s", event["request_id"])
-
-
-async def _post_track(ip: str, command: str) -> None:
-    """Wait for the core to durably append the event before considering it captured."""
-    async with httpx.AsyncClient(timeout=2.0) as c:
-        response = await c.post(
-            TRACK_URL, json={"ip": ip, "door": "web", "command": command}
-        )
-        response.raise_for_status()
-
-
-def _track(ip: str, command: str) -> None:
-    """Fire-and-forget for ordinary page views; login attempts use _track_login."""
-
-    async def _call():
-        try:
-            await _post_track(ip, command)
-        except Exception:
-            log.exception("track call failed")
-
-    asyncio.create_task(_call())
 
 
 def _spool_login_event(event: dict) -> Path:
@@ -436,17 +390,6 @@ async def _track_login(event: dict) -> bool:
     return True
 
 
-def _is_sensitive(norm_path: str) -> bool:
-    """path ที่ถือเป็น 'สแกน/สอดแนม' — bait list + /backup (robots ประกาศ Disallow ไว้ ใครเปิด =
-    ตั้งใจ) + อะไรที่ขึ้นต้นด้วย /.git /.env"""
-    return (
-        norm_path in _BAIT_NORM
-        or norm_path.startswith("/backup")
-        or norm_path.startswith("/.git")
-        or norm_path.startswith("/.env")
-    )
-
-
 def _safe_file(url_path: str) -> Path | None:
     """map path → ไฟล์ใน HTML_DIR อย่างปลอดภัย (กัน path traversal) คืน None ถ้าไม่มีไฟล์"""
     rel = url_path.lstrip("/")
@@ -506,38 +449,24 @@ async def do_login(
 )
 async def serve(full_path: str, request: Request):
     path = "/" + full_path
-    ip = _client_ip(request)
     web_session_id, cookie = _web_session(request)
     norm = path.rstrip("/") or "/"
-    # Core remains a legacy page counter. Never forward attacker query text to
-    # its command/session classifier; structured rule hints live in the spool.
-    target = request.url.path if re.fullmatch(r"/[A-Za-z0-9_./-]{0,127}", request.url.path) else "[redacted-path]"
 
     # /admin (และ /admin/) → หน้า login ปลอม เหมือน nginx เดิม (SME web ทั่วไปทำแบบนี้)
     if norm == "/admin":
-        _track(ip, f"web-scan {request.method} {target}")
-        await _record_http_event(_http_event(request, ip, web_session_id, 302))
         return _with_session_cookie(RedirectResponse(url="/login.html", status_code=302), request, cookie)
 
-    command = f"web-scan {request.method} {target}" if _is_sensitive(norm) else (
-        f"{request.method} {target}"
-    )
-    _track(ip, command)
-
     if request.method not in {"GET", "HEAD"}:
-        await _record_http_event(_http_event(request, ip, web_session_id, 404))
         return _with_session_cookie(PlainTextResponse("404 Not Found\n", status_code=404), request, cookie)
 
     # Odoo-style canonical login URL; keep /login.html available for continuity.
     if norm == "/web/login":
         login_page = HTML_DIR / "login.html"
         if login_page.is_file():
-            await _record_http_event(_http_event(request, ip, web_session_id, 200))
             return _with_session_cookie(FileResponse(login_page, media_type="text/html; charset=utf-8"), request, cookie)
 
     f = _safe_file(path)
     if f is None:
-        await _record_http_event(_http_event(request, ip, web_session_id, 404))
         return _with_session_cookie(PlainTextResponse("404 Not Found\n", status_code=404), request, cookie)
 
     media = None
@@ -545,5 +474,4 @@ async def serve(full_path: str, request: Request):
         media = "text/html; charset=utf-8"
     elif f.suffix == ".txt":
         media = "text/plain; charset=utf-8"
-    await _record_http_event(_http_event(request, ip, web_session_id, 200))
     return _with_session_cookie(FileResponse(f, media_type=media), request, cookie)

@@ -308,12 +308,292 @@
   }
 }
 
-@keyframes pti-radar-sweep {
-  from {
-    transform: rotate(0deg);
+.pti-live-radar {
+  --pti-radar-canvas-radius: 12px;
+  --pti-radar-bg: var(--surface);
+  --pti-radar-text: var(--text);
+  --pti-radar-accent: var(--primary);
+  --pti-radar-line: color-mix(in srgb, var(--primary) 16%, transparent);
+  --pti-radar-stroke-width: 1.5px;
+  --pti-radar-hub-glow: color-mix(in srgb, var(--primary) 12%, transparent);
+  --pti-radar-edge-glow: color-mix(in srgb, var(--primary) 48%, transparent);
+  --pti-radar-wave-glow: color-mix(in srgb, var(--primary) 72%, transparent);
+  --pti-radar-control-bg: color-mix(in srgb, var(--surface) 94%, var(--primary));
+  color: var(--pti-radar-text);
+  background: var(--pti-radar-bg);
+}
+
+.pti-live-radar-grid {
+  background-image:
+    linear-gradient(var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px),
+    linear-gradient(90deg, var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px);
+  background-size: 2.5rem 2.5rem, 2.5rem 2.5rem;
+  opacity: 0.5;
+}
+
+.pti-topology-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.pti-live-radar-diagonals {
+  pointer-events: none;
+}
+
+.pti-live-radar-diagonal {
+  fill: none;
+  stroke: var(--pti-radar-accent);
+  stroke-opacity: 0.2;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.pti-live-radar-crosshair::before,
+.pti-live-radar-crosshair::after {
+  position: absolute;
+  display: block;
+  content: "";
+  opacity: 0.2;
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
+  pointer-events: none;
+}
+
+.pti-live-radar-crosshair::before {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  transform: translateX(-50%);
+}
+
+.pti-live-radar-crosshair::after {
+  right: 0;
+  left: 0;
+  top: 50%;
+  height: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  transform: translateY(-50%);
+}
+
+.pti-live-radar-wave-shell {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pti-radar-wave-expand 7s cubic-bezier(0.18, 0.78, 0.25, 1) infinite both;
+}
+
+.pti-live-radar-wave {
+  fill: none;
+  stroke: var(--pti-radar-accent);
+  stroke-opacity: 0;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 0 14px var(--pti-radar-wave-glow));
+  animation: pti-radar-wave-energy 7s cubic-bezier(0.18, 0.78, 0.25, 1) infinite both;
+}
+
+.pti-live-radar-corner-tick {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  width: 2rem;
+  height: var(--pti-radar-stroke-width);
+  background: var(--pti-radar-accent);
+  opacity: 0.72;
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
+}
+
+.pti-live-radar-corner-tick.is-top-left {
+  top: -1px;
+  left: 0;
+  transform: rotate(var(--pti-radar-corner-angle-positive));
+  transform-origin: left center;
+}
+
+.pti-live-radar-corner-tick.is-top-right {
+  top: -1px;
+  right: 0;
+  transform: rotate(var(--pti-radar-corner-angle-negative));
+  transform-origin: right center;
+}
+
+.pti-live-radar-corner-tick.is-bottom-right {
+  right: 0;
+  bottom: -1px;
+  transform: rotate(var(--pti-radar-corner-angle-positive));
+  transform-origin: right center;
+}
+
+.pti-live-radar-corner-tick.is-bottom-left {
+  bottom: -1px;
+  left: 0;
+  transform: rotate(var(--pti-radar-corner-angle-negative));
+  transform-origin: left center;
+}
+
+.pti-live-radar-edge-tick {
+  position: absolute;
+  z-index: 1;
+  display: block;
+  width: var(--pti-radar-stroke-width);
+  height: 2rem;
+  background: var(--pti-radar-accent);
+  opacity: 0.72;
+  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
+}
+
+.pti-live-radar-edge-tick.is-top {
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pti-live-radar-edge-tick.is-right {
+  top: 50%;
+  right: 0;
+  width: 2rem;
+  height: var(--pti-radar-stroke-width);
+  transform: translateY(-50%);
+}
+
+.pti-live-radar-edge-tick.is-bottom {
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.pti-live-radar-edge-tick.is-left {
+  top: 50%;
+  left: 0;
+  width: 2rem;
+  height: var(--pti-radar-stroke-width);
+  transform: translateY(-50%);
+}
+
+.pti-live-radar-sweep-canvas {
+  display: block;
+}
+
+.pti-live-radar-status h3 {
+  color: var(--pti-radar-text);
+  text-shadow: 0 1px 10px var(--pti-radar-bg);
+}
+
+.pti-live-radar-status-line {
+  color: var(--pti-radar-accent);
+}
+
+.pti-live-radar-status-line.is-loading,
+.pti-live-radar-status-line.is-reconnecting {
+  color: var(--warning);
+}
+
+.pti-live-radar-status-line .pti-listening-status-dot {
+  flex: none;
+  background: currentColor;
+  box-shadow: 0 0 0 0 currentColor;
+  animation: pti-listening-status 2.8s ease-in-out infinite;
+}
+
+.pti-live-radar-hub {
+  --pti-radar-hub-emitter: var(--pti-radar-accent);
+  border: 1px solid color-mix(in srgb, var(--pti-radar-hub-emitter) 70%, var(--surface));
+  border-radius: 50%;
+  color: var(--surface);
+  background: var(--pti-radar-hub-emitter);
+  box-shadow: 0 0 1.25rem var(--pti-radar-hub-glow);
+}
+
+.pti-live-radar-hub.is-loading,
+.pti-live-radar-hub.is-reconnecting {
+  --pti-radar-hub-emitter: var(--warning);
+  --pti-radar-hub-glow: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.pti-live-radar-action {
+  border-color: color-mix(in srgb, var(--primary) 42%, transparent);
+  color: var(--pti-radar-text);
+  background: var(--pti-radar-control-bg);
+}
+
+.pti-live-radar-action:hover {
+  border-color: var(--pti-radar-accent);
+  background: color-mix(in srgb, var(--surface) 88%, var(--primary));
+}
+
+.pti-live-radar-action.is-warning {
+  border-color: var(--warning-border);
+  color: var(--warning);
+  background: var(--warning-subtle);
+}
+
+.pti-live-radar-action.is-warning:hover {
+  background: color-mix(in srgb, var(--warning-subtle) 78%, var(--warning));
+}
+
+.pti-retained-session-shortcut::after {
+  position: absolute;
+  top: -0.3rem;
+  right: -0.3rem;
+  display: grid;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding-inline: 0.2rem;
+  place-items: center;
+  border: 1px solid var(--surface);
+  border-radius: 9999px;
+  background: var(--success);
+  color: var(--surface);
+  content: attr(data-count);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pti-live-radar-status-line .pti-listening-status-dot {
+    animation: none;
   }
-  to {
-    transform: rotate(360deg);
+
+  .pti-live-radar-wave-shell,
+  .pti-live-radar-wave {
+    animation: none;
+    stroke-opacity: 0;
+  }
+
+}
+
+@keyframes pti-radar-wave-expand {
+  0% {
+    transform: scale(0.012);
+  }
+  80%, 100% {
+    transform: scale(1);
+  }
+}
+
+/* The wave clears the corners at 80%, then leaves a 0.63-second quiet gap. */
+@keyframes pti-radar-wave-energy {
+  0% {
+    stroke-opacity: 0.78;
+  }
+  80% {
+    stroke-opacity: 0.14;
+    animation-timing-function: ease-out;
+  }
+  91%, 100% {
+    stroke-opacity: 0;
+  }
+}
+
+@keyframes pti-listening-status {
+  0%, 100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 0.25rem transparent;
   }
 }
 
