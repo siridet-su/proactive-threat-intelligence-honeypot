@@ -587,7 +587,7 @@ describe("FSV-005 failed-change visualization", () => {
     assertHostileDestinationAbsent(container);
   });
 
-  it("renders a warning annotation at the failed origin without a target badge or transition energy", async () => {
+  it("omits the duplicated failure explanation from the topology canvas", async () => {
     const failedRoute = deriveActiveHopRoute([failedEvent], 0, getHistoryWindowMetrics(1, 1, 0));
     await act(async () => {
       root.render(createElement(TopologyCanvas, {
@@ -606,13 +606,8 @@ describe("FSV-005 failed-change visualization", () => {
       await Promise.resolve();
     });
 
-    const annotation = container.querySelector('[data-testid="failed-change-annotation"]');
-    expect(annotation).not.toBeNull();
-    expect(annotation?.textContent).toContain(
-      `Directory change failed while at ${VERIFIED_ORIGIN}; attempted destination unavailable or unverified`,
-    );
-    expect(annotation?.querySelector("svg")).not.toBeNull();
-    expect(annotation?.getAttribute("aria-label")).toContain("attempted destination unavailable or unverified");
+    expect(container.querySelector('[data-testid="failed-change-annotation"]')).toBeNull();
+    expect(container.querySelector('[data-testid="failed-change-canvas-status"]')).toBeNull();
     assertNoFailedTargetPresentation(container);
     assertHostileDestinationAbsent(container);
   });
@@ -648,7 +643,7 @@ describe("FSV-005 failed-change visualization", () => {
     expect(container.querySelector('[data-edge-kind="hierarchy"][marker-end]')).toBeNull();
   });
 
-  it("keeps a truthful canvas-level warning when the failed origin is outside a partial graph", async () => {
+  it("does not add a canvas warning when the failed origin is outside a partial graph", async () => {
     const failedRoute = deriveActiveHopRoute(
       [event("missing-origin", "failed_change", "/missing/origin", HOSTILE_DESTINATION)],
       0,
@@ -671,7 +666,7 @@ describe("FSV-005 failed-change visualization", () => {
       await Promise.resolve();
     });
 
-    expect(container.querySelector('[data-testid="failed-change-canvas-status"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="failed-change-canvas-status"]')).toBeNull();
     expect(container.querySelector('[data-testid="failed-change-annotation"]')).toBeNull();
     assertHostileDestinationAbsent(container);
   });
