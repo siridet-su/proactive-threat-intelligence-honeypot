@@ -553,9 +553,9 @@ function CoverageMap({ data, coveragePercent, reduceMotion }: { data: HardwareBa
         <div>
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 id="backup-coverage-title" className="text-sm font-semibold">Coverage map</h3>
+            <h3 id="backup-coverage-title" className="text-sm font-semibold">Hardware rollup coverage</h3>
           </div>
-          <p className="mt-1 text-xs text-text-muted">{formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · UTC days</p>
+          <p className="mt-1 text-xs text-text-muted">Pi hardware rollups · {formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · UTC</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-2xl font-semibold tracking-tight text-text">{coveragePercent}%</span>

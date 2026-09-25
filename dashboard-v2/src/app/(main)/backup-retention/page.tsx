@@ -32,7 +32,7 @@ export default function BackupRetentionPage() {
             Data protection / operations
           </div>
           <h1 id="backup-page-title" className="mt-2 text-2xl font-semibold leading-8 tracking-tight text-text sm:text-[28px]">Backup &amp; retention</h1>
-          <p className="mt-1.5 max-w-2xl text-sm text-text-muted">Protect retained history, trigger Pi backup actions, and verify the private cloud archive in one view.</p>
+          <p className="mt-1.5 max-w-2xl text-sm text-text-muted">Track archive coverage by source, then manage Pi hardware backup operations.</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -51,9 +51,9 @@ export default function BackupRetentionPage() {
         </div>
       </motion.header>
 
-      <HardwareBackupStatus />
-
       <BackupSourceMap />
+
+      <HardwareBackupStatus />
 
       <motion.section
         initial={reduceMotion ? false : { opacity: 0, y: 12 }}
