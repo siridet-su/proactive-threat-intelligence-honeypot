@@ -94,6 +94,34 @@ export default function UserManagementPage() {
     void loadSession();
   }, []);
 
+  const [positionOptions, setPositionOptions] = useState<string[]>([
+    "Lead Sentinel",
+    "Data Guardian",
+    "Network Shield",
+    "Threat Hunter",
+  ]);
+
+  useEffect(() => {
+    const loadPositions = async () => {
+      try {
+        const res = await fetch("/api/positions");
+        if (!res.ok) return;
+        const data: unknown = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const titles = data
+            .map((p) => (typeof p === "object" && p !== null && "title" in p && typeof p.title === "string" ? p.title : ""))
+            .filter(Boolean);
+          if (titles.length > 0) {
+            setPositionOptions(Array.from(new Set(titles)));
+          }
+        }
+      } catch {
+        // Fallback to default presets if endpoint is unavailable
+      }
+    };
+    void loadPositions();
+  }, [refreshKey]);
+
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -148,7 +176,7 @@ export default function UserManagementPage() {
     if (createDialogCloseTimer.current !== null) window.clearTimeout(createDialogCloseTimer.current);
     setCreateError("");
     setCreatedOperatorId("");
-    setFormData({ fullName: "", email: "", position: "Lead Sentinel", role: "Supporter", initialPassword: "" });
+    setFormData({ fullName: "", email: "", position: positionOptions[0] || "Lead Sentinel", role: "Supporter", initialPassword: "" });
     setIsAddModalPresent(true);
     window.requestAnimationFrame(() => setIsAddModalOpen(true));
   };
@@ -393,7 +421,7 @@ export default function UserManagementPage() {
                 </div>
                 <div>
                   <label htmlFor="create-position" className="text-xs font-medium text-text-muted">Position</label>
-                  <SelectMenu id="create-position" value={formData.position} onValueChange={(position) => setFormData({ ...formData, position })} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isCreating} />
+                  <SelectMenu id="create-position" value={formData.position} onValueChange={(position) => setFormData({ ...formData, position })} options={positionOptions.includes(formData.position) ? positionOptions : [formData.position, ...positionOptions]} className="mt-1" disabled={isCreating} />
                 </div>
                 <div>
                   <label htmlFor="create-role" className="text-xs font-medium text-text-muted">Role</label>
@@ -441,7 +469,7 @@ export default function UserManagementPage() {
 
               {/* ให้ Admin เท่านั้นที่เปลี่ยนตำแหน่งและ Role ได้ */}
               <div>
-                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={["Lead Sentinel", "Data Guardian", "Network Shield", "Threat Hunter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
+                <label className="text-xs font-medium text-text-muted">Position</label><SelectMenu value={editFormData.position} onValueChange={(position) => setEditFormData({...editFormData, position})} options={positionOptions.includes(editFormData.position) ? positionOptions : [editFormData.position, ...positionOptions]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />
               </div>
               <div>
                 <label className="text-xs font-medium text-text-muted">Role</label><SelectMenu value={editFormData.role} onValueChange={(role) => setEditFormData({...editFormData, role})} options={["Admin", "Supporter"]} className="mt-1" disabled={isSavingEdit || currentUserRole !== "Admin"} />

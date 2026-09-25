@@ -1887,3 +1887,48 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   clean checkout for future Pi agent releases.
 - Related ADR/runbook: [web-login pipeline deployment validation](validation/2026-09-24-web-login-pipeline.md)
   and [current architecture](CURRENT-ARCHITECTURE.md).
+
+### 2026-09-25 — Align the Live topology grid to the radar center
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: phase the neutral Live topology grid so its center intersection overlays the radar's perpendicular crosshair origin.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `ae0eff5`; this refinement is uncommitted.
+- Repository changes: define the grid cell and half-cell sizes, offset both CSS grid layers so their repeated lines intersect at the exact canvas center, and update the `FS-024` current-state criterion and append its decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: `npm run dev` remains active at `http://localhost:3000`; Next.js HMR compiled the updated styles in 259ms.
+- Validation performed and outcome: Next.js HMR compilation succeeded; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated visual review of the grid/crosshair overlap, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only background-position change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: revert the grid cell/half-cell positioning and its current-state/decision/update documentation; no host rollback is required.
+- Follow-up: review the center intersection at common viewport sizes and both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Keep failed-origin annotations clear of topology nodes
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: prevent a failed-directory-change warning from overlapping its origin node and keep its position synchronized with topology movement.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3d2d34d`; this refinement is uncommitted.
+- Repository changes: render the warning inside the transformed graph plane so it follows pan and zoom; calculate its anchor from the measured origin-node height and leave 0.75rem clearance above the node; add current-state decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: `npm run dev` remains active at `http://localhost:3000`.
+- Validation performed and outcome: `git diff --check` passed; an unauthenticated `/filesystem-activity` request redirected to login with HTTP 307. HMR compilation and authenticated browser rendering were not confirmed. No automated tests were run.
+- Not performed / deferred: authenticated visual review at different zoom levels, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only positioning change; failure provenance and event content are unchanged.
+- Rollback: restore the failed-origin warning to its prior map-surface position and revert the corresponding decision/update records; no host rollback is required.
+- Follow-up: confirm that the callout remains fully visible and separate from its node in the authenticated Audit view at narrow and wide canvas sizes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Keep failed-change explanations out of the topology canvas
+
+- Status: prepared for review; local development UI active; not deployed. This entry corrects the preceding same-day annotation-position experiment.
+- Scope and intent: remove the duplicate long failure explanation from the topology canvas because it can overlap neighboring session or directory nodes; keep the event's failed-origin marker and full explanation in Forensic Studio.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3d2d34d`; this correction is uncommitted.
+- Repository changes: remove anchored and fallback canvas warning text, retain the Replay/Forensic Studio detail and origin marker, and update the existing failure-visualization assertions to match the canvas-free presentation.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: `npm run dev` remains active at `http://localhost:3000`.
+- Validation performed and outcome: Next.js HMR compiled in 175ms; the authenticated Audit route returned HTTP 200; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated screenshot review, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only duplication removal; failure provenance and verified/unknown path semantics are unchanged.
+- Rollback: restore the canvas-level failed-change warning and previous assertions; retain this dated correction as audit history.
+- Follow-up: confirm the remaining failed-origin marker is visible while the full explanation remains readable in Forensic Studio.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).

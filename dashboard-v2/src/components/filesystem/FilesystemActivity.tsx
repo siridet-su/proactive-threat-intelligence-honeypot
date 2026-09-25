@@ -911,6 +911,9 @@ export function FilesystemActivity() {
         handleReconnect={handleReconnect}
         regionStatus={regionStatus}
         refresh={refresh}
+        onOpenRetainedSessions={() =>
+          switchViewMode("audit", snapshot?.recentClosedSessions[0]?.sessionId)
+        }
       />
 
       {/* Mode 1: Live Global Topology Mode */}
@@ -1002,7 +1005,6 @@ export function FilesystemActivity() {
               selectedClosedSession={selectedClosedSession}
               selectedNode={selectedNode}
               sessions={snapshot?.sessions ?? []}
-              recentClosedSessions={snapshot?.recentClosedSessions ?? []}
               selectedSessionId={selectedSessionId}
               onSelectSession={selectSession}
               onSelectPath={selectPath}

@@ -58,7 +58,6 @@ import {
   directorySegment,
   estimateExpandedCalloutDisclosureHeight,
   formatUpdateAge,
-  formatFailedChangeMessage,
   formatRuleBasedPathInterestDescription,
   GRAPH_CALLOUT_LIMIT,
   GRAPH_NODE_LIMIT,
@@ -602,10 +601,6 @@ export function TopologyCanvas({
   const isEmptyLiveState = !isAuditMode && (!snapshot || snapshot.sessions.length === 0);
   const showLiveRadarStandby = !isAuditMode && snapshot?.sessions.length === 0;
   const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
-  const isFailedHop = activeHop?.isFailedAttempt === true || activeHop?.action === "failed_change";
-  const failedHopMessage = isFailedHop
-    ? formatFailedChangeMessage(activeHop?.fromPath)
-    : null;
   const reducedMotion = useReducedMotion();
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
@@ -769,9 +764,6 @@ export function TopologyCanvas({
     () => transitionEndpointCoverage.filter((endpoint) => endpoint.status !== "visible"),
     [transitionEndpointCoverage],
   );
-  const failedAnnotationNode = activeHopCanvasSemantics.failedAnnotationPath
-    ? graphNodeByPath.get(activeHopCanvasSemantics.failedAnnotationPath) ?? null
-    : null;
   const graphPlaneHeight = useMemo(
     () => Math.max(440, 144 + Math.max(0, ...graphNodes.map((node) => node.depth)) * 64),
     [graphNodes],
@@ -1242,17 +1234,6 @@ export function TopologyCanvas({
         </div>
       ) : !snapshot?.nodes.length ? (
         <div className={isAuditMode ? "p-5" : "flex min-h-0 flex-1 flex-col p-5"}>
-          {failedHopMessage && (
-            <div
-              role="status"
-              data-testid="failed-change-canvas-status"
-              aria-label={failedHopMessage}
-              className="mb-4 flex items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning"
-            >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{failedHopMessage}</span>
-            </div>
-          )}
           {!isAuditMode && freshnessState.isDegraded && (
             <div role="status" className="mb-4 rounded-lg border border-warning-border bg-surface-raised px-3 py-2 text-xs text-text">
               <strong className="font-semibold text-warning">Degraded connection:</strong>{" "}
@@ -1403,18 +1384,6 @@ export function TopologyCanvas({
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                {failedHopMessage && !failedAnnotationNode && (
-                  <div
-                    role="status"
-                    data-testid="failed-change-canvas-status"
-                    aria-label={failedHopMessage}
-                    className="pointer-events-none absolute left-1/2 top-4 z-40 flex max-w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
-                  >
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    <span>{failedHopMessage}</span>
-                  </div>
-                )}
 
                 {obscuredTransitionEndpoints.length > 0 && (
                   <div
@@ -1587,23 +1556,6 @@ export function TopologyCanvas({
                       showLegend={false}
                       displayMode={transitionDisplayMode}
                     />
-                  )}
-                  {failedHopMessage && failedAnnotationNode && (
-                    <div
-                      role="status"
-                      data-testid="failed-change-annotation"
-                      data-failed-change-origin={activeHopCanvasSemantics.failedAnnotationPath ?? undefined}
-                      aria-label={failedHopMessage}
-                      className="pointer-events-none absolute z-30 flex max-w-[min(32rem,calc(100%-2rem))] items-start gap-2 rounded-lg border border-warning-border bg-warning-subtle px-3 py-2 text-xs text-warning shadow-sm"
-                      style={{
-                        left: `${failedAnnotationNode.x}%`,
-                        top: `${failedAnnotationNode.y}%`,
-                        transform: "translate(-50%, calc(-100% - 0.75rem))",
-                      }}
-                    >
-                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                      <span>{failedHopMessage}</span>
-                    </div>
                   )}
                   <AnimatePresence initial={false}>
                     {graphNodes.map((node) => {

@@ -1,4 +1,4 @@
-import { Radio, Route, RefreshCw } from "lucide-react";
+import { History, Radio, Route, RefreshCw } from "lucide-react";
 import type { FilesystemTopologySnapshot } from "@/lib/dashboardTypes";
 import { formatPageBadgeText, type FreshnessState } from "./filesystemUtils";
 import { handleRovingTabKey } from "./tabSemantics";
@@ -14,6 +14,7 @@ interface FilesystemPageHeaderProps {
   handleReconnect: () => void;
   regionStatus: string;
   refresh: () => void;
+  onOpenRetainedSessions?: () => void;
 }
 
 export function FilesystemPageHeader({
@@ -25,11 +26,19 @@ export function FilesystemPageHeader({
   handleReconnect,
   regionStatus,
   refresh,
+  onOpenRetainedSessions,
 }: FilesystemPageHeaderProps) {
+  const retainedSessionCount = snapshot?.recentClosedSessions.length ?? 0;
+  const retainedSessionsLabel = retainedSessionCount === 1
+    ? "View 1 retained session"
+    : `View ${retainedSessionCount} retained sessions`;
+
   return (
     <section className="flex flex-col gap-3.5 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-text">Filesystem activity</h1>
+        <h1 className="text-2xl font-semibold leading-8 tracking-tight text-text sm:text-[28px]">
+          Filesystem activity
+        </h1>
         <p className="mt-0.5 max-w-2xl text-xs text-text-muted">
           {viewMode === "live"
             ? "Inspect observed Cowrie working-directory topology and live threat clusters."
@@ -99,6 +108,20 @@ export function FilesystemPageHeader({
             <span>Session Audit & Replay</span>
           </button>
         </div>
+
+        {retainedSessionCount > 0 && onOpenRetainedSessions && (
+          <button
+            type="button"
+            onClick={onOpenRetainedSessions}
+            className="pti-retained-session-shortcut relative inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-subtle text-text-muted transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+            data-count={retainedSessionCount}
+            aria-label={retainedSessionsLabel}
+            title={retainedSessionsLabel}
+          >
+            <History className="h-4 w-4" aria-hidden="true" />
+            <span className="sr-only">{retainedSessionsLabel}</span>
+          </button>
+        )}
 
         {/* Telemetry Status Bar & Actions */}
         <div

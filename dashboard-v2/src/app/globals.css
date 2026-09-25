@@ -324,10 +324,17 @@
 }
 
 .pti-live-radar-grid {
+  --pti-radar-grid-cell-size: 2.5rem;
+  --pti-radar-grid-cell-half-size: 1.25rem;
   background-image:
     linear-gradient(var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px),
     linear-gradient(90deg, var(--pti-radar-line, color-mix(in srgb, var(--border) 52%, transparent)) 1px, transparent 1px);
-  background-size: 2.5rem 2.5rem, 2.5rem 2.5rem;
+  background-size:
+    var(--pti-radar-grid-cell-size) var(--pti-radar-grid-cell-size),
+    var(--pti-radar-grid-cell-size) var(--pti-radar-grid-cell-size);
+  background-position:
+    calc(50% - var(--pti-radar-grid-cell-half-size)) calc(50% - var(--pti-radar-grid-cell-half-size)),
+    calc(50% - var(--pti-radar-grid-cell-half-size)) calc(50% - var(--pti-radar-grid-cell-half-size));
   opacity: 0.5;
 }
 
