@@ -831,3 +831,41 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
   [current architecture](CURRENT-ARCHITECTURE.md), and
   [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Add per-target backup coverage to the dashboard
+
+- Status: repository implementation complete; local dashboard worktree is ready
+  for review. No production web deployment was performed by this change.
+- Scope and intent: distinguish a target being enabled on the Pi from the
+  amount of data actually archived for that target.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; dashboard and
+  test changes are included with this entry.
+- Repository changes: extended the backup target overview API to aggregate the
+  `hardware_backup_manifests` window by target, including successful, archived,
+  empty, failed, running, and missing days plus document and compressed-byte
+  totals. Updated the source cards to show independent coverage, records,
+  archive size, and latest checked day for hardware, filesystem, and threat
+  archives. Empty successful manifests are presented as `No eligible records`
+  rather than falsely implying a B2 object exists.
+- Host/environment changes actually applied: none. The Pi backup worker and
+  MongoDB data were not changed; the UI reads the existing
+  `backup_target_status` and `hardware_backup_manifests` records.
+- Runtime/exposure state: the existing local development server can hot-reload
+  the worktree; no production dashboard process or external endpoint was
+  restarted.
+- Validation performed and outcome: the targeted backup dashboard test suite
+  passed 5 tests, ESLint passed, TypeScript `--noEmit` passed, and the new
+  manifest aggregation test covers archived, empty, failed, and missing days.
+- Not performed / deferred: no authenticated browser screenshot validation and
+  no production dashboard deployment; the API still requires the existing
+  operator session.
+- Risks and data handling: the dashboard exposes counts, sizes, dates, and
+  statuses only. It does not return archive payloads or credential-bearing
+  event contents.
+- Rollback: revert the dashboard/API commit; the Pi worker and existing
+  manifests remain unchanged.
+- Follow-up: deploy the dashboard branch through the normal web release path
+  and verify the three active target cards against the authenticated API.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).

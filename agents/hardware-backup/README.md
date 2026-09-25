@@ -117,4 +117,7 @@ upload the same archive concurrently.
 
 The worker publishes enabled targets to `backup_target_status`; the dashboard
 uses that record to distinguish a target activated on the Pi from a target
-that is only supported by repository code.
+that is only supported by repository code. The dashboard source cards also
+aggregate `hardware_backup_manifests` per target and day so activation status
+is shown separately from actual archive coverage, document counts, and
+compressed bytes.

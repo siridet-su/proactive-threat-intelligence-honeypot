@@ -13,7 +13,12 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
-import { isBackupTargetOverview, type BackupTargetId, type BackupTargetOverview } from "@/lib/dashboardTypes";
+import {
+  isBackupTargetOverview,
+  type BackupTargetId,
+  type BackupTargetOverview,
+  type BackupTargetStatus,
+} from "@/lib/dashboardTypes";
 
 const SOURCE_CARDS: Array<{
   targetId: BackupTargetId;
@@ -45,6 +50,31 @@ const SOURCE_CARDS: Array<{
   },
 ];
 
+function formatNumber(value: number | null) {
+  return value === null ? "—" : new Intl.NumberFormat().format(value);
+}
+
+function formatBytes(value: number | null) {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (value < 1_024) return `${value} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let amount = value;
+  let unitIndex = -1;
+  while (amount >= 1_024 && unitIndex < units.length - 1) {
+    amount /= 1_024;
+    unitIndex += 1;
+  }
+  return `${amount.toFixed(amount >= 100 ? 0 : amount >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatDay(value: string | null) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime())
+    ? date.toLocaleDateString([], { month: "short", day: "numeric", timeZone: "UTC" })
+    : "—";
+}
+
 function statePresentation(overview: BackupTargetOverview | null, targetId: BackupTargetId, loading: boolean) {
   const target = overview?.targets.find((item) => item.target_id === targetId);
   if (loading && !overview) {
@@ -63,6 +93,58 @@ function relativeWorkerState(overview: BackupTargetOverview | null, targetId: Ba
   const seen = new Date(target.last_seen_at);
   if (!Number.isFinite(seen.getTime())) return "Enabled target";
   return `Worker seen ${seen.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function coveragePresentation(target: BackupTargetStatus | undefined) {
+  if (!target || target.state !== "active") {
+    return {
+      label: "Awaiting activation",
+      detail: "Manifest coverage will appear after the Pi enables this target.",
+      className: "text-text-subtle",
+    };
+  }
+
+  const coverage = target.coverage;
+  if (coverage.failed_days > 0) {
+    return {
+      label: `${coverage.failed_days} failed day${coverage.failed_days === 1 ? "" : "s"}`,
+      detail: "Review the failed manifest before considering this archive complete.",
+      className: "text-danger",
+    };
+  }
+  if (coverage.running_days > 0) {
+    return {
+      label: "Backup in progress",
+      detail: "The Pi is currently writing a manifest.",
+      className: "text-info",
+    };
+  }
+  if (coverage.missing_days > 0) {
+    return {
+      label: `${coverage.archived_days}/${coverage.expected_days} days archived`,
+      detail: `${coverage.missing_days} day${coverage.missing_days === 1 ? "" : "s"} still have no manifest.`,
+      className: "text-warning",
+    };
+  }
+  if (coverage.archived_days === 0 && coverage.empty_days === coverage.successful_days && coverage.successful_days > 0) {
+    return {
+      label: "No eligible records",
+      detail: `${coverage.successful_days}/${coverage.expected_days} days checked; records are still inside the safety window or absent.`,
+      className: "text-info",
+    };
+  }
+  if (coverage.archived_days < coverage.expected_days) {
+    return {
+      label: `${coverage.archived_days}/${coverage.expected_days} days archived`,
+      detail: `${coverage.empty_days} day${coverage.empty_days === 1 ? "" : "s"} completed with no records.`,
+      className: "text-info",
+    };
+  }
+  return {
+    label: "Fully archived",
+    detail: `${coverage.archived_days}/${coverage.expected_days} eligible days have B2 objects.`,
+    className: "text-success",
+  };
 }
 
 export function BackupSourceMap() {
@@ -119,6 +201,12 @@ export function BackupSourceMap() {
       <div className="grid gap-3 md:grid-cols-3">
         {SOURCE_CARDS.map(({ targetId, title, description, collection, icon: Icon }, index) => {
           const presentation = statePresentation(overview, targetId, loading);
+          const target = overview?.targets.find((item) => item.target_id === targetId);
+          const coverage = target?.coverage;
+          const coverageState = coveragePresentation(target);
+          const checkedPercent = coverage && coverage.expected_days > 0
+            ? Math.round((coverage.successful_days / coverage.expected_days) * 100)
+            : 0;
           return (
             <motion.article
               key={targetId}
@@ -137,6 +225,46 @@ export function BackupSourceMap() {
               </div>
               <h3 className="mt-4 text-sm font-semibold">{title}</h3>
               <p className="mt-1 min-h-10 text-xs leading-5 text-text-muted">{description}</p>
+              <div className="mt-4 rounded-lg border border-border bg-surface-subtle/70 p-3">
+                <div className="flex items-center justify-between gap-2 text-[10px]">
+                  <span className="font-semibold uppercase tracking-[0.12em] text-text-subtle">Archive coverage</span>
+                  <span className={`font-semibold ${coverageState.className}`}>{coverageState.label}</span>
+                </div>
+                <div
+                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-border"
+                  role="progressbar"
+                  aria-label={`${title} checked backup window`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={checkedPercent}
+                >
+                  <motion.span
+                    className="block h-full rounded-full bg-success transition-[width] duration-500"
+                    initial={reduceMotion ? false : { width: 0 }}
+                    animate={{ width: `${checkedPercent}%` }}
+                    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[10px]">
+                  <div>
+                    <p className="text-text-subtle">Window checked</p>
+                    <p className="mt-0.5 font-mono font-semibold text-text">
+                      {coverage ? `${coverage.successful_days}/${coverage.expected_days}` : "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-text-subtle">Documents</p>
+                    <p className="mt-0.5 font-mono font-semibold text-text">
+                      {coverage ? formatNumber(coverage.archived_documents) : "—"}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2 text-[10px] text-text-subtle">
+                  <span>{coverage ? formatBytes(coverage.archive_bytes) : "—"} compressed</span>
+                  <span>Last {coverage ? formatDay(coverage.latest_success_day) : "—"}</span>
+                </div>
+                <p className="mt-2 text-[10px] leading-4 text-text-subtle">{coverageState.detail}</p>
+              </div>
               <div className="mt-4 flex items-center justify-between gap-2 border-t border-border pt-3 text-[10px] text-text-subtle">
                 <div className="min-w-0">
                   <p className="truncate font-mono" title={collection}>{collection}</p>

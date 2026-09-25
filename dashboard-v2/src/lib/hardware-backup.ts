@@ -10,6 +10,8 @@ import type {
   HardwareBackupRequestView,
   HardwareBackupStorageStatus,
   HardwareBackupStatus,
+  BackupTargetCoverage,
+  BackupTargetId,
   BackupTargetOverview,
   BackupTargetState,
 } from "./dashboardTypes";
@@ -284,6 +286,56 @@ export function getHardwareBackupWindow(now = new Date()) {
   return { from, to, days };
 }
 
+function manifestTargetId(document: Document): string | null {
+  if (typeof document.target_id === "string" && document.target_id.trim()) return document.target_id;
+  if (typeof document.collection === "string" && document.collection.trim()) return document.collection;
+  return null;
+}
+
+export function buildBackupTargetCoverage(
+  documents: Document[],
+  targetId: BackupTargetId,
+  window = getHardwareBackupWindow(),
+): BackupTargetCoverage {
+  const manifests = new Map<string, HardwareBackupDay>();
+  for (const document of documents) {
+    if (manifestTargetId(document) !== targetId) continue;
+    const day = manifestDay(document);
+    if (day) manifests.set(day.day, day);
+  }
+
+  const days: HardwareBackupDay[] = [];
+  for (let day = window.from; day <= window.to; day = addUtcDays(day, 1)) {
+    days.push(expectedDay(day, manifests.get(dayKey(day))));
+  }
+
+  const successfulDays = days.filter((day) => day.status === "success");
+  const archivedDays = successfulDays.filter((day) => day.object_name !== null);
+  const failedDays = days.filter((day) => day.status === "failed");
+  const runningDays = days.filter((day) => day.status === "running");
+  const archivedDocuments = successfulDays.reduce((total, day) => total + (day.document_count ?? 0), 0);
+  const archiveBytes = successfulDays.reduce((total, day) => total + (day.archive_bytes ?? 0), 0);
+  const latestRun = [...days]
+    .filter((day) => day.started_at !== null)
+    .sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))[0] ?? null;
+
+  return {
+    expected_days: window.days,
+    successful_days: successfulDays.length,
+    archived_days: archivedDays.length,
+    empty_days: successfulDays.filter((day) => day.document_count === 0).length,
+    failed_days: failedDays.length,
+    running_days: runningDays.length,
+    missing_days: days.filter((day) => day.status === "missing").length,
+    archived_documents: archivedDocuments,
+    archive_bytes: archiveBytes,
+    latest_success_day: successfulDays.at(-1)?.day ?? null,
+    last_started_at: latestDate(days, "started_at"),
+    last_completed_at: latestDate(days, "completed_at"),
+    latest_run_status: latestRun?.status ?? null,
+  };
+}
+
 export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
   const window = getHardwareBackupWindow();
   const query: Document = {
@@ -388,15 +440,31 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
 export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
-  const [statusDocuments, ...manifestDocuments] = await Promise.all([
+  const window = getHardwareBackupWindow();
+  const targetIds = BACKUP_TARGET_CATALOG.map((target) => target.target_id);
+  const [statusDocuments, manifestDocuments] = await Promise.all([
     database.collection(TARGET_STATUS_COLLECTION).find({
-      target_id: { $in: BACKUP_TARGET_CATALOG.map((target) => target.target_id) },
+      target_id: { $in: targetIds },
       enabled: true,
     }).project({ target_id: 1, enabled: 1, last_seen_at: 1 }).toArray(),
-    ...BACKUP_TARGET_CATALOG.map((target) => database.collection(BACKUP_COLLECTION).findOne(
-      { $or: [{ target_id: target.target_id }, { collection: target.target_id }] },
-      { projection: { completed_at: 1 }, sort: { completed_at: -1 } },
-    )),
+    database.collection(BACKUP_COLLECTION).find({
+      day_start: { $gte: window.from, $lte: window.to },
+      $or: [
+        { target_id: { $in: targetIds } },
+        { collection: { $in: targetIds } },
+      ],
+    }).project({
+      target_id: 1,
+      collection: 1,
+      day_start: 1,
+      status: 1,
+      document_count: 1,
+      archive_bytes: 1,
+      started_at: 1,
+      completed_at: 1,
+      object_name: 1,
+      error: 1,
+    }).sort({ day_start: 1 }).limit(MAX_MANIFESTS * BACKUP_TARGET_CATALOG.length).toArray(),
   ]);
 
   const liveTargets = new Map<string, Document>();
@@ -404,10 +472,10 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
     if (typeof document.target_id === "string") liveTargets.set(document.target_id, document);
   }
 
-  const targets = BACKUP_TARGET_CATALOG.map((target, index) => {
+  const targets = BACKUP_TARGET_CATALOG.map((target) => {
     const statusDocument = liveTargets.get(target.target_id);
-    const latestManifest = manifestDocuments[index];
-    const fallbackHardwareActivation = target.target_id === "hardware_metrics_1m" && !statusDocument && latestManifest !== null;
+    const coverage = buildBackupTargetCoverage(manifestDocuments, target.target_id, window);
+    const fallbackHardwareActivation = target.target_id === "hardware_metrics_1m" && !statusDocument && coverage.successful_days > 0;
     const active = Boolean(statusDocument?.enabled) || fallbackHardwareActivation;
     return {
       target_id: target.target_id,
@@ -415,7 +483,8 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
       collections: [...target.collections],
       sensitive: target.sensitive,
       last_seen_at: dateValue(statusDocument?.last_seen_at),
-      last_completed_at: dateValue(latestManifest?.completed_at),
+      last_completed_at: coverage.last_completed_at,
+      coverage,
     };
   });
 
