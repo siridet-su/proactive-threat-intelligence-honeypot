@@ -4,7 +4,7 @@ import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Activity, ArrowLeft, Fingerprint, Globe2, Printer, RefreshCw, ShieldAlert } from "lucide-react";
 import type { WebHttpCapturedPayload, WebHttpHint } from "@/lib/web-http-intel";
-import { decodedQueryForDisplay, reportedClient } from "@/lib/web-http-presentation";
+import { decodedQueryForDisplay, reportedClient, requestTargetForDisplay } from "@/lib/web-http-presentation";
 
 type HttpDetail = { sessionId: string; items: WebHttpHint[]; payloads: WebHttpCapturedPayload[]; rawPayloadAccess: boolean; coverage: string };
 type TiCache = { provider?: unknown; lookup_status?: unknown; normalized_context?: unknown; lookup_at?: unknown; expires_at?: unknown };
@@ -153,13 +153,16 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
         <h2 className="flex items-center gap-2 text-lg font-semibold text-text"><Activity className="h-5 w-5 text-primary" /> Request chronology</h2>
         <p className="mt-1 text-sm text-text-muted">Observed method, path, response, request metadata, literal submitted fields, and rule matches. User-Agent and related headers are self-reported and may be spoofed. A missing query in an older record cannot be reconstructed from its rule match.</p>
         <ol className="mt-4 max-h-[32rem] space-y-2 overflow-y-auto pr-1">
-          {items.map((item, index) => <li key={item.eventId} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
-            <div className="flex flex-wrap items-start justify-between gap-2"><p className="font-semibold text-text">{index + 1}. {item.method} {item.path}</p><time className="text-xs text-text-muted">{formatTime(item.observedAt)}</time></div>
+          {items.map((item, index) => {
+            const payload = capturedByEvent.get(item.eventId);
+            const requestTarget = requestTargetForDisplay(item.path, payload, detail.rawPayloadAccess);
+            return <li key={item.eventId} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm">
+            <div className="flex flex-wrap items-start justify-between gap-2"><p className="min-w-0 break-all font-semibold text-text">{index + 1}. {item.method} <code className="whitespace-pre-wrap break-all">{requestTarget.target}</code>{requestTarget.truncated && <span className="ml-2 text-xs font-normal text-text-muted">truncated at capture</span>}</p><time className="text-xs text-text-muted">{formatTime(item.observedAt)}</time></div>
             <p className="mt-1 text-xs text-text-muted">{item.eventType === "web_login_attempt" ? `Login ${item.outcome}` : `HTTP ${item.statusCode ?? "status unavailable"}`} · {item.sourceIp}</p>
             {item.signals.length > 0 && <p className="mt-2 text-xs text-warning">{item.signals.map(signalName).join(" · ")} · T1190 review candidate only</p>}
             {item.matches.length > 0 && <p className="mt-1 text-xs text-text-muted">Matched: {item.matches.map((match) => `${match.field} / ${match.signal}_${match.ruleId}`).join(", ")}</p>}
-            {detail.rawPayloadAccess ? <CapturedRequest payload={capturedByEvent.get(item.eventId)} matches={item.matches} /> : <p className="mt-2 text-xs text-text-muted">Literal payload fields require an Admin account.</p>}
-          </li>)}
+            {detail.rawPayloadAccess ? <CapturedRequest payload={payload} matches={item.matches} /> : <p className="mt-2 text-xs text-text-muted">Literal payload fields require an Admin account.</p>}
+          </li>; })}
         </ol>
       </section>
 
@@ -238,7 +241,7 @@ function CapturedRequest({ payload, matches }: { payload?: WebHttpCapturedPayloa
     <p className="mt-1 text-xs text-text-muted">Matched fields: {matches.length ? matches.map((match) => `${match.field} (${match.signal}_${match.ruleId})`).join(" · ") : "No injection rule match"}</p>
     {matches.length > 0 && <ul className="mt-2 space-y-1 text-xs text-text">{matches.map((match) => <li key={`${match.field}.${match.signal}.${match.ruleId}`}><span className="font-semibold">{match.field}:</span> {RULE_EXPLANATIONS[`${match.signal}_${match.ruleId}`] ?? "Rule matched; inspect the captured field."}</li>)}</ul>}
     <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-      <CapturedField label="URL path (literal)" value={payload.rawPath} truncated={false} />
+      <CapturedField label="URL path (literal)" value={payload.rawPath} truncated={payload.truncatedFields.includes("http.raw_path")} />
       <CapturedField label="URL query" value={payload.query} truncated={payload.truncatedFields.includes("http.query")} />
       {decodedQuery && <CapturedField label="URL query · decoded for reading" value={decodedQuery} truncated={payload.truncatedFields.includes("http.query")} />}
       {fields.map(([name, value]) => <CapturedField key={name} label={`Form: ${name}`} value={value} truncated={payload.truncatedFields.includes(`odoo_login.${name}`)} />)}
