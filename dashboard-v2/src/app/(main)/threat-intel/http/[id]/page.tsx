@@ -152,7 +152,7 @@ export default function HttpSessionDetailPage({ params }: { params: Promise<{ id
       <section className="rounded-xl border border-border bg-surface p-5">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-text"><Activity className="h-5 w-5 text-primary" /> Request chronology</h2>
         <p className="mt-1 text-sm text-text-muted">Observed method, path, response, request metadata, literal submitted fields, and rule matches. User-Agent and related headers are self-reported and may be spoofed. A missing query in an older record cannot be reconstructed from its rule match.</p>
-        <ol className="mt-4 max-h-[32rem] space-y-2 overflow-y-auto pr-1">
+        <ol className="mt-4 space-y-2">
           {items.map((item, index) => {
             const payload = capturedByEvent.get(item.eventId);
             const requestTarget = requestTargetForDisplay(item.path, payload, detail.rawPayloadAccess);
