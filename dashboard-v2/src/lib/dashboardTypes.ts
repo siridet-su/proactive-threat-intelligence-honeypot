@@ -435,20 +435,6 @@ export interface SessionCwdHistoryPage {
   complete: boolean;
 }
 
-export type SessionTerminateActionStatus = "requested" | "delivered" | "verified" | "failed";
-
-export interface SessionTerminateAction {
-  actionId: string;
-  sessionId: string;
-  action: "terminate_session";
-  status: SessionTerminateActionStatus;
-  requestedBy: string;
-  requestedAt: string;
-  deliveredAt: string | null;
-  verifiedAt: string | null;
-  failureCategory: string | null;
-}
-
 /** One sampled action for a (session, phase, attacker_type) — see deception-core `session_action`. */
 export interface DeceptionAction {
   phase: string;

@@ -8,9 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FilesystemTopologySession, SessionCwdHistoryEvent } from "../src/lib/dashboardTypes";
 import { FilesystemTimelinePanel } from "../src/components/filesystem/FilesystemTimelinePanel";
-import { ResponseActionPanel } from "../src/components/filesystem/ResponseActionPanel";
 import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
-import { useResponseActionController } from "../src/components/filesystem/ResponseActionController";
 import { TopologyCanvas } from "../src/components/filesystem/TopologyCanvas";
 
 // @ts-expect-error React act environment flag
@@ -37,10 +35,6 @@ const history: SessionCwdHistoryEvent[] = [
   { id: "event-a", sessionId: "session-a", fromPath: "/", toPath: "/a", command: "cd /a", action: "changed", status: "confirmed", at: "2026-09-19T00:00:00.000Z" },
 ];
 
-function jsonResponse(payload: unknown): Response {
-  return { ok: true, json: async () => payload } as Response;
-}
-
 function ProductionFilesystemCompositionProbe({
   onSelect,
   noise = 0,
@@ -48,7 +42,7 @@ function ProductionFilesystemCompositionProbe({
   onSelect?: (id: string | null, source?: "user" | "playback") => void;
   noise?: number;
 }) {
-  const [activeTab, setActiveTab] = useState<"replay" | "commands" | "actions">("replay");
+  const [activeTab, setActiveTab] = useState<"replay" | "evidence">("replay");
   const [selectedId, setSelectedId] = useState<string | null>("event-a");
   const replay = useAuditReplay({
     viewMode: "audit",
@@ -64,27 +58,6 @@ function ProductionFilesystemCompositionProbe({
       onSelect?.(id, source);
     },
   });
-  const responseAction = useResponseActionController({
-    selectedSession: session,
-    sessionIsLive: true,
-    enabled: activeTab === "actions",
-  });
-
-  const responsePanel = createElement(ResponseActionPanel, {
-    selectedSession: session,
-    sessionIsLive: true,
-    visibleTerminateAction: responseAction.visibleTerminateAction,
-    visibleTerminateCapability: responseAction.visibleTerminateCapability,
-    terminateDialogOpen: responseAction.terminateDialogOpen,
-    onTerminateDialogOpenChange: responseAction.setTerminateDialogOpen,
-    terminateProcessing: responseAction.terminateProcessing,
-    terminateError: responseAction.terminateError,
-    onTerminateErrorChange: responseAction.setTerminateError,
-    operationToast: responseAction.operationToast,
-    onOperationToastChange: responseAction.setOperationToast,
-    onTerminateSession: responseAction.handleTerminateSession,
-  });
-
   return createElement(
     "div",
     { "data-noise": noise },
@@ -104,7 +77,6 @@ function ProductionFilesystemCompositionProbe({
       replay: replay.presentation,
       activeTab,
       onTabChange: setActiveTab,
-      responsePanel,
       hopResolutionStatus: "idle",
       requestedHop: null,
       onClearHop: () => {},
@@ -137,7 +109,7 @@ describe("FA-012 ownership boundaries", () => {
   });
 
   it("renders the production timeline composition with one required replay presentation model", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ available: true, action: null }));
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     await act(async () => {
@@ -158,53 +130,6 @@ describe("FA-012 ownership boundaries", () => {
 
     expect(source.match(/<AuditFilesystemWorkspace\b/g) ?? []).toHaveLength(1);
     expect(source).toContain("isFullscreen={isAuditFullscreen}");
-  });
-
-  it("keeps response capability request, abort, and reopen lifecycles on the controlled production tab", async () => {
-    vi.useFakeTimers();
-    let firstSignal: AbortSignal | undefined;
-    let resolveFirst: ((value: Response) => void) | undefined;
-    const firstResponse = new Promise<Response>((resolve) => {
-      resolveFirst = resolve;
-    });
-    const fetchMock = vi.fn()
-      .mockImplementationOnce((_url: string, init?: RequestInit) => {
-        firstSignal = init?.signal as AbortSignal | undefined;
-        return firstResponse;
-      })
-      .mockResolvedValue(jsonResponse({ available: true, action: null }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await act(async () => {
-      root.render(createElement(ProductionFilesystemCompositionProbe, { noise: 1 }));
-      await Promise.resolve();
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    await act(async () => {
-      (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Response")) as HTMLButtonElement).click();
-      await Promise.resolve();
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      root.render(createElement(ProductionFilesystemCompositionProbe, { noise: 2 }));
-      await Promise.resolve();
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Route Replay")) as HTMLButtonElement).click();
-      await Promise.resolve();
-    });
-    expect(firstSignal?.aborted).toBe(true);
-
-    await act(async () => {
-      (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.includes("Response")) as HTMLButtonElement).click();
-      await Promise.resolve();
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    resolveFirst?.(jsonResponse({ available: true, action: null }));
   });
 
   it("advances exactly one autoplay hop after presentational width and rerender changes", async () => {

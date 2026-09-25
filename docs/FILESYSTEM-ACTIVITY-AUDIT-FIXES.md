@@ -49,8 +49,10 @@ FA-016 was accepted `DONE` at terminal implementation commit
 re-audit accepted exact projection semantics, bounded item plans, truthful
 count/summary bounds, source-owned retention, stable repair/cleanup cursors,
 event-outbox ownership, and isolated MongoDB evidence. FS-007 is complete
-through FA-001, FA-002, FA-011, and accepted FA-016. Manual/live response-agent
-validation remains an unrelated outstanding gate and was not performed.
+through FA-001, FA-002, FA-011, and accepted FA-016. The former manual/live
+response-agent validation gate was retired with the session-termination feature
+on 2026-09-25; it was not performed and is no longer active. See the dated
+addendum at the end of this document.
 
 ## Remediation backlog
 
@@ -560,3 +562,14 @@ Recorded on 2026-09-16 before remediation:
 | 2026-09-19 | Continued only FA-016: removed the independent `cwd_audit_projection` TTL, made source-state TTL authoritative, added bounded resumable repair for v2-ready source rows missing a projection, and added bounded source-checked orphan cleanup; directly covered projection-first deletion with concurrent production reconciliation and exact projection facts. | Clean preflight at `5036d03`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed before edits; isolated retention integration passed with execution-plan checks. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-20 | Continued only FA-016: normalized eligible source expiry, replaced trimmed repair markers with raw `(session field, _id)` keysets that advance over malformed rows, made orphan cleanup resumable by `(expires_at, _id)` with source recreation rechecks, made cursor CAS independent of BSON field order, and added bounded malformed-expiry migration. | Preflight started clean at `a479cc0`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed before edits. Production Mongo coverage passed source/projection expiry normalization, v1/unversioned/legacy/canonical and padded identifiers, >256 batches, 1,000 non-ready rows ahead of eligible rows, malformed source-backed/source-less handling, duplicate/concurrent repair, cursor field-order/wrap coverage, cleanup starvation, concurrent cleanup/source recreation, TTL-index migration, and bounded `executionStats`; targeted cursor/CAS tests passed `-count=20`. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
 | 2026-09-20 | Continued only FA-016: corrected repair readiness ownership by projecting all readiness fields and requiring exact generation equality with no pending/dirty markers; added canonical/legacy ownership, cursor advancement, bounded-plan, and paused-writer/event-outbox race coverage. | Preflight started clean at `3015b8b`; fetch succeeded; `origin/main` `4390d88` was already the merge base; dashboard baseline passed before edits. Ownership, event-outbox, repair, cleanup, and dotted-CAS tests passed `-count=20`; verbose plans used the intended raw-field/`_id` indexes with 3/3 ownership and 256/256 adversarial repair documents/keys. FA-016 remains IN PROGRESS and FS-007 remains PARTIAL pending re-audit. |
+## 2026-09-25 addendum — response-agent retirement
+
+The rows above remain historical implementation and validation evidence. On
+2026-09-25 the product owner retired Dashboard session termination and its Pi
+response-agent path. The prior manual/live response-agent smoke-test gate is
+therefore superseded and is no longer planned; it was not performed. The Pi
+agent unit and runtime files were removed, and port 8788 was verified closed.
+Cowrie was not restarted because active TCP sessions were present; the removed
+systemd drop-in takes effect on its next restart. Tailscale remains enabled for
+host administration, while any old tailnet TCP 8788 grant still needs removal
+in the Admin Console. Existing action records were not deleted.

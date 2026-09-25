@@ -50,6 +50,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
+| Dashboard Filesystem Activity | Source retirement prepared; production deployment pending | The current branch removes session termination and keeps Route Replay/Evidence, but the production Dashboard has not been redeployed and may still serve its earlier UI/API. The Pi agent is unavailable. Tailnet ACL cleanup and the next Cowrie restart are pending; see [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md) and the [retirement runbook](RESPONSE-CONTROL-PLANE.md). |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
 | Post-session/cloud analysis | Target workstream | Under active development. |
 | Hailo/Ollama runtime | Experimental candidate | Not the current Cowrie execution path. |
@@ -66,6 +67,9 @@ Real administrative SSH listens on port 2222 but host-firewall access is limited
   it does not execute attacker input on the Pi.
 - **Management plane:** SSH administration plus Tailscale/ZeroTier are for
   developers and operations, not attacker-facing application services.
+- **Dashboard boundary:** Dashboard Filesystem Activity reads telemetry and
+  retained evidence; it has no action channel into Cowrie. Tailscale remains a
+  host-administration path, not a Dashboard response transport.
 - **Legacy plane:** inherited SQLite/MySQL-LLM/old dashboard material remains
   historical evidence. The isolated OpenCanary HTTP login decoy is re-adopted
   for loopback staging under [ADR-0004](adr/ADR-0004-opencanary-http-login.md);

@@ -1,5 +1,13 @@
 # Real-time Attacker Directory Tracking (CWD)
 
+> **Current-state addendum — 2026-09-25:** The Filesystem Activity Response tab
+> and Dashboard session-termination control path described in older sections
+> are retired. The current forensic sidebar has Route Replay and Evidence only.
+> Pi agent and deployment status are documented in
+> [`docs/RESPONSE-CONTROL-PLANE.md`](../../docs/RESPONSE-CONTROL-PLANE.md).
+> Historical polling and action-record details below are retained as past
+> implementation evidence, not as current behavior.
+
 ## สถานะปัจจุบัน
 
 Dashboard ใช้ CWD ที่ Cowrie อ่านจาก virtual shell โดยตรง ไม่ parse หรือจำลอง

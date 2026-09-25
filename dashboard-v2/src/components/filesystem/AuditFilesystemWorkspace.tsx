@@ -167,7 +167,6 @@ export function AuditFilesystemWorkspace({ isFullscreen, onToggleFullscreen }: A
         replay={props.replayPresentation}
         activeTab={props.activeForensicTab}
         onTabChange={props.setActiveForensicTab}
-        responsePanel={props.responsePanel}
         hopResolutionStatus={props.hopResolutionStatus}
         requestedHop={props.requestedHop}
         onClearHop={props.clearRequestedHop}

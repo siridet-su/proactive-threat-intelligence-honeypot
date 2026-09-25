@@ -320,12 +320,6 @@ export async function installApiFixtures(page, {
     }
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [{ ...firstHistoryHop, sessionId }, { ...secondHistoryHop, sessionId }], nextCursor: "earlier", totalItems: 3, totalSuccessfulItems: 3, complete: false }) });
   });
-  await page.route("**/api/sessions/*/actions/terminate**", (route) => route.fulfill({
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({ available: true, action: null }),
-  }));
-
   return {
     requests,
     historyRequests,

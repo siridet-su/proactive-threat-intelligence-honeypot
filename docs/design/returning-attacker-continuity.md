@@ -6,6 +6,12 @@ last_verified: 2026-09-15
 
 # Returning-attacker filesystem continuity
 
+> **Architecture addendum — 2026-09-25:** The response-action contract in the
+> deferred prerequisite list was superseded by [ADR-0007](../adr/ADR-0007-retire-dashboard-session-termination.md).
+> Do not resume or rebuild the Pi response agent as a prerequisite for this
+> filesystem-continuity work. The remaining continuity prerequisites below
+> continue to apply independently.
+
 ## Decision
 
 Keep the current reset-per-login Cowrie filesystem as the production default.

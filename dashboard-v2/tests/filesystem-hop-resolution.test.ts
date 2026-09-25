@@ -1435,7 +1435,6 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
         },
         activeTab: "replay",
         onTabChange: () => {},
-        responsePanel: null,
         hopResolutionStatus: "not-found",
         requestedHop: "cwd:target-not-found-xyz",
         onSelectHistoryEventId: () => {},

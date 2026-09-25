@@ -1,5 +1,34 @@
 # Cowrie response control plane
 
+> **Retired on 2026-09-25.** This document is retained as historical design and
+> deployment evidence. Do not use the install or enablement instructions below
+> as a current operating procedure. Dashboard session termination and its
+> Pi-side agent have been removed. Current decommission status is recorded in
+> the dated section below and in [`IMPLEMENTATION-LOG.md`](IMPLEMENTATION-LOG.md).
+
+## Decommission status — 2026-09-25
+
+- Dashboard Response UI, terminate API, and response-control client code are
+  removed from the current source tree.
+- On the Pi, `honeypot-response-agent.service` was stopped and disabled; its
+  unit, binary, environment file, token file, and dedicated `cowrie-response`
+  service account were removed. Port 8788 had no listener after removal.
+- The Cowrie `40-session-control.conf` drop-in was removed and systemd was
+  reloaded. Cowrie remained active with existing TCP sessions, so it was not
+  restarted; its already-running process may retain the prior environment or
+  hook until a later restart. With the agent removed, the response endpoint is
+  unavailable.
+- Tailscale remains active for host administration. The tailnet ACL was not
+  inspected or changed because the local Tailscale CLI does not manage Admin
+  Console policy. Remove any old TCP 8788 grant in the tailnet Admin Console.
+- Existing MongoDB `session_response_actions` records were not modified.
+- The Dashboard source change has not been deployed to production; a deployed
+  older Dashboard may still show the former control UI, but its Pi endpoint is
+  unavailable.
+
+The old deployment sequence and lifecycle details below describe the retired
+implementation only.
+
 ## Phase 1 scope
 
 Phase 1 supports one operation: terminate one live Cowrie transport by its
