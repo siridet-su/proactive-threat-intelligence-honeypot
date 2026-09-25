@@ -910,3 +910,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [web-login telemetry design](design/web-login-telemetry.md),
   [web-corp runbook](../integrations/web-corp/README.md), and
   [data-access guide](../integrations/web-corp/DATA-ACCESS.md).
+
+### 2026-09-25 — Deploy Web-corp client source-port pipeline
+
+- Status: deployed; live login-event verification pending.
+- Runtime change: built the `web-corp` image from commit `60125598`, atomically
+  replaced the collector and processor binaries, restarted only
+  `honeypot-processor.service`, `honeypot-collector.service`, and the `web-corp`
+  container. The HTTPS container and unrelated services were left untouched.
+- Validation: Compose config check passed; collector and processor Go tests
+  passed; 14 Web-corp tests passed in an isolated network-disabled container;
+  the running app contains `_client_port` and emits `source_port`; both agents
+  are active; `GET /web/login` returned HTTP 200.
+- Data impact: no live login POST or DB write was made. The earlier record
+  remains without `network.src_port`; it cannot be backfilled. Confirm the field
+  with a projected MongoDB query after the next authorized login attempt.
+- Rollback: prior collector and processor executables are preserved under
+  `/tmp/web-source-port-rollout.ycLTz2/` pending end-to-end confirmation.
+- Detailed evidence: [source-port rollout validation](validation/2026-09-25-web-client-source-port-rollout.md).
