@@ -13,7 +13,7 @@ last_verified: 2026-09-25
 | Raw Cowrie/Zeek/service logs | origin service | collector/adapter | local, bounded and rotated |
 | Web-corp login spool | web-corp app | host collector | root-only, max 64 MiB pending; delete after successful Redis enqueue |
 | Redis streams | Go telemetry plane | processor and workers | transient, bounded queue |
-| Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | 30-day TTL; optional `threat_events` B2 archive because restricted web-login records may contain credentials |
+| Canonical security events | MongoDB Atlas `events` | dashboard, cloud analysis, report jobs | 30-day TTL; active `threat_events` B2 archive under the reviewed private-bucket policy because restricted web-login records may contain credentials |
 | Live hardware samples | MongoDB Atlas `hardware_live` | dashboard snapshot and SSE | fixed ring of 30 documents per sensor |
 | Hardware history | MongoDB Atlas `hardware_metrics_1m` | dashboard history endpoint and reporting | one compact upserted row per sensor/minute, 30-day TTL |
 | Filesystem audit events | MongoDB Atlas `cwd_events` | filesystem activity history and audit replay | authoritative CWD transitions, 30-day TTL; active `filesystem_audit` B2 archive |
@@ -82,5 +82,7 @@ metadata are excluded because the processor rebuilds them from source records.
 The dashboard's target map reads the worker's `backup_target_status` record, so
 repository support is not presented as host activation.
 
-As of 2026-09-25, the Pi explicitly enables `hardware_metrics_1m` and
-`filesystem_audit`. The sensitive `threat_events` target remains disabled.
+As of 2026-09-25, the Pi explicitly enables `hardware_metrics_1m`,
+`filesystem_audit`, and `threat_events`. The latter remains bounded by the
+same safety window and private upload policy; current events are not archived
+until they leave the late-write hold.

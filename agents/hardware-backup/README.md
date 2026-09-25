@@ -14,13 +14,15 @@ BACKUP_TARGETS=hardware_metrics_1m
 The current Pi activation is deliberately broader than the code default:
 
 ```text
-BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit
+BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit,threat_events
+BACKUP_ALLOW_SENSITIVE=true
 ```
 
-This was verified on 2026-09-25 after a successful manual run. The
-`threat_events` target remains disabled because its source can contain
-credential-bearing records and still requires the separate sensitive-data
-policy decision.
+This was verified on 2026-09-25 after a successful manual run and the
+explicit sensitive-data policy review. The `threat_events` target archives the
+canonical `events` collection only after records leave the late-write safety
+hold; the current event window may therefore produce successful zero-document
+manifests until older events become eligible.
 
 The supported logical targets are:
 

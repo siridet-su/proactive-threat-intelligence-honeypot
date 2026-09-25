@@ -779,3 +779,55 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
   [current architecture](CURRENT-ARCHITECTURE.md), and
   [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Activate sensitive threat-event archive on the Pi
+
+- Status: active for all three configured targets: `hardware_metrics_1m`,
+  `filesystem_audit`, and `threat_events`.
+- Scope and intent: enable the final retained-data target after the private
+  bucket, upload-key capability boundary, and sensitive-data handling policy
+  were explicitly reviewed.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; this entry
+  and the current-state updates are committed with the host activation record.
+- Repository changes: updated the current architecture, service catalog, data
+  ownership contract, and hardware-backup runbook to record that the sensitive
+  target is now active while preserving the no-read/no-delete upload boundary.
+- Host/environment changes actually applied: preserved the prior environment at
+  `/var/lib/honeypot/hardware-backups/deploy-backups/backup.env.pre-threat-events-20260925`,
+  set `BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit,threat_events`, set
+  `BACKUP_ALLOW_SENSITIVE=true` in the protected `/etc/honeypot/backup.env`,
+  and restarted `honeypot-hardware-backup-control.service`. No credential
+  value or protected configuration content was copied into the repository.
+- Runtime/exposure state: the control service is active and reports all three
+  targets; the daily timer remains enabled. The upload worker still has only
+  `listFiles` and `writeFiles` for the private B2 bucket. The dashboard target
+  status is therefore eligible to show all three cards as Active.
+- Validation performed and outcome: a manual scheduled run completed without
+  error for all three targets and refreshed the B2 storage snapshot. Hardware
+  and filesystem archives were uploaded for the newly eligible day. The
+  `threat_events` target produced successful zero-document manifests for the
+  current lookback window because its event records have not yet passed the
+  two-day late-write safety hold; no threat-event upload failure was observed.
+  The oneshot service exited successfully while the control loop remained
+  active.
+- Not performed / deferred: no restore/read operation was run; no sensitive
+  event payload was read back from B2; and no direct local B2 listing was
+  possible because the workstation could not resolve the regional Backblaze
+  API hostname. Pi-side authorization, target activation, and upload logs were
+  verified.
+- Risks and data handling: the `events` archive can contain credential-bearing
+  web-login fields. Keep the bucket private, restrict restore access to the
+  separate read-only operator key, and do not place raw event values in logs,
+  docs, or fixtures.
+- Rollback: restore the protected environment copy above to
+  `/etc/honeypot/backup.env`, remove `threat_events` and
+  `BACKUP_ALLOW_SENSITIVE` from the active environment, and restart the
+  control service. Existing B2 objects remain unless an operator separately
+  applies the cloud lifecycle policy.
+- Follow-up: monitor the first non-empty `threat_events` archive after the
+  safety hold and validate the read-only restore procedure under the approved
+  operator path.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
