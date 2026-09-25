@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Loader2, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Folder, Loader2, RotateCcw } from "lucide-react";
 import React, {
   useCallback,
   useEffect,
@@ -57,6 +57,66 @@ export function formatSessionMetadata(s: FilesystemTopologySession | FilesystemC
     : `${label} time unavailable`;
 
   return { timeStr, eventsStr };
+}
+
+function abbreviatedPath(path: string, maxLength = 30): string {
+  if (path.length <= maxLength) return path;
+
+  const lastSeparator = path.lastIndexOf("/");
+  const basename = lastSeparator >= 0 ? path.slice(lastSeparator + 1) : path;
+  const suffix = basename ? `/${basename}` : "";
+  const prefixLength = Math.max(1, maxLength - suffix.length - 1);
+
+  return `${path.slice(0, prefixLength)}…${suffix}`;
+}
+
+interface SessionOptionSummaryProps {
+  session: FilesystemTopologySession | FilesystemClosedSession;
+  isSelected: boolean;
+  isClosed: boolean;
+}
+
+function SessionOptionSummary({ session, isSelected, isClosed }: SessionOptionSummaryProps) {
+  const metadata = formatSessionMetadata(session);
+  const path = session.cwdState?.path ?? null;
+  const isOutsideHome = Boolean(
+    path && path !== "/" && path !== "/home" && !path.startsWith("/home/"),
+  );
+
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span
+          className={`h-1.5 w-1.5 shrink-0 rounded-full ${isClosed ? "bg-text-subtle/60" : "bg-success"}`}
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1">
+          <strong className={`block truncate text-sm ${isSelected ? "text-primary" : "text-text"}`}>
+            {session.sourceIp}
+          </strong>
+        </span>
+        <span className="shrink-0 rounded-full border border-border/60 bg-surface-subtle px-2 py-0.5 font-sans text-xs font-medium text-text-subtle">
+          {metadata.eventsStr}
+        </span>
+      </div>
+
+      <div className="mt-1 grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] items-center gap-3 pl-3">
+        <span className="whitespace-nowrap text-text-subtle">{metadata.timeStr}</span>
+        <span
+          className={`flex min-w-0 max-w-56 items-center justify-self-end gap-1 rounded border px-1.5 py-0.5 text-xs ${
+            isOutsideHome
+              ? "border-primary/30 bg-primary/10 font-semibold text-primary"
+              : "border-border/50 bg-surface-subtle text-text-subtle"
+          }`}
+        >
+          <Folder className="h-3 w-3 shrink-0" aria-hidden="true" />
+          <span className="block truncate">
+            {path ? abbreviatedPath(path) : "Path unavailable"}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
 }
 
 export interface AuditSessionSelectProps {
@@ -385,6 +445,13 @@ export function AuditSessionSelect({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={listboxId}
+        aria-label={
+          selectedSession
+            ? `${selectedSession.sourceIp}; session ${selectedSession.sessionId}; ${
+                isSelectedClosed ? "closed" : selectedSession.cwdState.path ?? "path unavailable"
+              }`
+            : "Select session to audit"
+        }
         onClick={handleToggleOpen}
         onKeyDown={handleTriggerKeyDown}
         className={`h-9 min-h-9 max-w-[280px] sm:max-w-[320px] flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-2.5 py-1 font-mono text-xs text-text transition-colors cursor-pointer select-none ${
@@ -392,13 +459,6 @@ export function AuditSessionSelect({
             ? "border-primary ring-2 ring-primary/30 bg-surface"
             : "hover:bg-surface-hover hover:border-border-strong"
         }`}
-        title={
-          selectedSession
-            ? `${selectedSession.sourceIp} · ${selectedSession.sessionId} (${
-                isSelectedClosed ? "Closed" : selectedSession.cwdState.path ?? "/"
-              })`
-            : "Select session to audit"
-        }
       >
         <div className="flex items-center gap-1.5 truncate">
           <span
@@ -449,7 +509,7 @@ export function AuditSessionSelect({
         triggerRef={triggerRef}
         ariaLabel="Select session to audit"
         totalCount={allDisplaySessions.length}
-        className="min-w-[320px] sm:min-w-[440px] max-w-[90vw] sm:max-w-[500px] max-h-96 overflow-y-auto overscroll-contain"
+        className="min-w-[320px] max-w-[90vw] sm:min-w-[620px] sm:max-w-[640px] max-h-96 overflow-y-auto overscroll-contain"
       >
         {/* Search Input inside Session Dropdown (outside listbox) */}
         <ComboboxSearchInput
@@ -545,11 +605,7 @@ export function AuditSessionSelect({
                   const globalIndex = idx;
                   const isOptionTabStop =
                     activeIndex === globalIndex || (activeIndex === -1 && globalIndex === 0);
-                  const isOutsideHome =
-                    s.cwdState?.path &&
-                    s.cwdState.path !== "/" &&
-                    s.cwdState.path !== "/home" &&
-                    !s.cwdState.path.startsWith("/home/");
+                  const metadata = formatSessionMetadata(s);
 
                   return (
                     <button
@@ -563,7 +619,10 @@ export function AuditSessionSelect({
                       onFocus={() => handleOptionFocus(globalIndex, s.sessionId)}
                       onClick={() => handleSelect(s.sessionId, s)}
                       onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                      className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                      aria-label={`${s.sourceIp}; session ${s.sessionId}; ${metadata.timeStr}; ${metadata.eventsStr}; ${
+                        s.cwdState?.path ? `current path ${s.cwdState.path}` : "current path unavailable"
+                      }`}
+                      className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-mono transition-colors cursor-pointer ${
                         isSelected
                           ? "bg-primary-subtle text-primary border border-primary-border/50"
                           : activeIndex === globalIndex
@@ -571,34 +630,7 @@ export function AuditSessionSelect({
                             : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="h-1.5 w-1.5 rounded-full bg-success shrink-0" />
-                        <strong className={isSelected ? "text-primary" : "text-text"}>
-                          {s.sourceIp}
-                        </strong>
-                        <span className="text-text-subtle">·</span>
-                        {(() => {
-                           const meta = formatSessionMetadata(s);
-                           return (
-                             <>
-                               {meta.timeStr && <span className="text-text-subtle whitespace-nowrap">{meta.timeStr}</span>}
-                               {meta.timeStr && <span className="text-text-subtle">·</span>}
-                               <span className="text-text-subtle whitespace-nowrap">{meta.eventsStr}</span>
-                             </>
-                           );
-                        })()}
-                        {s.cwdState?.path && (
-                          <span
-                            className={`truncate px-1.5 py-0.2 rounded text-xs border ${
-                              isOutsideHome
-                                ? "bg-primary/10 text-primary border-primary/30 font-semibold"
-                                : "bg-surface-subtle text-text-subtle border-border/50"
-                            }`}
-                          >
-                            {s.cwdState.path}
-                          </span>
-                        )}
-                      </div>
+                      <SessionOptionSummary session={s} isSelected={isSelected} isClosed={false} />
                       {isSelected && (
                         <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
                       )}
@@ -629,11 +661,7 @@ export function AuditSessionSelect({
                   const globalIndex = filteredActiveSessions.length + idx;
                   const isOptionTabStop =
                     activeIndex === globalIndex || (activeIndex === -1 && globalIndex === 0);
-                  const isOutsideHome =
-                    s.cwdState?.path &&
-                    s.cwdState.path !== "/" &&
-                    s.cwdState.path !== "/home" &&
-                    !s.cwdState.path.startsWith("/home/");
+                  const metadata = formatSessionMetadata(s);
 
                   return (
                     <button
@@ -647,7 +675,10 @@ export function AuditSessionSelect({
                       onFocus={() => handleOptionFocus(globalIndex, s.sessionId)}
                       onClick={() => handleSelect(s.sessionId, s)}
                       onKeyDown={(e) => handleOptionKeyDown(e, globalIndex)}
-                      className={`w-full flex items-center justify-between gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-xs font-mono transition-colors cursor-pointer ${
+                      aria-label={`${s.sourceIp}; session ${s.sessionId}; ${metadata.timeStr}; ${metadata.eventsStr}; ${
+                        s.cwdState?.path ? `last path ${s.cwdState.path}` : "last path unavailable"
+                      }`}
+                      className={`flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-xs font-mono transition-colors cursor-pointer ${
                         isSelected
                           ? "bg-primary-subtle text-primary border border-primary-border/50"
                           : activeIndex === globalIndex
@@ -655,34 +686,7 @@ export function AuditSessionSelect({
                             : "text-text-muted hover:bg-surface-hover hover:text-text border border-transparent"
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="h-1.5 w-1.5 rounded-full bg-text-subtle/60 shrink-0" />
-                        <strong className={isSelected ? "text-primary" : "text-text"}>
-                          {s.sourceIp}
-                        </strong>
-                        <span className="text-text-subtle">·</span>
-                        {(() => {
-                           const meta = formatSessionMetadata(s);
-                           return (
-                             <>
-                               {meta.timeStr && <span className="text-text-subtle whitespace-nowrap">{meta.timeStr}</span>}
-                               {meta.timeStr && <span className="text-text-subtle">·</span>}
-                               <span className="text-text-subtle whitespace-nowrap">{meta.eventsStr}</span>
-                             </>
-                           );
-                        })()}
-                        {s.cwdState?.path && (
-                          <span
-                            className={`truncate px-1.5 py-0.2 rounded text-xs border ${
-                              isOutsideHome
-                                ? "bg-primary/10 text-primary border-primary/30 font-semibold"
-                                : "bg-surface-subtle text-text-subtle border-border/50"
-                            }`}
-                          >
-                            {s.cwdState.path}
-                          </span>
-                        )}
-                      </div>
+                      <SessionOptionSummary session={s} isSelected={isSelected} isClosed />
                       {isSelected && (
                         <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" />
                       )}
