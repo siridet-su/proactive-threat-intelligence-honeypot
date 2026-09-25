@@ -16,9 +16,10 @@ const (
 	targetStatusSchemaVersion = "pti.backup_target_status.v1"
 )
 
-// publishTargetStatus makes the worker's enabled target set observable to the
-// dashboard. A missing row means the Pi has not activated that target; it is
-// deliberately different from a manifest row with zero records.
+// publishTargetStatus makes the worker's enabled target set and heartbeat
+// observable to the dashboard. A missing row means the Pi has not activated
+// that target; it is deliberately different from a manifest row with zero
+// records.
 func publishTargetStatus(ctx context.Context, database *mongo.Database, cfg Config, target BackupTarget, workerID string) error {
 	if workerID == "" {
 		hostname, _ := os.Hostname()
@@ -36,6 +37,7 @@ func publishTargetStatus(ctx context.Context, database *mongo.Database, cfg Conf
 			"mode":           cfg.Mode,
 			"bucket":         cfg.B2Bucket,
 			"worker_id":      workerID,
+			"poll_seconds":   cfg.ControlPollSeconds,
 			"last_seen_at":   now,
 			"updated_at":     now,
 		},

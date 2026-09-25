@@ -39,6 +39,14 @@ policy were ready would report a capability that was not actually deployed.
 - Publish the enabled target set to `backup_target_status`. The dashboard
   reports a target as active only when the worker has published that state (or
   the existing hardware manifest proves the already-deployed hardware path).
+- In control mode, refresh `backup_target_status.last_seen_at` on every control
+  poll and include the configured poll interval so the dashboard can classify
+  healthy, stale, or offline worker state. Scheduled mode is displayed as a
+  last-run report, not as a continuously connected worker.
+- Keep restore readiness separate from upload success. The dashboard may show
+  a verification result from `backup_restore_verifications`, but absence of a
+  verification record must remain `Not tested` and must not be inferred from
+  a successful archive manifest.
 
 ## Consequences
 
