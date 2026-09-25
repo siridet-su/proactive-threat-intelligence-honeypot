@@ -336,6 +336,17 @@ export interface DashboardUser extends JsonRecord {
   createdAt?: string | number | Date;
 }
 
+export interface JobPosition extends JsonRecord {
+  id: string;
+  title: string;
+  status: "ACTIVE" | "STANDBY";
+  description?: string;
+  iconName?: string;
+  userCount?: number;
+  createdAt?: string | number | Date;
+  updatedAt?: string | number | Date;
+}
+
 export type DashboardProfile = DashboardUser;
 
 export type CwdObservationStatus = "observed" | "confirmed" | "conditional_candidate" | "unknown";
