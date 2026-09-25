@@ -252,6 +252,83 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   payloads, credentials, or provider secrets are rendered.
 - Rollback: revert the Artifact Intelligence page change; no host rollback is
   required.
+### 2026-09-25 — Align backup retention header with dashboard pages
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: remove the backup page's `Data protection / operations`
+  eyebrow so the header follows the simpler title treatment used by the
+  surrounding dashboard pages.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: removed the eyebrow label from the Backup control room
+  header and removed the title's compensating top margin.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: the page is available through the local
+  dev server; automated dashboard tests are not yet run.
+- Not performed / deferred: no production build, deployment, or browser
+  regression sweep beyond the local page check.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the removed eyebrow element and the previous `mt-2`
+  title class, or revert the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks before committing or deploying.
+- Related runbook: `dashboard-v2/README.md`.
+
+### 2026-09-25 — Remove remaining hardware archive eyebrow
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: remove the `Hardware archive` eyebrow from the Rollup
+  backup section and keep the health badge beside the section title.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: moved the existing status badge alongside `Rollup
+  backup` and removed the redundant all-caps section label.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: `npm run lint`, `npx tsc --noEmit`, and
+  `git diff --check` passed after the header updates; the local backup page
+  returned the expected authentication redirect.
+- Not performed / deferred: no production build, deployment, or authenticated
+  browser regression sweep.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the `Hardware archive` label and previous heading wrapper,
+  or revert the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks before committing or deploying.
+- Related runbook: `dashboard-v2/README.md`.
+
+### 2026-09-25 — Align backup retention header with tab layout
+
+- Status: prepared; local development only, not deployed.
+- Scope and intent: replace the oversized Backup control room hero card with
+  the flat page-header treatment used by the other dashboard tabs.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; change is
+  currently uncommitted.
+- Repository changes: changed the backup page header to a bottom-border layout,
+  restored the shared `Backup & retention` title, retained the concise
+  description and Pi-connected badge, and removed the decorative hero panel.
+  This supersedes the earlier local-only hero-label adjustment in this same
+  uncommitted worktree change.
+- Host/environment changes actually applied: none; no Pi or production
+  dashboard files were changed.
+- Runtime/exposure state: the local dev server uses the artifact-intelligence
+  worktree on port 3100; no production runtime was restarted.
+- Validation performed and outcome: `npm run lint`, `npx tsc --noEmit`, and
+  `git diff --check` passed before this final header layout adjustment.
+- Not performed / deferred: no production build, deployment, or authenticated
+  browser regression sweep.
+- Risks and data handling: presentation-only change; no data, API, backup
+  state, or secrets were changed.
+- Rollback: restore the rounded hero header from the branch base, or revert
+  the implementation commit when one is created.
+- Follow-up: run the focused dashboard checks again before committing or
+  deploying.
+- Related runbook: `dashboard-v2/README.md`.
 ### 2026-09-24 — Correct the HTTP skin and verify local event capture
 
 - Status: corrected and locally verified; service returned to stopped/disabled.
@@ -620,6 +697,242 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
   [web-login telemetry design](design/web-login-telemetry.md), and
   [data access guide](../integrations/web-corp/DATA-ACCESS.md).
 
+### 2026-09-25 — Prepare multi-target retained-data backup support
+
+- Status: prepared; hardware target remains active on the Pi, additional targets
+  are not deployed or activated.
+- Scope and intent: extend the existing Pi backup worker and dashboard source
+  map so retained threat events and filesystem audit sources can be activated
+  deliberately without presenting repository-only support as live coverage.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; changes are
+  currently uncommitted in the dashboard worktree.
+- Repository changes: added target-aware backup configuration for
+  `hardware_metrics_1m`, `threat_events`, and `filesystem_audit`; added a
+  versioned multi-source gzip JSONL envelope; excluded derived filesystem
+  projections; added `backup_target_status` publication and a dashboard API
+  that drives Active/Planned source cards from worker state; and added the
+  sensitive-target opt-in guard. Updated the backup runbook, current
+  architecture, data ownership, service catalog, systemd descriptions, and
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md).
+- Host/environment changes actually applied: none. No Pi binary, systemd unit,
+  B2 bucket/key, MongoDB data, or dashboard deployment was changed by this
+  repository preparation.
+- Runtime/exposure state: the deployed hardware path remains the only active
+  target. `threat_events` and `filesystem_audit` remain Planned until the Pi
+  environment enables their target IDs, the sensitive-data policy is approved,
+  and the B2 application-key prefixes are updated.
+- Validation performed and outcome: hardware-backup `go test ./...` passed with
+  target/configuration coverage; dashboard `npx tsc --noEmit` and `npm run lint`
+  passed; `git diff --check` passed. MongoDB/B2 integration and restore tests
+  were not run.
+- Not performed / deferred: no sensitive-event archive upload, no filesystem
+  archive upload, no restore/readFiles implementation, no Pi deployment, no
+  B2 key-policy change, and no production dashboard verification.
+- Risks and data handling: `events` may contain restricted credential-bearing
+  web-login fields, so the worker rejects that target unless
+  `BACKUP_ALLOW_SENSITIVE=true`. Do not copy credentials, raw event values, or
+  protected B2 configuration into logs or documentation.
+- Rollback: do not enable the new target IDs on the Pi; for repository review,
+  revert the implementation commit. Existing hardware manifests and B2 objects
+  are not modified by this prepared change.
+- Follow-up: review the private B2 encryption/key-prefix policy, update the Pi
+  environment, deploy the worker, run a bounded filesystem archive first, then
+  verify target status, manifest counts, storage snapshot, and read-only restore
+  handling before enabling sensitive threat events.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Deploy retained-data backup worker to the Pi
+
+- Status: active for `hardware_metrics_1m`; additional targets remain inactive.
+- Scope and intent: install the committed multi-target worker and updated
+  systemd descriptions on the Pi while preserving the existing hardware-only
+  target policy until B2 key scope permits additional prefixes.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; implementation
+  commit `93670fd` plus the Backblaze API correction in this commit.
+- Repository changes: restored Backblaze Native API v4 authorization and
+  storage endpoints that are required by the current B2 account; added v4
+  authorization-shape tests and prefix-scoped storage usage. The current
+  architecture row now reflects the deployed hardware-only state.
+- Host/environment changes actually applied: built a static `linux/arm64`
+  binary, installed it at
+  `/home/cpe27/proactive-threat-intelligence-honeypot/agents/hardware-backup/hardware-backup`,
+  installed the updated scheduled/control unit files, reloaded systemd, and
+  restarted `honeypot-hardware-backup-control.service`. The previous binary
+  and unit files were preserved on the Pi with `.pre-93670fd` suffixes. No
+  source branch merge was performed in the Pi repository.
+- Runtime/exposure state: the control service is active and the daily timer is
+  enabled. `/etc/honeypot/backup.env` continues to use the private
+  `pti-honeypot-archives` bucket and the upload key restricted to
+  `hardware_metrics_1m/`; `BACKUP_TARGETS` is unset, so the worker defaults to
+  the hardware target. `threat_events` and `filesystem_audit` are not active.
+- Validation performed and outcome: the deployed binary SHA-256 is
+  `72c7ce33174ab2ddcdfd9d93156263c012a69c8bb6d9f30d67a250f902471536`;
+  control startup authorized B2 without the previous v2 error; a manual
+  scheduled run completed successfully, uploaded the 2026-09-22 hardware
+  archive, and refreshed the B2 storage snapshot. Local Go tests passed.
+- Not performed / deferred: no filesystem or sensitive threat-event archive
+  was uploaded; no restore operation was run; B2 listing from the local
+  workstation was unavailable because the regional API hostname did not
+  resolve locally. The Pi upload result and service logs were verified.
+- Risks and data handling: the first deployed candidate used the obsolete v2
+  B2 endpoint and was immediately replaced after the control-service log
+  exposed the incompatibility. No credentials or event payloads were copied
+  into the repository or logs.
+- Rollback: stop/restart the control service with the preserved
+  `hardware-backup.pre-93670fd-v2` binary, restore the `.pre-93670fd` unit
+  files if needed, then run `systemctl daemon-reload`; no database rollback is
+  required.
+- Follow-up: create a bucket-scoped upload key or a separately scoped worker
+  for `filesystem_audit/` before enabling that target; keep
+  `BACKUP_ALLOW_SENSITIVE` disabled until the restricted `events` archive
+  policy and restore procedure are approved.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md), and
+  [current architecture](CURRENT-ARCHITECTURE.md).
+
+### 2026-09-25 — Activate filesystem audit archive on the Pi
+
+- Status: active for `hardware_metrics_1m` and `filesystem_audit`; sensitive
+  `threat_events` remains inactive.
+- Scope and intent: enable the authoritative filesystem audit archive after
+  confirming that the B2 upload credential can write both target prefixes
+  without granting file deletion or read access.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; worker
+  implementation commits `93670fd` and `c1b9393`; this entry and the current
+  state updates are committed with the operational activation record.
+- Repository changes: updated the current architecture, service catalog, data
+  ownership contract, and hardware-backup runbook to distinguish the deployed
+  filesystem target from the still-disabled sensitive threat-event target.
+- Host/environment changes actually applied: preserved the previous Pi
+  environment at
+  `/var/lib/honeypot/hardware-backups/deploy-backups/backup.env.pre-filesystem-retry-20260925`,
+  configured `BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit` in the
+  protected `/etc/honeypot/backup.env`, and restarted
+  `honeypot-hardware-backup-control.service`. The upload credential remains
+  outside the repository; its capability policy is limited to `listFiles` and
+  `writeFiles` for the private archive bucket.
+- Runtime/exposure state: the control service is active, the daily backup timer
+  remains enabled, and the deployed binary SHA-256 is
+  `ec0f051e423ef0f03d1a36927d97bdf0d127c2d78a7daba68d59b64610d67cca`.
+  `threat_events` was not enabled and `BACKUP_ALLOW_SENSITIVE` remains absent.
+- Validation performed and outcome: control startup reported both enabled
+  targets. A manual scheduled run completed successfully for
+  `hardware_metrics_1m` and `filesystem_audit`; filesystem archives were
+  uploaded for 2026-09-09 through 2026-09-22, with empty days skipped, and the
+  B2 storage snapshot was refreshed. The oneshot service exited successfully
+  while the control loop remained active.
+- Not performed / deferred: no sensitive threat-event archive or restore/read
+  operation was run; no direct local B2 listing was possible because the
+  workstation could not resolve the regional Backblaze API hostname. Pi-side
+  authorization and upload logs were verified instead. Dashboard verification
+  requiring an authenticated browser session remains deferred.
+- Risks and data handling: filesystem archives may contain paths, session
+  identifiers, and other audit metadata. The bucket remains private; no
+  credential values or protected configuration contents were copied into the
+  repository or this log.
+- Rollback: restore the protected environment copy above to
+  `/etc/honeypot/backup.env`, remove `filesystem_audit` from `BACKUP_TARGETS`,
+  and restart the control service. Existing B2 objects are retained unless an
+  operator separately applies the cloud lifecycle policy.
+- Follow-up: monitor the next scheduled run and separately review the
+  sensitive-data policy before enabling `threat_events`.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Activate sensitive threat-event archive on the Pi
+
+- Status: active for all three configured targets: `hardware_metrics_1m`,
+  `filesystem_audit`, and `threat_events`.
+- Scope and intent: enable the final retained-data target after the private
+  bucket, upload-key capability boundary, and sensitive-data handling policy
+  were explicitly reviewed.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; this entry
+  and the current-state updates are committed with the host activation record.
+- Repository changes: updated the current architecture, service catalog, data
+  ownership contract, and hardware-backup runbook to record that the sensitive
+  target is now active while preserving the no-read/no-delete upload boundary.
+- Host/environment changes actually applied: preserved the prior environment at
+  `/var/lib/honeypot/hardware-backups/deploy-backups/backup.env.pre-threat-events-20260925`,
+  set `BACKUP_TARGETS=hardware_metrics_1m,filesystem_audit,threat_events`, set
+  `BACKUP_ALLOW_SENSITIVE=true` in the protected `/etc/honeypot/backup.env`,
+  and restarted `honeypot-hardware-backup-control.service`. No credential
+  value or protected configuration content was copied into the repository.
+- Runtime/exposure state: the control service is active and reports all three
+  targets; the daily timer remains enabled. The upload worker still has only
+  `listFiles` and `writeFiles` for the private B2 bucket. The dashboard target
+  status is therefore eligible to show all three cards as Active.
+- Validation performed and outcome: a manual scheduled run completed without
+  error for all three targets and refreshed the B2 storage snapshot. Hardware
+  and filesystem archives were uploaded for the newly eligible day. The
+  `threat_events` target produced successful zero-document manifests for the
+  current lookback window because its event records have not yet passed the
+  two-day late-write safety hold; no threat-event upload failure was observed.
+  The oneshot service exited successfully while the control loop remained
+  active.
+- Not performed / deferred: no restore/read operation was run; no sensitive
+  event payload was read back from B2; and no direct local B2 listing was
+  possible because the workstation could not resolve the regional Backblaze
+  API hostname. Pi-side authorization, target activation, and upload logs were
+  verified.
+- Risks and data handling: the `events` archive can contain credential-bearing
+  web-login fields. Keep the bucket private, restrict restore access to the
+  separate read-only operator key, and do not place raw event values in logs,
+  docs, or fixtures.
+- Rollback: restore the protected environment copy above to
+  `/etc/honeypot/backup.env`, remove `threat_events` and
+  `BACKUP_ALLOW_SENSITIVE` from the active environment, and restart the
+  control service. Existing B2 objects remain unless an operator separately
+  applies the cloud lifecycle policy.
+- Follow-up: monitor the first non-empty `threat_events` archive after the
+  safety hold and validate the read-only restore procedure under the approved
+  operator path.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Add per-target backup coverage to the dashboard
+
+- Status: repository implementation complete; local dashboard worktree is ready
+  for review. No production web deployment was performed by this change.
+- Scope and intent: distinguish a target being enabled on the Pi from the
+  amount of data actually archived for that target.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; dashboard and
+  test changes are included with this entry.
+- Repository changes: extended the backup target overview API to aggregate the
+  `hardware_backup_manifests` window by target, including successful, archived,
+  empty, failed, running, and missing days plus document and compressed-byte
+  totals. Updated the source cards to show independent coverage, records,
+  archive size, and latest checked day for hardware, filesystem, and threat
+  archives. Empty successful manifests are presented as `No eligible records`
+  rather than falsely implying a B2 object exists.
+- Host/environment changes actually applied: none. The Pi backup worker and
+  MongoDB data were not changed; the UI reads the existing
+  `backup_target_status` and `hardware_backup_manifests` records.
+- Runtime/exposure state: the existing local development server can hot-reload
+  the worktree; no production dashboard process or external endpoint was
+  restarted.
+- Validation performed and outcome: the targeted backup dashboard test suite
+  passed 5 tests, ESLint passed, TypeScript `--noEmit` passed, and the new
+  manifest aggregation test covers archived, empty, failed, and missing days.
+- Not performed / deferred: no authenticated browser screenshot validation and
+  no production dashboard deployment; the API still requires the existing
+  operator session.
+- Risks and data handling: the dashboard exposes counts, sizes, dates, and
+  statuses only. It does not return archive payloads or credential-bearing
+  event contents.
+- Rollback: revert the dashboard/API commit; the Pi worker and existing
+  manifests remain unchanged.
+- Follow-up: deploy the dashboard branch through the normal web release path
+  and verify the three active target cards against the authenticated API.
+- Related material: [retained-data backup runbook](../agents/hardware-backup/README.md),
+  [current architecture](CURRENT-ARCHITECTURE.md), and
+  [data ownership](DATA-OWNERSHIP.md).
 ### 2026-09-24 — Track FTP and SMTP decoy sources in the repository
 
 - Status: source/build-context migration completed; running containers were not
@@ -1537,6 +1850,43 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the paired pulse circles, fixed square viewBox, and previous two-wave keyframes; revert the current-state criterion and appended decision/update records; no host rollback is required.
 - Follow-up: inspect circle clipping and the fade/pause cadence at multiple canvas aspect ratios and in both themes.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Rebuild collector and processor binaries from a clean Pi checkout
+
+- Status: active; deployed and verified on the Pi.
+- Scope and intent: replace the collector and processor binaries that were
+  stamped `vcs.modified=true` with clean builds while preserving the existing
+  service configuration and runtime data path.
+- Repository branch and commit/PR: `feat/artifact-intelligence` at merge
+  commit `275314a`; the Pi source checkout was at `6e46abf` and its tracked
+  collector/processor source files matched the branch before build.
+- Repository changes: appended this deployment record; no agent source,
+  schema, or service-unit change was introduced.
+- Host/environment changes actually applied: ran `go test ./...` for both
+  agent modules; built Linux ARM64 binaries with `-trimpath` and
+  `CGO_ENABLED=1`; preserved the previous binaries under the protected
+  rollback directory `/home/cpe27/agent-deploy-backups/collector-processor-20260925-clean-vcs`; installed the new binaries atomically.
+- Runtime/exposure state: restarted `honeypot-collector.service` and
+  `honeypot-processor.service`. Both are active with zero restart failures;
+  the hardware and hardware-backup services were not restarted.
+- Validation performed and outcome: both Go test suites passed; deployed
+  collector SHA-256 is
+  `0126a24de591096390cee11476ad352e414a7285d5adec9bfb501265351c6fde` and
+  processor SHA-256 is
+  `d11451eb02e0c89669bb4950b1d532fa12ec716834ec6589c66d8960fd0abc38`.
+  Both binaries report `vcs.modified=false`; post-restart service checks were
+  active with no error-priority journal entries.
+- Not performed / deferred: no synthetic login event, MongoDB write, Redis
+  throughput test, or dashboard regression test was generated by this
+  restart.
+- Risks and data handling: binary-only replacement; no credentials, event
+  payloads, MongoDB records, or retention policy were changed.
+- Rollback: atomically restore the preserved binaries from the rollback
+  directory and restart the two services.
+- Follow-up: keep the clean-build hashes with the deployment record and use a
+  clean checkout for future Pi agent releases.
+- Related ADR/runbook: [web-login pipeline deployment validation](validation/2026-09-24-web-login-pipeline.md)
+  and [current architecture](CURRENT-ARCHITECTURE.md).
 
 ### 2026-09-25 — Align the Live topology grid to the radar center
 

@@ -31,6 +31,10 @@ HTTPS edge is target work. FTP, SMTP, and Odoo containers are stopped. Deception
 Core on loopback `:9000` and PostgreSQL on loopback `:5432` remain active as
 Cowrie dependencies; neither is exposed as a public database/web service.
 
+Retained MongoDB sources with an enabled target flow through the Pi backup
+control/scheduled worker into gzip Extended JSON Lines in the private
+Backblaze B2 archive.
+
 The legacy sensor forwarder remains active as an inherited parallel path. It
 must not be expanded as part of new features. Its retirement or migration is a
 separate, verified change once the Go pipeline and cloud receiver have parity.
@@ -47,6 +51,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Login pipeline uses collector/processor; hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs only for eligible observables when `THREAT_INTEL_ENABLED=true`. |
+| Retained data backup worker | Active for `hardware_metrics_1m`, `filesystem_audit`, and `threat_events` | The Pi worker writes the three approved retention targets to the private B2 bucket and reports storage/manifest state. `cwd_audit_projection` remains excluded because it is rebuildable; the sensitive threat-event archive is enabled under the reviewed private-bucket policy. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
@@ -82,6 +87,9 @@ Real administrative SSH listens on port 2222 but host-firewall access is limited
 3. Operate asynchronous VirusTotal/AbuseIPDB enrichment through the active worker with bounded queue/cache and provider-quota controls.
 4. Verify authenticated dashboard review of web-corp login events; keep FTP/SMTP adapters as future work.
 5. Deliver post-session/cloud analysis against Atlas-backed canonical events.
+6. Monitor all enabled retained-data backup targets, manifests, and B2 storage
+   health; revisit the sensitive-event policy before changing the `threat_events`
+   scope.
 
 ## Out of scope for the current phase
 

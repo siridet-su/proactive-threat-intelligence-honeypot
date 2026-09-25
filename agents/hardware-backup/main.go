@@ -46,19 +46,18 @@ func run() error {
 	}
 
 	database := mongoClient.Database(cfg.MongoDatabase)
-	collection := database.Collection(cfg.Collection)
 	manifests := database.Collection(manifestCollection)
 	snapshots := database.Collection(storageSnapshotCollection)
 	if cfg.Mode == "control" {
-		return runControlLoop(ctx, mongoClient, cfg, collection, manifests, snapshots)
+		return runControlLoop(ctx, mongoClient, cfg, database, manifests, snapshots)
 	}
-	return runScheduledBackup(ctx, cfg, collection, manifests, snapshots)
+	return runScheduledBackup(ctx, cfg, database, manifests, snapshots)
 }
 
 func runScheduledBackup(
 	ctx context.Context,
 	cfg Config,
-	collection *mongo.Collection,
+	database *mongo.Database,
 	manifests *mongo.Collection,
 	snapshots *mongo.Collection,
 ) error {
@@ -69,30 +68,37 @@ func runScheduledBackup(
 		return err
 	}
 
-	days := backupWindow(cfg, time.Now().UTC())
-	oldestDay := days[0]
-	latestDay := days[len(days)-1]
-	log.Printf(
-		"hardware backup started collection=%s bucket=%s days=%s..%s force=%t",
-		cfg.Collection,
-		cfg.B2Bucket,
-		oldestDay.Format("2006-01-02"),
-		latestDay.Format("2006-01-02"),
-		cfg.Force,
-	)
-
-	err = withBackupLock(ctx, cfg, func() error {
-		return runBackupDays(ctx, collection, manifests, b2, cfg, days, nil)
-	})
-	if err != nil {
-		return err
+	if err := publishConfiguredTargetStatuses(ctx, database, cfg, ""); err != nil {
+		log.Printf("backup target status failed: %v", err)
 	}
-	if err := refreshStorageSnapshot(ctx, snapshots, cfg, b2); err != nil {
+	for _, target := range cfg.Targets {
+		days := backupWindow(cfg, time.Now().UTC())
+		oldestDay := days[0]
+		latestDay := days[len(days)-1]
+		log.Printf(
+			"backup started target=%s collections=%v bucket=%s days=%s..%s force=%t",
+			target.ID,
+			backupTargetCollectionNames(target),
+			cfg.B2Bucket,
+			oldestDay.Format("2006-01-02"),
+			latestDay.Format("2006-01-02"),
+			cfg.Force,
+		)
+
+		err = withBackupLock(ctx, cfg, func() error {
+			return runBackupDays(ctx, database, manifests, b2, cfg, target, days, nil)
+		})
+		if err != nil {
+			return fmt.Errorf("backup target %s: %w", target.ID, err)
+		}
+		log.Printf("backup completed target=%s", target.ID)
+	}
+	if err := refreshStorageSnapshots(ctx, snapshots, cfg, b2); err != nil {
 		log.Printf("B2 storage snapshot failed: %v", err)
 	} else {
 		log.Printf("B2 storage snapshot updated bucket=%s", cfg.B2Bucket)
 	}
-	log.Printf("hardware backup completed")
+	log.Printf("backup run completed targets=%v", backupTargetIDs(cfg.Targets))
 	return nil
 }
 
@@ -106,10 +112,11 @@ type backupRunProgress struct {
 
 func runBackupDays(
 	ctx context.Context,
-	collection *mongo.Collection,
+	database *mongo.Database,
 	manifests *mongo.Collection,
 	b2 *B2Client,
 	cfg Config,
+	target BackupTarget,
 	days []time.Time,
 	onProgress func(backupRunProgress) error,
 ) error {
@@ -129,12 +136,12 @@ func runBackupDays(
 			}
 		}
 
-		err := backupDay(ctx, collection, manifests, b2, cfg, day)
+		err := backupDay(ctx, database, manifests, b2, cfg, target, day)
 		progress.CompletedDays = index + 1
 		if err != nil {
 			progress.FailedDays++
 			failures = append(failures, err)
-			log.Printf("hardware backup failed day=%s err=%v", day.Format("2006-01-02"), err)
+			log.Printf("backup failed target=%s day=%s err=%v", target.ID, day.Format("2006-01-02"), err)
 		} else {
 			progress.SuccessfulDays++
 		}
@@ -145,22 +152,23 @@ func runBackupDays(
 		}
 	}
 	if len(failures) > 0 {
-		return fmt.Errorf("hardware backup completed with %d failed day(s): %v", len(failures), failures[0])
+		return fmt.Errorf("backup target %s completed with %d failed day(s): %v", target.ID, len(failures), failures[0])
 	}
 	return nil
 }
 
 func backupDay(
 	ctx context.Context,
-	collection *mongo.Collection,
+	database *mongo.Database,
 	manifests *mongo.Collection,
 	b2 *B2Client,
 	cfg Config,
+	target BackupTarget,
 	dayStart time.Time,
 ) error {
 	dayStart = dayStart.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	manifestID := fmt.Sprintf("%s:%s", cfg.Collection, dayStart.Format("2006-01-02"))
+	manifestID := fmt.Sprintf("%s:%s", target.ID, dayStart.Format("2006-01-02"))
 
 	if !cfg.Force {
 		var existing bson.M
@@ -176,7 +184,9 @@ func backupDay(
 	startedAt := time.Now().UTC()
 	if err := updateManifest(ctx, manifests, manifestID, bson.M{
 		"schema_version": archiveSchemaVersion,
-		"collection":     cfg.Collection,
+		"target_id":      target.ID,
+		"collection":     target.ID,
+		"collections":    backupTargetCollectionNames(target),
 		"day_start":      dayStart,
 		"day_end":        dayEnd,
 		"status":         "running",
@@ -187,7 +197,7 @@ func backupDay(
 	}
 
 	operationCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-	archive, err := writeDayArchive(operationCtx, collection, cfg, dayStart)
+	archive, err := writeTargetDayArchive(operationCtx, database, cfg, target, dayStart)
 	cancel()
 	if err != nil {
 		_ = markManifestFailed(ctx, manifests, manifestID, err)
@@ -206,11 +216,11 @@ func backupDay(
 		}); err != nil {
 			return fmt.Errorf("mark empty backup %s complete: %w", manifestID, err)
 		}
-		log.Printf("hardware backup day=%s has no documents", dayStart.Format("2006-01-02"))
+		log.Printf("backup target=%s day=%s has no documents", target.ID, dayStart.Format("2006-01-02"))
 		return nil
 	}
 
-	objectName := archiveObjectName(dayStart)
+	objectName := archiveObjectNameForTarget(target, dayStart)
 	operationCtx, cancel = context.WithTimeout(ctx, 20*time.Minute)
 	uploaded, err := b2.Upload(operationCtx, archive.Path, objectName, "application/gzip", archive.SHA1, archive.SizeBytes)
 	cancel()
@@ -231,7 +241,8 @@ func backupDay(
 		return fmt.Errorf("mark backup %s complete: %w", manifestID, err)
 	}
 	log.Printf(
-		"hardware backup day=%s documents=%d bytes=%d object=%s",
+		"backup target=%s day=%s documents=%d bytes=%d object=%s",
+		target.ID,
 		dayStart.Format("2006-01-02"),
 		archive.DocumentCount,
 		archive.SizeBytes,

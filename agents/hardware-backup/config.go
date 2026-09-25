@@ -21,6 +21,7 @@ type Config struct {
 	MongoURI      string
 	MongoDatabase string
 	Collection    string
+	Targets       []BackupTarget
 
 	B2Bucket           string
 	B2Endpoint         string
@@ -31,14 +32,21 @@ type Config struct {
 	SafetyDays         int
 	ControlPollSeconds int
 	Force              bool
+	AllowSensitive     bool
 }
 
 func loadConfig() (Config, error) {
+	legacyCollection := getenv("BACKUP_COLLECTION", defaultCollection)
+	targets, targetErr := configuredBackupTargets(os.Getenv("BACKUP_TARGETS"), legacyCollection)
+	if targetErr != nil {
+		return Config{}, targetErr
+	}
 	cfg := Config{
 		Mode:               getenv("BACKUP_MODE", "scheduled"),
 		MongoURI:           strings.TrimSpace(os.Getenv("MONGO_URI")),
 		MongoDatabase:      getenv("MONGO_DATABASE", defaultMongoDatabase),
-		Collection:         getenv("BACKUP_COLLECTION", defaultCollection),
+		Collection:         targets[0].ID,
+		Targets:            targets,
 		B2Bucket:           strings.TrimSpace(os.Getenv("B2_BUCKET")),
 		B2Endpoint:         strings.TrimSpace(os.Getenv("B2_ENDPOINT")),
 		B2KeyID:            strings.TrimSpace(os.Getenv("B2_KEY_ID")),
@@ -48,6 +56,7 @@ func loadConfig() (Config, error) {
 		SafetyDays:         getenvNonNegativeInt("BACKUP_SAFETY_DAYS", defaultSafetyDays),
 		ControlPollSeconds: getenvPositiveInt("BACKUP_CONTROL_POLL_SECONDS", defaultControlPollSeconds),
 		Force:              strings.EqualFold(strings.TrimSpace(os.Getenv("BACKUP_FORCE")), "true"),
+		AllowSensitive:     strings.EqualFold(strings.TrimSpace(os.Getenv("BACKUP_ALLOW_SENSITIVE")), "true"),
 	}
 
 	for name, value := range map[string]string{
@@ -65,6 +74,11 @@ func loadConfig() (Config, error) {
 	}
 	if cfg.LookbackDays < cfg.SafetyDays+1 {
 		return Config{}, fmt.Errorf("BACKUP_LOOKBACK_DAYS must be greater than BACKUP_SAFETY_DAYS")
+	}
+	for _, target := range cfg.Targets {
+		if target.Sensitive && !cfg.AllowSensitive {
+			return Config{}, fmt.Errorf("backup target %q contains sensitive event fields; set BACKUP_ALLOW_SENSITIVE=true only after the private B2 policy is ready", target.ID)
+		}
 	}
 
 	return cfg, nil

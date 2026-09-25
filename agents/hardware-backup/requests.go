@@ -53,25 +53,37 @@ func runControlLoop(
 	ctx context.Context,
 	mongoClient *mongo.Client,
 	cfg Config,
-	collection *mongo.Collection,
+	database *mongo.Database,
 	manifests *mongo.Collection,
 	snapshots *mongo.Collection,
 ) error {
 	requests := mongoClient.Database(cfg.MongoDatabase).Collection(requestCollection)
 	hostname, _ := os.Hostname()
 	workerID := fmt.Sprintf("%s:%d", hostname, os.Getpid())
-	log.Printf("hardware backup control loop started worker=%s poll_seconds=%d", workerID, cfg.ControlPollSeconds)
+	b2Ctx, cancelB2 := context.WithTimeout(ctx, 2*time.Minute)
+	_, b2Err := NewB2Client(b2Ctx, cfg)
+	cancelB2()
+	if b2Err != nil {
+		log.Printf("backup target activation check failed: %v", b2Err)
+	} else if err := publishConfiguredTargetStatuses(ctx, database, cfg, workerID); err != nil {
+		log.Printf("backup target status failed: %v", err)
+	}
+	log.Printf("backup control loop started worker=%s targets=%v poll_seconds=%d", workerID, backupTargetIDs(cfg.Targets), cfg.ControlPollSeconds)
 
 	poll := time.NewTicker(time.Duration(cfg.ControlPollSeconds) * time.Second)
 	defer poll.Stop()
 
 	for {
-		request, err := claimNextBackupRequest(ctx, requests, cfg.Collection, workerID)
+		request, err := claimNextBackupRequest(ctx, requests, backupTargetRequestSources(cfg.Targets), workerID)
 		if err != nil {
-			log.Printf("hardware backup request claim failed: %v", err)
+			log.Printf("backup request claim failed: %v", err)
 		} else if request != nil {
-			if err := processBackupRequest(ctx, requests, collection, manifests, cfg, *request, snapshots); err != nil {
-				log.Printf("hardware backup request id=%s failed: %v", request.ID, err)
+			target, ok := backupTargetForRequest(request.Source)
+			if !ok || !targetEnabled(cfg.Targets, target.ID) {
+				log.Printf("backup request id=%s ignored unsupported or disabled source=%s", request.ID, request.Source)
+				_ = markBackupRequestFailed(ctx, requests, request.ID, fmt.Errorf("backup target %q is not enabled", request.Source))
+			} else if err := processBackupRequest(ctx, requests, database, manifests, cfg, target, *request, snapshots); err != nil {
+				log.Printf("backup request id=%s target=%s failed: %v", request.ID, target.ID, err)
 			}
 			continue
 		}
@@ -84,11 +96,11 @@ func runControlLoop(
 	}
 }
 
-func claimNextBackupRequest(ctx context.Context, requests *mongo.Collection, source, workerID string) (*backupRequest, error) {
+func claimNextBackupRequest(ctx context.Context, requests *mongo.Collection, sources []string, workerID string) (*backupRequest, error) {
 	now := time.Now().UTC()
 	staleBefore := now.Add(-requestLeaseDuration)
 	filter := bson.M{
-		"source":         source,
+		"source":         bson.M{"$in": sources},
 		"schema_version": requestSchemaVersion,
 		"$or": bson.A{
 			bson.M{"status": requestStatusPending},
@@ -119,13 +131,14 @@ func claimNextBackupRequest(ctx context.Context, requests *mongo.Collection, sou
 func processBackupRequest(
 	ctx context.Context,
 	requests *mongo.Collection,
-	collection *mongo.Collection,
+	database *mongo.Database,
 	manifests *mongo.Collection,
 	cfg Config,
+	target BackupTarget,
 	request backupRequest,
 	snapshots *mongo.Collection,
 ) error {
-	days, err := selectBackupRequestDays(ctx, manifests, cfg, request.Action)
+	days, err := selectBackupRequestDays(ctx, manifests, target, cfg, request.Action)
 	if err != nil {
 		return markBackupRequestFailed(ctx, requests, request.ID, err)
 	}
@@ -134,7 +147,7 @@ func processBackupRequest(
 	if err := updateBackupRequestProgress(ctx, requests, request.ID, progress); err != nil {
 		return err
 	}
-	log.Printf("hardware backup request id=%s action=%s days=%d", request.ID, request.Action, len(days))
+	log.Printf("backup request id=%s target=%s action=%s days=%d", request.ID, target.ID, request.Action, len(days))
 
 	if len(days) == 0 {
 		return completeBackupRequest(ctx, requests, request.ID, progress, nil)
@@ -148,7 +161,7 @@ func processBackupRequest(
 	}
 
 	err = withBackupLock(ctx, cfg, func() error {
-		return runBackupDays(ctx, collection, manifests, b2, cfg, days, func(runProgress backupRunProgress) error {
+		return runBackupDays(ctx, database, manifests, b2, cfg, target, days, func(runProgress backupRunProgress) error {
 			progress = backupRequestProgress{
 				TotalDays:      runProgress.TotalDays,
 				CompletedDays:  runProgress.CompletedDays,
@@ -160,13 +173,13 @@ func processBackupRequest(
 			return updateBackupRequestProgress(ctx, requests, request.ID, progress)
 		})
 	})
-	if storageErr := refreshStorageSnapshot(ctx, snapshots, cfg, b2); storageErr != nil {
+	if storageErr := refreshStorageSnapshot(ctx, snapshots, cfg, b2, target.ID); storageErr != nil {
 		log.Printf("B2 storage snapshot failed for request id=%s: %v", request.ID, storageErr)
 	}
 	return completeBackupRequest(ctx, requests, request.ID, progress, err)
 }
 
-func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, cfg Config, action string) ([]time.Time, error) {
+func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, target BackupTarget, cfg Config, action string) ([]time.Time, error) {
 	if action != requestActionRunMissing && action != requestActionRetryFailed {
 		return nil, fmt.Errorf("unsupported backup request action %q", action)
 	}
@@ -175,10 +188,10 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, c
 		var existing []struct {
 			DayStart time.Time `bson:"day_start"`
 		}
-		cursor, err := manifests.Find(ctx, bson.M{
-			"collection": cfg.Collection,
-			"day_start":  bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)},
-		}, options.Find().SetProjection(bson.M{"day_start": 1}))
+		query := manifestTargetFilter(target.ID)
+		query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
+		cursor, err := manifests.Find(ctx, query,
+			options.Find().SetProjection(bson.M{"day_start": 1}))
 		if err != nil {
 			return nil, fmt.Errorf("read backup manifests: %w", err)
 		}
@@ -201,11 +214,11 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, c
 	var failed []struct {
 		DayStart time.Time `bson:"day_start"`
 	}
-	cursor, err := manifests.Find(ctx, bson.M{
-		"collection": cfg.Collection,
-		"status":     requestStatusFailed,
-		"day_start":  bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)},
-	}, options.Find().SetProjection(bson.M{"day_start": 1}).SetSort(bson.D{{Key: "day_start", Value: 1}}))
+	query := manifestTargetFilter(target.ID)
+	query["status"] = requestStatusFailed
+	query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
+	cursor, err := manifests.Find(ctx, query,
+		options.Find().SetProjection(bson.M{"day_start": 1}).SetSort(bson.D{{Key: "day_start", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("read failed backup manifests: %w", err)
 	}
