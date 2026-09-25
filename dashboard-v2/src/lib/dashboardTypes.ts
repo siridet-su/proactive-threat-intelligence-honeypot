@@ -202,6 +202,42 @@ export interface HardwareBackupStatus {
   storage: HardwareBackupStorageStatus | null;
 }
 
+export type BackupTargetId = "hardware_metrics_1m" | "threat_events" | "filesystem_audit";
+export type BackupTargetState = "active" | "planned";
+
+export interface BackupTargetCoverage {
+  expected_days: number;
+  successful_days: number;
+  archived_days: number;
+  empty_days: number;
+  failed_days: number;
+  running_days: number;
+  missing_days: number;
+  archived_documents: number;
+  archive_bytes: number;
+  latest_success_day: string | null;
+  last_started_at: string | null;
+  last_completed_at: string | null;
+  latest_run_status: HardwareBackupDayStatus | null;
+}
+
+export interface BackupTargetStatus {
+  target_id: BackupTargetId;
+  state: BackupTargetState;
+  collections: string[];
+  sensitive: boolean;
+  last_seen_at: string | null;
+  last_completed_at: string | null;
+  coverage: BackupTargetCoverage;
+}
+
+export interface BackupTargetOverview {
+  generated_at: string;
+  active_count: number;
+  planned_count: number;
+  targets: BackupTargetStatus[];
+}
+
 function isNullableNumber(value: unknown): value is number | null {
   return value === null || (typeof value === "number" && Number.isFinite(value));
 }
@@ -250,6 +286,25 @@ function isHardwareBackupStorageStatus(value: unknown): value is HardwareBackupS
     typeof value.checked_at === "string";
 }
 
+function isBackupTargetCoverage(value: unknown): value is BackupTargetCoverage {
+  if (!isRecord(value)) return false;
+  return [
+    "expected_days",
+    "successful_days",
+    "archived_days",
+    "empty_days",
+    "failed_days",
+    "running_days",
+    "missing_days",
+    "archived_documents",
+    "archive_bytes",
+  ].every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
+    isNullableString(value.latest_success_day) &&
+    isNullableString(value.last_started_at) &&
+    isNullableString(value.last_completed_at) &&
+    (value.latest_run_status === null || value.latest_run_status === "success" || value.latest_run_status === "failed" || value.latest_run_status === "running" || value.latest_run_status === "missing");
+}
+
 export function isHardwareBackupStatus(value: unknown): value is HardwareBackupStatus {
   if (!isRecord(value) || typeof value.can_control !== "boolean" || typeof value.collection !== "string" || typeof value.generated_at !== "string" || !isRecord(value.expected_window) || !isRecord(value.summary) || !Array.isArray(value.days)) {
     return false;
@@ -271,6 +326,27 @@ export function isHardwareBackupStatus(value: unknown): value is HardwareBackupS
     value.days.every(isHardwareBackupDay) &&
     (value.request === null || isHardwareBackupRequest(value.request)) &&
     (value.storage === null || isHardwareBackupStorageStatus(value.storage));
+}
+
+function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {
+  if (!isRecord(value)) return false;
+  return (value.target_id === "hardware_metrics_1m" || value.target_id === "threat_events" || value.target_id === "filesystem_audit") &&
+    (value.state === "active" || value.state === "planned") &&
+    Array.isArray(value.collections) && value.collections.every((collection) => typeof collection === "string") &&
+    typeof value.sensitive === "boolean" &&
+    isNullableString(value.last_seen_at) &&
+    isNullableString(value.last_completed_at) &&
+    isBackupTargetCoverage(value.coverage);
+}
+
+export function isBackupTargetOverview(value: unknown): value is BackupTargetOverview {
+  if (!isRecord(value) || typeof value.generated_at !== "string" ||
+    typeof value.active_count !== "number" || !Number.isFinite(value.active_count) ||
+    typeof value.planned_count !== "number" || !Number.isFinite(value.planned_count) ||
+    !Array.isArray(value.targets)) {
+    return false;
+  }
+  return value.targets.every(isBackupTargetStatus);
 }
 
 function isHardwareHistoryMetric(value: unknown): value is HardwareHistoryMetric {

@@ -19,14 +19,20 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const archiveSchemaVersion = "pti.hardware_metrics_1m_backup.v1"
+const archiveSchemaVersion = "pti.backup.v2"
 
 type archiveHeader struct {
-	Marker        string `json:"_pti_backup"`
-	SchemaVersion string `json:"schema_version"`
-	Collection    string `json:"collection"`
-	DayStart      string `json:"day_start"`
-	DayEnd        string `json:"day_end"`
+	Marker        string   `json:"_pti_backup"`
+	SchemaVersion string   `json:"schema_version"`
+	TargetID      string   `json:"target_id"`
+	Collections   []string `json:"collections"`
+	DayStart      string   `json:"day_start"`
+	DayEnd        string   `json:"day_end"`
+}
+
+type archiveRecord struct {
+	Collection string          `json:"collection"`
+	Document   json.RawMessage `json:"document"`
 }
 
 type ArchiveResult struct {
@@ -37,10 +43,32 @@ type ArchiveResult struct {
 	SHA256        string
 }
 
+// writeDayArchive keeps the original helper available for focused tests and
+// older callers. New runs use writeTargetDayArchive so a logical target can
+// contain more than one authoritative collection.
 func writeDayArchive(
 	ctx context.Context,
 	collection *mongo.Collection,
 	cfg Config,
+	dayStart time.Time,
+) (ArchiveResult, error) {
+	target := BackupTarget{
+		ID:     cfg.Collection,
+		Prefix: cfg.Collection,
+		Sources: []ArchiveSource{{
+			Collection: cfg.Collection,
+			TimeFields: []string{"timestamp"},
+			SortField:  "timestamp",
+		}},
+	}
+	return writeTargetDayArchive(ctx, collection.Database(), cfg, target, dayStart)
+}
+
+func writeTargetDayArchive(
+	ctx context.Context,
+	database *mongo.Database,
+	cfg Config,
+	target BackupTarget,
 	dayStart time.Time,
 ) (ArchiveResult, error) {
 	dayStart = dayStart.UTC().Truncate(24 * time.Hour)
@@ -49,7 +77,7 @@ func writeDayArchive(
 		return ArchiveResult{}, fmt.Errorf("create backup root: %w", err)
 	}
 
-	temporary, err := os.CreateTemp(cfg.BackupRoot, "hardware-metrics-*.jsonl.gz")
+	temporary, err := os.CreateTemp(cfg.BackupRoot, "backup-"+target.ID+"-*.jsonl.gz")
 	if err != nil {
 		return ArchiveResult{}, fmt.Errorf("create archive temp file: %w", err)
 	}
@@ -68,9 +96,10 @@ func writeDayArchive(
 	}
 	buffered := bufio.NewWriterSize(gzipWriter, 64*1024)
 	header := archiveHeader{
-		Marker:        "hardware_metrics_1m",
+		Marker:        "pti_backup",
 		SchemaVersion: archiveSchemaVersion,
-		Collection:    cfg.Collection,
+		TargetID:      target.ID,
+		Collections:   backupTargetCollectionNames(target),
 		DayStart:      dayStart.Format(time.RFC3339),
 		DayEnd:        dayEnd.Format(time.RFC3339),
 	}
@@ -82,40 +111,13 @@ func writeDayArchive(
 		return ArchiveResult{}, fmt.Errorf("write archive header: %w", err)
 	}
 
-	query := bson.M{
-		"timestamp": bson.M{
-			"$gte": dayStart,
-			"$lt":  dayEnd,
-		},
-	}
-	cursor, err := collection.Find(ctx, query, options.Find().
-		SetSort(bson.D{{Key: "timestamp", Value: 1}, {Key: "_id", Value: 1}}).
-		SetBatchSize(512))
-	if err != nil {
-		return ArchiveResult{}, fmt.Errorf("read %s for %s: %w", cfg.Collection, dayStart.Format("2006-01-02"), err)
-	}
-	defer cursor.Close(ctx)
-
 	var documentCount int64
-	for cursor.Next(ctx) {
-		document := bson.M{}
-		if err := cursor.Decode(&document); err != nil {
-			return ArchiveResult{}, fmt.Errorf("decode %s document: %w", cfg.Collection, err)
-		}
-		encoded, err := bson.MarshalExtJSON(document, true, false)
+	for _, source := range target.Sources {
+		count, err := writeSourceArchive(ctx, buffered, database.Collection(source.Collection), source, dayStart, dayEnd)
 		if err != nil {
-			return ArchiveResult{}, fmt.Errorf("encode %s document: %w", cfg.Collection, err)
+			return ArchiveResult{}, err
 		}
-		if _, err := buffered.Write(encoded); err != nil {
-			return ArchiveResult{}, fmt.Errorf("write %s document: %w", cfg.Collection, err)
-		}
-		if err := buffered.WriteByte('\n'); err != nil {
-			return ArchiveResult{}, fmt.Errorf("write %s document separator: %w", cfg.Collection, err)
-		}
-		documentCount++
-	}
-	if err := cursor.Err(); err != nil {
-		return ArchiveResult{}, fmt.Errorf("iterate %s documents: %w", cfg.Collection, err)
+		documentCount += count
 	}
 	if err := buffered.Flush(); err != nil {
 		return ArchiveResult{}, fmt.Errorf("flush archive: %w", err)
@@ -144,6 +146,72 @@ func writeDayArchive(
 	}, nil
 }
 
+func writeSourceArchive(
+	ctx context.Context,
+	writer *bufio.Writer,
+	collection *mongo.Collection,
+	source ArchiveSource,
+	dayStart time.Time,
+	dayEnd time.Time,
+) (int64, error) {
+	query := archiveSourceQuery(source, dayStart, dayEnd)
+	sortField := source.SortField
+	if sortField == "" && len(source.TimeFields) > 0 {
+		sortField = source.TimeFields[0]
+	}
+	findOptions := options.Find().SetBatchSize(512)
+	if sortField != "" {
+		findOptions.SetSort(bson.D{{Key: sortField, Value: 1}, {Key: "_id", Value: 1}})
+	}
+	cursor, err := collection.Find(ctx, query, findOptions)
+	if err != nil {
+		return 0, fmt.Errorf("read %s for %s: %w", source.Collection, dayStart.Format("2006-01-02"), err)
+	}
+	defer cursor.Close(ctx)
+
+	var documentCount int64
+	for cursor.Next(ctx) {
+		document := bson.M{}
+		if err := cursor.Decode(&document); err != nil {
+			return 0, fmt.Errorf("decode %s document: %w", source.Collection, err)
+		}
+		documentBytes, err := bson.MarshalExtJSON(document, true, false)
+		if err != nil {
+			return 0, fmt.Errorf("encode %s document: %w", source.Collection, err)
+		}
+		recordBytes, err := json.Marshal(archiveRecord{
+			Collection: source.Collection,
+			Document:   documentBytes,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("encode %s archive record: %w", source.Collection, err)
+		}
+		if _, err := writer.Write(append(recordBytes, '\n')); err != nil {
+			return 0, fmt.Errorf("write %s document: %w", source.Collection, err)
+		}
+		documentCount++
+	}
+	if err := cursor.Err(); err != nil {
+		return 0, fmt.Errorf("iterate %s documents: %w", source.Collection, err)
+	}
+	return documentCount, nil
+}
+
+func archiveSourceQuery(source ArchiveSource, dayStart, dayEnd time.Time) bson.M {
+	dateRange := bson.M{"$gte": dayStart, "$lt": dayEnd}
+	if len(source.TimeFields) == 0 {
+		return bson.M{}
+	}
+	if len(source.TimeFields) == 1 {
+		return bson.M{source.TimeFields[0]: dateRange}
+	}
+	conditions := make(bson.A, 0, len(source.TimeFields))
+	for _, field := range source.TimeFields {
+		conditions = append(conditions, bson.M{field: dateRange})
+	}
+	return bson.M{"$or": conditions}
+}
+
 func hashFile(path string) (sha1Hex, sha256Hex string, size int64, err error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -161,11 +229,19 @@ func hashFile(path string) (sha1Hex, sha256Hex string, size int64, err error) {
 }
 
 func archiveObjectName(dayStart time.Time) string {
+	return archiveObjectNameForTarget(BackupTarget{ID: hardwareBackupTargetID, Prefix: hardwareBackupTargetID}, dayStart)
+}
+
+func archiveObjectNameForTarget(target BackupTarget, dayStart time.Time) string {
+	filename := "archive.jsonl.gz"
+	if target.ID == hardwareBackupTargetID {
+		filename = "rollup.jsonl.gz"
+	}
 	return filepath.ToSlash(filepath.Join(
-		"hardware_metrics_1m",
+		target.Prefix,
 		dayStart.UTC().Format("2006"),
 		dayStart.UTC().Format("01"),
 		dayStart.UTC().Format("02"),
-		"rollup.jsonl.gz",
+		filename,
 	))
 }

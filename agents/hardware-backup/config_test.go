@@ -64,3 +64,35 @@ func TestLoadConfigControlMode(t *testing.T) {
 		t.Fatalf("ControlPollSeconds = %d, want 7", cfg.ControlPollSeconds)
 	}
 }
+
+func TestLoadConfigRejectsSensitiveTargetWithoutExplicitOptIn(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("B2_BUCKET", "pti-honeypot-archives")
+	t.Setenv("B2_KEY_ID", "key-id")
+	t.Setenv("B2_APPLICATION_KEY", "application-key")
+	t.Setenv("BACKUP_TARGETS", "hardware_metrics_1m,threat_events")
+
+	if _, err := loadConfig(); err == nil {
+		t.Fatal("loadConfig() error = nil, want sensitive-target opt-in error")
+	}
+}
+
+func TestLoadConfigAcceptsAllTargetsWhenSensitiveOptedIn(t *testing.T) {
+	t.Setenv("MONGO_URI", "mongodb://localhost:27017")
+	t.Setenv("B2_BUCKET", "pti-honeypot-archives")
+	t.Setenv("B2_KEY_ID", "key-id")
+	t.Setenv("B2_APPLICATION_KEY", "application-key")
+	t.Setenv("BACKUP_TARGETS", "hardware_metrics_1m,threat_events,filesystem_audit")
+	t.Setenv("BACKUP_ALLOW_SENSITIVE", "true")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig() error = %v", err)
+	}
+	if len(cfg.Targets) != 3 {
+		t.Fatalf("Targets = %d, want 3", len(cfg.Targets))
+	}
+	if !cfg.Targets[1].Sensitive {
+		t.Fatal("threat_events target is not marked sensitive")
+	}
+}

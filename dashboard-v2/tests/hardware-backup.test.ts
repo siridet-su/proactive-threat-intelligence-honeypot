@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { getHardwareBackupWindow } from "@/lib/hardware-backup";
-import { isHardwareBackupStatus } from "@/lib/dashboardTypes";
+import { buildBackupTargetCoverage, getHardwareBackupWindow } from "@/lib/hardware-backup";
+import { isBackupTargetOverview, isHardwareBackupStatus } from "@/lib/dashboardTypes";
 
 describe("hardware backup dashboard status", () => {
   it("uses the completed-day safety window", () => {
@@ -97,6 +97,82 @@ describe("hardware backup dashboard status", () => {
         error: null,
       },
       storage: null,
+    })).toBe(true);
+  });
+
+  it("summarizes manifest coverage per target, including empty days", () => {
+    const window = getHardwareBackupWindow(new Date("2026-09-23T12:00:00.000Z"));
+    const coverage = buildBackupTargetCoverage([
+      {
+        target_id: "threat_events",
+        day_start: new Date("2026-09-19T00:00:00.000Z"),
+        status: "success",
+        document_count: 0,
+        archive_bytes: 0,
+        started_at: new Date("2026-09-23T15:00:00.000Z"),
+        completed_at: new Date("2026-09-23T15:00:01.000Z"),
+        object_name: null,
+      },
+      {
+        target_id: "threat_events",
+        day_start: new Date("2026-09-20T00:00:00.000Z"),
+        status: "success",
+        document_count: 4,
+        archive_bytes: 100,
+        started_at: new Date("2026-09-23T15:01:00.000Z"),
+        completed_at: new Date("2026-09-23T15:01:01.000Z"),
+        object_name: "threat_events/2026/09/20/archive.jsonl.gz",
+      },
+      {
+        target_id: "threat_events",
+        day_start: new Date("2026-09-21T00:00:00.000Z"),
+        status: "failed",
+        error: "temporary upload failure",
+        started_at: new Date("2026-09-23T15:02:00.000Z"),
+        completed_at: new Date("2026-09-23T15:02:01.000Z"),
+      },
+    ], "threat_events", window);
+
+    expect(coverage.expected_days).toBe(29);
+    expect(coverage.successful_days).toBe(2);
+    expect(coverage.archived_days).toBe(1);
+    expect(coverage.empty_days).toBe(1);
+    expect(coverage.failed_days).toBe(1);
+    expect(coverage.missing_days).toBe(26);
+    expect(coverage.archived_documents).toBe(4);
+    expect(coverage.archive_bytes).toBe(100);
+    expect(coverage.latest_success_day).toBe("2026-09-20");
+    expect(coverage.latest_run_status).toBe("failed");
+  });
+
+  it("accepts target coverage summaries from the backup overview API", () => {
+    expect(isBackupTargetOverview({
+      generated_at: "2026-09-23T15:00:00.000Z",
+      active_count: 2,
+      planned_count: 1,
+      targets: [{
+        target_id: "filesystem_audit",
+        state: "active",
+        collections: ["cwd_events", "cwd_session_state"],
+        sensitive: false,
+        last_seen_at: "2026-09-23T15:00:00.000Z",
+        last_completed_at: "2026-09-23T15:02:00.000Z",
+        coverage: {
+          expected_days: 29,
+          successful_days: 29,
+          archived_days: 28,
+          empty_days: 1,
+          failed_days: 0,
+          running_days: 0,
+          missing_days: 0,
+          archived_documents: 1_878,
+          archive_bytes: 12_345,
+          latest_success_day: "2026-09-21",
+          last_started_at: "2026-09-23T15:00:00.000Z",
+          last_completed_at: "2026-09-23T15:02:00.000Z",
+          latest_run_status: "success",
+        },
+      }],
     })).toBe(true);
   });
 });

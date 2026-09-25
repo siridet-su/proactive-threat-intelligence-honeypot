@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-const b2AuthorizeURL = "https://api.backblazeb2.com/b2api/v2/b2_authorize_account"
+const (
+	b2NativeAPIVersion = "v4"
+	b2AuthorizeURL     = "https://api.backblazeb2.com/b2api/v4/b2_authorize_account"
+)
 
 const (
 	b2RequestAttempts = 4
@@ -30,12 +33,29 @@ type B2Client struct {
 
 type b2AuthorizationResponse struct {
 	AccountID          string `json:"accountId"`
-	APIURL             string `json:"apiUrl"`
 	AuthorizationToken string `json:"authorizationToken"`
-	Allowed            struct {
+	APIInfo            struct {
+		StorageAPI struct {
+			APIURL  string `json:"apiUrl"`
+			Allowed struct {
+				Buckets    []b2AllowedBucket `json:"buckets"`
+				NamePrefix string            `json:"namePrefix"`
+			} `json:"allowed"`
+		} `json:"storageApi"`
+	} `json:"apiInfo"`
+	// These fields keep the decoder compatible with older authorization
+	// responses while new application keys use the v4 response shape above.
+	APIURL  string `json:"apiUrl"`
+	Allowed struct {
 		BucketID   string `json:"bucketId"`
 		BucketName string `json:"bucketName"`
+		NamePrefix string `json:"namePrefix"`
 	} `json:"allowed"`
+}
+
+type b2AllowedBucket struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type b2Bucket struct {
@@ -83,24 +103,70 @@ func NewB2Client(ctx context.Context, cfg Config) (*B2Client, error) {
 		return nil, err
 	}
 
-	bucketID := authorization.Allowed.BucketID
-	if authorization.Allowed.BucketName != "" && authorization.Allowed.BucketName != cfg.B2Bucket {
-		return nil, fmt.Errorf("B2 key is restricted to bucket %q, expected %q", authorization.Allowed.BucketName, cfg.B2Bucket)
+	apiURL := authorization.storageAPIURL()
+	if apiURL == "" {
+		return nil, fmt.Errorf("B2 authorization response is missing storage API URL")
+	}
+	bucketID, err := authorization.bucketIDFor(cfg.B2Bucket)
+	if err != nil {
+		return nil, err
 	}
 	if bucketID == "" {
-		bucketID, err = findB2Bucket(ctx, client, authorization, cfg.B2Bucket)
+		bucketID, err = findB2Bucket(ctx, client, apiURL, authorization.AccountID, authorization.AuthorizationToken, cfg.B2Bucket)
 		if err != nil {
 			return nil, err
+		}
+	}
+	if prefix := authorization.allowedNamePrefix(); prefix != "" {
+		for _, target := range cfg.Targets {
+			targetPrefix := strings.TrimSuffix(target.Prefix, "/") + "/"
+			if !strings.HasPrefix(targetPrefix, prefix) {
+				return nil, fmt.Errorf("B2 key prefix %q does not allow backup target %q", prefix, target.ID)
+			}
 		}
 	}
 
 	return &B2Client{
 		httpClient: client,
-		apiURL:     strings.TrimRight(authorization.APIURL, "/"),
+		apiURL:     strings.TrimRight(apiURL, "/"),
 		authToken:  authorization.AuthorizationToken,
 		bucketID:   bucketID,
 		bucketName: cfg.B2Bucket,
 	}, nil
+}
+
+func (authorization b2AuthorizationResponse) storageAPIURL() string {
+	if authorization.APIInfo.StorageAPI.APIURL != "" {
+		return authorization.APIInfo.StorageAPI.APIURL
+	}
+	return authorization.APIURL
+}
+
+func (authorization b2AuthorizationResponse) bucketIDFor(bucketName string) (string, error) {
+	allowedBuckets := authorization.APIInfo.StorageAPI.Allowed.Buckets
+	if len(allowedBuckets) > 0 {
+		for _, bucket := range allowedBuckets {
+			if bucket.Name == bucketName {
+				return bucket.ID, nil
+			}
+		}
+		if len(allowedBuckets) == 1 && allowedBuckets[0].Name == "" {
+			return allowedBuckets[0].ID, nil
+		}
+		return "", fmt.Errorf("B2 key is not authorized for bucket %q", bucketName)
+	}
+
+	if authorization.Allowed.BucketName != "" && authorization.Allowed.BucketName != bucketName {
+		return "", fmt.Errorf("B2 key is restricted to bucket %q, expected %q", authorization.Allowed.BucketName, bucketName)
+	}
+	return authorization.Allowed.BucketID, nil
+}
+
+func (authorization b2AuthorizationResponse) allowedNamePrefix() string {
+	if prefix := strings.TrimSpace(authorization.APIInfo.StorageAPI.Allowed.NamePrefix); prefix != "" {
+		return prefix
+	}
+	return strings.TrimSpace(authorization.Allowed.NamePrefix)
 }
 
 func authorizeB2(ctx context.Context, client *http.Client, keyID, applicationKey string) (b2AuthorizationResponse, error) {
@@ -122,28 +188,28 @@ func authorizeB2(ctx context.Context, client *http.Client, keyID, applicationKey
 	if err := json.NewDecoder(response.Body).Decode(&authorization); err != nil {
 		return b2AuthorizationResponse{}, fmt.Errorf("decode B2 authorization response: %w", err)
 	}
-	if authorization.APIURL == "" || authorization.AuthorizationToken == "" {
+	if authorization.storageAPIURL() == "" || authorization.AuthorizationToken == "" {
 		return b2AuthorizationResponse{}, fmt.Errorf("B2 authorization response is missing API URL or token")
 	}
 	return authorization, nil
 }
 
-func findB2Bucket(ctx context.Context, client *http.Client, authorization b2AuthorizationResponse, bucketName string) (string, error) {
+func findB2Bucket(ctx context.Context, client *http.Client, apiURL, accountID, authToken, bucketName string) (string, error) {
 	payload, err := json.Marshal(struct {
 		AccountID  string `json:"accountId"`
 		BucketName string `json:"bucketName"`
 	}{
-		AccountID:  authorization.AccountID,
+		AccountID:  accountID,
 		BucketName: bucketName,
 	})
 	if err != nil {
 		return "", fmt.Errorf("encode B2 bucket request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(authorization.APIURL, "/")+"/b2api/v2/b2_list_buckets", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(apiURL, "/")+"/b2api/"+b2NativeAPIVersion+"/b2_list_buckets", bytes.NewReader(payload))
 	if err != nil {
 		return "", fmt.Errorf("create B2 bucket request: %w", err)
 	}
-	request.Header.Set("Authorization", authorization.AuthorizationToken)
+	request.Header.Set("Authorization", authToken)
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
@@ -204,13 +270,13 @@ func (client *B2Client) Upload(ctx context.Context, path, objectName, contentTyp
 	return uploaded, nil
 }
 
-func (client *B2Client) StorageUsage(ctx context.Context) (b2StorageUsage, error) {
+func (client *B2Client) StorageUsage(ctx context.Context, prefix string) (b2StorageUsage, error) {
 	usage := b2StorageUsage{}
 	startFileName := ""
 	startFileID := ""
 
 	for {
-		page, err := client.listFileVersions(ctx, startFileName, startFileID)
+		page, err := client.listFileVersions(ctx, startFileName, startFileID, prefix)
 		if err != nil {
 			return b2StorageUsage{}, err
 		}
@@ -236,17 +302,19 @@ func (client *B2Client) StorageUsage(ctx context.Context) (b2StorageUsage, error
 	}
 }
 
-func (client *B2Client) listFileVersions(ctx context.Context, startFileName, startFileID string) (b2ListFileVersionsResponse, error) {
+func (client *B2Client) listFileVersions(ctx context.Context, startFileName, startFileID, prefix string) (b2ListFileVersionsResponse, error) {
 	payload, err := json.Marshal(struct {
 		BucketID      string `json:"bucketId"`
 		StartFileName string `json:"startFileName,omitempty"`
 		StartFileID   string `json:"startFileId,omitempty"`
 		MaxFileCount  int    `json:"maxFileCount"`
+		Prefix        string `json:"prefix,omitempty"`
 	}{
 		BucketID:      client.bucketID,
 		StartFileName: startFileName,
 		StartFileID:   startFileID,
 		MaxFileCount:  1000,
+		Prefix:        prefix,
 	})
 	if err != nil {
 		return b2ListFileVersionsResponse{}, fmt.Errorf("encode B2 storage usage request: %w", err)
@@ -254,7 +322,7 @@ func (client *B2Client) listFileVersions(ctx context.Context, startFileName, sta
 
 	var lastErr error
 	for attempt := 1; attempt <= b2RequestAttempts; attempt++ {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiURL+"/b2api/v2/b2_list_file_versions", bytes.NewReader(payload))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiURL+"/b2api/"+b2NativeAPIVersion+"/b2_list_file_versions", bytes.NewReader(payload))
 		if err != nil {
 			return b2ListFileVersionsResponse{}, fmt.Errorf("create B2 storage usage request: %w", err)
 		}
@@ -300,7 +368,7 @@ func (client *B2Client) getUploadURL(ctx context.Context) (string, string, error
 
 	var lastErr error
 	for attempt := 1; attempt <= b2RequestAttempts; attempt++ {
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiURL+"/b2api/v2/b2_get_upload_url", bytes.NewReader(payload))
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.apiURL+"/b2api/"+b2NativeAPIVersion+"/b2_get_upload_url", bytes.NewReader(payload))
 		if err != nil {
 			return "", "", fmt.Errorf("create B2 upload URL request: %w", err)
 		}

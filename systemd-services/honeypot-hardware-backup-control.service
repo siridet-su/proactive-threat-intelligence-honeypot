@@ -1,5 +1,5 @@
 [Unit]
-Description=Honeypot Hardware Backup Control Loop
+Description=Honeypot Retained Data Backup Control Loop
 Wants=network-online.target
 After=network-online.target
 

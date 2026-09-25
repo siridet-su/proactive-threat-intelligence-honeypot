@@ -257,7 +257,7 @@ export function HardwareBackupStatus() {
           </div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-primary">Hardware archive</span>
+              <h2 id="hardware-backup-title" className="text-xl font-semibold tracking-tight sm:text-2xl">Rollup backup</h2>
               {presentation && (
                 <span className={`ui-badge text-[10px] ${presentation.className}`} aria-live="polite">
                   <StatusIcon className="h-3 w-3" aria-hidden="true" />
@@ -265,7 +265,6 @@ export function HardwareBackupStatus() {
                 </span>
               )}
             </div>
-            <h2 id="hardware-backup-title" className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl">Rollup backup</h2>
             <p className="mt-0.5 text-xs text-text-muted">`hardware_metrics_1m` → private Backblaze B2</p>
           </div>
         </div>
@@ -554,9 +553,9 @@ function CoverageMap({ data, coveragePercent, reduceMotion }: { data: HardwareBa
         <div>
           <div className="flex items-center gap-2">
             <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 id="backup-coverage-title" className="text-sm font-semibold">Coverage map</h3>
+            <h3 id="backup-coverage-title" className="text-sm font-semibold">Hardware rollup coverage</h3>
           </div>
-          <p className="mt-1 text-xs text-text-muted">{formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · UTC days</p>
+          <p className="mt-1 text-xs text-text-muted">Pi hardware rollups · {formatDay(data.expected_window.from.slice(0, 10))} → {formatDay(data.expected_window.to.slice(0, 10))} · UTC</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="font-mono text-2xl font-semibold tracking-tight text-text">{coveragePercent}%</span>
