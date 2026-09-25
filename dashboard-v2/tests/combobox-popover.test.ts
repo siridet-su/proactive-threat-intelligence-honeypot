@@ -457,6 +457,58 @@ describe("accessible combobox navigation helpers (FS-013)", () => {
       container.remove();
     });
 
+    it("AuditSessionSelect: separates session identity from bounded time, event, and path metadata", async () => {
+      const retained: FilesystemClosedSession = {
+        sessionId: "abcdef1234567890",
+        sourceIp: "203.0.113.42",
+        lifecycle: {
+          startedAt: "2026-09-24T02:50:00Z",
+          closedAt: "2026-09-24T02:52:17Z",
+        },
+        cwdState: {
+          path: "/this/is/a/very/long/verified/current/working/directory",
+          status: "confirmed",
+          observedAt: "2026-09-24T02:52:00Z",
+        },
+        auditSummary: {
+          visitedPaths: ["/this/is/a/very/long/verified/current/working/directory"],
+          homeOnly: false,
+          eventCount: 12,
+        },
+      };
+
+      await act(async () => {
+        root.render(
+          createElement(AuditSessionSelect, {
+            sessions: [],
+            recentClosedSessions: [retained],
+            selectedSessionId: retained.sessionId,
+            onSelectSession: vi.fn(),
+          }),
+        );
+      });
+
+      const trigger = container.querySelector('button[role="combobox"]') as HTMLButtonElement;
+      expect(trigger.getAttribute("title")).toBeNull();
+      await act(async () => fireClick(trigger));
+
+      const option = container.querySelector('button[role="option"]') as HTMLButtonElement;
+      expect(option.getAttribute("aria-label")).toContain("session abcdef1234567890");
+      expect(option.getAttribute("aria-label")).toContain("12 events");
+      expect(option.getAttribute("aria-label")).toContain(retained.cwdState?.path);
+      expect(option.textContent).not.toContain("abcdef1234567890");
+      expect(option.textContent).not.toContain("SID");
+      expect(option.textContent).toContain("Closed 24 Sept 2026, 02:52:17 UTC");
+      expect(option.textContent).toContain("12 events");
+      expect(option.textContent).toContain("/this/is/a/very/lon…/directory");
+      expect(option.querySelector("[title]")).toBeNull();
+      expect(option.querySelector("[data-keyboard-tooltip]")).toBeNull();
+
+      const pathBadge = option.querySelector("svg")?.parentElement;
+      expect(pathBadge?.className).toContain("min-w-0");
+      expect(pathBadge?.querySelector(".truncate")).not.toBeNull();
+    });
+
     it("AuditSessionSelect: ArrowDown while closed opens and focuses the first option", async () => {
       await act(async () => {
         root.render(

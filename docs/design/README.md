@@ -16,4 +16,5 @@ staging evidence belong in `../validation/`.
 | [Dashboard v2 UX review](dashboard-v2-ux-review-2026-09-20.md) | Review | Current implementation findings covering data meaning, duplication, hierarchy, and responsive behavior. |
 | [Dashboard v2 implementation phases](dashboard-v2-implementation-phases.md) | Plan | Contract-first phased rollout with regression gates and compatibility-safe cutovers. |
 | [Atlas Free Tier data lifecycle](atlas-free-tier-data-lifecycle.md) | Target | Retention, TTL, index, and rollup constraints for the 512 MB tier. |
+| [Canonical backup and retention implementation plan](canonical-backup-retention-implementation-plan.md) | Plan | Living plan for archiving `honeypot_canonical_v1` to B2 without unsafe canonical TTL deletion. |
 | [Honeypot Portal & Customer Installer](../HONEYPOT-PORTAL-INSTALLER-GUIDE.md) | Target | Outbound WSS gateway, scoped actions, and transactional customer-appliance design. |
