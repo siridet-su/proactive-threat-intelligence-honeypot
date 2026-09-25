@@ -1520,3 +1520,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the paired pulse circles, fixed square viewBox, and previous two-wave keyframes; revert the current-state criterion and appended decision/update records; no host rollback is required.
 - Follow-up: inspect circle clipping and the fade/pause cadence at multiple canvas aspect ratios and in both themes.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Align the Live topology grid to the radar center
+
+- Status: prepared for review; local development UI active; not deployed.
+- Scope and intent: phase the neutral Live topology grid so its center intersection overlays the radar's perpendicular crosshair origin.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `ae0eff5`; this refinement is uncommitted.
+- Repository changes: define the grid cell and half-cell sizes, offset both CSS grid layers so their repeated lines intersect at the exact canvas center, and update the `FS-024` current-state criterion and append its decision/update records.
+- Host/environment changes actually applied: none. No production dashboard, service, database, reverse proxy, or host configuration was changed.
+- Runtime/exposure state: `npm run dev` remains active at `http://localhost:3000`; Next.js HMR compiled the updated styles in 259ms.
+- Validation performed and outcome: Next.js HMR compilation succeeded; `git diff --check` passed. No automated tests were run.
+- Not performed / deferred: authenticated visual review of the grid/crosshair overlap, lint, type-check, production build, and production deployment.
+- Risks and data handling: presentation-only background-position change; no API, MongoDB query, path evidence, telemetry authority, or event marker changed.
+- Rollback: revert the grid cell/half-cell positioning and its current-state/decision/update documentation; no host rollback is required.
+- Follow-up: review the center intersection at common viewport sizes and both themes.
+- Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
