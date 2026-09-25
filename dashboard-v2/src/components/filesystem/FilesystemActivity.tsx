@@ -27,8 +27,6 @@ import type {
 import type { DateRange } from "react-day-picker";
 import { AuditFilterControls, type TimeRangeFilter } from "./AuditFilterControls";
 import { AuditSessionSelect } from "./AuditSessionSelect";
-import { ResponseActionPanel } from "./ResponseActionPanel";
-import { useResponseActionController } from "./ResponseActionController";
 import { FilesystemContextPanel } from "./FilesystemContextPanel";
 import { AuditFilesystemWorkspace } from "./AuditFilesystemWorkspace";
 import { LiveScopeBar } from "./LiveScopeBar";
@@ -69,7 +67,7 @@ interface NavigationApplicationErrorState {
 
 import { useTimelineDrag } from "./useTimelineDrag";
 
-export type ForensicTab = "replay" | "evidence" | "actions";
+export type ForensicTab = "replay" | "evidence";
 
 const LIVE_WORKSPACE_TABS = ["map", "details"] as const;
 
@@ -421,30 +419,6 @@ export function FilesystemActivity() {
   const selectedSession = useMemo(
     () => sessionById.get(selectedSessionId ?? "") ?? null,
     [selectedSessionId, sessionById],
-  );
-
-  // Explicit page-level response lifecycle owner. CwdRouteHistory only renders
-  // the supplied response view model and never starts capability requests or polling.
-  const responseAction = useResponseActionController({
-    selectedSession,
-    sessionIsLive: Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId)),
-    enabled: viewMode === "audit" && activeForensicTab === "actions" && Boolean(selectedSession),
-  });
-  const responsePanel = (
-    <ResponseActionPanel
-      selectedSession={selectedSession}
-      sessionIsLive={Boolean(selectedSessionId && snapshot?.sessions.some((session) => session.sessionId === selectedSessionId))}
-      visibleTerminateAction={responseAction.visibleTerminateAction}
-      visibleTerminateCapability={responseAction.visibleTerminateCapability}
-      terminateDialogOpen={responseAction.terminateDialogOpen}
-      onTerminateDialogOpenChange={responseAction.setTerminateDialogOpen}
-      terminateProcessing={responseAction.terminateProcessing}
-      terminateError={responseAction.terminateError}
-      onTerminateErrorChange={responseAction.setTerminateError}
-      operationToast={responseAction.operationToast}
-      onOperationToastChange={responseAction.setOperationToast}
-      onTerminateSession={responseAction.handleTerminateSession}
-    />
   );
 
   const selectedClosedSession = useMemo(() => {
@@ -871,7 +845,6 @@ export function FilesystemActivity() {
     replayPresentation,
     activeForensicTab,
     setActiveForensicTab,
-    responsePanel,
     hopResolutionStatus,
     requestedHop,
     clearRequestedHop,

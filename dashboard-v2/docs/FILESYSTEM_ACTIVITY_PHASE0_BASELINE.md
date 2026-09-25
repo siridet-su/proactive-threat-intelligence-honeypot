@@ -1,5 +1,11 @@
 # Filesystem Activity Phase 0 behavior baseline
 
+> **Historical addendum — 2026-09-25:** This baseline records the pre-redesign
+> system. Its Response-tab and session-termination ownership statements are
+> superseded by the removal of the Dashboard response feature. See
+> [`docs/RESPONSE-CONTROL-PLANE.md`](../../docs/RESPONSE-CONTROL-PLANE.md) for
+> the current retirement status.
+
 Date: 2026-09-20
 
 Scope: `/filesystem-activity` before the production UI refactor

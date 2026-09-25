@@ -12,13 +12,11 @@ import type {
 } from "../src/lib/dashboardTypes";
 import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
 import { FilesystemPageHeader } from "../src/components/filesystem/FilesystemPageHeader";
-import { ResponseActionPanel } from "../src/components/filesystem/ResponseActionPanel";
 import {
   TopologyCanvas,
   deriveTopologyPresentationContext,
 } from "../src/components/filesystem/TopologyCanvas";
 import { useAuditReplay } from "../src/components/filesystem/useAuditReplay";
-import { useResponseActionController } from "../src/components/filesystem/ResponseActionController";
 
 // @ts-expect-error React act environment flag
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -49,13 +47,6 @@ const event = (id: string, at: string, toPath = `/${id}`): SessionCwdHistoryEven
   at,
 });
 
-function jsonResponse(payload: unknown, status = 200): Response {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 function fireInputChange(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
   setter?.call(input, value);
@@ -65,28 +56,6 @@ function fireInputChange(input: HTMLInputElement, value: string): void {
 
 function fireKey(element: HTMLElement, key: string): void {
   element.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
-}
-
-function ResponseComposition({ enabled }: { enabled: boolean }) {
-  const responseAction = useResponseActionController({
-    selectedSession: session,
-    sessionIsLive: false,
-    enabled,
-  });
-  return createElement(ResponseActionPanel, {
-    selectedSession: session,
-    sessionIsLive: false,
-    visibleTerminateAction: responseAction.visibleTerminateAction,
-    visibleTerminateCapability: responseAction.visibleTerminateCapability,
-    terminateDialogOpen: responseAction.terminateDialogOpen,
-    onTerminateDialogOpenChange: responseAction.setTerminateDialogOpen,
-    terminateProcessing: responseAction.terminateProcessing,
-    terminateError: responseAction.terminateError,
-    onTerminateErrorChange: responseAction.setTerminateError,
-    operationToast: responseAction.operationToast,
-    onOperationToastChange: responseAction.setOperationToast,
-    onTerminateSession: responseAction.handleTerminateSession,
-  });
 }
 
 describe("FA-013 production component evidence", () => {
@@ -104,50 +73,6 @@ describe("FA-013 production component evidence", () => {
     vi.restoreAllMocks();
     act(() => root.unmount());
     container.remove();
-  });
-
-  it("E: polls the controlled Response tab with bounded cadence and aborts on disable", async () => {
-    vi.useFakeTimers();
-    const requestedAt = new Date(Date.now()).toISOString();
-    const pending = {
-      actionId: "action-1",
-      sessionId: session.sessionId,
-      action: "terminate_session",
-      status: "requested",
-      requestedBy: "operator",
-      requestedAt,
-      deliveredAt: null,
-      verifiedAt: null,
-      failureCategory: null,
-    } as const;
-    const verified = { ...pending, status: "verified", verifiedAt: requestedAt };
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ available: true, action: pending }))
-      .mockResolvedValueOnce(jsonResponse({ available: true, action: pending }))
-      .mockResolvedValueOnce(jsonResponse({ available: true, action: verified }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    await act(async () => root.render(createElement(ResponseComposition, { enabled: true })));
-    await act(async () => Promise.resolve());
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    await act(async () => vi.advanceTimersByTimeAsync(100));
-    await act(async () => Promise.resolve());
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    await act(async () => vi.advanceTimersByTimeAsync(150));
-    await act(async () => Promise.resolve());
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(container.textContent).toContain("Session disconnected");
-
-    const abortingFetch = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((resolve) => {
-      init?.signal?.addEventListener("abort", () => resolve(jsonResponse({ available: true, action: pending })));
-    }));
-    vi.stubGlobal("fetch", abortingFetch);
-    await act(async () => root.render(createElement(ResponseComposition, { enabled: false })));
-    await act(async () => root.render(createElement(ResponseComposition, { enabled: true })));
-    await act(async () => Promise.resolve());
-    const signal = abortingFetch.mock.calls[0][1]?.signal as AbortSignal;
-    await act(async () => root.render(createElement(ResponseComposition, { enabled: false })));
-    expect(signal.aborted).toBe(true);
   });
 
   it("F: renders a valid empty topology as live no-activity without creating a freshness owner", async () => {
@@ -299,7 +224,6 @@ describe("FA-013 production component evidence", () => {
         historyComplete: true,
         replay: replay.presentation,
         activeTab: "replay",
-        responsePanel: null,
         onClearHop: () => {},
         onShowLatestHop: () => {},
         onSelectHistoryEventId: (id) => {

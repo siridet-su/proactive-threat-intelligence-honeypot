@@ -404,8 +404,6 @@ test.describe("FA-013 real-browser evidence", () => {
   test("H: reduced motion makes production replay transitions immediate while controls remain functional", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await openAuditPage(page);
-    await page.getByRole("tab", { name: "Response" }).click();
-    await expect(page.locator('[data-forensic-tab-panel="actions"]')).toBeVisible();
     await page.getByRole("tab", { name: "Evidence" }).click();
     await expect(page.locator('[data-forensic-tab-panel="evidence"]')).toBeVisible();
     const transitionDurations = await page.locator('[class*="motion-reduce:transition-none"]').evaluateAll((elements) =>
@@ -755,7 +753,6 @@ test.describe("FA-013 real-browser evidence", () => {
     const forensicTabs = page.getByRole("tablist", { name: "Forensic studio views" });
     const routeTab = forensicTabs.getByRole("tab", { name: "Route Replay" });
     const evidenceTab = forensicTabs.getByRole("tab", { name: "Evidence" });
-    const responseTab = forensicTabs.getByRole("tab", { name: "Response" });
     await expect(routeTab).toHaveAttribute("tabindex", "0");
     await expect(evidenceTab).toHaveAttribute("tabindex", "-1");
     await routeTab.focus();
@@ -764,8 +761,8 @@ test.describe("FA-013 real-browser evidence", () => {
     await expect(evidenceTab).toHaveAttribute("aria-selected", "true");
     await expect(page.locator("#tabpanel-evidence")).toHaveAttribute("aria-labelledby", await evidenceTab.getAttribute("id"));
     await evidenceTab.press("End");
-    await expect(responseTab).toBeFocused();
-    await responseTab.press("Home");
+    await expect(evidenceTab).toBeFocused();
+    await evidenceTab.press("Home");
     await expect(routeTab).toBeFocused();
 
     await auditModeTab.focus();

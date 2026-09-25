@@ -20,6 +20,11 @@ function validIdentityText(value: unknown, maximumLength: number): value is stri
     && !/[\x00-\x1f\x7f]/.test(value);
 }
 
+/** Validate an opaque sensor-local session ID before using it for an exact lookup. */
+export function isValidSensorSessionIdentifier(value: unknown): value is string {
+  return validIdentityText(value, MAX_SENSOR_SESSION_ID_LENGTH);
+}
+
 /**
  * Verify the authenticated sensor/session binding embedded at ingestion and
  * return its sensor-local Cowrie ID. This mirrors the Python canonical-ID

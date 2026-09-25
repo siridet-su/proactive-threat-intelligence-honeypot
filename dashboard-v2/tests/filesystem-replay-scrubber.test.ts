@@ -130,7 +130,6 @@ function ReplayHistoryAdapter({
     layout: "card",
     activeTab: "replay",
     onTabChange: () => {},
-    responsePanel: null,
     hopResolutionStatus,
     requestedHop,
     onClearHop,

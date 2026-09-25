@@ -2,8 +2,14 @@ import "server-only";
 
 import { lstatSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import type { Document } from "mongodb";
 
-import { CANONICAL_SESSION_ID_PATTERN } from "@/lib/sensor-session-identity";
+import {
+  authenticatedSensorSessionAlias,
+  CANONICAL_SESSION_ID_PATTERN,
+  isValidSensorSessionIdentifier,
+  parseStoredCanonicalEvent,
+} from "@/lib/sensor-session-identity";
 import { getMongoClient } from "@/lib/mongodb";
 
 const MAX_TOKEN_BYTES = 4_096;
@@ -11,11 +17,19 @@ const MAX_UPSTREAM_BYTES = 1_000_000;
 const MAX_COMMANDS = 100;
 const MAX_COMMAND_INPUT_BYTES = 4_096;
 const UPSTREAM_TIMEOUT_MS = 4_000;
+const IDENTITY_LOOKUP_TIMEOUT_MS = 20_000;
+const CANONICAL_EVENT_SCHEMA = "mongodb_canonical_event.v1";
 const COMMAND_EVENT_IDS = new Set([
   "cowrie.command.failed",
   "cowrie.command.input",
   "cowrie.command.success",
 ]);
+const SESSION_IDENTITY_EVENT_IDS = [
+  "cowrie.session.closed",
+  "cowrie.session.connect",
+  "cowrie.session.cwd",
+  "cowrie.session.params",
+];
 
 type JsonRecord = Record<string, unknown>;
 
@@ -49,6 +63,58 @@ export interface AdminCowrieCommandProjection {
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Resolve a Filesystem Activity sensor-local ID to its canonical identity.
+ * Only canonical event rows with an authenticated identity binding can establish
+ * the alias; missing or ambiguous mappings fail closed.
+ */
+export async function resolveCanonicalSessionIdForCommandEvidence(sessionId: string): Promise<string | null> {
+  if (CANONICAL_SESSION_ID_PATTERN.test(sessionId)) return sessionId;
+  if (!isValidSensorSessionIdentifier(sessionId)) return null;
+
+  // Match the JSON-encoded value exactly. Search only session metadata event
+  // types so the identity lookup never loads command-input event payloads.
+  const jsonValue = JSON.stringify(sessionId).slice(1, -1);
+  const sensorAliasPattern = new RegExp(`"sensor_session_id"\\s*:\\s*"${escapeRegExp(jsonValue)}"`);
+  const client = await getMongoClient();
+  const candidates = await client.db("honeypot_canonical_v1").collection<Document>("events")
+    .aggregate<Document>([
+      {
+        $match: {
+          schema_version: CANONICAL_EVENT_SCHEMA,
+          session_id: { $regex: CANONICAL_SESSION_ID_PATTERN.source },
+          eventid: { $in: SESSION_IDENTITY_EVENT_IDS },
+          payload_json: { $regex: sensorAliasPattern },
+        },
+      },
+      {
+        $group: {
+          _id: "$session_id",
+          sensor_id: { $first: "$sensor_id" },
+          payload_json: { $first: "$payload_json" },
+        },
+      },
+      { $limit: 2 },
+    ], { maxTimeMS: IDENTITY_LOOKUP_TIMEOUT_MS })
+    .toArray();
+
+  if (candidates.length !== 1) return null;
+  const candidate = candidates[0];
+  const canonicalSessionId = candidate?._id;
+  if (typeof canonicalSessionId !== "string" || !CANONICAL_SESSION_ID_PATTERN.test(canonicalSessionId)) {
+    return null;
+  }
+
+  const event = parseStoredCanonicalEvent(candidate.payload_json);
+  return authenticatedSensorSessionAlias(canonicalSessionId, event, candidate.sensor_id) === sessionId
+    ? canonicalSessionId
+    : null;
 }
 
 function tokenFromPrivateFile(configuredPath: string): string | null {
