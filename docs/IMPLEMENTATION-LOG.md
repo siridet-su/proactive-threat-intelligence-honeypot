@@ -1932,3 +1932,166 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the canvas-level failed-change warning and previous assertions; retain this dated correction as audit history.
 - Follow-up: confirm the remaining failed-origin marker is visible while the full explanation remains readable in Forensic Studio.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Add read-only Pi installation profile and Word-ready manual
+
+- Status: prepared; planner is read-only and installation/apply mode is not
+  implemented.
+- Scope and intent: begin the fresh Raspberry Pi sensor-node installation
+  workflow with an ordered module profile, a safe plan-only CLI, and a separate
+  Markdown document for copying the installation structure into Word.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit
+  `4b0d67d1`; changes are uncommitted in the dedicated installer worktree.
+- Repository changes: added `deploy/profiles/pi-sensor-arm64.json`,
+  `scripts/pti_install.py`, installer unit tests, and
+  `docs/INSTALLATION-MANUAL-WORD.md`; linked the manual from the docs index.
+  The profile records current/optional/excluded modules and unresolved release
+  blockers instead of claiming a complete install artifact exists.
+- Host/environment changes actually applied: none. The planner does not
+  install packages, create files, access a network service, or alter service
+  state.
+- Runtime/exposure state: unchanged; no service, listener, database, firewall,
+  or credential was changed.
+- Validation performed and outcome: seven installer planner tests passed;
+  `python3 scripts/pti_install.py plan` printed a read-only plan and reported
+  that the exact OS release matrix is not approved; `git diff --check` passed.
+- Not performed / deferred: no apply/install command, clean-device installation,
+  OS release approval, package publication, or service activation was tested.
+- Risks and data handling: the profile is a planning contract, not a supported
+  release declaration. No secrets, credentials, or event payloads were added.
+- Rollback: remove the new profile, planner, tests, manual, and index/log
+  references; no host rollback is required.
+- Follow-up: approve exact OS and hardware versions, bring external deployment
+  sources under review, make service units portable, then test a clean ARM64
+  installation before implementing apply mode.
+- Related ADR/runbook: [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md), [installer profile](../deploy/profiles/pi-sensor-arm64.json), and [customer installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-25 — Scope the active installer phase to Pi host foundation
+
+- Status: prepared for review; both profiles remain plan-only; no package installation is implemented.
+- Scope and intent: follow the operator's phase boundary by preparing Ubuntu host prerequisites first and deferring web and database deployment.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; changes are uncommitted in the dedicated installer worktree.
+- Repository changes: added `deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json` and `docs/INSTALLER-VM-TEST-TARGET.md`; made the host-foundation profile the CLI default while retaining the complete sensor profile as a later target; added candidate package and build-host dependency classification; updated the Word manual and docs index to mark DB/web as deferred and ZeroTier as the selected Pi management network.
+- Host/environment changes actually applied: none. No VM was created, no host packages or files were installed, and no network enrollment or service change occurred.
+- Runtime/exposure state: unchanged; no listener, service, database, firewall, or credential changed.
+- Validation performed and outcome: pending focused tests, default-plan output, host preflight, profile JSON validation, and `git diff --check`.
+- Not performed / deferred: VM boot/package audit, ZeroTier client installation/enrollment, Cowrie/Zeek setup, databases, web/Compose, host account/ACL creation, and apply mode.
+- Risks and data handling: the package list is explicitly candidate-only until checked against the clean ARM64 VM; the VM checklist forbids production secrets/network identity and requires an isolated NAT/host-only test boundary. Current upstream package docs do not prove compatibility of the project's older pinned Cowrie patch or ARM64 Zeek artifacts.
+- Rollback: restore `DEFAULT_PROFILE` to the full profile and remove the foundation-only profile/checklist/index/log references; no host rollback is required.
+- Follow-up: wait for the operator-prepared VM, inspect only sanitized OS/architecture/package evidence, then validate package candidates and filesystem permissions before selecting installation artifacts.
+- Related ADR/runbook: [VM test target](INSTALLER-VM-TEST-TARGET.md), [Word-ready manual](INSTALLATION-MANUAL-WORD.md), and [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json).
+
+### 2026-09-25 — Add checksummed Linux ARM64 Go-agent release builder
+
+- Status: prepared for review; builder plan mode is validated; no release artifacts have been generated or installed.
+- Scope and intent: establish a repeatable artifact boundary for tracked Go sensor agents before implementing any host-side apply operation.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; changes are uncommitted in the dedicated installer worktree.
+- Repository changes: added `scripts/build_sensor_release.py` and focused tests; the helper requires clean Go module source, uses the module Go-version floor, disables automatic Go toolchain/module downloads, scrubs inherited application/secret environment variables from test processes, cross-builds six Linux ARM64 binaries, and emits a source-commit manifest plus SHA-256 checksums into a new output directory without overwriting an existing release. Updated the Word-ready manual and installer profile to state the remaining signing, publication, and hardware qualification gates.
+- Host/environment changes actually applied: none. No Go artifact was built; no package, file outside the repository, service, network setting, database, or credential was changed.
+- Runtime/exposure state: unchanged; no binary was installed, no service was enabled/restarted, and no listener was changed.
+- Validation performed and outcome: all fifteen installer/release-builder unit tests passed; release-builder `--plan` emitted the expected six-module Linux ARM64 plan without invoking Go or writing files; `git diff --check` passed.
+- Not performed / deferred: actual Go tests/cross-build, aarch64 runtime smoke test, clean-device install, artifact signing/publication, portable systemd units, and apply mode.
+- Risks and data handling: the checksum manifest provides integrity checking only, not artifact authenticity; signing remains required before publication. Runtime secrets/configuration are not included in the bundle.
+- Rollback: revert the release-builder, tests, and associated manual/profile/log updates; no host rollback is required.
+- Follow-up: run the actual builder in a controlled build environment with a clean module cache, review checksums and binaries, then define signing and portable service-account/unit contracts before installation is enabled.
+- Related ADR/runbook: [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md), [installer profile](../deploy/profiles/pi-sensor-arm64.json), and [customer installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-25 addendum — Validate the Linux ARM64 Go-agent release build
+
+- Status: build validation passed; the temporary bundle is not an approved or deployed release. This addendum records work performed after the preceding entry was written.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; no additional repository source edits were needed for this validation.
+- Host/environment changes actually applied: created the validation bundle under `/tmp/pti-release-builder-validation/2026.09.25-rc-check` only. Nothing was installed on the Pi or copied into a service/runtime path.
+- Runtime/exposure state: unchanged; no service, listener, database, firewall, or credential was changed.
+- Validation performed and outcome: the builder ran with Go 1.26.3 and dependency/toolchain downloads disabled; `go test ./...` passed for collector, processor, TI worker, hardware agent, hardware backup, and response agent; all six binaries cross-compiled as statically linked Linux ARM64 executables; all six entries passed `sha256sum -c SHA256SUMS`; `file` identified each binary as ELF AArch64; total staging bundle size was 64 MiB.
+- Not performed / deferred: runtime behavior on a clean Raspberry Pi image, installation, systemd integration, signing, publication, and a release rollback drill were not tested.
+- Risks and data handling: the bundle is a build-validation artifact whose checksum verifies file integrity only; it is not authenticated and must not be treated as a published production release.
+- Rollback: no service rollback applies. The exact temporary validation directory is isolated under `/tmp`; no repository release artifact or host state depends on it.
+- Follow-up: retain build evidence while implementing portable units/config contracts; sign and publish only after clean-device installation and rollback tests pass.
+- Related ADR/runbook: [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md), [installer profile](../deploy/profiles/pi-sensor-arm64.json), and [customer installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-25 — Select Ubuntu 24.04 ARM64 and add read-only host preflight
+
+- Status: prepared for review; host preflight and plan are read-only; installation/apply remains disabled.
+- Scope and intent: record the operator-selected first OS target and make host compatibility checks repeatable before packaging or service deployment is implemented.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; changes are uncommitted in the dedicated installer worktree.
+- Repository changes: changed the fresh Pi sensor profile to Ubuntu Server 24.04 ARM64 with an explicit selected-target status; added `preflight` checks for OS ID/release, architecture, systemd, apt, and dpkg-query; updated the Word-ready manual and added positive/negative preflight tests.
+- Host/environment changes actually applied: none. No package manager, network, filesystem, service, container, database, or host setting was changed.
+- Runtime/exposure state: unchanged; no service was installed, enabled, restarted, or exposed.
+- Validation performed and outcome: ten installer tests passed; the read-only CLI preflight passed against the detected `ubuntu 24.04 aarch64` host with systemd, `apt-get`, and `dpkg-query` present; the plan correctly reports `selected-target-host-match-install-blocked`; `git diff --check` passed.
+- Not performed / deferred: clean-image qualification on a Raspberry Pi, package/artifact publication, secrets provisioning, apply mode, and service activation.
+- Risks and data handling: selecting the OS target does not establish image or hardware compatibility; the profile remains plan-only and keeps `install_enabled=false`. No secret or operational telemetry was added.
+- Rollback: revert the OS target/profile and preflight/manual changes together; no host rollback is required.
+- Follow-up: run focused tests, inspect the target-plan output, then move to reproducible ARM64 agent artifact packaging and portable service definitions; keep apply mode disabled until every runtime dependency and rollback is reviewed.
+- Related ADR/runbook: [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md), [installer profile](../deploy/profiles/pi-sensor-arm64.json), and [customer installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-25 addendum — Validate host-foundation plan and package audit
+
+- Status: read-only host-foundation CLI and focused tests passed; clean target-VM validation remains pending.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; work remains uncommitted in the dedicated installer worktree.
+- Repository changes: added a local-dpkg-only `package-audit` command for candidate package names, made the host-foundation profile the CLI default, and expanded validation for malformed candidate package entries. The full sensor profile remains separately selectable.
+- Host/environment changes actually applied: none. The CLI was run from the local checkout environment only; no apt operation, network access, package, file outside the repository, service, or host setting was changed.
+- Runtime/exposure state: unchanged; no service, listener, database, firewall, or credential changed.
+- Validation performed and outcome: all 20 installer/release-builder tests passed; default host-foundation plan and preflight passed on the local checkout host (`ubuntu 24.04`, `aarch64`, systemd/apt/dpkg-query present); package audit read five candidate statuses from that host's local dpkg database; the separate full-system profile parsed and emitted a plan; `git diff --check` passed. These observations do not qualify the operator-prepared clean VM.
+- Not performed / deferred: no VM boot, clean-image package audit, ZeroTier package/service test, Cowrie pinned-revision test, Zeek ARM64 repository/path test, package installation, or apply-mode execution.
+- Risks and data handling: package names remain candidates only and the local dpkg results must not be treated as VM evidence or as an instruction to install. No credentials, network IDs, or telemetry were read or recorded.
+- Rollback: remove the package-audit implementation/tests and revert the default profile/documentation updates; no host rollback is required.
+- Follow-up: when the isolated Ubuntu Server 24.04 ARM64 VM is ready, capture the documented sanitized baseline and run preflight/package-audit/plan there before selecting any package or changing host state.
+- Related ADR/runbook: [VM test target](INSTALLER-VM-TEST-TARGET.md), [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json), and [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md).
+
+### 2026-09-25 — Expand the pre-test Pi host-foundation installation manual
+
+- Status: detailed host-foundation sequence is drafted for the operator-prepared VM; no commands in its installation section have been run on that VM.
+- Scope and intent: prepare the Word-ready manual and one-pass validation procedure while the disposable ARM64 VM is being built, so VM time is spent on execution and evidence review rather than waiting for initial documentation.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; documentation remains uncommitted in the dedicated installer worktree.
+- Repository changes: expanded the host-foundation chapter with the selected generic ARM64 ISO, clean-snapshot procedure, read-only baseline and planner checks, candidate package origin/install/verification steps, service and exposure checks, ZeroTier test gate, deferred dependency boundaries, acceptance criteria, and snapshot rollback guidance; linked the detailed procedure from the VM checklist.
+- Host/environment changes actually applied: none. No VM, package manager, network enrollment, service, filesystem outside the repository, or host setting was changed.
+- Runtime/exposure state: unchanged; no listener, service, database, firewall, or credential changed.
+- Validation performed and outcome: documentation scope was cross-checked against the current host-foundation profile and read-only CLI; repository whitespace validation remains pending for this documentation edit. No VM test or package installation was performed.
+- Not performed / deferred: clean VM boot, apt metadata refresh, candidate package installation, ZeroTier client test, Cowrie/Zeek compatibility test, service-user/ACL application, Ansible, and all database/web work.
+- Risks and data handling: apt commands are explicitly gated to the disposable VM after snapshot and package-origin review. The manual remains a pre-test draft and must not be treated as a production-approved install procedure; no secret, private network identity, or attacker data was added.
+- Rollback: revert the manual and VM-checklist text changes; no host rollback is required.
+- Follow-up: run the documented sequence on the clean VM, correct commands and package decisions from observed results, then append validation evidence before promoting this manual beyond draft status.
+- Related ADR/runbook: [VM test target](INSTALLER-VM-TEST-TARGET.md), [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json), and [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md).
+
+### 2026-09-25 addendum — Validate the host-foundation manual draft
+
+- Status: documentation formatting and scope checks passed; execution remains pending on the operator-prepared VM.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; all work remains uncommitted in the dedicated installer worktree.
+- Repository changes: added the explicit Ubuntu Server 24.04.5 ARM64 VM image, clean snapshot and read-only evidence steps, candidate package review/install/verification sequence, network/service gates, and acceptance/rollback checklist to the Word-ready manual; linked this procedure from the VM target checklist.
+- Host/environment changes actually applied: none. No apt command, VM command, network join, service, or host setting was changed.
+- Runtime/exposure state: unchanged; no listener, service, database, firewall, or credential changed.
+- Validation performed and outcome: `git diff --check` passed for tracked modifications; targeted whitespace checks for the new manual section passed; both edited documents have balanced Markdown code fences; the commands and scope match the plan-only profile. This is documentation validation, not a VM install test.
+- Not performed / deferred: no VM execution, apt index refresh, candidate package install, ZeroTier test, Cowrie/Zeek validation, Ansible run, or production-hardware acceptance.
+- Risks and data handling: commands that alter packages are explicitly limited to the disposable VM after snapshot and package-origin review. The manual remains a pre-test draft; no credentials, node identities, raw events, or private environment values were added.
+- Rollback: revert the manual/checklist content changes; no host rollback is required.
+- Follow-up: execute the sequence when the ARM64 VM is ready and record observed results before treating any command or package choice as validated.
+- Related ADR/runbook: [VM test target](INSTALLER-VM-TEST-TARGET.md), [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json), and [Word-ready installation manual](INSTALLATION-MANUAL-WORD.md).
+
+### 2026-09-25 — Add concise Thai copy-ready host installation guide
+
+- Status: Thai guide drafted for Word copy/paste; all host-changing steps remain untested on the operator-prepared VM.
+- Scope and intent: provide the operator a formal, concise Thai-language version of the active Pi host-foundation procedure while retaining the broader English full-system plan separately.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; documentation remains uncommitted in the dedicated installer worktree.
+- Repository changes: added `docs/INSTALLATION-MANUAL-WORD-TH.md` with VM image requirements, baseline checks, read-only profile commands, gated package candidates, deferred-module boundaries, acceptance criteria, and rollback; linked it from the documentation index and VM checklist.
+- Host/environment changes actually applied: none. No VM, package manager, network enrollment, service, or host setting was changed.
+- Runtime/exposure state: unchanged; no listener, service, database, firewall, or credential changed.
+- Validation performed and outcome: pending document formatting, link, command-scope, and whitespace checks. No VM test or package installation was performed.
+- Not performed / deferred: all VM commands, ZeroTier, Cowrie/Zeek, service-account/ACL changes, Ansible, database/web modules, and production hardware acceptance.
+- Risks and data handling: package-changing commands are clearly gated to the disposable VM after snapshot and package-origin review. The guide is not a production-approved runbook; it includes no credentials, network identities, or operational secrets.
+- Rollback: remove the Thai guide and its index/checklist references; no host rollback is required.
+- Follow-up: validate formatting and internal links now, then update procedures only from observed VM results.
+- Related ADR/runbook: [Thai Word-ready manual](INSTALLATION-MANUAL-WORD-TH.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json).
+
+### 2026-09-25 addendum — Validate Thai guide formatting and links
+
+- Status: Thai copy-ready guide passes documentation-format checks; VM execution remains pending.
+- Repository branch and commit/PR: `feat/appliance-installer` at base commit `4b0d67d1`; documentation remains uncommitted in the dedicated installer worktree.
+- Repository changes: no additional content changes beyond the preceding guide entry; this addendum records its validation outcome.
+- Host/environment changes actually applied: none. No VM, package manager, service, network, or host setting was changed.
+- Runtime/exposure state: unchanged.
+- Validation performed and outcome: `git diff --check` passed for tracked modifications; the Thai guide has balanced Markdown code fences and no trailing whitespace; its README and VM-checklist links point to the new file. No application tests were needed because this update changes documentation only.
+- Not performed / deferred: no VM boot, package install, ZeroTier enrollment, service activation, or hardware acceptance.
+- Risks and data handling: the guide remains an untested draft; no secrets, node identities, or operational telemetry were added.
+- Rollback: no runtime rollback applies; revert the guide and its links if the operator rejects this version.
+- Follow-up: validate every host-changing step on the disposable ARM64 VM before applying it to Pi hardware.
+- Related ADR/runbook: [Thai Word-ready manual](INSTALLATION-MANUAL-WORD-TH.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [host-foundation profile](../deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json).

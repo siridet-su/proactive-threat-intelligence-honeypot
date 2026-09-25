@@ -20,6 +20,9 @@ and historical material inherited from the previous team.
 8. [Architecture decisions](adr/) — durable decisions and their rationale.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
+11. [Pi installer VM test target](INSTALLER-VM-TEST-TARGET.md) — clean Ubuntu Server 24.04 ARM64 VM requirements and safe evidence to return before host-dependency work continues.
+12. [คู่มือติดตั้งภาษาไทยสำหรับคัดลอกลง Word](INSTALLATION-MANUAL-WORD-TH.md) — ขั้นตอนเตรียม VM และ host foundation สำหรับทดสอบ; ยังไม่รับรองก่อนผ่าน VM
+13. [Installation Manual — Word-ready draft](INSTALLATION-MANUAL-WORD.md) — ลำดับโมดูลและรายละเอียดเป้าหมายทั้งระบบ พร้อมระบุ release blockers. โปรไฟล์เริ่มต้นของ installer ครอบคลุมเฉพาะ host foundation; full-system profile แยกต่างหาก. CLI มีเฉพาะ read-only `preflight`, `package-audit`, และ `plan`; `scripts/build_sensor_release.py` สร้าง checksummed ARM64 Go-agent bundle เท่านั้น ไม่ได้ติดตั้ง
 
 The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the

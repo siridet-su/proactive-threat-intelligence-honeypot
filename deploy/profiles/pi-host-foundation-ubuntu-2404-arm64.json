@@ -1,0 +1,160 @@
+{
+  "schema_version": "pti.install-profile.v1",
+  "profile": {
+    "id": "pi-host-foundation-ubuntu-2404-arm64",
+    "title": "Pi host foundation — Ubuntu Server 24.04 ARM64",
+    "mode": "fresh-install-phase",
+    "execution_mode": "plan-only",
+    "install_enabled": false,
+    "target": {
+      "device": "Raspberry Pi sensor VM / hardware target",
+      "supported_os_ids": ["ubuntu"],
+      "supported_os_versions": ["24.04"],
+      "supported_architectures": ["aarch64", "arm64"],
+      "release_matrix_status": "selected",
+      "hardware_matrix_status": "not-validated"
+    }
+  },
+  "modules": [
+    {
+      "order": 10,
+      "id": "host-baseline",
+      "title": "Ubuntu host baseline",
+      "required": true,
+      "lifecycle": "phase-1-foundation",
+      "automation_status": "awaiting-clean-vm-validation",
+      "depends_on": [],
+      "summary": "Verify OS image, systemd, package tools, time synchronization, storage, recovery console, and a non-root administrator.",
+      "references": ["docs/INSTALLER-VM-TEST-TARGET.md"]
+    },
+    {
+      "order": 20,
+      "id": "base-package-candidates",
+      "title": "Host-side package prerequisites",
+      "required": true,
+      "lifecycle": "phase-1-foundation",
+      "automation_status": "candidate-list-needs-vm-audit",
+      "depends_on": ["host-baseline"],
+      "summary": "Audit CA certificates, curl, git, Python 3 and venv support; do not add application, database, or build-only packages by assumption.",
+      "references": ["docs/INSTALLER-VM-TEST-TARGET.md"]
+    },
+    {
+      "order": 30,
+      "id": "private-network",
+      "title": "ZeroTier management network prerequisite",
+      "required": true,
+      "lifecycle": "operator-managed",
+      "automation_status": "arm64-package-and-refresh-policy-needs-vm-test",
+      "depends_on": ["host-baseline"],
+      "summary": "Validate the ZeroTier ARM64 client and service on the VM; network ID, membership authorization, and credentials remain operator-controlled and are not joined during the clean-image check.",
+      "references": ["docs/INSTALLER-VM-TEST-TARGET.md"]
+    },
+    {
+      "order": 40,
+      "id": "runtime-layout",
+      "title": "Service identity and filesystem layout contract",
+      "required": true,
+      "lifecycle": "phase-1-foundation",
+      "automation_status": "access-matrix-needs-review",
+      "depends_on": ["host-baseline"],
+      "summary": "Specify non-login service identities, protected configuration paths, release/current layout, writable state, and read-only Cowrie/Zeek log access without installing services.",
+      "references": ["docs/INSTALLER-VM-TEST-TARGET.md", "systemd-services/honeypot-collector.service"]
+    }
+  ],
+  "host_dependencies": [
+    {
+      "id": "ubuntu-base",
+      "status": "provided-by-image-and-verified-by-preflight",
+      "items": ["systemd", "apt-get", "dpkg-query"],
+      "reason": "Required to manage and inspect a native Ubuntu Server guest; the preflight checks presence without changing the host."
+    },
+    {
+      "id": "common-tools",
+      "status": "candidate-awaiting-clean-vm-audit",
+      "items": ["ca-certificates", "curl", "git"],
+      "reason": "Candidate tools for validating and retrieving pinned artifacts; package state and source policy must be checked on the clean VM."
+    },
+    {
+      "id": "cowrie-python-runtime",
+      "status": "candidate-awaiting-pinned-cowrie-test",
+      "items": ["python3 >= 3.10", "python3-venv"],
+      "reason": "Current Cowrie documentation lists Python 3.10+ and virtualenv; verify the project's pinned 2.6.1-derived revision before locking the Ubuntu package mapping."
+    },
+    {
+      "id": "zerotier-client",
+      "status": "operator-managed-package-method-not-selected",
+      "items": ["ZeroTier One ARM64 client", "snapd only if the Snap method is approved"],
+      "reason": "The official Snap is an ARM64-capable candidate but refresh behavior and the actual service/interface contract need VM validation; do not join a production network as part of the image test."
+    },
+    {
+      "id": "go-agent-runtime",
+      "status": "not-required-on-pi",
+      "items": ["Go toolchain"],
+      "reason": "The six Go agents were built as statically linked Linux ARM64 binaries. Keep the Go toolchain and module cache on the controlled build host."
+    },
+    {
+      "id": "sensor-services-later",
+      "status": "deferred-until-host-foundation-passes",
+      "items": ["Cowrie service", "Zeek service"],
+      "reason": "The pinned Cowrie runtime and Zeek ARM64 package/interface strategy must be tested after the clean host baseline. The tracked Zeek unit currently assumes /usr/local/zeek while the official binary-package instructions use /opt/zeek."
+    },
+    {
+      "id": "data-and-web-later",
+      "status": "deferred-by-current-scope",
+      "items": ["Redis", "MongoDB", "PostgreSQL/Deception Core", "Docker/web-corp"],
+      "reason": "Database and web deployment are intentionally outside the current Pi host-foundation work."
+    }
+  ],
+  "package_audit": {
+    "candidate_apt_packages": [
+      "ca-certificates",
+      "curl",
+      "git",
+      "python3",
+      "python3-venv"
+    ],
+    "scope_note": "Candidate packages only. This read-only audit inspects the local dpkg status database; it never runs apt update/install or resolves package versions/origins."
+  },
+  "separate_targets": [
+    {
+      "id": "full-sensor-installation-profile",
+      "title": "Full Pi sensor installation plan",
+      "reason": "The complete sensor/data/web plan remains documented separately and is not part of the current host-foundation phase.",
+      "references": ["deploy/profiles/pi-sensor-arm64.json", "docs/INSTALLATION-MANUAL-WORD.md"]
+    },
+    {
+      "id": "gcp-dashboard-and-analysis",
+      "title": "GCP dashboard and post-session analysis",
+      "reason": "Separate host, identity, credentials, and deployment lifecycle; do not install these services on the Pi profile.",
+      "references": ["honeypot-analysis/deployment/systemd/README.md", "dashboard-v2/README.md"]
+    }
+  ],
+  "excluded_modules": [
+    {"id": "cowrie", "reason": "Sensor service installation is a later phase; only its host runtime prerequisites are inventoried now."},
+    {"id": "zeek", "reason": "Sensor service installation is a later phase; qualify ARM64 package source, prefix, and capture interface after host foundation."},
+    {"id": "collector", "reason": "Service setup depends on later Cowrie/Zeek and Redis phases; the validated binary bundle is not installed now."},
+    {"id": "processor", "reason": "Deferred with database and Redis integration."},
+    {"id": "redis", "reason": "Database/data-service phase is deferred by current scope."},
+    {"id": "mongodb-atlas", "reason": "External database identity and secret provisioning are deferred."},
+    {"id": "postgres-deception-core", "reason": "Database/Deception Core deployment is deferred."},
+    {"id": "web-corp-http", "reason": "Web decoy/Compose deployment is deferred by current scope."},
+    {"id": "ti-worker", "reason": "Depends on deferred data services and provider credentials."},
+    {"id": "hardware-agent", "reason": "Depends on deferred Redis/processor integration."},
+    {"id": "retained-data-backup", "reason": "Depends on deferred database, retention, and backup-policy work."},
+    {"id": "response-agent", "reason": "Separate optional control-plane service; not part of the ZeroTier host-foundation phase."},
+    {"id": "opencanary", "reason": "Prepared loopback service is stopped and has no central event adapter."},
+    {"id": "ftp", "reason": "Stopped future work; telemetry adapter and dashboard integration are not complete."},
+    {"id": "smtp", "reason": "Stopped future work; telemetry adapter and dashboard integration are not complete."},
+    {"id": "odoo", "reason": "Stopped; not part of the current login pipeline."},
+    {"id": "web-corp-direct-https", "reason": "Stopped on Pi; public-VPS HTTPS is a separate target deployment."},
+    {"id": "legacy-sensor-forwarder", "reason": "Legacy parallel path; do not expand on a fresh node without an approved migration plan."}
+  ],
+  "blockers": [
+    "Qualify the exact Ubuntu Server 24.04 ARM64 image build and supported Raspberry Pi model on the external clean VM/hardware target.",
+    "Audit the candidate Ubuntu package set against the clean image before adding packages; do not run an OS-wide upgrade as part of preflight.",
+    "Select and test the ZeroTier ARM64 package method and refresh policy; keep membership identity and network ID outside Git and this profile.",
+    "Resolve the per-service account/group/ACL matrix for Cowrie and Zeek logs before writing portable systemd units.",
+    "Validate the project's pinned Cowrie revision against the VM's Python runtime; current upstream documentation is not a substitute for that test.",
+    "Resolve the Zeek ARM64 package availability and install-prefix mismatch before enabling the existing Zeek service unit."
+  ]
+}

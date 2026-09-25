@@ -1,0 +1,198 @@
+{
+  "schema_version": "pti.install-profile.v1",
+  "profile": {
+    "id": "pi-ubuntu-2404-arm64-fresh",
+    "title": "Fresh Ubuntu Server 24.04 ARM64 sensor node",
+    "mode": "fresh-install",
+    "execution_mode": "plan-only",
+    "install_enabled": false,
+    "target": {
+      "device": "Raspberry Pi",
+      "supported_os_ids": ["ubuntu"],
+      "supported_os_versions": ["24.04"],
+      "supported_architectures": ["aarch64", "arm64"],
+      "release_matrix_status": "selected",
+      "hardware_matrix_status": "not-validated"
+    }
+  },
+  "modules": [
+    {
+      "order": 10,
+      "id": "host-baseline",
+      "title": "Host OS and security baseline",
+      "required": true,
+      "lifecycle": "foundation",
+      "automation_status": "manual-design-required",
+      "depends_on": [],
+      "summary": "Select and validate the supported image, management access, time sync, service identity, storage, and host firewall policy.",
+      "references": ["docs/HONEYPOT-PORTAL-INSTALLER-GUIDE.md"]
+    },
+    {
+      "order": 20,
+      "id": "private-network",
+      "title": "Private management and sensor network",
+      "required": true,
+      "lifecycle": "operator-managed",
+      "automation_status": "operator-enrollment-required",
+      "depends_on": ["host-baseline"],
+      "summary": "Use the operator-selected ZeroTier management network; keep network IDs, authorization, and device identity operator-managed and outside this repository.",
+      "references": ["docs/INSTALLER-VM-TEST-TARGET.md"]
+    },
+    {
+      "order": 30,
+      "id": "redis",
+      "title": "Local Redis event buffer",
+      "required": true,
+      "lifecycle": "current-dependency",
+      "automation_status": "deployment-source-not-standardized",
+      "depends_on": ["host-baseline"],
+      "summary": "Provide the bounded Redis streams used by collectors, processor, and optional workers; keep Redis private to the host.",
+      "references": ["docs/CURRENT-ARCHITECTURE.md", "integrations/web-corp/DATA-ACCESS.md"]
+    },
+    {
+      "order": 40,
+      "id": "mongodb-atlas",
+      "title": "MongoDB Atlas connection",
+      "required": true,
+      "lifecycle": "external-dependency",
+      "automation_status": "operator-provisioned-secret",
+      "depends_on": ["private-network"],
+      "summary": "Provision the reviewed least-privilege runtime identity and install its URI through a protected host secret file.",
+      "references": ["docs/DATA-OWNERSHIP.md", "integrations/web-corp/DATA-ACCESS.md"]
+    },
+    {
+      "order": 50,
+      "id": "postgres-deception-core",
+      "title": "PostgreSQL and Deception Core support",
+      "required": true,
+      "lifecycle": "current-cowrie-dependency",
+      "automation_status": "deployment-source-outside-repository",
+      "depends_on": ["host-baseline"],
+      "summary": "Retain only the internal Cowrie support services; bind them privately. Odoo is not part of this module.",
+      "references": ["docs/CURRENT-ARCHITECTURE.md", "docs/SERVICE-CATALOG.md"]
+    },
+    {
+      "order": 60,
+      "id": "zeek",
+      "title": "Zeek network sensor",
+      "required": true,
+      "lifecycle": "current",
+      "automation_status": "package-and-interface-config-not-standardized",
+      "depends_on": ["private-network", "host-baseline"],
+      "summary": "Install a pinned Zeek release, configure approved monitored interfaces, then validate zeekctl before enabling the unit.",
+      "references": ["systemd-services/zeek.service", "docs/CURRENT-ARCHITECTURE.md"]
+    },
+    {
+      "order": 70,
+      "id": "cowrie",
+      "title": "Cowrie SSH/Telnet decoy",
+      "required": true,
+      "lifecycle": "current",
+      "automation_status": "versioned-source-and-unit-template-required",
+      "depends_on": ["private-network", "postgres-deception-core"],
+      "summary": "Install a pinned Cowrie build and reviewed patch set in isolation; stage and test before exposing trap ports.",
+      "references": ["integrations/cowrie/README.md", "docs/SERVICE-CATALOG.md"]
+    },
+    {
+      "order": 80,
+      "id": "collector",
+      "title": "Go collector",
+      "required": true,
+      "lifecycle": "current",
+      "automation_status": "portable-systemd-template-required",
+      "depends_on": ["redis", "zeek", "cowrie"],
+      "summary": "Build a versioned Linux ARM64 artifact, install a portable unit and protected environment, then verify accepted events reach Redis.",
+      "references": ["agents/collector-agent/go.mod", "systemd-services/honeypot-collector.service"]
+    },
+    {
+      "order": 90,
+      "id": "processor",
+      "title": "Go processor",
+      "required": true,
+      "lifecycle": "current",
+      "automation_status": "portable-systemd-template-required",
+      "depends_on": ["redis", "mongodb-atlas", "collector"],
+      "summary": "Build a versioned Linux ARM64 artifact, install protected shared and processor-specific settings, then verify canonical persistence.",
+      "references": ["agents/processor-agent/go.mod", "systemd-services/honeypot-processor.service"]
+    },
+    {
+      "order": 100,
+      "id": "web-corp-http",
+      "title": "Web-corp HTTP login decoy",
+      "required": false,
+      "lifecycle": "current-optional-module",
+      "automation_status": "blocked-until-compose-is-tracked",
+      "depends_on": ["collector", "processor", "redis", "mongodb-atlas"],
+      "summary": "Build only the web-corp service and bind the approved HTTP interface; never publish the internal app port or start the whole external Compose stack.",
+      "references": ["integrations/web-corp/README.md", "integrations/web-corp/DATA-ACCESS.md"]
+    },
+    {
+      "order": 110,
+      "id": "ti-worker",
+      "title": "Asynchronous threat-intelligence worker",
+      "required": false,
+      "lifecycle": "current-opt-in-module",
+      "automation_status": "protected-provider-secret-required",
+      "depends_on": ["redis", "mongodb-atlas", "processor"],
+      "summary": "Enable only with an explicit processor policy and private provider keys; preserve queue, cache, and quota limits.",
+      "references": ["agents/ti-worker/README.md", "systemd-services/honeypot-ti-worker.service"]
+    },
+    {
+      "order": 120,
+      "id": "hardware-agent",
+      "title": "Hardware metrics agent",
+      "required": false,
+      "lifecycle": "current-opt-in-module",
+      "automation_status": "portable-systemd-template-required",
+      "depends_on": ["redis", "processor"],
+      "summary": "Configure approved interfaces and sensor identity; validate bounded Redis samples and MongoDB projections.",
+      "references": ["agents/hardware-agent/README.md", "systemd-services/honeypot-hardware.service"]
+    },
+    {
+      "order": 130,
+      "id": "retained-data-backup",
+      "title": "Retained-data backup worker",
+      "required": false,
+      "lifecycle": "current-opt-in-module",
+      "automation_status": "protected-b2-credentials-and-policy-review-required",
+      "depends_on": ["mongodb-atlas"],
+      "summary": "Install only after target collections, sensitive-data policy, B2 prefix permissions, and restore procedure are reviewed.",
+      "references": ["agents/hardware-backup/README.md", "systemd-services/honeypot-hardware-backup.service"]
+    },
+    {
+      "order": 140,
+      "id": "response-agent",
+      "title": "Scoped Cowrie response agent",
+      "required": false,
+      "lifecycle": "current-managed-deployment-option",
+      "automation_status": "tailnet-and-firewall-approval-required",
+      "depends_on": ["private-network", "cowrie"],
+      "summary": "Expose only the authenticated Tailscale-bound response port after its ACL, credential, and host firewall policy pass review.",
+      "references": ["agents/response-agent/README.md", "integrations/tailscale/README.md", "systemd-services/honeypot-response-agent.service"]
+    }
+  ],
+  "separate_targets": [
+    {
+      "id": "gcp-dashboard-and-analysis",
+      "title": "GCP dashboard and post-session analysis",
+      "reason": "Separate host, identity, credentials, and deployment lifecycle; do not install these services on the Pi profile.",
+      "references": ["honeypot-analysis/deployment/systemd/README.md", "dashboard-v2/README.md"]
+    }
+  ],
+  "excluded_modules": [
+    {"id": "opencanary", "reason": "Prepared loopback service is stopped and has no central Redis/Atlas adapter."},
+    {"id": "ftp", "reason": "Stopped future work; telemetry adapter and dashboard integration are not complete."},
+    {"id": "smtp", "reason": "Stopped future work; telemetry adapter and dashboard integration are not complete."},
+    {"id": "odoo", "reason": "Stopped; not part of the web-corp login pipeline."},
+    {"id": "web-corp-direct-https", "reason": "Stopped on Pi; public-VPS HTTPS is a separate target deployment."},
+    {"id": "legacy-sensor-forwarder", "reason": "Legacy parallel path; do not expand or install on a fresh node without an approved migration plan."}
+  ],
+  "blockers": [
+    "Ubuntu Server 24.04 ARM64 is the operator-selected target; the exact image build/checksum and Raspberry Pi model matrix have not been qualified on clean hardware.",
+    "A validation ARM64 Go bundle was built in temporary staging, but no approved release artifact has been signed, hardware-tested, or published.",
+    "Redis, PostgreSQL/Deception Core, Cowrie, and Zeek installation artifacts and configuration are not fully versioned in this repository.",
+    "Several tracked systemd units embed the development checkout path and local account; portable unit templates and release layout are required before apply mode.",
+    "The Docker Compose deployment source remains outside this repository; a full-stack compose operation could activate stopped services.",
+    "Secrets, device enrollment, external database roles, and network exposure require operator-controlled provisioning and must not be generated or exposed by this plan tool."
+  ]
+}
