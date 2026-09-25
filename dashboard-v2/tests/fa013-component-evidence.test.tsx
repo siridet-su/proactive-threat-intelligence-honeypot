@@ -11,6 +11,7 @@ import type {
   FilesystemTopologySnapshot,
 } from "../src/lib/dashboardTypes";
 import { CwdRouteHistory } from "../src/components/filesystem/CwdRouteHistory";
+import { FilesystemPageHeader } from "../src/components/filesystem/FilesystemPageHeader";
 import { ResponseActionPanel } from "../src/components/filesystem/ResponseActionPanel";
 import {
   TopologyCanvas,
@@ -217,6 +218,57 @@ describe("FA-013 production component evidence", () => {
     expect(container.textContent).not.toContain("Reconnect now");
     expect(container.textContent).not.toContain("Offline");
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("offers retained history beside the Session Audit view control", async () => {
+    const onOpenRetainedSessions = vi.fn();
+    const retainedSession: FilesystemClosedSession = {
+      ...session,
+      sessionId: "retained-empty-state-session",
+      lifecycle: {
+        startedAt: "2026-09-18T23:00:00.000Z",
+        closedAt: "2026-09-19T00:00:00.000Z",
+      },
+    };
+
+    const freshnessState = {
+      classification: "fresh" as const,
+      label: "Live · No activity",
+      detail: "No authoritative telemetry activity has been observed yet.",
+      badgeClass: "",
+      dotClass: "",
+      isDegraded: false,
+      isStale: false,
+      telemetryAgeMs: null,
+      snapshotReceiptAgeMs: 0,
+      retrievalAgeMs: 0,
+      telemetryStatus: "none" as const,
+    };
+    await act(async () => root.render(createElement(FilesystemPageHeader, {
+      viewMode: "live",
+      switchViewMode: () => {},
+      snapshot: {
+        nodes: [],
+        sessions: [],
+        recentClosedSessions: [retainedSession],
+        truncated: false,
+        generatedAt: "2026-09-19T00:00:00.000Z",
+        latestTelemetryAt: null,
+      },
+      streamState: "live",
+      freshnessState,
+      handleReconnect: () => {},
+      regionStatus: "ready",
+      refresh: () => {},
+      onOpenRetainedSessions,
+    })));
+
+    const retainedAction = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent === "View 1 retained session",
+    );
+    expect(retainedAction).not.toBeUndefined();
+    await act(async () => retainedAction?.click());
+    expect(onOpenRetainedSessions).toHaveBeenCalledTimes(1);
   });
 
   it("I: drives the production scrubber by elapsed position and hop-key fallback", async () => {
