@@ -67,8 +67,13 @@ class RrfTests(unittest.TestCase):
     def test_wrong_binding_falls_back(self):
         value = ensemble()
         value["model2"]["binding"]["episode_id"] = "wrong"
-        result = module.build_rrf_advisory(advisory(), value, session_id="s1", session_ended=True)
+        model1 = advisory()
+        model1["command_rank_lists"] = [
+            {"command_ref": "index:0", "ranked_techniques": ["T1110", "T1105", "T1082"]},
+        ]
+        result = module.build_rrf_advisory(model1, value, session_id="s1", session_ended=True)
         self.assertEqual(result["recommendation_order"], result["baseline_order"])
+        self.assertFalse(result["ordering_changed"])
         self.assertEqual(result["fallback_reason"], "model2_binding_mismatch")
 
     def test_model2_only_ttp_never_enters_candidates(self):
@@ -90,6 +95,17 @@ class RrfTests(unittest.TestCase):
         result = module.build_weighted_voting_advisory(advisory(), ensemble(), session_id="s1", session_ended=True)
         self.assertEqual(result["recommendation_order"][0], "T1105")
         self.assertEqual(result["score_semantics"], "VOTE_SCORE_NOT_PROBABILITY_OR_CONFIDENCE")
+
+    def test_weighted_voting_keeps_model1_order_when_model2_unavailable(self):
+        model1 = advisory()
+        model1["command_rank_lists"] = [
+            {"command_ref": "index:0", "ranked_techniques": ["T1110", "T1105", "T1082"]},
+        ]
+        result = module.build_weighted_voting_advisory(
+            model1, {}, session_id="s1", session_ended=True,
+        )
+        self.assertEqual(result["recommendation_order"], ["T1082", "T1105", "T1110"])
+        self.assertFalse(result["ordering_changed"])
 
     def test_full_formula_uses_per_command_topk_ranks(self):
         value = advisory()

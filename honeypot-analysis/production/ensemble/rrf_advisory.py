@@ -196,7 +196,15 @@ def build_rrf_advisory(
             "exclusion_reason": reason,
         })
 
-    ordered_rows = sorted(rows, key=lambda row: (-row["rrf_score"], row["baseline_rank"]))
+    # A missing, stale, mismatched, or entirely non-supporting Model2 result
+    # must be a true Model1-only fallback.  The Model1 RRF component remains
+    # available for diagnostics, but it must not silently reorder the stored
+    # Model1 recommendation unless a gated PRESENT vote actually participates.
+    ordered_rows = (
+        sorted(rows, key=lambda row: (-row["rrf_score"], row["baseline_rank"]))
+        if any_support
+        else sorted(rows, key=lambda row: row["baseline_rank"])
+    )
     for rank, row in enumerate(ordered_rows, start=1):
         row["recommendation_rank"] = rank
     order = [row["technique_id"] for row in ordered_rows]
@@ -243,7 +251,11 @@ def build_weighted_voting_advisory(
             "model1_vote_component": 0.5,
             "model2_vote_component": 0.5 if supported else 0.0,
         })
-    rows.sort(key=lambda row: (-row["weighted_vote_score"], -row["model1_rrf_component"], row["baseline_rank"]))
+    # Weighted voting treats every Model1 candidate as one vote.  Model1's
+    # established rank is therefore the deterministic tie-breaker; using its
+    # RRF diagnostic component here would turn this comparator into a hidden
+    # hybrid and would alter Model1-only fallback ordering.
+    rows.sort(key=lambda row: (-row["weighted_vote_score"], row["baseline_rank"]))
     for index, row in enumerate(rows, start=1):
         row["recommendation_rank"] = index
     return {
