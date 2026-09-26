@@ -1,0 +1,13 @@
+{
+  "capstone_host": "10.58.33.6",
+  "capstone_port": 18085,
+  "cowrie_log": "/home/cowrie/cowrie/var/log/cowrie/cowrie.json",
+  "zeek_conn_log": "/usr/local/zeek/spool/logger-1/conn.log",
+  "state_dir": "/var/lib/model2-v7-observer",
+  "start_at_end": true,
+  "transfer_ring_bases": ["/var/lib/model2-v7-observer/pcap/transfer.pcap"],
+  "exact_evidence_dir": "/var/lib/model2-v7-observer/exact",
+  "zeek_bin": "/usr/local/bin/zeek",
+  "max_queue_files": 512,
+  "max_queue_bytes": 67108864
+}

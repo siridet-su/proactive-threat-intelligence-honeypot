@@ -1,0 +1,17 @@
+{
+  "listen_host": "10.58.33.6",
+  "listen_port": 18085,
+  "shadow_enabled": false,
+  "state_dir": "/var/lib/model2-v7",
+  "ring_bases": [
+    "/var/lib/model2-v7/pcap/public.pcap",
+    "/var/lib/model2-v7/pcap/backend.pcap"
+  ],
+  "sensor_receipt_path": "/var/lib/model2-v7/sensor/receipts.jsonl",
+  "artifact_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/model2_targeted_generalization_production_frozen/MODEL2_TARGETED_GENERALIZATION_PRODUCTION_ARTIFACT.json",
+  "feature_schema_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/V7_32_FEATURE_SCHEMA.json",
+  "runtime_contract_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/V7_32_RUNTIME_CONTRACT.json",
+  "binding_contract_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/MODEL2_PRODUCTION_BINDING_CONTRACT_V1.json",
+  "feature_contract_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/V7_32_FEATURE_SCHEMA.json",
+  "measurement_contract_path": "/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/MODEL2_PRODUCTION_BINDING_CONTRACT_V1.json"
+}

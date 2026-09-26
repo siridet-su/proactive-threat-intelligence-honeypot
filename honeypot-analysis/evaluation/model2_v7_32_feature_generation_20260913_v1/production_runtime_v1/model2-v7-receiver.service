@@ -1,0 +1,22 @@
+[Unit]
+Description=Model2 V7 exact-episode receiver and non-authoritative shadow
+Wants=network-online.target
+After=network-online.target model2-v7-capture.service model2-v7-capture-backend.service model2-v7-sensor.service
+
+[Service]
+Type=simple
+User=model2v7
+Group=model2v7
+Environment=PYTHONPATH=/opt/model2-v7/honeypot-analysis:/opt/model2-v7/honeypot-analysis/research:/opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/production_runtime_v1:/opt/model2-v7/honeypot-analysis/evaluation/model2_v6_production_native_20260911_v1
+ExecStart=/usr/bin/python3 /opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/production_runtime_v1/v7_capstone_runtime.py --config /etc/model2-v7/runtime.json
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/model2-v7
+RestrictAddressFamilies=AF_INET AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

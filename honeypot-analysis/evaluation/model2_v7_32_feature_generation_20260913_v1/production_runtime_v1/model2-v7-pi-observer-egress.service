@@ -1,0 +1,18 @@
+[Unit]
+Description=Model2 V7 exact private observer egress exception
+After=honeypot-local-firewall.service network-online.target
+Before=model2-v7-pi-observer.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=root
+ExecStart=/bin/sh -c '/usr/sbin/iptables -C ufw-before-output -o ztxoocdlsi -d 10.58.33.6 -p tcp --dport 18085 -m owner --uid-owner 1004 -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I ufw-before-output 1 -o ztxoocdlsi -d 10.58.33.6 -p tcp --dport 18085 -m owner --uid-owner 1004 -j ACCEPT'
+ExecStop=/bin/sh -c '/usr/sbin/iptables -D ufw-before-output -o ztxoocdlsi -d 10.58.33.6 -p tcp --dport 18085 -m owner --uid-owner 1004 -j ACCEPT 2>/dev/null || true'
+NoNewPrivileges=no
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

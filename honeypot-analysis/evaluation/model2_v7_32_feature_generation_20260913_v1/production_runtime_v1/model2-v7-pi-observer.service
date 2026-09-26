@@ -1,0 +1,23 @@
+[Unit]
+Description=Model2 V7 privacy-preserving Pi observer and exact offline Zeek worker
+Wants=network-online.target model2-v7-pi-capture-transfer.service
+After=network-online.target model2-v7-pi-capture-transfer.service zeek.service cowrie.service
+
+[Service]
+Type=simple
+User=cowrie
+Group=cowrie
+Environment=PYTHONPATH=/opt/model2-v7/production_runtime_v1:/opt/model2-v7/v6_transport
+ExecStart=/usr/bin/python3 /opt/model2-v7/production_runtime_v1/v7_pi_observer.py --config /etc/model2-v7/observer.json
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/home/cowrie/cowrie/var/log/cowrie /usr/local/zeek/spool/logger-1
+ReadWritePaths=/var/lib/model2-v7-observer
+RestrictAddressFamilies=AF_INET AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

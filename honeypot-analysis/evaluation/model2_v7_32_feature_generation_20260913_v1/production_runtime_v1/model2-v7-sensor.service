@@ -1,0 +1,23 @@
+[Unit]
+Description=Model2 V7 bounded public multiservice decoy sensor
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=model2v7
+Group=model2v7
+ExecStart=/usr/bin/python3 /opt/model2-v7/honeypot-analysis/evaluation/model2_v7_32_feature_generation_20260913_v1/production_runtime_v1/v7_decoy_sensor.py --bind 10.148.0.2 --receipt /var/lib/model2-v7/sensor/receipts.jsonl
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/model2-v7/sensor
+RestrictAddressFamilies=AF_INET AF_UNIX
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

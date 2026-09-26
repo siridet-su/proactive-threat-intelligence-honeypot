@@ -1481,6 +1481,9 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
     : [];
   const model1Only = list(ensemble.model1_only_labels).map(record);
   const recommendations = rankTtpRecommendations(data);
+  const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
+  const rrfReady = rrf.schema_version === "session_ttp_rrf_advisory.v1"
+    && rrf.session_id === data.session_id;
 
   if (!hasMeaningfulRecord(ensemble) && recommendations.length === 0) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
@@ -1507,12 +1510,12 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <p className="font-semibold">Why Model2 is partial</p>
         <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
       </div>}
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier. Model2 adds advisory corroboration only when fully bound to this session. Native model scores are never added or treated as probabilities.</p>
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the primary classifier and the only source of candidates. An exact-bound Model2 PRESENT result may add a small evidence-gated RRF bonus; ABSENT never subtracts. Native model scores are never combined or treated as probabilities.</p>
       {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
-            <p className="mt-1 text-xs leading-5 text-text-muted">Model1&apos;s selected TTP per command, grouped by distinct command event. More supporting commands appear first. This is not a confidence percentage, trusted finding, or response authorization.</p>
+            <p className="mt-1 text-xs leading-5 text-text-muted">{rrfReady && rrf.status === "EXPERIMENTAL_RRF" ? "Experimental evidence-gated RRF review order from Model1 rank plus qualified Model2 support." : "Model1 review order; no qualified Model2 support changed this list."} This is not a confidence percentage, trusted finding, or response authorization.</p>
           </div>
           <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
         </div>
@@ -1520,14 +1523,15 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
           {recommendations.map((item) => <li key={item.techniqueId} className="rounded-lg border border-border bg-surface p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-text">#{item.rank} <span className="font-mono">{item.techniqueId}</span></span>
-              <span className="ui-badge text-[10px]">{item.model2Support === "corroborates" ? "Model2 supports" : item.model2Support === "does_not_support" ? "Model2 does not support" : item.model2Support === "not_supported" ? "Model2 does not cover this TTP" : "Model2 unavailable"}</span>
+              <span className="ui-badge text-[10px]">{item.model2SupportAdded ? "Model1 + Model2" : item.model2Support === "does_not_support" ? "Model1 only · Model2 ABSENT" : item.model2Support === "not_supported" ? "Model1 only · outside Model2" : "Model1 only"}</span>
             </div>
             <p className="mt-1 text-xs text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support this Model1 suggestion.</p>
+            {item.rrfScore !== null && <p className="mt-1 text-xs font-medium text-text">RRF rank score: {item.rrfScore.toFixed(4)}{item.model2SupportAdded ? ` · Model2 bonus +${item.model2RrfComponent.toFixed(4)}` : ""}{item.rank !== item.baselineRank ? ` · Model1 position #${item.baselineRank}` : ""}</p>}
             {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command refs: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
             {item.model2Support === "does_not_support" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT for its independent head; review before drawing a conclusion.</p>}
           </li>)}
         </ol>
-        <p className="mt-2 text-[11px] text-text-subtle">Method: count distinct command events by selected Model1 TTP. Repeated classifications for one command count once. Model2 is a separate bound-session comparison; no RRF or score fusion is applied.</p>
+        <p className="mt-2 text-[11px] text-text-subtle">Method: 1/(60 + Model1 rank) + 0.25/(61) only when the matching Model2 head is PRESENT and passes its evidence gate. Model2 cannot add a new TTP or lower a Model1 candidate. RRF scores are ordinal review signals, not probabilities.</p>
       </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">

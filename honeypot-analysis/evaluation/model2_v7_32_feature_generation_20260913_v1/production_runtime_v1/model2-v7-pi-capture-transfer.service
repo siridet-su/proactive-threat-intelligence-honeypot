@@ -1,0 +1,23 @@
+[Unit]
+Description=Model2 V7 bounded Pi transfer PCAP ring
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0007
+ExecStart=/usr/bin/tcpdump -Z cowrie -i wlan0 -nn -s 0 -U -C 8 -W 8 -w /var/lib/model2-v7-observer/pcap/transfer.pcap host 1.1.1.1 and tcp port 80
+Restart=always
+RestartSec=2
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/model2-v7-observer/pcap
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_SETUID CAP_SETGID
+
+[Install]
+WantedBy=multi-user.target

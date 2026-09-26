@@ -41,6 +41,7 @@ from production.api.security import (
 from production.classification.classification_evaluation import classification_metrics
 from production.ensemble.evidence import build_ensemble_from_session_payload
 from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
+from production.ensemble.rrf_advisory import with_rrf_advisory
 from production.enrichment.external_ti_session import (
     OBSERVABLE_TI_SCHEMA,
     SESSION_TI_SCHEMA,
@@ -2972,6 +2973,16 @@ def load_dashboard_session_detail(
         if projected_duration is not None:
             overview["recorded_duration"] = overview.get("duration") or ""
             overview["duration"] = projected_duration
+    model1_advisory = summarize_session_model1_ttp(
+        payload.get("classification_events"), session_id=clean_session_id,
+    )
+    session_ttp_advisory = with_rrf_advisory(
+        model1_advisory,
+        ensemble_evidence,
+        session_id=clean_session_id,
+        session_ended=overview["is_ended"],
+        latest_event_at=_latest_iso_timestamp(event_timestamps),
+    )
     report_summary = _report_summary_with_current_ai(
         config, storage, clean_session_id, report_payload, {},
     )
@@ -2992,9 +3003,7 @@ def load_dashboard_session_detail(
         "commands": payload.get("commands") or [],
         "authentication_activity": authentication_activity,
         "classification_events": payload.get("classification_events") or [],
-        "session_ttp_advisory": summarize_session_model1_ttp(
-            payload.get("classification_events"), session_id=clean_session_id
-        ),
+        "session_ttp_advisory": session_ttp_advisory,
         "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
@@ -3740,6 +3749,21 @@ def load_session_detail(
         configured_policy_path=config.response_guidance_policy_path,
     )
     primary_response_guidance = historical_response_guidance or current_policy_reevaluation
+    full_event_timestamps = [
+        _text(_event_payload(row).get("timestamp") or row.get("timestamp"))
+        for row in event_rows
+    ]
+    full_overview = _session_overview(selected)
+    model1_advisory = summarize_session_model1_ttp(
+        payload.get("classification_events"), session_id=session_id,
+    )
+    session_ttp_advisory = with_rrf_advisory(
+        model1_advisory,
+        ensemble_evidence,
+        session_id=session_id,
+        session_ended=bool(payload.get("is_ended") or session_rows[0].get("ended")),
+        latest_event_at=_latest_iso_timestamp(full_event_timestamps),
+    )
     report_summary = _report_summary_with_current_ai(
         config, storage, session_id, report_payload, artifact_payload,
     )
@@ -3747,7 +3771,7 @@ def load_session_detail(
         "ok": True,
         "timestamp": utc_now(),
         "session_id": session_id,
-        "overview": _session_overview(selected),
+        "overview": full_overview,
         "source_geo": selected.get("geo") or (_extract_geo(payload) if selected.get("src_ip_is_public") else {}),
         "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
@@ -3769,6 +3793,7 @@ def load_session_detail(
         "enrichment_status": payload.get("enrichment_status") or {},
         "credential_metadata": payload.get("credential_metadata") or {},
         "ensemble_evidence": ensemble_evidence,
+        "session_ttp_advisory": session_ttp_advisory,
         "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
         "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,
