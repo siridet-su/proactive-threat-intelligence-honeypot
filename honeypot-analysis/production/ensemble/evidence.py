@@ -34,9 +34,9 @@ MODEL2_BACKEND_POC_ARTIFACT_SHA256 = "127a5b0bd18b0f7b76a8bcce6a51294db554220045
 MODEL2_BACKEND_POC_VERSION = "MODEL2_V5_BACKEND_SSH_ONLY_EXPERIMENTAL_POC_20260924_V1"
 MODEL2_BACKEND_POC_PROJECTION_SHA256 = "2679fe6ff98c833ed497597e37f26fa05a6bc428aba7df561bb828fbf3fee80f"
 MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.v1"
-MODEL2_UNIFIED54_ARTIFACT_SHA256 = "adff0e76507edfc4f5deadb02922917ff66962c6c2824eb25970ebf40a06b424"
+MODEL2_UNIFIED54_ARTIFACT_SHA256 = "fb56940ba2ca90c0942813168d9f5a85cb80a58da5c62e2dd7e343da5f71d5fa"
 MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256 = "28cc1a43e59259c5939dacdb889cdbe4e13fbdaa71b197264e27907a071d13c1"
-MODEL2_UNIFIED54_VERSION = "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260926_V2"
+MODEL2_UNIFIED54_VERSION = "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260927_V3"
 
 
 def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
@@ -675,6 +675,7 @@ def normalize_model2_v5_shadow_result(
         "input_projection_contract_sha256": _clean(value.get("input_projection_contract_sha256")),
         "capture_selection": _clean(value.get("capture_selection")),
         "t1105_transfer_observed": value.get("t1105_transfer_observed") is True,
+        "t1110_repeated_auth_observed": value.get("t1110_repeated_auth_observed") is True,
         "t1105_evidence_semantics": _clean(value.get("t1105_evidence_semantics")),
         "auth_binding": _clean(value.get("auth_binding")),
         "episode_flow_count": value.get("episode_flow_count"),
@@ -1035,6 +1036,7 @@ def compute_ensemble_evidence(
             "input_projection_contract_sha256": _clean(model2.get("input_projection_contract_sha256")),
             "capture_selection": _clean(model2.get("capture_selection")),
             "t1105_transfer_observed": model2.get("t1105_transfer_observed") is True,
+            "t1110_repeated_auth_observed": model2.get("t1110_repeated_auth_observed") is True,
             "t1105_evidence_semantics": _clean(model2.get("t1105_evidence_semantics")),
             "auth_binding": _clean(model2.get("auth_binding")),
             "episode_flow_count": model2.get("episode_flow_count"),

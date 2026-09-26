@@ -133,6 +133,21 @@ def build_rrf_advisory(
         for row in results if isinstance(row, Mapping)
     } if isinstance(results, list) else {}
 
+    rank_lists: list[list[str]] = []
+    raw_rank_lists = model1_advisory.get("command_rank_lists")
+    if isinstance(raw_rank_lists, list):
+        for raw_list in raw_rank_lists:
+            values = raw_list.get("ranked_techniques") if isinstance(raw_list, Mapping) else None
+            if not isinstance(values, list):
+                continue
+            normalized = []
+            for value in values:
+                label = _text(value).split(".", 1)[0]
+                if TECHNIQUE.fullmatch(label) and label not in normalized:
+                    normalized.append(label)
+            if normalized:
+                rank_lists.append(normalized)
+
     rows: list[dict[str, Any]] = []
     any_support = False
     for baseline_rank, technique in enumerate(baseline, start=1):
@@ -146,6 +161,8 @@ def build_rrf_advisory(
             reason = _text(comparison.get("model2_unavailable_reason")) or "t1046_exact_pcap_zeek_observation_required"
         elif reason is None and technique == "T1110" and model2.get("auth_binding") != "PASS":
             reason = "t1110_auth_binding_required"
+        elif reason is None and technique == "T1110" and model2.get("t1110_repeated_auth_observed") is not True:
+            reason = "t1110_repeated_failed_auth_evidence_required"
         elif reason is None and (
             comparison.get("model2_available") is not True
             or comparison.get("model2_result") not in {"PRESENT", "ABSENT"}
@@ -154,7 +171,15 @@ def build_rrf_advisory(
 
         decision = comparison.get("model2_result") if reason is None else None
         supported = decision == "PRESENT"
-        base_score = MODEL1_WEIGHT / (K + baseline_rank)
+        if rank_lists:
+            base_score = MODEL1_WEIGHT * sum(
+                1.0 / (K + labels.index(technique) + 1)
+                for labels in rank_lists if technique in labels
+            ) / len(rank_lists)
+        else:
+            # Explicit legacy fallback for stored events that predate top-k
+            # rank-list retention.
+            base_score = MODEL1_WEIGHT / (K + baseline_rank)
         bonus = MODEL2_WEIGHT / (K + 1) if supported else 0.0
         any_support = any_support or supported
         rows.append({
@@ -179,10 +204,11 @@ def build_rrf_advisory(
         "schema_version": SCHEMA,
         "session_id": session_id,
         "method": "evidence_gated_reciprocal_rank_fusion",
-        "method_version": "1",
+        "method_version": "2",
         "k": K,
         "weights": {"model1": MODEL1_WEIGHT, "model2": MODEL2_WEIGHT},
-        "formula": "1/(60+Model1_rank) + 0.25/(60+1) when gated Model2=PRESENT",
+        "formula": "1.0*(1/N)*sum_c I(t in Lc)/(60+r_c(t)) + 0.25*G2(t)/(60+1)",
+        "model1_rank_source": "per_command_topk" if rank_lists else "legacy_session_rank_fallback",
         "authority": "ADVISORY_ONLY_EXPERIMENTAL_POC",
         "score_semantics": "RRF_RANK_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
         "candidate_set_source": "MODEL1_ONLY",
@@ -198,6 +224,44 @@ def build_rrf_advisory(
     }
 
 
+def build_weighted_voting_advisory(
+    model1_advisory: Mapping[str, Any], ensemble: Mapping[str, Any] | None,
+    *, session_id: str, session_ended: bool, latest_event_at: str = "",
+) -> dict[str, Any]:
+    """Return the retained weighted-voting comparator on the same gates."""
+    rrf = build_rrf_advisory(
+        model1_advisory, ensemble, session_id=session_id,
+        session_ended=session_ended, latest_event_at=latest_event_at,
+    )
+    rows = []
+    for row in rrf["rows"]:
+        supported = row["model2_support_added"] is True
+        score = 0.5 + (0.5 if supported else 0.0)
+        rows.append({
+            **row,
+            "weighted_vote_score": score,
+            "model1_vote_component": 0.5,
+            "model2_vote_component": 0.5 if supported else 0.0,
+        })
+    rows.sort(key=lambda row: (-row["weighted_vote_score"], -row["model1_rrf_component"], row["baseline_rank"]))
+    for index, row in enumerate(rows, start=1):
+        row["recommendation_rank"] = index
+    return {
+        "schema_version": "session_ttp_weighted_voting_advisory.v1",
+        "session_id": session_id,
+        "method": "evidence_gated_weighted_voting",
+        "weights": {"model1": 0.5, "model2": 0.5},
+        "formula": "0.5*I(Model1 candidate) + 0.5*I(gated Model2 PRESENT)",
+        "authority": "ADVISORY_ONLY_EXPERIMENTAL_POC",
+        "score_semantics": "VOTE_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
+        "candidate_set_source": "MODEL1_ONLY",
+        "negative_vote_policy": "MODEL2_ABSENT_DOES_NOT_SUBTRACT",
+        "recommendation_order": [row["technique_id"] for row in rows],
+        "ordering_changed": [row["technique_id"] for row in rows] != rrf["baseline_order"],
+        "rows": rows,
+    }
+
+
 def with_rrf_advisory(
     model1_advisory: Mapping[str, Any], ensemble: Mapping[str, Any] | None,
     *, session_id: str, session_ended: bool, latest_event_at: str = "",
@@ -210,4 +274,18 @@ def with_rrf_advisory(
         session_ended=session_ended,
         latest_event_at=latest_event_at,
     )
+    result["weighted_voting_recommendation"] = build_weighted_voting_advisory(
+        model1_advisory,
+        ensemble,
+        session_id=session_id,
+        session_ended=session_ended,
+        latest_event_at=latest_event_at,
+    )
+    result["ensemble_method_comparison"] = {
+        "status": "BOTH_RETAINED_PENDING_FIELD_EVALUATION",
+        "methods": ["evidence_gated_weighted_voting", "evidence_gated_reciprocal_rank_fusion"],
+        "controlled_synthetic_leader": "evidence_gated_weighted_voting",
+        "production_winner": None,
+        "reason": "controlled synthetic results are not real-world accuracy",
+    }
     return result

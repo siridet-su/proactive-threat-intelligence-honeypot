@@ -52,9 +52,16 @@ def render_validated_advisory(
         _validate_rendered_privacy(result)
         return {**result, "render_sha256": sha256_json(result)}
 
-    findings = _index(report.get("behavioral_findings"), "finding_id")
+    findings = {
+        key: {**value, "_advisory_scope": "canonical_behavioral_finding"}
+        for key, value in _index(report.get("behavioral_findings"), "finding_id").items()
+    }
     guidance = report.get("response_guidance_v3") or {}
-    findings.update(_index(guidance.get("findings"), "finding_id"))
+    findings.update({
+        key: {**value, "_advisory_scope": "response_guidance_finding"}
+        for key, value in _index(guidance.get("findings"), "finding_id").items()
+        if key not in findings
+    })
     actions = _index(guidance.get("advisory_actions"), "action_id")
     templates = policy.get("templates") or {}
     paragraphs = []
@@ -64,7 +71,11 @@ def render_validated_advisory(
         if not isinstance(template, str):
             raise AIAdvisoryContractError("accepted template is unavailable")
         finding_types = [
-            str(findings[item].get("finding_type") or "canonical_finding")
+            str(
+                findings[item].get("_advisory_scope")
+                or findings[item].get("finding_type")
+                or "unresolved_finding_reference"
+            )
             for item in selection.get("finding_ids") or []
             if item in findings
         ]

@@ -1454,6 +1454,8 @@ def write_pdf_report(
     external_ti_projection: Optional[Dict[str, Any]] = None,
     ai_advisory_projection: Optional[Dict[str, Any]] = None,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    ensemble_projection: Optional[Dict[str, Any]] = None,
+    session_ttp_advisory_projection: Optional[Dict[str, Any]] = None,
 ) -> str:
     report = _safe_artifact_mapping(report, "report")
     # The generic artifact scrubber intentionally drops path-shaped fields.
@@ -1511,6 +1513,19 @@ def write_pdf_report(
     ai_advisory = (
         _safe_artifact_mapping(ai_advisory_projection, "ai_advisory_projection")
         if isinstance(ai_advisory_projection, dict)
+        else {}
+    )
+    current_ensemble = (
+        _safe_artifact_mapping(ensemble_projection, "ensemble_projection")
+        if isinstance(ensemble_projection, dict)
+        else {}
+    )
+    current_ttp_advisory = (
+        _safe_artifact_mapping(
+            session_ttp_advisory_projection,
+            "session_ttp_advisory_projection",
+        )
+        if isinstance(session_ttp_advisory_projection, dict)
         else {}
     )
     try:
@@ -1981,7 +1996,7 @@ def write_pdf_report(
             for claim in follow_on.get("claims") or []:
                 if isinstance(claim, dict) and str(claim.get("text") or "").strip():
                     hypothesis_statements.append(str(claim["text"]).strip())
-    ensemble = session_payload.get("ensemble_evidence") or report.get("ensemble_evidence") or {}
+    ensemble = current_ensemble or session_payload.get("ensemble_evidence") or report.get("ensemble_evidence") or {}
     ensemble_results = ensemble.get("results") if isinstance(ensemble, dict) else []
     ensemble_results = [item for item in (ensemble_results or []) if isinstance(item, dict)]
     agreement_count = sum(
@@ -2310,14 +2325,20 @@ def write_pdf_report(
     else:
         story.append(_p("No evidence-layer summary was recorded for this session.", body))
 
-    model1_advisory = summarize_session_model1_ttp(
-        session_payload.get("classification_events"), session_id=str(session_id)
-    )
+    model1_advisory = current_ttp_advisory
+    if not (
+        isinstance(model1_advisory, dict)
+        and model1_advisory.get("schema_version") == "session_model1_ttp_advisory.v1"
+        and str(model1_advisory.get("session_id") or "") == str(session_id)
+    ):
+        model1_advisory = summarize_session_model1_ttp(
+            session_payload.get("classification_events"), session_id=str(session_id)
+        )
     story.append(_p("Model1 command-level advisory (not an observed finding)", h2))
     story.append(_p(
         f"{model1_advisory['assessed_command_events']} distinct command event(s) with usable Model1 predictions. "
         "Counts rank items for manual investigation only; they are not confidence or ATT&CK findings. "
-        "Model2 binary heads are not ranked or numerically fused here.",
+        "Model2 performs its own multi-head inference and does not use RRF internally.",
         body,
     ))
     model1_rows = [["Technique", "Supporting commands", "Command references"]]
@@ -2384,6 +2405,52 @@ def write_pdf_report(
         story.append(_p(
             "No complete exact-session Model2 binding was available for this report. "
             "Model1 remains the primary classifier; Model2 corroboration is not claimed.",
+            body,
+        ))
+
+    story.append(_p("Advisory recommendation ranking (two retained late-fusion candidates)", h2))
+    rrf = model1_advisory.get("rrf_recommendation") if isinstance(model1_advisory, dict) else None
+    rrf = rrf if isinstance(rrf, dict) else {}
+    if (
+        rrf.get("schema_version") == "session_ttp_rrf_advisory.v1"
+        and str(rrf.get("session_id") or "") == str(session_id)
+    ):
+        story.append(_p(
+            "Model2 does not run RRF internally. The downstream advisory layer retains both "
+            "gated weighted voting and gated weighted reciprocal-rank for comparison. Both start "
+            "with Model1 candidates and may add support only when the matching "
+            "exact-session Model2 head reports PRESENT and passes its evidence gate. Model2 cannot "
+            "add a new candidate, an ABSENT result never subtracts, and either score is not a "
+            "probability or confidence value. This is a current read-only projection and may be "
+            "newer than the immutable report snapshot.",
+            body,
+        ))
+        story.append(_p(f"Formula: {_value(rrf.get('formula'), limit=180)}", small))
+        rrf_rows = [["Review rank", "Technique", "Model1 rank", "Model2 support", "RRF score"]]
+        for item in (rrf.get("rows") or [])[:20]:
+            if not isinstance(item, dict):
+                continue
+            rrf_rows.append([
+                _value(item.get("recommendation_rank"), limit=8),
+                _value(item.get("technique_id"), limit=24),
+                _value(item.get("baseline_rank"), limit=8),
+                "PRESENT bonus" if item.get("model2_support_added") is True else "No bonus",
+                f"{float(item.get('rrf_score') or 0):.6f}",
+            ])
+        if len(rrf_rows) > 1:
+            story.append(_table(rrf_rows, [2.4 * cm, 3.0 * cm, 2.6 * cm, 4.2 * cm, 3.2 * cm]))
+        weighted = model1_advisory.get("weighted_voting_recommendation")
+        if isinstance(weighted, dict) and weighted.get("schema_version") == "session_ttp_weighted_voting_advisory.v1":
+            story.append(_p(f"Weighted-voting formula: {_value(weighted.get('formula'), limit=180)}", small))
+            story.append(_p(
+                "Controlled synthetic comparison currently favors weighted voting, but both methods "
+                "remain experimental and no field-performance winner is claimed.",
+                small,
+            ))
+    else:
+        story.append(_p(
+            "No qualified current RRF projection is available. Model1 review order remains unchanged; "
+            "no Model2 ranking contribution is claimed.",
             body,
         ))
 
@@ -3006,6 +3073,8 @@ def render_pdf_report_bytes(
     external_ti_projection: Optional[Dict[str, Any]] = None,
     ai_advisory_projection: Optional[Dict[str, Any]] = None,
     prediction_snapshot: Optional[Dict[str, Any]] = None,
+    ensemble_projection: Optional[Dict[str, Any]] = None,
+    session_ttp_advisory_projection: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """Render one authenticated, deterministic PDF without persistent writes.
 
@@ -3027,6 +3096,8 @@ def render_pdf_report_bytes(
             external_ti_projection=external_ti_projection,
             ai_advisory_projection=ai_advisory_projection,
             prediction_snapshot=prediction_snapshot,
+            ensemble_projection=ensemble_projection,
+            session_ttp_advisory_projection=session_ttp_advisory_projection,
         ))
         return path.read_bytes()
 

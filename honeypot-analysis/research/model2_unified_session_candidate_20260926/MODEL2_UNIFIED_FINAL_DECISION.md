@@ -1,5 +1,7 @@
 # Unified Model2 — corrected T1105 semantics and controlled PoC decision
 
+> เอกสารนี้เป็นผล V2 เดิม ผล retrain T1110 hard-negative และการเปรียบเทียบ ensemble 5 วิธีล่าสุดอยู่ที่ `../model2_formula_comparison_20260927/FIVE_METHOD_COMPARISON_REPORT_TH.md` ห้ามนำตัวเลข V2 ด้านล่างไปอ้างว่าเป็น candidate ปัจจุบัน
+
 **Run date:** 26 Sep 2026  
 **Decision:** `CONTROLLED_SYNTHETIC_POC_RETRAINED; T1105_GATE_BLOCKED`  
 **Scope:** isolated research candidate only. No production deployment or change to the frozen 32F baseline.

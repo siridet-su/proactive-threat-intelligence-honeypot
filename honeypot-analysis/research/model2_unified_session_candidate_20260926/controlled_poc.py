@@ -113,6 +113,9 @@ def _procedures() -> tuple[Procedure, ...]:
                 Procedure(f"{prefix}-local-file-operation", split, (False, False, False), ("cat /tmp/document", "ls -l /tmp"), ports=(), tags=no_transfer_tag + ("local_file_operation",)),
                 Procedure(f"{prefix}-execute-existing-local-file", split, (False, False, False), ("sh /usr/bin/true",), ports=(), tags=no_transfer_tag + ("execute_existing_local_file",)),
                 Procedure(f"{prefix}-ordinary-auth-only", split, (False, False, False), (), auth_failures=0, auth_successes=1, ports=(22,), tags=no_transfer_tag + ("ordinary_auth_only",)),
+                Procedure(f"{prefix}-successful-login-transfer", split, (True, False, False), (get, "id", "uname -a"), auth_failures=0, auth_successes=1, ports=(22, 80), response_bytes=106496, tags=transfer_tags + ("single_success_t1110_hard_negative",)),
+                Procedure(f"{prefix}-successful-login-discovery", split, (False, True, False), ("id", discover), auth_failures=0, auth_successes=1, ports=(22,) + scan, tags=no_transfer_tag + ("single_success_t1110_hard_negative",)),
+                Procedure(f"{prefix}-successful-login-command-mix", split, (False, False, False), ("id", "uname -a", "pwd", "ls -la", "cat /etc/os-release"), auth_failures=0, auth_successes=1, ports=(22,), tags=no_transfer_tag + ("single_success_t1110_hard_negative",)),
                 Procedure(f"{prefix}-single-service", split, (False, False, False), ("ss -tn",), ports=(443,), tags=no_transfer_tag + ("single_service_access",)),
                 Procedure(f"{prefix}-benign-auth-retry", split, (False, False, False), (), auth_failures=1, auth_successes=1, ports=(22,), tags=no_transfer_tag + ("benign_auth_retry",)),
             ]
@@ -189,6 +192,9 @@ def _episode(procedure: Procedure, repetition: int) -> tuple[dict[str, Any], dic
                 "duration": round(0.1 + rng.random() * 2.0, 6),
                 "orig_bytes": float(64 + rng.randrange(0, 64)),
                 "resp_bytes": float(procedure.response_bytes if index == len(procedure.ports) - 1 and procedure.response_bytes else rng.randrange(0, 512)),
+                "orig_pkts": float(2 + rng.randrange(0, 4)),
+                "resp_pkts": float(2 + rng.randrange(0, 5)),
+                "ts_utc": (start + timedelta(seconds=0.2 + index * 0.25)).isoformat().replace("+00:00", "Z"),
                 "conn_state": "SF" if established else "S0",
             }
         )

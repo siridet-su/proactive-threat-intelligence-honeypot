@@ -37,6 +37,7 @@ def ensemble():
             "independent_binary_heads": True, "argmax_used": False,
             "measurement_id": "m1", "episode_id": "e1", "binding": binding,
             "t1105_transfer_observed": True, "auth_binding": "PASS",
+            "t1110_repeated_auth_observed": True,
             "available_at": "2026-09-26T12:00:01+00:00",
         },
         "results": [
@@ -75,6 +76,31 @@ class RrfTests(unittest.TestCase):
         value["results"].append({"technique_id": "T1046", "model2_available": True, "model2_result": "PRESENT"})
         result = module.build_rrf_advisory(advisory(), value, session_id="s1", session_ended=True)
         self.assertNotIn("T1046", result["recommendation_order"])
+
+    def test_t1110_single_success_style_result_cannot_vote(self):
+        value = ensemble()
+        value["model2"]["t1110_repeated_auth_observed"] = False
+        value["results"][-1]["model2_result"] = "PRESENT"
+        result = module.build_rrf_advisory(advisory(), value, session_id="s1", session_ended=True)
+        row = next(item for item in result["rows"] if item["technique_id"] == "T1110")
+        self.assertFalse(row["model2_support_added"])
+        self.assertEqual(row["exclusion_reason"], "t1110_repeated_failed_auth_evidence_required")
+
+    def test_weighted_voting_is_retained_as_separate_comparator(self):
+        result = module.build_weighted_voting_advisory(advisory(), ensemble(), session_id="s1", session_ended=True)
+        self.assertEqual(result["recommendation_order"][0], "T1105")
+        self.assertEqual(result["score_semantics"], "VOTE_SCORE_NOT_PROBABILITY_OR_CONFIDENCE")
+
+    def test_full_formula_uses_per_command_topk_ranks(self):
+        value = advisory()
+        value["command_rank_lists"] = [
+            {"command_ref": "index:0", "ranked_techniques": ["T1082", "T1105"]},
+            {"command_ref": "index:1", "ranked_techniques": ["T1105", "T1082"]},
+        ]
+        result = module.build_rrf_advisory(value, ensemble(), session_id="s1", session_ended=True)
+        row = next(item for item in result["rows"] if item["technique_id"] == "T1082")
+        self.assertAlmostEqual(row["model1_rrf_component"], (1 / 61 + 1 / 62) / 2)
+        self.assertEqual(result["model1_rank_source"], "per_command_topk")
 
 
 if __name__ == "__main__":

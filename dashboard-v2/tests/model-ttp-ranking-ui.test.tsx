@@ -34,7 +34,7 @@ describe("Model1 + Model2 advisory panel", () => {
     expect(html).toContain("Command refs: index:0");
     expect(html).toContain("Model1 only");
     expect(html).toContain("RRF rank score");
-    expect(html).toContain("1/(60 + Model1 rank)");
+    expect(html).toContain("Gated weighted reciprocal-rank");
     expect(html).not.toContain("priority score");
     expect(html).not.toContain("Confidence: ");
   });

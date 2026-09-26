@@ -21,9 +21,9 @@ class ControlledPocTests(unittest.TestCase):
         second, second_manifest = build_corpus(repetitions=2)
         self.assertEqual(first, second)
         self.assertEqual(manifest, second_manifest)
-        self.assertEqual(manifest["rows_total"], 162)
-        self.assertEqual(manifest["families_total"], 81)
-        self.assertEqual(manifest["split_rows"], {"FIT": 54, "SELECTION": 54, "SEALED_FINAL": 54})
+        self.assertEqual(manifest["rows_total"], 180)
+        self.assertEqual(manifest["families_total"], 90)
+        self.assertEqual(manifest["split_rows"], {"FIT": 60, "SELECTION": 60, "SEALED_FINAL": 60})
         for split in ("FIT", "SELECTION", "SEALED_FINAL"):
             subset = [row for row in first if row["split"] == split]
             for label in LABEL_ORDER:
@@ -50,7 +50,7 @@ class ControlledPocTests(unittest.TestCase):
         self.assertEqual(artifact["architecture"], "UNIFIED_ARTIFACT_WITH_THREE_OVR_HEADS")
         self.assertEqual(tuple(artifact["heads"]), LABEL_ORDER)
         self.assertEqual(len(artifact["selected_feature_names"]), len(FEATURE_ORDER))
-        self.assertEqual(evaluation["scored_sealed_final_rows"], 54)
+        self.assertEqual(evaluation["scored_sealed_final_rows"], 60)
         self.assertEqual(evaluation["warning"], POC_WARNING)
 
     def test_benign_content_transfer_is_positive_and_matches_basic_transfer(self):
@@ -78,6 +78,12 @@ class ControlledPocTests(unittest.TestCase):
                 self.assertTrue(any(tag in row["control_tags"] and not row["labels"]["T1105"] for row in subset))
             self.assertTrue(any(row["labels"] == {"T1105": True, "T1046": True, "T1110": True} for row in subset))
             self.assertTrue(any(row["labels"] == {"T1105": False, "T1046": True, "T1110": True} for row in subset))
+            t1110_hard_negatives = [
+                row for row in subset
+                if "single_success_t1110_hard_negative" in row["control_tags"]
+            ]
+            self.assertEqual(len(t1110_hard_negatives), 3)
+            self.assertTrue(all(row["labels"]["T1110"] is False for row in t1110_hard_negatives))
 
     def test_run_writes_research_only_outputs(self):
         with tempfile.TemporaryDirectory() as directory:

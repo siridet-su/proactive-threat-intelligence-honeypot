@@ -475,6 +475,10 @@ class Coordinator(v6.Coordinator):
                     transfer_tool_count > 0
                     and len(episode_tuples) > 0
                 )
+                t1110_repeated_auth_observed = (
+                    float(feature_gate_summary.get("auth_failure_count", 0)) >= 2
+                    and float(feature_gate_summary.get("auth_max_failure_streak", 0)) >= 2
+                )
                 outputs = {}
                 for label, item in candidate_result["outputs"].items():
                     outputs[label] = {
@@ -491,7 +495,7 @@ class Coordinator(v6.Coordinator):
                     "status": "VALID_SHADOW",
                     "availability": "AVAILABLE",
                     "authority": "NON_AUTHORITATIVE_SHADOW_ONLY",
-                    "model_version": "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260926_V2",
+                    "model_version": "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260927_V3",
                     "model_artifact_sha256": candidate_result["model_artifact_sha256"],
                     "canonical_model_identity_sha256": candidate_result["canonical_model_identity_sha256"],
                     "source_feature_contract_sha256": candidate_result["feature_schema_sha256"],
@@ -509,6 +513,8 @@ class Coordinator(v6.Coordinator):
                     "t1105_transfer_observed": t1105_transfer_observed,
                     "t1105_evidence_semantics": "SESSION_BOUND_TRANSFER_ACTIVITY_NOT_DOWNLOAD_SUCCESS",
                     "auth_binding": "PASS" if feature_gate_summary.get("auth_telemetry_complete") is True else "FAIL",
+                    "t1110_repeated_auth_observed": t1110_repeated_auth_observed,
+                    "t1110_evidence_semantics": "REPEATED_FAILED_AUTH_ACTIVITY_NOT_LOGIN_SUCCESS",
                 }
             elif self.collection_enabled:
                 result = {

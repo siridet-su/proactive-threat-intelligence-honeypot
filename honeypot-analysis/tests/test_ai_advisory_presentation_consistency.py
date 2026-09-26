@@ -50,7 +50,7 @@ def test_presentation_uses_verified_finding_authority_without_mutating_source():
     assert rendered == original
 
 
-def test_presentation_keeps_a_verified_canonical_finding_label():
+def test_presentation_labels_a_verified_canonical_finding_by_authority():
     report, selected, rendered = _case()
     report["behavioral_findings"] = [{"finding_id": "canonical_abc", "status": "supported"}]
     selected["selected_finding_ids"] = ["canonical_abc"]
@@ -58,7 +58,9 @@ def test_presentation_keeps_a_verified_canonical_finding_label():
 
     presentation = advisory_presentation(rendered, selected, report)
 
-    assert presentation["paragraphs"][0]["text"] == rendered["paragraphs"][0]["text"]
+    assert "1 canonical behavioral finding(s)" in presentation["paragraphs"][0]["text"]
+    assert "0 response-guidance finding(s)" in presentation["paragraphs"][0]["text"]
+    assert "existing canonical finding family" not in presentation["paragraphs"][0]["text"]
 
 
 def test_ai_api_exposes_corrected_display_but_preserves_stored_text(monkeypatch):

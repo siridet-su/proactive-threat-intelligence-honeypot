@@ -38,6 +38,7 @@ CONTROL_TAGS = {
     "curl_version", "embedded_transfer_text", "quoted_transfer_text",
     "url_without_transfer_tool", "local_file_operation", "execute_existing_local_file",
     "ordinary_auth_only", "discovery_only", "benign_auth_retry", "single_service_access",
+    "single_success_t1110_hard_negative",
     "repeated_same_port", "network_unavailable",
 }
 T1105_NONTRANSFER_HARD_NEGATIVE_TAGS = {

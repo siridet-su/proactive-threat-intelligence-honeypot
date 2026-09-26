@@ -253,6 +253,8 @@ def infer_envelope(
                 "network_connection_count": values[FEATURE_ORDER.index("network_connection_count")],
                 "network_established_connection_count": values[FEATURE_ORDER.index("network_established_connection_count")],
                 "auth_attempt_count": values[FEATURE_ORDER.index("auth_attempt_count")],
+                "auth_failure_count": values[FEATURE_ORDER.index("auth_failure_count")],
+                "auth_max_failure_streak": values[FEATURE_ORDER.index("auth_max_failure_streak")],
                 "auth_telemetry_complete": True,
             },
             "outputs": outputs,

@@ -68,7 +68,7 @@
     "alternative_explanation_supported"
   ],
   "templates": {
-    "summarize_selected_findings": "AI selected {finding_count} existing canonical finding family/families for analyst review: {finding_types}",
+    "summarize_selected_findings": "AI selected {finding_count} existing evidence item(s) for analyst review: {finding_types}",
     "rank_existing_actions": "AI ranked existing manual-only investigation steps in this order: {action_descriptions}",
     "explain_supported_relationships": "AI highlighted {relationship_count} existing canonical relationship(s).",
     "explain_canonical_limitations": "Canonical limitations relevant to this selection: {limitation_labels}"

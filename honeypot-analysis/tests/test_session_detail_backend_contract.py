@@ -193,6 +193,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
         "analyst_feedback",
         "observable_sightings",
         "prediction_snapshots",
+        "enrichment_jobs",
     }
     assert {table: limit for table, _, limit in storage.calls} == {
         "sessions": 1,
@@ -202,6 +203,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
         "analyst_feedback": 50,
         "observable_sightings": 100,
         "prediction_snapshots": 50,
+        "enrichment_jobs": 100,
     }
     serialized = json.dumps(public, sort_keys=True)
     assert "payload_json" not in serialized
@@ -237,6 +239,35 @@ def test_session_model1_advisory_matches_full_and_compact_projection(
     assert advisory["techniques"][0]["supporting_command_events"] == 1
     assert "private command text" not in json.dumps(advisory)
     assert "decision_score" not in json.dumps(advisory)
+
+
+def test_current_enrichment_status_replaces_stale_queued_snapshot(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        monitor_web,
+        "build_session_ti_projection",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "timestamp": "2026-09-27T00:00:00Z",
+            "enrichment_job_summary": {
+                "total": 3,
+                "pending": False,
+                "status_counts": {"completed": 3},
+            },
+        },
+    )
+    status = monitor_web._current_enrichment_status(
+        object(),
+        SESSION_ID,
+        {"status": "queued", "source": "enrichment_queue", "jobs_submitted": 3},
+        config=_config(tmp_path),
+    )
+    assert status["status"] == "completed"
+    assert status["stored_status"] == "queued"
+    assert status["jobs_pending"] is False
+    assert status["job_status_counts"] == {"completed": 3}
+    assert status["read_only_projection"] is True
 
 
 def test_dashboard_detail_merges_hypothesis_sets_from_report_artifact(

@@ -1,5 +1,7 @@
 # Model2 54F + evidence-gated RRF production PoC closeout — 2026-09-26
 
+> Historical V2 deployment record. The current V3 T1110-hard-negative candidate and five-method comparison are documented in `../research/model2_formula_comparison_20260927/FIVE_METHOD_COMPARISON_REPORT_TH.md`.
+
 ## Decision
 
 The controlled-synthetic unified Model2 candidate is deployed as a non-authoritative shadow PoC. Its qualified `PRESENT` decisions may change only the review order of TTP candidates already emitted by Model1. It cannot create a candidate, trusted finding, canonical write, or response action.

@@ -11,44 +11,44 @@
     "T1046",
     "T1110"
   ],
-  "rows_total": 324,
-  "procedure_families_total": 81,
+  "rows_total": 360,
+  "procedure_families_total": 90,
   "splits": {
     "FIT": {
-      "rows": 108,
-      "procedure_families": 27,
+      "rows": 120,
+      "procedure_families": 30,
       "labels_present_in_synthetic_corpus": true,
       "scored_after_candidate_freeze": false
     },
     "SELECTION": {
-      "rows": 108,
-      "procedure_families": 27,
+      "rows": 120,
+      "procedure_families": 30,
       "labels_present_in_synthetic_corpus": true,
       "scored_after_candidate_freeze": false
     },
     "SEALED_FINAL": {
-      "rows": 108,
-      "procedure_families": 27,
+      "rows": 120,
+      "procedure_families": 30,
       "labels_present_in_synthetic_corpus": true,
       "scored_after_candidate_freeze": true
     }
   },
   "label_support": {
     "T1105": {
-      "positive": 132,
-      "negative": 192,
-      "nontransfer_hard_negative_rows": 128,
+      "positive": 144,
+      "negative": 216,
+      "nontransfer_hard_negative_rows": 144,
       "benign_content_transfer_positive_rows": 8
     },
     "T1046": {
-      "positive": 48,
-      "negative": 276,
+      "positive": 60,
+      "negative": 300,
       "nontransfer_hard_negative_rows": null,
       "benign_content_transfer_positive_rows": null
     },
     "T1110": {
       "positive": 48,
-      "negative": 276,
+      "negative": 312,
       "nontransfer_hard_negative_rows": null,
       "benign_content_transfer_positive_rows": null
     }
@@ -57,10 +57,10 @@
   "baseline_paired_rows": 0,
   "manifest_reproducibility": "DETERMINISTIC_CONTROLLED_SYNTHETIC_CORPUS",
   "training_authorized_by_readiness_gates": false,
-  "dataset_file_sha256": "550e0dfd5f67f785c75f6c8fcc41c5b0298e902d63b39fd21f71eb8fc31dbcc7",
-  "full_dataset_content_sha256": "1e0dc84860784fef597621abe167de30566f974eeefdbf0aa6303397ab67a917",
-  "fit_selection_content_sha256": "9a754c3ed0867623beceb0b3849cece9513781250cc7db7af7011f28a71431a9",
-  "split_manifest_sha256": "2f954d44c2072762f3f016808a3562d65c93d31a5344e1a6363d49cec9115a39",
+  "dataset_file_sha256": "b650a44e5f69a12c287282fcb3da82944f29e000e88cc4924b3a65d56158e7c0",
+  "full_dataset_content_sha256": "f0756dbfeb80624672375a32e32b30b8b1a9d4330975b882a01707799fa0955b",
+  "fit_selection_content_sha256": "c08df9380b48ee78290400c0d56bc9eaead93709664027738ece3e33438dbf98",
+  "split_manifest_sha256": "beadf2d8278f1e8d3a3818bcf838e7ded3c63a09ec606e1d75deb6ccdaed53dd",
   "http_log_used": false,
   "t1105_semantics": "SESSION_BOUND_TRANSFER_ACTIVITY",
   "benign_content_transfer_label": "T1105_POSITIVE",
