@@ -12,7 +12,7 @@ import (
 
 const (
 	storageSnapshotCollection    = "b2_storage_snapshots"
-	storageSnapshotSchemaVersion = "pti.b2_storage_snapshot.v2"
+	storageSnapshotSchemaVersion = "pti.b2_storage_snapshot.v3"
 	storageUsageTimeout          = 10 * time.Minute
 )
 
@@ -57,7 +57,8 @@ func writeStorageSnapshots(
 	targets []BackupTarget,
 ) error {
 	for _, target := range targets {
-		_, err := snapshots.UpdateOne(ctx, bson.M{"_id": target.ID}, bson.M{
+		id := storageSnapshotID(cfg.B2Bucket, target.ID)
+		_, err := snapshots.UpdateOne(ctx, bson.M{"_id": id}, bson.M{
 			"$set": bson.M{
 				"schema_version": storageSnapshotSchemaVersion,
 				"source":         target.ID,
@@ -72,4 +73,8 @@ func writeStorageSnapshots(
 		}
 	}
 	return nil
+}
+
+func storageSnapshotID(bucket, targetID string) string {
+	return fmt.Sprintf("bucket:%s:%s", bucket, targetID)
 }

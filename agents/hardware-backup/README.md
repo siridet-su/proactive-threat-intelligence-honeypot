@@ -92,6 +92,35 @@ Optional environment includes `MONGO_DATABASE`, `BACKUP_TARGETS`, the legacy
 region metadata; the worker uses the Backblaze Native API and follows the API
 URL returned during authorization.
 
+## Bucket rollover
+
+The prepared worker records each new manifest under a bucket, target, and UTC
+day identity. Its skip, missing-day, and failed-day queries count only the
+configured `B2_BUCKET`. New storage snapshots also retain separate identities
+per bucket and target. Old manifests and snapshots stay in MongoDB; the worker
+does not copy, rewrite, or delete old B2 objects.
+
+Before activating a new bucket, verify its private-bucket policy, scoped key,
+target prefixes, and read-only restore path. Set `B2_BUCKET` to the new bucket
+only on the reviewed worker deployment. Set optional
+`BACKUP_LEGACY_MANIFEST_BUCKET` to the bucket that holds older manifests with
+no `bucket` field. This attributes those old rows only to that named bucket.
+For an in-place worker upgrade, set it to the unchanged `B2_BUCKET` to avoid
+re-uploading completed legacy days. During a rollover to a different bucket,
+the old rows remain visible as history but do not satisfy the new bucket's
+coverage; eligible days are archived again in the new bucket.
+
+The Dashboard reads the active bucket from `backup_target_status` unless
+`HARDWARE_BACKUP_BUCKET` is set. The optional
+`HARDWARE_BACKUP_LEGACY_MANIFEST_BUCKET` must match the worker's legacy bucket
+setting if old bucket-less manifests should count. Keep these names aligned
+with the deployed worker; the Dashboard never receives B2 credentials.
+Verify a new-bucket manifest and storage snapshot, inspect the Backup &
+Retention coverage for that bucket, and rehearse a read-only restore before
+retiring any old bucket or access key. This repository change does not perform
+those host or cloud actions. A restore verification must record its bucket;
+the Dashboard does not carry an old bucket's verification into a new bucket.
+
 The systemd service and timer are in `systemd-services/`. The local temporary
 archive root is mode `0700` and archives are removed after upload.
 
