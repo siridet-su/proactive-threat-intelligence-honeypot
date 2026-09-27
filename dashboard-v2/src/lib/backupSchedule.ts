@@ -11,6 +11,7 @@ const BANGKOK_OFFSET_MS = 7 * 3_600_000;
 
 export type BackupScheduleOverride = { start_date: string; days: number; time: string };
 export type BackupScheduleSettings = { base_time: string; override: BackupScheduleOverride | null };
+export type BackupSchedulePreviewResult = { revision: string; settings: BackupScheduleSettings; preview: BackupSchedulePreview; unchanged: boolean };
 export type BackupScheduleEdit =
   | { mode: "permanent"; time: string }
   | { mode: "temporary"; time: string; start_date: string; days: number }
@@ -34,6 +35,7 @@ export type BackupScheduleView = {
   can_edit: boolean;
   updated_at: string | null;
 };
+export type BackupScheduleSaveResult = BackupScheduleView & { unchanged: boolean };
 
 export function bangkokDate(now: Date): string {
   return new Date(now.getTime() + BANGKOK_OFFSET_MS).toISOString().slice(0, 10);
@@ -64,6 +66,14 @@ export function applyScheduleEdit(settings: BackupScheduleSettings, edit: Backup
     throw new Error("Temporary schedules must last 1–90 days");
   }
   return { ...settings, override: { start_date: edit.start_date, days: edit.days, time: edit.time } };
+}
+
+function sameScheduleSettings(left: BackupScheduleSettings, right: BackupScheduleSettings): boolean {
+  if (left.base_time !== right.base_time) return false;
+  if (!left.override || !right.override) return left.override === right.override;
+  return left.override.start_date === right.override.start_date
+    && left.override.days === right.override.days
+    && left.override.time === right.override.time;
 }
 
 export function effectiveScheduleTime(settings: BackupScheduleSettings, localDay: string): string {
@@ -160,24 +170,30 @@ export async function getBackupCoverageAnchor(now = new Date()): Promise<Date> {
   return lastScheduledOccurrence(settings, now);
 }
 
-export async function previewBackupScheduleEdit(edit: BackupScheduleEdit, now = new Date()): Promise<{ revision: string; settings: BackupScheduleSettings; preview: BackupSchedulePreview }> {
+export async function previewBackupScheduleEdit(edit: BackupScheduleEdit, now = new Date()): Promise<BackupSchedulePreviewResult> {
   const current = await getBackupScheduleView(true, now);
   const settings = applyScheduleEdit(current.settings, edit, bangkokDate(now));
-  return { revision: current.revision, settings, preview: previewSchedule(settings, now, current.today_run_status, current.retry_after ? new Date(current.retry_after) : null) };
+  return { revision: current.revision, settings, preview: previewSchedule(settings, now, current.today_run_status, current.retry_after ? new Date(current.retry_after) : null), unchanged: sameScheduleSettings(current.settings, settings) };
 }
 
-export async function saveBackupSchedule(edit: BackupScheduleEdit, expectedRevision: string, operatorId: string): Promise<BackupScheduleView> {
+export async function saveBackupSchedule(edit: BackupScheduleEdit, expectedRevision: string, operatorId: string): Promise<BackupScheduleSaveResult> {
   const db = await database();
   const now = new Date();
+  const previous = await latestRevision(db);
+  const parent = previous?._id instanceof ObjectId ? previous._id.toHexString() : "default";
+  if (expectedRevision !== parent) throw new Error("Backup schedule changed; refresh and try again");
+  const currentSettings = parseSettings(previous);
+  const settings = applyScheduleEdit(currentSettings, edit, bangkokDate(now));
+  if (sameScheduleSettings(currentSettings, settings)) {
+    const current = await getBackupScheduleView(true);
+    if (current.revision !== parent) throw new Error("Backup schedule changed; refresh and try again");
+    return { ...current, unchanged: true };
+  }
   const worker = await db.collection(TARGET_STATUS_COLLECTION).findOne({ target_id: "hardware_metrics_1m", enabled: true }, { projection: { scheduler_version: 1, last_seen_at: 1, mode: 1 } });
   const seen = worker?.last_seen_at instanceof Date ? worker.last_seen_at.getTime() : 0;
   if (worker?.scheduler_version !== BACKUP_SCHEDULE_SCHEMA || worker?.mode !== "control" || now.getTime() - seen >= 90_000) {
     throw new Error("Pi schedule worker is not ready");
   }
-  const previous = await latestRevision(db);
-  const parent = previous?._id instanceof ObjectId ? previous._id.toHexString() : "default";
-  if (expectedRevision !== parent) throw new Error("Backup schedule changed; refresh and try again");
-  const settings = applyScheduleEdit(parseSettings(previous), edit, bangkokDate(now));
   await db.collection(REVISION_COLLECTION).createIndex({ parent_id: 1 }, { unique: true });
   await db.collection(REVISION_COLLECTION).insertOne({
     schema_version: BACKUP_SCHEDULE_SCHEMA,
@@ -188,5 +204,5 @@ export async function saveBackupSchedule(edit: BackupScheduleEdit, expectedRevis
     updated_by: operatorId,
     created_at: now,
   });
-  return getBackupScheduleView(true);
+  return { ...await getBackupScheduleView(true), unchanged: false };
 }

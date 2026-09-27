@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Prevent identical backup schedule revisions
+
+- Status: repository Dashboard and API change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: prevent repeated saves of the same permanent time and temporary override from creating redundant schedule revisions. Read-only verification before this change found two consecutive `01:00` revisions; the latest active revision was `02:00`.
+- Repository branch and commit/PR: `fix/backup-schedule-noop-guard`; commit and PR follow this entry.
+- Repository changes: compare the complete schedule settings in both the Admin preview and every save request at the backend. Preview reports `unchanged`; the Dashboard disables Save and explains why. An identical direct POST returns `unchanged:true` without inserting a revision, while an applied edit returns `unchanged:false`. Keep stale-revision conflict checks and the existing three-second Undo window. Add backend and component regression tests and update the Dashboard API contract.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed by this implementation.
+- Runtime/exposure state: the Pi scheduler remains on the previously verified `02:00` Asia/Bangkok permanent revision until an Admin changes it; this repository change does not alter the stored schedule or Pi worker. The local Dashboard and API pick up this code when reloaded.
+- Validation performed and outcome: targeted Dashboard schedule and Undo tests passed (9/9), TypeScript check, targeted lint, production Dashboard build, and `git diff --check` passed locally.
+- Not performed / deferred: live Admin no-op save, authenticated browser review, production Dashboard deployment, and the next scheduled Pi run were not performed for this change.
+- Risks and data handling: comparison includes permanent time and the complete temporary override. Concurrent edits still return `409` for stale revisions; no-op requests do not need a live worker because they do not write. No secrets or archive contents enter the change.
+- Rollback: revert this Dashboard/API commit; no Pi or data rollback is required.
+- Follow-up: confirm an authenticated same-setting preview disables Save and monitor the next 02:00 scheduled run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Keep backup schedule toast movement horizontal
 
 - Status: repository Dashboard UI correction prepared; local development Dashboard uses it when reloaded.

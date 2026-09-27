@@ -31,8 +31,8 @@ describe("backup schedule Undo", () => {
   it("does not write during the Undo window and sends the previewed edit after it", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input);
-      if (path.endsWith("/preview")) return { ok: true, json: async () => ({ revision: current.revision, settings: { base_time: "01:00", override: null }, preview: current.preview }) };
-      if (init?.method === "POST") return { ok: true, json: async () => ({ ...current, revision: "revision-2", settings: { base_time: "01:00", override: null } }) };
+      if (path.endsWith("/preview")) return { ok: true, json: async () => ({ revision: current.revision, settings: { base_time: "01:00", override: null }, preview: current.preview, unchanged: false }) };
+      if (init?.method === "POST") return { ok: true, json: async () => ({ ...current, revision: "revision-2", settings: { base_time: "01:00", override: null }, unchanged: false }) };
       return { ok: true, json: async () => current };
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -62,5 +62,23 @@ describe("backup schedule Undo", () => {
     expect(writes).toHaveLength(1);
     expect(JSON.parse(String(writes[0]?.[1]?.body))).toEqual({ edit: { mode: "permanent", time: "01:00" }, expected_revision: "revision-1" });
     expect(screen.getByText("Schedule saved")).toBeTruthy();
+  });
+
+  it("disables Save when the server preview reports no change", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith("/preview")) return { ok: true, json: async () => ({ revision: current.revision, settings: current.settings, preview: current.preview, unchanged: true }) };
+      if (init?.method === "POST") throw new Error("Unexpected schedule write");
+      return { ok: true, json: async () => current };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<BackupScheduleSettings />);
+    await screen.findByText("Change schedule");
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview change" }));
+    const save = await screen.findByRole("button", { name: "Save schedule" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText("These settings already match the current schedule.")).toBeTruthy();
+    fireEvent.click(save);
+    expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/backup/schedule" && init?.method === "POST")).toHaveLength(0);
   });
 });
