@@ -233,7 +233,8 @@ export function BackupScheduleSettings() {
                 </div>
                 <div className="space-y-3">
                   <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="relative h-[68px]">
+                    <p className="text-xs font-medium text-text-muted">Schedule scope</p>
+                    <div className="relative mt-2 h-[68px]">
                       <AnimatePresence initial={false}>
                         {mode === "temporary" ? <motion.div key="temporary-range" className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
                           <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); }} />
