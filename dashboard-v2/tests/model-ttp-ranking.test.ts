@@ -19,7 +19,7 @@ function fixture() {
         schema_version: "session_ttp_rrf_advisory.v1", session_id: sessionId,
         method: "evidence_gated_reciprocal_rank_fusion", candidate_set_source: "MODEL1_ONLY",
         score_semantics: "RRF_RANK_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
-        recommendation_order: ["T1110", "T1105"],
+        recommendation_order: ["T1105", "T1110"],
         rows: [
           { technique_id: "T1110", baseline_rank: 2, rrf_score: 0.0202, model2_rrf_component: 0.0041, model2_support_added: true, eligible: true, model2_decision: "PRESENT", exclusion_reason: null },
           { technique_id: "T1105", baseline_rank: 1, rrf_score: 0.0164, model2_rrf_component: 0, model2_support_added: false, eligible: true, model2_decision: "ABSENT", exclusion_reason: null },
@@ -53,7 +53,9 @@ function fixture() {
 
 describe("session-level Model1 advisory", () => {
   it("uses the server-owned weighted-voting order without ranking by raw model scores", () => {
-    const ranked = rankTtpRecommendations(fixture());
+    const value = fixture();
+    expect(value.session_ttp_advisory.rrf_recommendation.recommendation_order).toEqual(["T1105", "T1110"]);
+    const ranked = rankTtpRecommendations(value);
     expect(ranked.map((item) => item.techniqueId)).toEqual(["T1110", "T1105"]);
     expect(ranked.map((item) => item.supportingCommandEvents)).toEqual([2, 3]);
     expect(ranked.map((item) => item.model2Support)).toEqual(["corroborates", "does_not_support"]);
