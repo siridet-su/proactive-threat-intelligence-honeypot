@@ -42,6 +42,33 @@ const BACKUP_TARGET_CATALOG = [
   { target_id: "filesystem_audit", collections: ["cwd_events", "cwd_session_state"], sensitive: false },
 ] as const;
 
+function bucketName(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function activeBackupBucket(statusDocuments: Document[]): string | null {
+  const configured = bucketName(process.env.HARDWARE_BACKUP_BUCKET);
+  if (configured) return configured;
+  const active = statusDocuments.find((document) => document.enabled === true && bucketName(document.bucket));
+  return bucketName(active?.bucket);
+}
+
+function legacyManifestBucket(): string | null {
+  return bucketName(process.env.HARDWARE_BACKUP_LEGACY_MANIFEST_BUCKET);
+}
+
+function manifestBucketQuery(bucket: string | null, legacyBucket: string | null): Document {
+  if (!bucket) return { bucket: { $exists: false } };
+  if (bucket === legacyBucket) return { $or: [{ bucket }, { bucket: { $exists: false } }] };
+  return { bucket };
+}
+
+export function manifestBelongsToBucket(document: Document, bucket: string | null, legacyBucket: string | null): boolean {
+  const documentBucket = bucketName(document.bucket);
+  if (!bucket) return documentBucket === null;
+  return documentBucket === bucket || (documentBucket === null && legacyBucket === bucket);
+}
+
 function asDate(value: unknown): Date | null {
   if (value instanceof Date) return Number.isFinite(value.getTime()) && value.getUTCFullYear() > 1 ? value : null;
   if (typeof value !== "string" && typeof value !== "number") return null;
@@ -322,12 +349,14 @@ export function buildBackupTargetCoverage(
   documents: Document[],
   targetId: BackupTargetId,
   window = getHardwareBackupWindow(),
+  bucket: string | null = null,
+  legacyBucket: string | null = null,
 ): BackupTargetCoverage {
   const manifests = new Map<string, HardwareBackupDay>();
   for (const document of documents) {
-    if (manifestTargetId(document) !== targetId) continue;
+    if (manifestTargetId(document) !== targetId || !manifestBelongsToBucket(document, bucket, legacyBucket)) continue;
     const day = manifestDay(document);
-    if (day) manifests.set(day.day, day);
+    if (day && (!manifests.has(day.day) || bucketName(document.bucket))) manifests.set(day.day, day);
   }
 
   const days: HardwareBackupDay[] = [];
@@ -371,12 +400,14 @@ export function buildBackupTargetExceptions(
   documents: Document[],
   targetId: BackupTargetId,
   window = getHardwareBackupWindow(),
+  bucket: string | null = null,
+  legacyBucket: string | null = null,
 ): BackupException[] {
   const manifests = new Map<string, HardwareBackupDay>();
   for (const document of documents) {
-    if (manifestTargetId(document) !== targetId) continue;
+    if (manifestTargetId(document) !== targetId || !manifestBelongsToBucket(document, bucket, legacyBucket)) continue;
     const day = manifestDay(document);
-    if (day) manifests.set(day.day, day);
+    if (day && (!manifests.has(day.day) || bucketName(document.bucket))) manifests.set(day.day, day);
   }
 
   const exceptions: BackupException[] = [];
@@ -498,18 +529,26 @@ function restoreReadinessView(document: Document | null): BackupRestoreReadiness
 
 export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
   const window = getHardwareBackupWindow();
-  const query: Document = {
-    collection: HARDWARE_COLLECTION,
-    day_start: { $gte: window.from, $lte: window.to },
-  };
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
+  const targetStatus = await database.collection(TARGET_STATUS_COLLECTION).findOne(
+    { target_id: HARDWARE_COLLECTION },
+    { projection: { bucket: 1, enabled: 1 } },
+  );
+  const bucket = activeBackupBucket(targetStatus ? [targetStatus] : []);
+  const legacyBucket = legacyManifestBucket();
+  const query: Document = { $and: [
+    { collection: HARDWARE_COLLECTION },
+    { day_start: { $gte: window.from, $lte: window.to } },
+    manifestBucketQuery(bucket, legacyBucket),
+  ] };
   const [documents, latestRequest, storageSnapshot] = await Promise.all([
     database
       .collection(BACKUP_COLLECTION)
       .find(query)
       .project({
         day_start: 1,
+        bucket: 1,
         status: 1,
         document_count: 1,
         archive_bytes: 1,
@@ -541,7 +580,7 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
       },
     ),
     database.collection(STORAGE_SNAPSHOT_COLLECTION).findOne(
-      { source: HARDWARE_COLLECTION },
+      bucket ? { source: HARDWARE_COLLECTION, bucket } : { source: HARDWARE_COLLECTION },
       {
         projection: { source: 1, bucket: 1, storage_bytes: 1, file_versions: 1, checked_at: 1 },
         sort: { checked_at: -1 },
@@ -552,7 +591,9 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
   const manifests = new Map<string, HardwareBackupDay>();
   for (const document of documents) {
     const day = manifestDay(document);
-    if (day) manifests.set(day.day, day);
+    if (day && manifestBelongsToBucket(document, bucket, legacyBucket) && (!manifests.has(day.day) || bucketName(document.bucket))) {
+      manifests.set(day.day, day);
+    }
   }
 
   const days: HardwareBackupDay[] = [];
@@ -603,21 +644,25 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   const window = getHardwareBackupWindow();
   const now = new Date();
   const targetIds = BACKUP_TARGET_CATALOG.map((target) => target.target_id);
-  const [statusDocuments, manifestDocuments, requestDocuments, storageDocuments, restoreDocument] = await Promise.all([
-    database.collection(TARGET_STATUS_COLLECTION).find({
-      target_id: { $in: targetIds },
-      enabled: true,
-    }).project({ target_id: 1, enabled: 1, last_seen_at: 1, mode: 1, poll_seconds: 1 }).toArray(),
-    database.collection(BACKUP_COLLECTION).find({
-      day_start: { $gte: window.from, $lte: window.to },
-      $or: [
+  const statusDocuments = await database.collection(TARGET_STATUS_COLLECTION).find({
+    target_id: { $in: targetIds },
+    enabled: true,
+  }).project({ target_id: 1, enabled: 1, bucket: 1, last_seen_at: 1, mode: 1, poll_seconds: 1 }).toArray();
+  const bucket = activeBackupBucket(statusDocuments);
+  const legacyBucket = legacyManifestBucket();
+  const [manifestDocuments, requestDocuments, storageDocuments, restoreDocument] = await Promise.all([
+    database.collection(BACKUP_COLLECTION).find({ $and: [
+      { day_start: { $gte: window.from, $lte: window.to } },
+      { $or: [
         { target_id: { $in: targetIds } },
         { collection: { $in: targetIds } },
-      ],
-    }).project({
+      ] },
+      manifestBucketQuery(bucket, legacyBucket),
+    ] }).project({
       target_id: 1,
       collection: 1,
       day_start: 1,
+      bucket: 1,
       status: 1,
       document_count: 1,
       archive_bytes: 1,
@@ -639,14 +684,14 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
       progress: 1,
       error: 1,
     }).sort({ created_at: -1 }).limit(10).toArray(),
-    database.collection(STORAGE_SNAPSHOT_COLLECTION).find({}).project({
+    database.collection(STORAGE_SNAPSHOT_COLLECTION).find(bucket ? { bucket } : {}).project({
       source: 1,
       bucket: 1,
       storage_bytes: 1,
       file_versions: 1,
       checked_at: 1,
     }).sort({ checked_at: -1 }).limit(20).toArray(),
-    database.collection(RESTORE_VERIFICATION_COLLECTION).findOne({}, {
+    database.collection(RESTORE_VERIFICATION_COLLECTION).findOne(manifestBucketQuery(bucket, legacyBucket), {
       projection: { status: 1, verified_at: 1, last_verified_at: 1, detail: 1, source: 1 },
       sort: { verified_at: -1, last_verified_at: -1, created_at: -1 },
     }),
@@ -659,7 +704,7 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
 
   const targets = BACKUP_TARGET_CATALOG.map((target) => {
     const statusDocument = liveTargets.get(target.target_id);
-    const coverage = buildBackupTargetCoverage(manifestDocuments, target.target_id, window);
+    const coverage = buildBackupTargetCoverage(manifestDocuments, target.target_id, window, bucket, legacyBucket);
     const fallbackHardwareActivation = target.target_id === "hardware_metrics_1m" && !statusDocument && coverage.successful_days > 0;
     const active = Boolean(statusDocument?.enabled) || fallbackHardwareActivation;
     return {
@@ -676,7 +721,7 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   const activeCount = targets.filter((target) => target.state === "active").length;
   const allExceptions = targets
     .filter((target) => target.state === "active")
-    .flatMap((target) => buildBackupTargetExceptions(manifestDocuments, target.target_id, window))
+    .flatMap((target) => buildBackupTargetExceptions(manifestDocuments, target.target_id, window, bucket, legacyBucket))
     .sort((left, right) => {
       const priority = { failed: 0, running: 1, missing: 2 };
       return priority[left.status] - priority[right.status] || right.day.localeCompare(left.day);

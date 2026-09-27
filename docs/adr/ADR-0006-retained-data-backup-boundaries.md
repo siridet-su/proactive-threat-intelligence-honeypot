@@ -59,6 +59,22 @@ policy were ready would report a capability that was not actually deployed.
 - Existing hardware manifests and object names remain readable; newly created
   archives use the versioned target/source envelope.
 
+## 2026-09-27 amendment: bucket rollover provenance
+
+- A successful manifest proves coverage only for the bucket that received the
+  archive. New manifest identities include bucket, target, and UTC day so a
+  new bucket cannot silently inherit another bucket's successful days.
+- Legacy manifests without a bucket remain attributed only when the operator
+  explicitly names their historical bucket. Old records and objects are not
+  rewritten or removed by a rollover.
+- Storage snapshots retain separate identities per bucket and target. The
+  Dashboard scopes manifest coverage, destination usage, and restore
+  verification to the active bucket published by the worker or explicitly
+  configured for the Dashboard.
+- A bucket change remains an operator-controlled deployment with key-scope,
+  archive, and read-only restore verification before the old destination can
+  be retired.
+
 ## Alternatives considered
 
 - Backup every MongoDB collection: rejected because it duplicates derived

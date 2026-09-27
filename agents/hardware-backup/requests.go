@@ -204,7 +204,7 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, t
 		var existing []struct {
 			DayStart time.Time `bson:"day_start"`
 		}
-		query := manifestTargetFilter(target.ID)
+		query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
 		query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
 		cursor, err := manifests.Find(ctx, query,
 			options.Find().SetProjection(bson.M{"day_start": 1}))
@@ -230,7 +230,7 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, t
 	var failed []struct {
 		DayStart time.Time `bson:"day_start"`
 	}
-	query := manifestTargetFilter(target.ID)
+	query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
 	query["status"] = requestStatusFailed
 	query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
 	cursor, err := manifests.Find(ctx, query,
@@ -242,8 +242,15 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, t
 		return nil, fmt.Errorf("decode failed backup manifests: %w", err)
 	}
 	retry := make([]time.Time, 0, len(failed))
+	seen := make(map[string]struct{}, len(failed))
 	for _, document := range failed {
-		retry = append(retry, document.DayStart.UTC().Truncate(24*time.Hour))
+		day := document.DayStart.UTC().Truncate(24 * time.Hour)
+		key := day.Format("2006-01-02")
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		retry = append(retry, day)
 	}
 	return retry, nil
 }

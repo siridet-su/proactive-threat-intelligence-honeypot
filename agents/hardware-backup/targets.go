@@ -126,6 +126,16 @@ func manifestTargetFilter(targetID string) bson.M {
 	}}
 }
 
+// Legacy manifests have no bucket field. Attribute them only when the operator
+// explicitly names the bucket that received those archives.
+func manifestTargetBucketFilter(targetID, bucket, legacyBucket string) bson.M {
+	buckets := bson.A{bson.M{"bucket": bucket}}
+	if legacyBucket == bucket {
+		buckets = append(buckets, bson.M{"bucket": bson.M{"$exists": false}})
+	}
+	return bson.M{"$and": bson.A{manifestTargetFilter(targetID), bson.M{"$or": buckets}}}
+}
+
 func backupTargetCollectionNames(target BackupTarget) []string {
 	collections := make([]string, 0, len(target.Sources))
 	for _, source := range target.Sources {

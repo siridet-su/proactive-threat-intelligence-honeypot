@@ -15,7 +15,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const manifestCollection = "hardware_backup_manifests"
+const (
+	manifestCollection    = "hardware_backup_manifests"
+	manifestSchemaVersion = "pti.backup_manifest.v3"
+)
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -168,12 +171,15 @@ func backupDay(
 ) error {
 	dayStart = dayStart.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	manifestID := fmt.Sprintf("%s:%s", target.ID, dayStart.Format("2006-01-02"))
+	manifestID := backupManifestID(cfg.B2Bucket, target.ID, dayStart)
 
 	if !cfg.Force {
 		var existing bson.M
-		err := manifests.FindOne(ctx, bson.M{"_id": manifestID}, options.FindOne().SetProjection(bson.M{"status": 1})).Decode(&existing)
-		if err == nil && existing["status"] == "success" {
+		query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
+		query["day_start"] = dayStart
+		query["status"] = "success"
+		err := manifests.FindOne(ctx, query, options.FindOne().SetProjection(bson.M{"status": 1})).Decode(&existing)
+		if err == nil {
 			return nil
 		}
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
@@ -183,8 +189,9 @@ func backupDay(
 
 	startedAt := time.Now().UTC()
 	if err := updateManifest(ctx, manifests, manifestID, bson.M{
-		"schema_version": archiveSchemaVersion,
+		"schema_version": manifestSchemaVersion,
 		"target_id":      target.ID,
+		"bucket":         cfg.B2Bucket,
 		"collection":     target.ID,
 		"collections":    backupTargetCollectionNames(target),
 		"day_start":      dayStart,
@@ -249,6 +256,10 @@ func backupDay(
 		uploaded.FileName,
 	)
 	return nil
+}
+
+func backupManifestID(bucket, targetID string, day time.Time) string {
+	return fmt.Sprintf("bucket:%s:%s:%s", bucket, targetID, day.UTC().Format("2006-01-02"))
 }
 
 func updateManifest(ctx context.Context, collection *mongo.Collection, id string, fields bson.M) error {

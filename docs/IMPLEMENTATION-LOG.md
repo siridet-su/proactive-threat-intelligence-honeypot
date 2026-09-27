@@ -2176,3 +2176,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the toolbar state adjustment and related test; no host rollback is needed.
 - Follow-up: wait for PR CI, then merge PR #69 after the required checks pass.
 - Related ADR/runbook: no architecture decision or operating procedure changed.
+
+### 2026-09-27 — Prepare bucket-scoped retained backup rollover
+
+- Status: repository implementation prepared for review; not deployed.
+- Scope and intent: consolidate overlapping backup branches on current `main` and prevent old-bucket manifests from satisfying coverage for a new B2 bucket.
+- Repository branch and commit/PR: `feat/backup-bucket-rollover`; commit and PR pending at the time of this entry.
+- Repository changes: give new manifests and storage snapshots bucket-scoped identities; constrain scheduled skip, control-request selection, Dashboard coverage, destination status, and restore-verification display to the active bucket; permit legacy bucket-less records only when their historical bucket is explicitly configured. Update the worker runbook, Dashboard environment example, current architecture, and ADR-0006 amendment. The old branch's B2 v4 change was already present on `main`, and its older UI was superseded by PR #69, so neither was copied.
+- Host/environment changes actually applied: none. No Pi worker, systemd unit, MongoDB document, B2 object, bucket policy, key, or Dashboard deployment was changed.
+- Runtime/exposure state: the deployed worker and Dashboard retain their previous behavior. Bucket-scoped rollover is active only in this repository branch until a separate reviewed deployment.
+- Validation performed and outcome: `go test ./...` in `agents/hardware-backup`, the targeted Dashboard backup Vitest suite (6/6), `npx tsc --noEmit`, full Dashboard `npm run lint`, and `git diff --check` passed. No live service or B2 behavior was exercised.
+- Not performed / deferred: no live MongoDB/B2 query, bucket move, deployment, authenticated browser review, or restore rehearsal was performed. Legacy-manifest bucket attribution and the new bucket's key scope must be verified before rollout.
+- Risks and data handling: a bucket change may re-archive eligible days and incur storage cost. Legacy manifests without an explicitly configured historical bucket are excluded from new-bucket coverage rather than assumed successful. No credentials or attacker data were added to repository files.
+- Rollback: revert this repository change before deployment. Once deployed, restore the previous worker and Dashboard versions and keep all old manifests and B2 objects for audit; do not delete archives as part of rollback.
+- Follow-up: review the new PR, deploy worker and Dashboard separately, verify current-bucket manifests and storage snapshots, and perform an approved read-only restore check before retiring an old bucket.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).

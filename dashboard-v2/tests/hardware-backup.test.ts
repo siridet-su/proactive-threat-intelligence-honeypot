@@ -162,6 +162,24 @@ describe("hardware backup dashboard status", () => {
     });
   });
 
+  it("does not count an old bucket's success during a bucket rollover", () => {
+    const window = getHardwareBackupWindow(new Date("2026-09-23T12:00:00.000Z"));
+    const documents = [
+      { target_id: "hardware_metrics_1m", bucket: "old-bucket", day_start: new Date("2026-09-21"), status: "success", document_count: 10 },
+      { target_id: "hardware_metrics_1m", day_start: new Date("2026-09-20"), status: "success", document_count: 8 },
+      { target_id: "hardware_metrics_1m", bucket: "new-bucket", day_start: new Date("2026-09-19"), status: "success", document_count: 5 },
+    ];
+
+    const rollover = buildBackupTargetCoverage(documents, "hardware_metrics_1m", window, "new-bucket", "old-bucket");
+    expect(rollover.successful_days).toBe(1);
+    expect(rollover.archived_documents).toBe(5);
+    expect(rollover.missing_days).toBe(window.days - 1);
+
+    const sameBucketUpgrade = buildBackupTargetCoverage(documents, "hardware_metrics_1m", window, "new-bucket", "new-bucket");
+    expect(sameBucketUpgrade.successful_days).toBe(2);
+    expect(sameBucketUpgrade.archived_documents).toBe(13);
+  });
+
   it("accepts target coverage summaries from the backup overview API", () => {
     expect(isBackupTargetOverview({
       generated_at: "2026-09-23T15:00:00.000Z",
