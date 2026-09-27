@@ -78,6 +78,13 @@ dates as an inclusive range. It calculates `days` from that range before
 calling the existing preview and save endpoints; the API contract remains
 `start_date` plus `days`.
 
+After an Admin selects Save, the Dashboard waits three seconds and shows an
+Undo action. Undo cancels the pending browser timer before the save endpoint is
+called. The Dashboard reports success only after the server confirms the write.
+This grace period belongs to the open page: leaving it before the request starts
+cancels the pending change, while a request already sent cannot be undone by
+the browser. The server's revision check still handles concurrent edits.
+
 The Pi control worker claims at most one scheduled run per Bangkok date. A
 time moved into the past causes one catch-up run if today's run has not
 completed. Manual hardware actions retain their separate request contract.

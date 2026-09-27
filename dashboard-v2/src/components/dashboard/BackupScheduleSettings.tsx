@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { CalendarClock, Clock3, RotateCcw, ShieldCheck } from "lucide-react";
+import { CalendarClock, Clock3, ShieldCheck } from "lucide-react";
 
 import { ScheduleNumberPicker, ScheduleRangePicker } from "@/components/dashboard/BackupSchedulePickers";
+import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
 import type { BackupScheduleEdit, BackupSchedulePreview, BackupScheduleSettings, BackupScheduleView } from "@/lib/backupSchedule";
 
 type EditMode = "permanent" | "temporary" | "clear_override";
@@ -12,6 +13,8 @@ type PreviewResult = { revision: string; settings: BackupScheduleSettings; previ
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
 const MINUTES = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"));
 const QUICK_TIMES = ["01:00", "02:00", "03:30"];
+const UNDO_DELAY_MS = 3_000;
+type ScheduleToast = { kind: OperationToastKind; title: string; description: string; pending?: boolean; undoable?: boolean };
 
 function formatBangkok(value: string | null): string {
   if (!value) return "—";
@@ -34,6 +37,7 @@ function overrideLastDate(startDate: string, days: number): string {
 
 export function BackupScheduleSettings() {
   const initialized = useRef(false);
+  const pendingSave = useRef<number | null>(null);
   const [view, setView] = useState<BackupScheduleView | null>(null);
   const [mode, setMode] = useState<EditMode>("permanent");
   const [time, setTime] = useState("03:30");
@@ -42,7 +46,7 @@ export function BackupScheduleSettings() {
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [toast, setToast] = useState<ScheduleToast | null>(null);
   const reducedMotion = useReducedMotion();
 
   const load = useCallback(async () => {
@@ -68,6 +72,16 @@ export function BackupScheduleSettings() {
     return () => { window.clearTimeout(initial); window.clearInterval(timer); };
   }, [load]);
 
+  useEffect(() => () => {
+    if (pendingSave.current !== null) window.clearTimeout(pendingSave.current);
+  }, []);
+
+  useEffect(() => {
+    if (!toast || toast.pending) return;
+    const timer = window.setTimeout(() => setToast(null), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
   function edit(): BackupScheduleEdit {
     if (mode === "clear_override") return { mode };
     if (mode === "temporary") return { mode, time, start_date: startDate, days };
@@ -77,7 +91,6 @@ export function BackupScheduleSettings() {
   async function previewChange() {
     setBusy(true);
     setError(null);
-    setSaved(false);
     try {
       const response = await fetch("/api/backup/schedule/preview", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit()),
@@ -92,29 +105,50 @@ export function BackupScheduleSettings() {
     }
   }
 
-  async function saveChange() {
-    if (!preview) return;
-    setBusy(true);
+  async function saveChange(request: { edit: BackupScheduleEdit; expected_revision: string }) {
+    setToast({ kind: "info", title: "Saving schedule", description: "Waiting for the Dashboard to confirm the change.", pending: true });
     setError(null);
     try {
       const response = await fetch("/api/backup/schedule", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ edit: edit(), expected_revision: preview.revision }),
+        body: JSON.stringify(request),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save schedule");
       setView(payload as BackupScheduleView);
       setPreview(null);
-      setSaved(true);
+      setToast({ kind: "success", title: "Schedule saved", description: "The new schedule is queued for the Pi worker." });
       setMode("permanent");
       setTime((payload as BackupScheduleView).settings.base_time);
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : "Could not save schedule");
+      const message = reason instanceof Error ? reason.message : "Could not save schedule";
+      setError(message);
+      setToast({ kind: "error", title: "Schedule was not saved", description: message });
       setPreview(null);
       await load();
     } finally {
       setBusy(false);
     }
+  }
+
+  function queueSave() {
+    if (!preview || pendingSave.current !== null || busy) return;
+    const request = { edit: edit(), expected_revision: preview.revision };
+    setBusy(true);
+    setError(null);
+    setToast({ kind: "info", title: "Schedule change pending", description: "Saving in 3 seconds. Select Undo to cancel before it reaches the Pi worker.", pending: true, undoable: true });
+    pendingSave.current = window.setTimeout(() => {
+      pendingSave.current = null;
+      void saveChange(request);
+    }, UNDO_DELAY_MS);
+  }
+
+  function undoSave() {
+    if (pendingSave.current === null) return;
+    window.clearTimeout(pendingSave.current);
+    pendingSave.current = null;
+    setBusy(false);
+    setToast({ kind: "info", title: "Change canceled", description: "The schedule was not changed. Your preview is still available." });
   }
 
   const settings = view?.settings;
@@ -125,7 +159,6 @@ export function BackupScheduleSettings() {
   function changeTime(next: string) {
     setTime(next);
     setPreview(null);
-    setSaved(false);
   }
   function selectTemporaryMode() {
     if (!view) return;
@@ -184,7 +217,7 @@ export function BackupScheduleSettings() {
               <div className="relative h-[68px]">
               <AnimatePresence initial={false}>
                 {mode === "temporary" ? <motion.div key="temporary-range" className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
-                  <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); setSaved(false); }} />
+                  <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); }} />
                 </motion.div> : <motion.div key={mode} className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
                   <span className="text-xs text-text-muted">{mode === "clear_override" ? "Effect" : "Applies for"}</span>
                   <div className="ui-field mt-1 flex items-center text-sm">{mode === "clear_override" ? "Return to the permanent schedule after saving" : temporary ? "Ongoing base time · temporary dates stay in effect" : "Every day until changed"}</div>
@@ -197,13 +230,13 @@ export function BackupScheduleSettings() {
               <p className="font-semibold">Next run: {preview.preview.catch_up ? "as soon as the Pi worker checks the schedule" : formatBangkok(preview.preview.next_run_at)}</p>
               {preview.preview.return_at && <p className="mt-1">Returns to {preview.settings.base_time} on {formatBangkok(preview.preview.return_at)}.</p>}
               <p className="mt-1 text-text-muted">A completed run today will not run twice. An active run will finish before the new schedule takes effect.</p>
-              <button type="button" className="ui-button ui-button-primary mt-3 min-h-9 px-3 text-xs" disabled={busy || !editable} onClick={() => void saveChange()}><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Save schedule</button>
+              <button type="button" className="ui-button ui-button-primary mt-3 min-h-9 px-3 text-xs" disabled={busy || !editable} onClick={queueSave}><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Save schedule</button>
             </div>}
-            {saved && <p className="flex items-center gap-1.5 text-xs text-success"><RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />Schedule saved and queued for the Pi worker.</p>}
           </div>
         )}
         {error && <p role="alert" className="text-xs text-danger lg:col-span-2">{error}</p>}
       </div>
+      {toast && <OperationToast kind={toast.kind} title={toast.title} description={toast.description} onDismiss={() => setToast(null)} actionLabel={toast.undoable ? "Undo" : undefined} onAction={undoSave} dismissible={!toast.pending} />}
     </section>
   );
 }

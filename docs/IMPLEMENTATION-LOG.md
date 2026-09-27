@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Add a three-second Undo window for backup schedule saves
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: give an Admin a brief chance to cancel a previewed schedule change and make save status visible.
+- Repository branch and commit/PR: `feat/backup-schedule-undo-toast`; commit and PR follow this entry.
+- Repository changes: show a themed pending toast with Undo for three seconds after Save, send the existing schedule POST only when that interval ends, and show separate saving, success, cancellation, and error notices. Add a component test for cancellation and delayed write, and document the browser-side grace period in the Dashboard API guide. Server and Pi scheduling logic are unchanged.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi control scheduler remains active with the Admin's permanent 01:00 Asia/Bangkok revision observed earlier on 2026-09-27; the former fixed timer remains disabled. This change affects only the Dashboard page when its new code is loaded.
+- Validation performed and outcome: the targeted Dashboard Undo and range-picker tests passed (3/3), TypeScript check, targeted lint, production Dashboard build, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser interaction, live Admin save or Undo, production Dashboard deployment, next scheduled Pi run, and restore rehearsal were not performed for this UI change.
+- Risks and data handling: Undo is available only before the POST begins and while this page remains mounted. A request already sent or saved is not reversed; a stale revision still returns the server's conflict response. No secrets or archive contents enter the UI change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify the pending, canceled, and saved notices in an authenticated browser and monitor the next scheduled Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Keep backup schedule card height stable across modes
 
 - Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
