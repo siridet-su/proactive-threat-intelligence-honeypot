@@ -108,8 +108,10 @@ export function TopologyToolbar({
   }, [viewMenuOpen]);
 
   useEffect(() => {
-    if (isEmptyLiveState && viewMenuOpen) setViewMenuOpen(false);
-  }, [isEmptyLiveState, viewMenuOpen]);
+    if (!isEmptyLiveState) return;
+    const timeout = window.setTimeout(() => setViewMenuOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [isEmptyLiveState]);
 
   // Handle escape for arrange mode in toolbar so we don't have to duplicate layoutMenuOpen state
   useEffect(() => {
