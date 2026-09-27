@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CalendarClock, Clock3, RotateCcw, ShieldCheck } from "lucide-react";
 
+import { ScheduleDatePicker, ScheduleNumberPicker } from "@/components/dashboard/BackupSchedulePickers";
 import type { BackupScheduleEdit, BackupSchedulePreview, BackupScheduleSettings, BackupScheduleView } from "@/lib/backupSchedule";
 
 type EditMode = "permanent" | "temporary" | "clear_override";
@@ -37,6 +39,7 @@ export function BackupScheduleSettings() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const reducedMotion = useReducedMotion();
 
   const load = useCallback(async () => {
     try {
@@ -121,7 +124,7 @@ export function BackupScheduleSettings() {
     setSaved(false);
   }
   return (
-    <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm" aria-labelledby="backup-schedule-title">
+    <section className="relative z-20 rounded-2xl border border-border bg-surface shadow-sm" aria-labelledby="backup-schedule-title">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
         <div className="flex items-center gap-2.5">
           <span className="grid h-9 w-9 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary"><CalendarClock className="h-4 w-4" aria-hidden="true" /></span>
@@ -151,30 +154,26 @@ export function BackupScheduleSettings() {
                 <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={() => { setMode("temporary"); changeTime(temporary?.time ?? "01:00"); setStartDate(view.local_date); setDays(temporary?.days ?? 7); }} />Temporary</label>
                 {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); setPreview(null); }} />Return to permanent</label>}
               </div>
-              {mode !== "clear_override" && <div className="rounded-lg border border-border bg-surface p-3">
+              <AnimatePresence initial={false} mode="wait">
+              {mode !== "clear_override" && <motion.div key={mode} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.18 }} className="space-y-3">
+              <div className="rounded-lg border border-border bg-surface p-3">
                 <p className="text-xs font-medium text-text-muted">Daily time · Asia/Bangkok (24-hour)</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <label className="min-w-0 flex-1 text-xs text-text-muted" htmlFor="backup-schedule-hour">Hour
-                    <select id="backup-schedule-hour" className="ui-field mt-1 cursor-pointer font-mono text-base font-semibold" value={selectedHour} onChange={(event) => changeTime(`${event.target.value}:${selectedMinute}`)}>
-                      {HOURS.map((hour) => <option key={hour} value={hour}>{hour}</option>)}
-                    </select>
-                  </label>
+                  <ScheduleNumberPicker label="Hour" value={selectedHour} values={HOURS} disabled={!editable || busy} onChange={(hour) => changeTime(`${hour}:${selectedMinute}`)} />
                   <span className="pt-4 text-lg font-semibold text-text-muted" aria-hidden="true">:</span>
-                  <label className="min-w-0 flex-1 text-xs text-text-muted" htmlFor="backup-schedule-minute">Minute
-                    <select id="backup-schedule-minute" className="ui-field mt-1 cursor-pointer font-mono text-base font-semibold" value={selectedMinute} onChange={(event) => changeTime(`${selectedHour}:${event.target.value}`)}>
-                      {MINUTES.map((minute) => <option key={minute} value={minute}>{minute}</option>)}
-                    </select>
-                  </label>
+                  <ScheduleNumberPicker label="Minute" value={selectedMinute} values={MINUTES} disabled={!editable || busy} onChange={(minute) => changeTime(`${selectedHour}:${minute}`)} />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
                   <span className="mr-1 text-text-muted">Quick times</span>
                   {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
                 </div>
-              </div>}
+              </div>
               {mode === "temporary" && <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block text-xs text-text-muted">Start date<input className="ui-field mt-1 w-full" type="date" min={view.local_date} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPreview(null); }} required /></label>
+                <ScheduleDatePicker value={startDate} today={view.local_date} disabled={!editable || busy} onChange={(day) => { setStartDate(day); setPreview(null); }} />
                 <label className="block text-xs text-text-muted">Number of days<input className="ui-field mt-1 w-full" type="number" min={1} max={90} value={days} onChange={(event) => { setDays(Number(event.target.value)); setPreview(null); }} required /></label>
               </div>}
+              </motion.div>}
+              </AnimatePresence>
               <button type="button" className="ui-button min-h-9 px-3 text-xs" onClick={() => void previewChange()}>Preview change</button>
             </fieldset>
             {preview && <div className="rounded-xl border border-info-border bg-info-subtle p-3 text-xs text-text">
