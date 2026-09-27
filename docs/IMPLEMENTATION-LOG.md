@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Remove stale fixed-time label from hardware backup card
+
+- Status: repository Dashboard UI correction prepared; production Dashboard deployment not performed.
+- Scope and intent: stop showing the obsolete fixed 03:30 time beside hardware backup controls after the daily schedule became configurable.
+- Repository branch and commit/PR: `fix/backup-sidebar-schedule-label`; commit and PR follow this entry.
+- Repository changes: replace the hardcoded time with `Daily · Asia/Bangkok`; the schedule card above remains the source for the actual current time. No API, Pi worker, or stored schedule change.
+- Host/environment changes actually applied: none. The Pi worker rollout and audited request recorded in the next entry remain active.
+- Runtime/exposure state: the currently running Pi schedule is 01:00 Asia/Bangkok; this wording appears wherever the updated Dashboard code is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint and `git diff --check` passed locally; the change is a static label correction.
+- Not performed / deferred: production Dashboard deployment and authenticated browser visual review were not performed for this label correction.
+- Risks and data handling: no new data flow or credentials. The sidebar now names the timezone but leaves exact time to the schedule card.
+- Rollback: revert this UI commit.
+- Follow-up: inspect the label after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ### 2026-09-27 — Deploy and verify manual backup window correction on Pi
 
 - Status: Pi control worker correction installed and active; Dashboard UI correction is merged into `main` but no production Dashboard deployment was performed.

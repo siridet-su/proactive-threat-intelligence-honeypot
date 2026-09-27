@@ -348,7 +348,7 @@ export function HardwareBackupStatus() {
               <CloudStorageSummary storage={data.storage} />
 
               <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-text-muted" aria-label="Backup schedule and retention">
-                <span className="inline-flex items-center gap-1.5"><TimerReset className="h-3.5 w-3.5 text-primary" aria-hidden="true" />03:30 daily</span>
+                <span className="inline-flex items-center gap-1.5"><TimerReset className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Daily · Asia/Bangkok</span>
                 <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-primary" aria-hidden="true" />30-day lookback</span>
                 <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />2-day safety hold</span>
               </div>
