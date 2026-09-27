@@ -24,6 +24,19 @@ Dashboard production host and its private environment were not accessed.
 | Cowrie and Go release paths | Cowrie starts through the versioned sanitized-output `current` release; Go agents execute binaries inside the mutable Pi checkout. | Preserve the existing Cowrie release/rollback contract and package Go binaries as immutable ARM64 artifacts before a fresh install. |
 | Dashboard location | No monitor-web, dashboard API, or Dashboard staging systemd unit was installed on the Pi. Repository docs place Dashboard production and staging on a separate host. | Install the Dashboard separately from the sensor Pi; do not add it to the Pi service sequence by assumption. |
 
+### Unmerged installer work
+
+The repository also has an unmerged `feat/appliance-installer` branch at
+`ddf4f3c`, based on an older `main` revision. It contains
+`scripts/pti_install.py`, ARM64 sensor profiles, a release builder, tests, and
+draft installation manuals. The CLI deliberately supports read-only `plan`,
+`preflight`, and `package-audit` work; its profile sets `install_enabled=false`.
+The Thai manual covers host-foundation testing on a disposable ARM64 VM and is
+not an accepted full Pi installation procedure. Rebase and review this branch
+against current `main` and the findings here before using it as the next
+implementation base. Its existence does not clear the installation blockers
+below.
+
 ### Environment boundaries
 
 - Pi systemd uses private files under `/etc/honeypot/` and
@@ -56,7 +69,8 @@ Dashboard production host and its private environment were not accessed.
 
 ## Installation blockers found
 
-1. There is no unified installer for the complete current system. The
+1. There is no runnable unified installer for the complete current system on
+   `main`. The unmerged installer branch is plan-only. The
    [customer appliance blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) is
    proposed, includes retired response-control history, and is not runnable.
 2. The Dashboard staging bootstrap/template still generates

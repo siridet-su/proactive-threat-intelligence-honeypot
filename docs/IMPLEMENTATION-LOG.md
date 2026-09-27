@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Addendum: identify unmerged installer planning branch
+
+- Status: documentation corrected; no host change or installation performed.
+- Scope and intent: supplement the installation-readiness audit after finding existing installer work outside `main`.
+- Repository branch and commit/PR: `docs/installation-audit-addendum`; commit/PR follow this entry.
+- Repository changes: document `feat/appliance-installer` at `ddf4f3c` and its plan-only CLI, profiles, tests, and draft manuals. Clarify that no runnable full-system installer is present on `main`.
+- Host/environment changes actually applied: none in this addendum.
+- Runtime/exposure state: unchanged from the preceding audit; no service or release was touched.
+- Validation performed and outcome: inspected the branch commit, file list, CLI execution-mode guard, draft manuals, and PR status. The branch is unmerged and has no PR.
+- Not performed / deferred: merge or rebase of the installer branch, fresh-OS installation, and VM or Pi acceptance tests.
+- Risks and data handling: the branch is based on an older `main` revision; the plan-only tool must not be presented as an installation command. No secrets were recorded.
+- Rollback: revert this documentation addendum with a new dated correction if the branch state changes.
+- Follow-up: rebase and review installer work against current `main` and the readiness blockers before developing apply mode.
+- Related ADR/runbook: [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) and [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
 ### 2026-09-28 — Audit fresh-Pi installation readiness and tighten an exposed env file
 
 - Status: repository readiness document prepared; one Pi file-permission correction applied; no installation or deployment performed.
