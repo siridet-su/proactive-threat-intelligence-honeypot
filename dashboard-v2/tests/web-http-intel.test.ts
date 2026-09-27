@@ -50,7 +50,6 @@ describe("Web-corp read-only HTTP hints", () => {
   it("projects a captured TCP source port as connection metadata", () => {
     expect(projectWebHttpEvent(event())?.sourcePort).toBe(49152);
   });
-
   it("rejects other sources and event types", () => {
     expect(projectWebHttpEvent(event({ source: "cowrie" }))).toBeNull();
     expect(projectWebHttpEvent(event({ event_type: "web_event" }))).toBeNull();

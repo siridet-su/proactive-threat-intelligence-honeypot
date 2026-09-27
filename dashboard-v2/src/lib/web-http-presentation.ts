@@ -1,4 +1,22 @@
 /** These are presentation hints from attacker-controlled HTTP fields, not verified browser identity. */
+import type { WebHttpCapturedPayload } from "@/lib/web-http-intel";
+
+/** Show the literal captured target only to operators granted payload access. */
+export function requestTargetForDisplay(
+  safePath: string,
+  payload: Pick<WebHttpCapturedPayload, "rawPath" | "query" | "truncatedFields"> | undefined,
+  rawPayloadAccess: boolean,
+): { target: string; truncated: boolean } {
+  if (!rawPayloadAccess) return { target: safePath, truncated: false };
+  if (!payload?.rawPath) {
+    return { target: safePath === "[redacted-path]" ? "[original path not stored]" : safePath, truncated: false };
+  }
+  return {
+    target: `${payload.rawPath}${payload.query ? `?${payload.query}` : ""}`,
+    truncated: payload.truncatedFields.includes("http.raw_path") || payload.truncatedFields.includes("http.query"),
+  };
+}
+
 export function reportedClient(userAgent: string | null | undefined): string | null {
   if (!userAgent) return null;
   const patterns: Array<[RegExp, string]> = [
