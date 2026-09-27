@@ -24,7 +24,7 @@ The compact API should retain full finding/action sentences and a complete artif
 ## Observed result
 
 - Guidance: two findings and two actions. The first finding is 200 characters and the first action is 170 characters; both contain a complete 64-character SHA-256 and end as full sentences. `requires_manual_approval=true`; `safe_to_auto_execute=false`.
-- Monitor API `/health`: HTTP 200 after startup warm-up. PDF: HTTP 200, `application/pdf`. Dashboard `/login`: HTTP 200; unauthenticated protected detail: HTTP 307.
+- Monitor API `/health`: HTTP 200 after startup warm-up. PDF: HTTP 200, `application/pdf`. Dashboard `/login`: HTTP 200 on loopback and at the existing public tunnel URL; unauthenticated protected detail: HTTP 307.
 - The same session's ETI endpoint reported `TI_AVAILABLE`; the AI endpoint reported `accepted`; the session detail enrichment projection reported `completed` while the stored legacy status remained `queued`. These are current versus stored projections, not one shared status field.
 - The current V3 Model2 spool includes a `VALID_SHADOW`, `PRESENT` result for the source session. The protected bridge and direct recomputation returned available evidence. Initially the HTTP endpoint intermittently returned Model1-only because its bridge client had a 250 ms timeout against measured 215–250 ms spool lookups. With the bounded 3-second timeout deployed, HTTP `/api/session-detail` returned bound Model2 V3 and `EXPERIMENTAL_RRF`; T1105 moved to first review priority. Two other current V3 sessions returned available Model2 evidence but retained Model1-only ordering where no gated support changed the order.
 - The older documented V2 session currently falls back to Model1-only at the HTTP API because the active V3 identity gate does not accept the retired V2 artifact. It still has one hypothesis set and two response-guidance findings/actions. The prior RRF reorder in its historical report remains a record of its original runtime, not evidence of current V3 fusion.
@@ -37,8 +37,8 @@ The compact API should retain full finding/action sentences and a complete artif
 
 ## Limitations
 
-No authenticated browser screenshot was captured. The active public address is backed by an unmanaged Cloudflare quick tunnel; changing its process would rotate the address. The Next Distinct feeder's historical restart count was 46 after a temporary MongoDB primary-selection timeout on 2026-09-25, but the service was active and the count stable during this check.
+No authenticated browser screenshot was captured. The temporary owner-only API response and the two upload staging files were removed after validation; the protected rollback backups remain. The active directory's copied release manifest and marker already identify an older backend revision and a different release path; read-only manifest verification therefore fails before checking file hashes. This deployment changed two files in place and does not repair that pre-existing provenance drift. The active public address is backed by an unmanaged Cloudflare quick tunnel; changing its process would rotate the address. The Next Distinct feeder's historical restart count was 46 after a temporary MongoDB primary-selection timeout on 2026-09-25, but the service was active and the count stable during this check.
 
 ## Follow-up
 
-Verify guidance and the V3 RRF recommendation in an authenticated browser. Keep the existing tunnel address until a stable named tunnel migration is planned.
+Build a clean manifest-bound backend release from the committed revision and promote it using the documented deployment procedure. Verify guidance and the V3 RRF recommendation in an authenticated browser. Keep the existing tunnel address until a stable named tunnel migration is planned.
