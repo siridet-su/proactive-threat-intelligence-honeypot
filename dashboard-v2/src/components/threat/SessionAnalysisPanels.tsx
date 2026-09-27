@@ -1494,6 +1494,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const recommendations = rankTtpRecommendations(data);
   const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
   const weighted = record(record(data.session_ttp_advisory).weighted_voting_recommendation);
+  const weightedRows = new Map(list(weighted.rows).map(record).map((item) => [label(item.technique_id, ""), item]));
   const weightedReady = weighted.schema_version === "session_ttp_weighted_voting_advisory.v1"
     && weighted.session_id === data.session_id
     && recommendations.some((item) => item.rankingScore !== null);
@@ -1511,7 +1512,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   return (
     <div className="space-y-3">
       <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
-        {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only available heads may corroborate Model1.` : "A session-bound Model2 result is available for comparison with Model1.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
+        {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only evidence-qualified heads may affect the review order.` : "A session-bound Model2 result is available for comparison with Model1; only evidence-qualified heads may affect the review order.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
       </Insight>
       {model2OnlyPredictions.length > 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-sm text-warning">Experimental Model2-only prediction for {model2OnlyPredictions.map((item) => summaryValue(item.technique_id, "unknown technique")).join(", ")}. This is not a confirmed observed behavior, canonical finding, or response instruction; check the session evidence before drawing a conclusion.</p>}
       <MetricStrip fields={[
@@ -1554,19 +1555,22 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
       </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">
-          {results.map((item, index) => (
-            <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
+          {results.map((item, index) => {
+            const qualified = record(weightedRows.get(label(item.technique_id, "")));
+            const rawAgreementOnly = item.evidence_state === "AGREE" && qualified.model2_support_added !== true;
+            return <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
-                <span className="ui-badge text-[11px]">{summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
+                <span className="ui-badge text-[11px]">{rawAgreementOnly ? "RAW AGREE · NO VOTE" : summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
               </div>
               <div className="mt-2 grid gap-1 text-text-muted sm:grid-cols-2">
                 <span>Model1: <span className="font-medium text-text">{readableCode(item.model1_result || "not applicable")}</span>{item.model1_margin !== null && item.model1_margin !== undefined ? ` · margin ${display(item.model1_margin)}` : ""}</span>
                 <span>Model2: <span className="font-medium text-text">{readableCode(item.model2_result || "unavailable")}</span>{item.model2_score !== null && item.model2_score !== undefined ? ` · score ${display(item.model2_score)}` : ""}</span>
               </div>
               <p className="mt-1 text-text-muted">{readableCode(item.model2_relation || "comparison not recorded")} · primary source: {readableCode(item.primary_source || "none")}</p>
-            </li>
-          ))}
+              {rawAgreementOnly && <p className="mt-1 text-warning">Raw predictions agree, but Model2 did not pass the evidence gate for this technique{hasMeaningfulValue(qualified.exclusion_reason) ? `: ${readableCode(qualified.exclusion_reason)}` : ""}. It did not vote or change the recommendation.</p>}
+            </li>;
+          })}
         </ol>
       </ScrollPanel>}
       {model1Only.length > 0 && <div className="flex flex-wrap items-center gap-2">

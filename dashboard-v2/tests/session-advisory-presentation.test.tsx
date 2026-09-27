@@ -120,6 +120,23 @@ describe("session assessment presentation", () => {
     expect(html).toContain("no ensemble corroboration or combined score is claimed");
   });
 
+  it("distinguishes raw Model2 agreement from an evidence-qualified vote", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-v1",
+      ensemble_evidence: {
+        model1: { applicable: true }, model2: { available: true },
+        results: [{ technique_id: "T1105", evidence_state: "AGREE", model1_result: "PRESENT", model2_result: "PRESENT" }],
+      },
+      session_ttp_advisory: { weighted_voting_recommendation: { rows: [{
+        technique_id: "T1105", model2_support_added: false,
+        exclusion_reason: "t1105_session_bound_transfer_evidence_required",
+      }] } },
+    }} />);
+    expect(html).toContain("RAW AGREE · NO VOTE");
+    expect(html).toContain("did not vote or change the recommendation");
+    expect(html).toContain("t1105 session bound transfer evidence required");
+  });
+
   it("labels Model2-only predictions as experimental and explains unbound T1046 context", () => {
     const sessionId = "session_v1_model2_boundary";
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
