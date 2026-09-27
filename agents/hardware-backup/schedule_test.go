@@ -45,3 +45,49 @@ func TestDailyScheduleRejectsUnboundedOrMalformedOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestManualBackupWindowFollowsLastScheduledOccurrence(t *testing.T) {
+	cfg := Config{LookbackDays: 30, SafetyDays: 2}
+	tests := []struct {
+		name       string
+		schedule   backupSchedule
+		now        time.Time
+		wantAnchor string
+		wantFrom   string
+		wantTo     string
+	}{
+		{
+			name:       "after UTC midnight but before next Bangkok run",
+			schedule:   backupSchedule{BaseTime: "01:00"},
+			now:        time.Date(2026, 9, 27, 14, 9, 0, 0, time.UTC),
+			wantAnchor: "2026-09-26T18:00:00Z", wantFrom: "2026-08-27", wantTo: "2026-09-24",
+		},
+		{
+			name:       "after next Bangkok run",
+			schedule:   backupSchedule{BaseTime: "01:00"},
+			now:        time.Date(2026, 9, 27, 18, 1, 0, 0, time.UTC),
+			wantAnchor: "2026-09-27T18:00:00Z", wantFrom: "2026-08-28", wantTo: "2026-09-25",
+		},
+		{
+			name:       "temporary time applies to the previous local day",
+			schedule:   backupSchedule{BaseTime: "03:30", Override: &scheduleOverride{StartDate: "2026-09-27", Days: 1, Time: "01:00"}},
+			now:        time.Date(2026, 9, 27, 18, 0, 0, 0, time.UTC),
+			wantAnchor: "2026-09-26T18:00:00Z", wantFrom: "2026-08-27", wantTo: "2026-09-24",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			anchor := lastScheduledOccurrence(test.schedule, test.now)
+			if got := anchor.Format(time.RFC3339); got != test.wantAnchor {
+				t.Fatalf("anchor = %s, want %s", got, test.wantAnchor)
+			}
+			days := backupWindow(cfg, anchor)
+			if got := days[0].Format("2006-01-02"); got != test.wantFrom {
+				t.Errorf("window start = %s, want %s", got, test.wantFrom)
+			}
+			if got := days[len(days)-1].Format("2006-01-02"); got != test.wantTo {
+				t.Errorf("window end = %s, want %s", got, test.wantTo)
+			}
+		})
+	}
+}

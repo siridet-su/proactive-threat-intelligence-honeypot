@@ -183,6 +183,13 @@ Supported actions are:
 - `run_missing`: archive days in the backup window that have no manifest;
 - `retry_failed`: retry days whose manifest is currently marked `failed`.
 
+For these manual actions, the worker anchors the UTC backup window to the most
+recent scheduled occurrence in `Asia/Bangkok`, including a temporary schedule.
+This is the same window shown by the Dashboard. It avoids shifting the manual
+window a day ahead of the displayed coverage after UTC midnight but before the
+next Bangkok scheduled run. A completed request with `0/0 days` means the worker
+found no eligible days in that window; it does not mean an archive was uploaded.
+
 While a request is running, the worker updates `progress` and `heartbeat_at`
 after each UTC day. The request document contains `source`, `status`,
 `completed_at`, `worker_id`, and an error message when the run fails. A stale
