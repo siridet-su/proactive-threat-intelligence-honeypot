@@ -18,8 +18,10 @@ const MAP_WIDTH = 800;
 const MAP_HEIGHT = 800;
 const PROJECTION_SCALE = 125;
 const FIT_PADDING = 70;
-const SINGLE_ORIGIN_ZOOM = 4.1;
-const MAX_AUTOMATIC_ZOOM = 4.5;
+// At the 800×800 / scale-125 projection this frames roughly 46° of longitude:
+// regional context, without the continent-wide view that exposed Brazil and Africa.
+const SINGLE_ORIGIN_ZOOM = 8;
+const MAX_AUTOMATIC_ZOOM = 8;
 const MIN_AUTOMATIC_ZOOM = 0.65;
 
 function normalizedLongitude(longitude: number): number {

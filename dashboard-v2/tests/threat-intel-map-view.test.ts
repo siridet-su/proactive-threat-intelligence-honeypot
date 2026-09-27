@@ -10,8 +10,14 @@ describe("origin map viewport", () => {
     const view = getOriginMapView([{ coordinates: [127.5, 37.5] }]);
 
     expect(view.coordinates).toEqual([127.5, 37.5]);
-    expect(view.zoom).toBeGreaterThanOrEqual(4);
-    expect(view.zoom).toBeLessThan(4.5);
+    expect(view.zoom).toBe(8);
+  });
+
+  it("uses regional zoom for a Brazilian origin instead of a South-America-wide view", () => {
+    const view = getOriginMapView([{ coordinates: [-46.6, -23.5] }]);
+
+    expect(view.coordinates).toEqual([-46.6, -23.5]);
+    expect(view.zoom).toBe(8);
   });
 
   it("fits multiple origins and handles the dateline using the short longitude arc", () => {
@@ -20,7 +26,7 @@ describe("origin map viewport", () => {
       { coordinates: [139.7, 35.7] },
       { coordinates: [121.5, 25] },
     ]);
-    expect(eastAsia.zoom).toBeLessThanOrEqual(4.5);
+    expect(eastAsia.zoom).toBeLessThanOrEqual(8);
     expect(eastAsia.coordinates[0]).toBeGreaterThan(120);
     expect(eastAsia.coordinates[0]).toBeLessThan(140);
 
@@ -30,5 +36,15 @@ describe("origin map viewport", () => {
     ]);
     expect(Math.abs(dateline.coordinates[0])).toBeGreaterThan(175);
     expect(dateline.zoom).toBeGreaterThan(1);
+  });
+
+  it("lets nearby multiple origins fill the map while keeping a regional maximum zoom", () => {
+    const view = getOriginMapView([
+      { coordinates: [-46.6, -23.5] },
+      { coordinates: [-47.2, -22.9] },
+    ]);
+
+    expect(view.coordinates[0]).toBeCloseTo(-46.9, 1);
+    expect(view.zoom).toBe(8);
   });
 });

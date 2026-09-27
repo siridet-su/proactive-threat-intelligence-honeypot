@@ -2477,3 +2477,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the UI commit on the staging branch; no host or data rollback is required.
 - Follow-up: inspect the staging workflow result and review the event alignment and collapsed technical-detail sections in an authenticated browser.
 - Related ADR/runbook: N/A; no operating procedure or architecture decision changed.
+
+### 2026-09-27 — Restore session classification filtering and structure provider intelligence
+
+- Status: repository Dashboard UI correction prepared in an isolated worktree; not pushed or deployed.
+- Scope and intent: restore the existing SSH attacker-type filter after unifying protocol browsing, tighten approximate-origin map framing, and make external provider evidence scannable without changing its source contract.
+- Repository branch and commit/PR: detached worktree based on staging commit `b30a7e49`; follow-up commit and PR pending.
+- Repository changes: expose the existing server-side attacker types (`APT`, `Bot`, `ScriptKiddie`) only in the SSH view and pass the selected value through the directory and export APIs; do not invent a Telnet protocol distinction absent from the current directory projection. Set single-origin and clustered multi-origin map zoom caps to regional scale. Replace paragraph-heavy external-TI cards with provider-specific metadata panels, keep the provider summary outside a 620px-bounded results viewport, retain allowlisted provider fields and collapsed provenance details, and distinguish provider errors from lookups that were not executed. Add/adjust focused regression tests.
+- Host/environment changes actually applied: none. No backend, API/schema, MongoDB, provider request, GCP service, or production configuration was changed. A temporary dependency symlink used for local checks was removed automatically after validation.
+- Runtime/exposure state: these changes exist only in the isolated repository worktree. They are not active on staging or production; the configured CI/CD behavior has not been triggered for this follow-up.
+- Validation performed and outcome: focused map, session-directory, and session-analysis presentation tests passed (26/26); Dashboard `tsc --noEmit`, ESLint on changed source/tests, and `git diff --check` passed. No production build or authenticated browser review was performed.
+- Not performed / deferred: no push, CI/CD run, staging/production deployment, map screenshot review, live session/API check, or full Dashboard test suite was performed.
+- Risks and data handling: the map's automatic view now starts closer (8x) while retaining approximate-geolocation semantics and a manual reset; provider records remain contextual and non-authoritative. Attacker-type values continue to use the backend's existing server-side filter and pagination. No secrets or raw request payloads were added.
+- Rollback: revert the follow-up UI commit; no service, data, or backend rollback is needed.
+- Follow-up: after an authorized staging push, inspect the Brazil/Korea regional maps, confirm the SSH filter returns the existing server-side results, and review AbuseIPDB/OTX/Shodan panels with fresh, stale, error, and unqueried data.
+- Related ADR/runbook: N/A; presentation and existing filter wiring only; no operating procedure or architecture decision changed.

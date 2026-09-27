@@ -69,7 +69,7 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Repeated source-IP activity indicates recurrence only");
   });
 
-  it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
+  it("shows provider-specific metadata panels and bounded results without double-counting cache", () => {
     const sourceIpCache = [
       { provider: "abuseipdb", cache_key: "abuse-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { abuse_confidence_score: 100, total_reports: 1809, country_code: "SE" } },
       { provider: "otx", cache_key: "otx-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { pulses: [{ pulse_id: "p1", name: "Observed SSH scanner feed" }], truncated: false } },
@@ -79,14 +79,20 @@ describe("session assessment presentation", () => {
       sessionData={{ status: "TI_AVAILABLE", counts: { eligible_observables: 1 }, source_ip_cache: sourceIpCache }}
       observableData={{ source_ip_cache: sourceIpCache, observable: { value: "203.0.113.9" } }}
     />);
-    expect(html).toContain("AbuseIPDB score:");
-    expect(html).toContain("1809 community reports");
-    expect(html).toContain("OTX pulse matches: 1");
+    expect(html).toContain("Provider Intelligence");
+    expect(html).toContain("abuse score");
+    expect(html).toContain("community reports");
+    expect(html).toContain("1809");
+    expect(html).toContain("pulse matches");
     expect(html).toContain("Observed SSH scanner feed");
-    expect(html).toContain("ssh 22");
+    expect(html).toContain("ports");
+    expect(html).toContain("ssh 22, nginx 80");
+    expect(html).toContain("not necessarily observed in this Cowrie session");
     expect(html).toContain("3 source-IP provider lookup results");
-    expect(html).toContain("What the providers reported");
-    expect(html).toContain("Lookup provenance and technical details");
+    expect(html).toContain("max-h-[620px] overflow-y-auto");
+    expect(html).toContain("lg:grid-cols-2");
+    expect(html).toContain("Technical details");
+    expect(html).not.toMatch(/<details[^>]*open(?:=|\s|>)/);
     expect(html).not.toContain("abuseipdb cache");
     expect(html).not.toContain("normalized context:");
     expect(html).not.toContain("6 source-IP provider lookup results");
@@ -153,7 +159,24 @@ describe("session assessment presentation", () => {
     expect(html).not.toContain("ti fresh");
     expect(html).not.toContain("freshness: FRESH");
     expect(html).toContain("Last lookup: Not executed");
-    expect(html).toContain("provider not queried");
+    expect(html).toContain("No provider lookup was executed");
+    expect(html).toContain("Lookup status");
+    expect(html).toContain("AlienVault OTX");
+    expect(html).not.toContain("Recorded Not recorded · provider not queried");
+  });
+
+  it("distinguishes a provider error from an unexecuted lookup", () => {
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{ status: "TI_AVAILABLE", counts: { eligible_observables: 1 }, provider_status: {
+        otx: { lookup_status: "PROVIDER_ERROR", record_count: 1, lookup_at: "2026-09-27T10:00:00Z" },
+      } }}
+      observableData={{ observable: { value: "203.0.113.9" } }}
+    />);
+
+    expect(html).toContain("Provider error");
+    expect(html).toContain("Provider records");
+    expect(html).toContain("Provider lookup returned Provider error");
+    expect(html).not.toContain("No provider lookup was executed");
   });
 
   it("shows validated AI selections even when no narrative template was rendered", () => {

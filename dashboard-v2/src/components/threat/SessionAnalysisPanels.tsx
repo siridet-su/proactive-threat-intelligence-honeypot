@@ -998,13 +998,13 @@ function TrustedTraceability({ mapping }: { mapping: JsonRecord }) {
 }
 
 function tiLookupState(value: JsonRecord, freshnessOverride?: unknown): string {
+  const lookup = String(value.lookup_status || value.status || "").trim().toUpperCase();
+  if (["PROVIDER_ERROR", "ERROR", "RATE_LIMITED", "AUTH_FAILED", "REQUEST_FAILED"].includes(lookup)) return "ERROR";
   if (!providerLookupExecuted(value)) return "UNAVAILABLE";
   const freshness = String(freshnessOverride ?? value.freshness_state ?? "").trim().toUpperCase();
   if (freshness === "STALE" || freshness === "EXPIRED" || freshness === "TI_EXPIRED" || freshness === "TI_STALE") return "STALE";
-  const lookup = String(value.lookup_status || value.status || "").trim().toUpperCase();
   if (["OK", "CACHED", "AVAILABLE"].includes(lookup)) return "DATA";
   if (["NOT_FOUND", "NO_DATA"].includes(lookup)) return "NO_DATA";
-  if (["PROVIDER_ERROR", "ERROR", "RATE_LIMITED", "AUTH_FAILED", "REQUEST_FAILED"].includes(lookup)) return "ERROR";
   if (["DISABLED", "UNAVAILABLE", "AUTH_DISABLED", "BUDGET_EXHAUSTED", "INVALID_OBSERVABLE", "PENDING"].includes(lookup)) return "UNAVAILABLE";
   return "UNAVAILABLE";
 }
@@ -1041,24 +1041,70 @@ function providerName(value: unknown): string {
   return ({ abuseipdb: "AbuseIPDB", otx: "AlienVault OTX", shodan_official: "Shodan" } as Record<string, string>)[name] || readableCode(value);
 }
 
-function providerResult(provider: unknown, normalized: JsonRecord): string {
+function providerContextNote(provider: unknown): string {
   const name = String(provider || "").toLowerCase();
-  if (name === "abuseipdb") {
-    const score = hasMeaningfulValue(normalized.abuse_confidence_score) ? `${display(normalized.abuse_confidence_score)}/100` : "not reported";
-    const reports = hasMeaningfulValue(normalized.total_reports) ? `${display(normalized.total_reports)} community reports` : "report count unavailable";
-    return `AbuseIPDB score: ${score} · ${reports}. This is provider reputation, not model confidence.`;
+  if (name === "abuseipdb") return "Third-party IP reputation and community reports; not model confidence or proof of this session’s behavior.";
+  if (name === "otx") return "Third-party pulse context; a match does not confirm behavior in this session.";
+  if (name === "shodan_official") return "Provider-observed internet host attributes; listed ports were not necessarily observed in this Cowrie session.";
+  return "External provider context only; it does not establish session behavior, actor identity, or attribution.";
+}
+
+function providerStateLabel(state: string): string {
+  return ({
+    DATA: "Data",
+    NO_DATA: "No data",
+    ERROR: "Provider error",
+    UNAVAILABLE: "Unavailable",
+    STALE: "Stale",
+  } as Record<string, string>)[state] || readableCode(state);
+}
+
+function providerLookupStatusLabel(value: unknown, state: string): string {
+  const code = String(value || "").trim().toUpperCase();
+  const labels: Record<string, string> = {
+    OK: "Available",
+    CACHED: "Available",
+    AVAILABLE: "Available",
+    NOT_FOUND: "No data",
+    NO_DATA: "No data",
+    PROVIDER_ERROR: "Provider error",
+    ERROR: "Provider error",
+    RATE_LIMITED: "Rate limited",
+    AUTH_FAILED: "Authentication failed",
+    REQUEST_FAILED: "Request failed",
+    DISABLED: "Disabled",
+    AUTH_DISABLED: "Authentication disabled",
+    BUDGET_EXHAUSTED: "Budget exhausted",
+    INVALID_OBSERVABLE: "Invalid observable",
+    PENDING: "Pending",
+    POLICY_BLOCKED: "Policy blocked",
+    SKIPPED: "Skipped",
+  };
+  return labels[code] || (code ? readableCode(code) : providerStateLabel(state));
+}
+
+function providerFieldValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value
+      .filter(hasMeaningfulValue)
+      .slice(0, 12)
+      .map((item) => display(item))
+      .join(" · ");
   }
-  if (name === "otx") {
-    const pulses = list(normalized.pulses).map(record);
-    const count = hasMeaningfulValue(normalized.pulse_count) ? display(normalized.pulse_count) : String(pulses.length);
-    return `OTX pulse matches: ${count}. A pulse match is third-party context, not confirmed session behavior.`;
-  }
-  if (name === "shodan_official") {
-    const ports = list(normalized.ports).slice(0, 8).map(String).join(", ");
-    const asn = hasMeaningfulValue(normalized.asn) ? `ASN ${display(normalized.asn)}` : "ASN not reported";
-    return `Internet-facing host context: ${ports ? `ports ${ports}` : "ports not reported"} · ${asn}. These are not ports observed in Cowrie.`;
-  }
-  return "Provider context is stored; inspect the details below for its bounded result.";
+  return display(value, "Not reported");
+}
+
+function ProviderMetadataGrid({ fields }: { fields: Array<readonly [string, string]> }) {
+  return (
+    <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border">
+      {fields.map(([name, value]) => (
+        <div key={name} className="min-w-0 bg-surface px-2.5 py-2">
+          <dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt>
+          <dd className="mt-0.5 break-words text-xs font-semibold text-primary-navy">{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
 }
 
 function normalizedProviderKey(value: unknown): string {
@@ -1116,17 +1162,22 @@ function ProviderContextRows({
   if (groups.length === 0) return <p className="border-l-2 border-border pl-3 text-xs text-text-muted">No provider status, lookup result, or linked finding was returned for this observable.</p>;
   return (
     <div className="space-y-3">
-      <p className="text-xs text-text-muted">Provider context is non-authoritative. Each row combines lookup state, cached result, and any separately linked finding.</p>
-      <ol className="space-y-2">
+      <p className="text-xs text-text-muted">Each panel separates lookup state, provider-specific intelligence, and findings linked to this session.</p>
+      <div className="max-h-[620px] overflow-y-auto overscroll-contain pr-1" aria-label="Provider intelligence results">
+      <ol className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {groups.slice(0, 12).map((group) => {
           const latestCache = latestProviderRecord(group.cache, "lookup_at");
           const latestEvidence = latestProviderRecord(group.evidence, "retrieved_at");
           const status = group.status;
+          const provider = group.provider;
           const latestCacheWasQueried = Boolean(latestCache && providerLookupExecuted(latestCache));
-          const source = (latestCacheWasQueried ? latestCache : null) || latestEvidence || status || latestCache || {};
+          const source = (latestCache && hasMeaningfulValue(latestCache.lookup_status || latestCache.status) ? latestCache : null) || latestEvidence || status || latestCache || {};
           const lookupWasExecuted = latestCacheWasQueried
             || Boolean(latestEvidence && providerLookupExecuted(latestEvidence))
             || Boolean(status && hasMeaningfulValue(status.lookup_status) && providerLookupExecuted(status));
+          const rawLookupState = String(source.lookup_status || source.status || "").trim().toUpperCase();
+          const lookupFailed = ["PROVIDER_ERROR", "ERROR", "RATE_LIMITED", "AUTH_FAILED", "REQUEST_FAILED"].includes(rawLookupState);
+          const lookupNotRun = ["DISABLED", "AUTH_DISABLED", "BUDGET_EXHAUSTED", "INVALID_OBSERVABLE", "PENDING", "POLICY_BLOCKED", "SKIPPED"].includes(rawLookupState);
           const normalized = record(latestCacheWasQueried ? latestCache?.normalized_context : undefined);
           const cacheFreshness = latestCacheWasQueried && latestCache ? sourceIpCacheFreshness(latestCache, asOf) : undefined;
           const freshness = latestCacheWasQueried ? freshnessLabel(cacheFreshness) : latestEvidence ? providerRecordFreshness(latestEvidence) : latestCache ? "NOT APPLICABLE" : providerRecordFreshness(status || {});
@@ -1137,82 +1188,121 @@ function ProviderContextRows({
               : status
                 ? tiLookupState(status)
                 : "UNAVAILABLE";
-          const summarizedProviderKeys = new Set(["pulses", "pulse_count", "abuse_confidence_score", "total_reports", "ports", "asn"]);
-          const context = selectedProviderFields(normalized).filter(([key]) => !summarizedProviderKeys.has(key.toLowerCase()));
           const pulses = list(normalized.pulses).map(record);
-          const extension = latestEvidence ? selectedProviderFields(latestEvidence.normalized_extension).filter(([key]) => !summarizedProviderKeys.has(key.toLowerCase())) : [];
-          const reportedAt = (latestCacheWasQueried ? latestCache?.lookup_at : undefined) || latestEvidence?.retrieved_at || status?.retrieved_at || status?.lookup_at;
+          const summarizedProviderKeys = new Set(["pulses", "pulse_count", "abuse_confidence_score", "total_reports", "ports", "asn"]);
+          const supplementalMap = new Map<string, readonly [string, string]>();
+          for (const [key, value] of [
+            ...selectedProviderFields(normalized),
+            ...(latestEvidence ? selectedProviderFields(latestEvidence.normalized_extension) : []),
+          ]) {
+            if (!summarizedProviderKeys.has(key.toLowerCase())) supplementalMap.set(key.toLowerCase(), [key, value]);
+          }
+          const supplemental = Array.from(supplementalMap.values());
+          const providerSpecificFields: Array<readonly [string, string]> = [];
+          if (provider === "abuseipdb") {
+            if (hasMeaningfulValue(normalized.abuse_confidence_score)) providerSpecificFields.push(["Abuse score", `${display(normalized.abuse_confidence_score)} / 100`]);
+            if (hasMeaningfulValue(normalized.total_reports)) providerSpecificFields.push(["Community reports", display(normalized.total_reports)]);
+          } else if (provider === "otx") {
+            if (hasMeaningfulValue(normalized.pulse_count)) providerSpecificFields.push(["Pulse matches", display(normalized.pulse_count)]);
+            else if (pulses.length > 0) providerSpecificFields.push(["Pulse matches", String(pulses.length)]);
+            const pulseNames = pulses.map((pulse) => summaryValue(pulse.name, "")).filter(Boolean).slice(0, 2);
+            if (pulseNames.length > 0) providerSpecificFields.push(["Pulse examples", pulseNames.join(" · ").slice(0, 140)]);
+          } else if (provider === "shodan_official") {
+            if (hasMeaningfulValue(normalized.ports)) providerSpecificFields.push(["Ports", providerFieldValue(normalized.ports)]);
+            if (hasMeaningfulValue(normalized.asn)) providerSpecificFields.push(["ASN", display(normalized.asn)]);
+          }
+          const visibleSupplementalCount = Math.max(0, 6 - providerSpecificFields.length);
+          const visibleProviderFields = [...providerSpecificFields, ...supplemental.slice(0, visibleSupplementalCount)];
+          const technicalProviderFields = supplemental.slice(visibleSupplementalCount);
+          const reportedAt = latestCache?.lookup_at || latestEvidence?.retrieved_at || status?.retrieved_at || status?.lookup_at;
           const expiresAt = (latestCacheWasQueried ? latestCache?.expires_at : undefined) || latestEvidence?.expires_at || status?.expires_at;
-          const provider = group.provider;
+          const lookupStatus = hasMeaningfulValue(source.lookup_status || source.status)
+            ? providerLookupStatusLabel(source.lookup_status || source.status, lookupState)
+            : providerStateLabel(lookupState);
+          const linkedFindings = group.evidence.length > 0
+            ? `${group.evidence.length}${latestEvidence ? ` · ${readableCode(latestEvidence.finding_state || "state not recorded")}` : ""}`
+            : "None";
+          const providerRecords = hasMeaningfulValue(status?.record_count) ? countOf(status?.record_count) : "Not recorded";
+          const checkedAt = hasMeaningfulValue(reportedAt) ? tiTimestampLabel(reportedAt) : lookupWasExecuted || lookupFailed ? "Not recorded" : "Not queried";
+          const validUntil = hasMeaningfulValue(expiresAt) ? tiTimestampLabel(expiresAt) : lookupWasExecuted ? "Not recorded" : "Not applicable";
+          const resultNote = lookupFailed
+            ? `Provider lookup returned ${lookupStatus}; no normalized result is available.`
+            : lookupNotRun
+              ? `No provider lookup was executed. State: ${lookupStatus}.`
+              : latestEvidence
+              ? summaryValue(latestEvidence.summary, "A linked provider finding is stored.")
+              : lookupWasExecuted
+                ? "The lookup ran, but no normalized provider result is available."
+                : hasMeaningfulValue(source.lookup_status || source.status)
+                  ? `No provider result is available. State: ${lookupStatus}.`
+                  : "Lookup state was not reported and no normalized provider result was returned.";
           return (
-            <li key={provider} className="min-w-0 rounded-lg border border-border bg-surface p-3 sm:p-4">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <h4 className="text-sm font-semibold text-primary-navy">{providerName(provider)}</h4>
-                  <p className="mt-1 text-xs text-text-muted">{latestCacheWasQueried ? "Source-IP lookup" : latestEvidence ? "Linked provider finding" : "Provider status"}</p>
+            <li key={provider} className="min-w-0 self-start overflow-hidden rounded-xl border border-border bg-surface">
+              <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border bg-surface-subtle px-3 py-2.5">
+                <div className="min-w-0">
+                  <h4 className="text-xs font-bold uppercase tracking-[0.08em] text-primary-navy">{providerName(provider)}</h4>
+                  <p className="mt-0.5 text-[10px] text-text-muted">{latestCacheWasQueried ? "Source-IP lookup" : latestEvidence ? "Linked provider finding" : "Provider status"}</p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
-                  <span className={`ui-badge text-[10px] ${lookupState === "ERROR" || lookupState === "UNAVAILABLE" ? "border-warning-border bg-warning-subtle text-warning" : ""}`}>{readableCode(lookupState)}</span>
-                  <span className="ui-badge text-[10px]">{readableCode(freshness)}</span>
+                  <span className={`ui-badge text-[9px] uppercase ${lookupState === "ERROR" || lookupState === "UNAVAILABLE" ? "border-warning-border bg-warning-subtle text-warning" : ""}`}>{providerStateLabel(lookupState)}</span>
+                  <span className="ui-badge text-[9px] uppercase">{readableCode(freshness)}</span>
                 </div>
               </div>
 
-              {latestCacheWasQueried ? (
-                <>
-                  <p className="mt-2 border-l-2 border-primary-border pl-3 text-xs leading-5 text-text">{providerResult(provider, normalized)}</p>
-                  {provider === "otx" && pulses.length > 0 && <p className="mt-1 text-xs text-text-muted">Example pulse: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
-                </>
-              ) : latestEvidence ? (
-                <div className="mt-2 border-l-2 border-border pl-3">
-                  <p className="text-xs font-semibold text-text">Finding: {readableCode(latestEvidence.finding_state || "not recorded")}</p>
-                  <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(latestEvidence.summary, "No provider finding summary stored.")}</p>
-                </div>
-              ) : (
-                <div className="mt-2 border-l-2 border-border pl-3 text-xs leading-5 text-text-muted">
-                  {lookupWasExecuted ? `No normalized provider result is available. State: ${summaryValue(source.lookup_status || source.status, "not reported")}.` : hasMeaningfulValue(source.lookup_status || source.status) ? `No provider lookup was executed. State: ${summaryValue(source.lookup_status || source.status, "not reported")}.` : "Provider lookup state was not reported and no normalized result was returned."}
-                </div>
-              )}
+              <div className="space-y-3 p-3">
+                <ProviderMetadataGrid fields={[
+                  ["Lookup status", lookupStatus],
+                  ["Freshness", readableCode(freshness)],
+                  ["Provider records", providerRecords],
+                  ["Linked findings", linkedFindings],
+                  ["Checked at", checkedAt],
+                  ["Valid until", validUntil],
+                ]} />
 
-              {(latestEvidence || status) && <p className="mt-2 text-xs text-text-muted">
-                Linked finding{group.evidence.length === 1 ? "" : "s"}: {group.evidence.length ? `${group.evidence.length} · ${readableCode(latestEvidence?.finding_state || "not recorded")}` : "none"}
-                {status && hasMeaningfulValue(status.record_count) ? ` · provider records: ${countOf(status.record_count)}` : ""}
-              </p>}
-              <p className="mt-auto pt-3 text-xs leading-5 text-text-muted">
-                {lookupWasExecuted ? "Checked" : "Recorded"} {tiTimestampLabel(reportedAt)}
-                {hasMeaningfulValue(expiresAt) ? ` · valid until ${tiTimestampLabel(expiresAt)}` : lookupWasExecuted ? " · expiry not recorded" : hasMeaningfulValue(source.lookup_status || source.status) ? " · provider not queried" : " · lookup state not reported"}
-              </p>
+                <section className="border-t border-border pt-2.5" aria-label={`${providerName(provider)} provider-specific intelligence`}>
+                  <h5 className="mb-2 text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">Provider-specific intelligence</h5>
+                  {visibleProviderFields.length > 0
+                    ? <ProviderMetadataGrid fields={visibleProviderFields.map(([key, value]) => [readableCode(key), value] as const)} />
+                    : <p className="rounded-md bg-surface-subtle px-2.5 py-2 text-[11px] text-text-muted">No provider-specific fields were returned.</p>}
+                </section>
 
-              <TraceabilityDetails
-                title="Lookup provenance and technical details"
-                fields={[
-                  ["Observable type", summaryValue(latestCache?.observable_type || latestEvidence?.observable_type || status?.observable_type || observable.type, "source_ip")],
-                  ["Observable role", summaryValue(latestCache?.observable_role || latestEvidence?.observable_role || status?.observable_role || "source_ip", "Not recorded")],
-                  ["Provider observed at", thailandTimestamp(latestCache?.provider_observed_at || latestEvidence?.provider_observed_at || status?.provider_observed_at)],
-                  ["Data age", dataAge(reportedAt)],
-                  ["Session binding", summaryValue(latestEvidence?.session_id || latestCache?.session_id, "Not recorded")],
-                  ["Provider record count", countOf(status?.record_count)],
-                ]}
-              />
+                <p className="border-l-2 border-primary-border pl-2.5 text-[10px] leading-4 text-text-muted">{providerContextNote(provider)}</p>
+                {!latestCacheWasQueried && <p className={`text-[10px] leading-4 ${lookupFailed ? "text-warning" : "text-text-muted"}`}>{resultNote}</p>}
 
-              {(context.length > 0 || extension.length > 0) && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
-                <summary className="cursor-pointer font-semibold text-text">Additional provider fields</summary>
-                <div className="mt-3"><TechnicalFieldGrid fields={[...context, ...extension].slice(0, 16).map(([key, value]) => [readableCode(key), value] as const)} /></div>
-              </details>}
-
-              {group.evidence.length > 1 && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
-                <summary className="cursor-pointer font-semibold text-text">Other linked findings · {group.evidence.length - 1}</summary>
-                <ol className="mt-3 space-y-2">
-                  {group.evidence.filter((item) => item !== latestEvidence).slice(0, 10).map((item, index) => <li key={`${index}-${label(item.evidence_id, "finding")}`} className="rounded-md border border-border bg-surface-subtle p-2">
-                    <p className="font-semibold text-text">{readableCode(item.finding_state || "not recorded")}</p>
-                    <p className="mt-1 text-text-muted">{summaryValue(item.summary, "No provider finding summary stored.")}</p>
-                    <p className="mt-1 text-[11px] text-text-subtle">{thailandTimestamp(item.retrieved_at)} · evidence {summaryValue(item.evidence_id, "not linked")}</p>
-                  </li>)}
-                </ol>
-              </details>}
+                <details className="border-t border-border pt-2.5 text-xs">
+                  <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-text">
+                    <span className="ui-badge text-[9px]">Technical details</span>
+                    <span>Provenance and additional fields</span>
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    <TechnicalFieldGrid fields={[
+                      ["Observable type", summaryValue(latestCache?.observable_type || latestEvidence?.observable_type || status?.observable_type || observable.type, "source_ip")],
+                      ["Observable role", summaryValue(latestCache?.observable_role || latestEvidence?.observable_role || status?.observable_role || "source_ip", "Not recorded")],
+                      ["Provider observed at", thailandTimestamp(latestCache?.provider_observed_at || latestEvidence?.provider_observed_at || status?.provider_observed_at)],
+                      ["Data age", dataAge(reportedAt)],
+                      ["Session binding", summaryValue(latestEvidence?.session_id || latestCache?.session_id, "Not recorded")],
+                      ...technicalProviderFields.map(([key, value]) => [readableCode(key), value] as const),
+                    ]} />
+                    {group.evidence.length > 1 && (
+                      <section>
+                        <h6 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-text-subtle">Other linked findings · {group.evidence.length - 1}</h6>
+                        <ol className="divide-y divide-border rounded-md border border-border">
+                          {group.evidence.filter((item) => item !== latestEvidence).slice(0, 10).map((item, index) => <li key={`${index}-${label(item.evidence_id, "finding")}`} className="px-2.5 py-2">
+                            <p className="font-semibold text-text">{readableCode(item.finding_state || "not recorded")}</p>
+                            <p className="mt-1 text-text-muted">{summaryValue(item.summary, "No provider finding summary stored.")}</p>
+                            <p className="mt-1 text-[10px] text-text-subtle">{thailandTimestamp(item.retrieved_at)} · evidence {summaryValue(item.evidence_id, "not linked")}</p>
+                          </li>)}
+                        </ol>
+                      </section>
+                    )}
+                  </div>
+                </details>
+              </div>
             </li>
           );
         })}
       </ol>
+      </div>
     </div>
   );
 }
@@ -1365,7 +1455,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
       )}
       {entities.length > 0 && <ContentPanel title="Related observables and sightings" count={entities.length}><ObservableList items={entities} empty="No shared entities are recorded." /></ContentPanel>}
       {providerCount > 0 ? <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-text">What the providers reported</h3><span className="ui-badge text-[10px]">{providerCount} providers · freshness per card</span></div>
+        <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-primary-navy">Provider Intelligence</h3><span className="ui-badge text-[10px]">{providerCount} provider{providerCount === 1 ? "" : "s"} · state per panel</span></div>
         <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
       </div> : <p className="border-l-2 border-border pl-3 text-xs text-text-muted">No provider result or lookup state is stored. {readableCode(summary.uncertainty || sessionData.status || "context only")}.</p>}
     </div>
@@ -2141,7 +2231,7 @@ export function SessionAnalysisPanels({
       <section aria-label="Threat intelligence context">
         <Panel eyebrow="" title="Threat intelligence context" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={tiSectionResult} variant="module" renderEmptyContent compactUnavailable>
           <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(20rem,5fr)_minmax(0,7fr)]">
-            <Panel eyebrow="Provider results" title="External threat intelligence" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} variant="embedded" renderEmptyContent compactUnavailable>
+            <Panel eyebrow="Provider results" title="External Threat Intelligence" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} variant="embedded" renderEmptyContent compactUnavailable>
               <ExternalTiSummary sessionData={sessionTi} observableData={observableTi.data} />
             </Panel>
             <Panel eyebrow="Recurrence · not attribution" title="Source-IP recurrence" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={sourcePivot} className="xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>

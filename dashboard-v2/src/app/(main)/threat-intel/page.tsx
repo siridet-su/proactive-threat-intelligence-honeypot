@@ -27,7 +27,10 @@ import {
 import { cn } from "@/lib/utils";
 import { groupWebHttpSessions, type WebHttpHint, type WebHttpSession } from "@/lib/web-http-intel";
 import {
+  attackerTypeQueryValue,
   buildSessionDirectoryRows,
+  SESSION_ATTACKER_TYPE_OPTIONS,
+  type SessionAttackerTypeFilter,
   type SessionDirectoryRow,
   type SessionProtocolFilter,
 } from "@/lib/threat-intel-session-directory";
@@ -45,6 +48,7 @@ export default function ThreatIntelPage() {
   const [queryInput, setQueryInput] = useState("");
   const query = useDebouncedValue(queryInput, 320);
   const [protocolFilter, setProtocolFilter] = useState<SessionProtocolFilter>("all");
+  const [attackerTypeFilter, setAttackerTypeFilter] = useState<SessionAttackerTypeFilter>("All");
 
   const [directory, setDirectory] = useState<ThreatDirectoryPage | null>(null);
   const [directoryStatus, setDirectoryStatus] = useState<RequestStatus>("loading");
@@ -84,6 +88,8 @@ export default function ThreatIntelPage() {
       try {
         const params = new URLSearchParams({ page: String(currentPage), pageSize: String(pageSize) });
         if (query) params.set("query", query);
+        const attackerType = attackerTypeQueryValue(protocolFilter, attackerTypeFilter);
+        if (attackerType) params.set("attackerType", attackerType);
         const response = await fetch(`/api/threats/directory?${params}`, { cache: "no-store" });
         if (!response.ok) throw new Error("Threat directory unavailable");
         const data: unknown = await response.json();
@@ -100,7 +106,7 @@ export default function ThreatIntelPage() {
         }
       }
     },
-    [currentPage, pageSize, query]
+    [attackerTypeFilter, currentPage, pageSize, protocolFilter, query]
   );
 
   useEffect(() => {
@@ -151,6 +157,8 @@ export default function ThreatIntelPage() {
     try {
       const params = new URLSearchParams();
       if (query) params.set("query", query);
+      const attackerType = attackerTypeQueryValue(protocolFilter, attackerTypeFilter);
+      if (attackerType) params.set("attackerType", attackerType);
       
       const response = await fetch(`/api/threats/directory/export?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error("Export failed");
@@ -251,6 +259,7 @@ export default function ThreatIntelPage() {
                     title={tab.title}
                     onClick={() => {
                       setProtocolFilter(tab.id);
+                      if (tab.id !== "ssh") setAttackerTypeFilter("All");
                       if (currentPage !== 1) {
                         setIsPageChanging(true);
                         setCurrentPage(1);
@@ -298,6 +307,26 @@ export default function ThreatIntelPage() {
                     </button>
                   )}
                 </div>
+                {protocolFilter === "ssh" && (
+                  <div className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5">
+                    <label htmlFor="session-attacker-type" className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-text-muted">Attacker type</label>
+                    <select
+                      id="session-attacker-type"
+                      aria-label="Filter SSH sessions by attacker type"
+                      value={attackerTypeFilter}
+                      onChange={(event) => {
+                        setAttackerTypeFilter(event.target.value as SessionAttackerTypeFilter);
+                        setCurrentPage(1);
+                      }}
+                      className="h-full min-w-24 border-0 bg-transparent p-0 text-xs font-semibold text-[#18227A] focus:outline-none focus:ring-0"
+                    >
+                      <option value="All">All types</option>
+                      {SESSION_ATTACKER_TYPE_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <Link href="/http-activity" className="ui-button h-8 min-h-8 px-2.5 text-xs">Request activity</Link>
                 {protocolFilter === "ssh" && (
                   <button

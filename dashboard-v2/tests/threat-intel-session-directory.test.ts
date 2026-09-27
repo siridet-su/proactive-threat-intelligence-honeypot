@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionDirectoryRows } from "@/lib/threat-intel-session-directory";
+import {
+  attackerTypeQueryValue,
+  buildSessionDirectoryRows,
+  SESSION_ATTACKER_TYPE_OPTIONS,
+} from "@/lib/threat-intel-session-directory";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { WebHttpSession } from "@/lib/web-http-intel";
 
@@ -76,6 +80,19 @@ const httpSession: WebHttpSession = {
 };
 
 describe("unified session directory projection", () => {
+  it("preserves exactly the backend-supported attacker types and scopes them to SSH", () => {
+    expect(SESSION_ATTACKER_TYPE_OPTIONS).toEqual([
+      { value: "APT", label: "APT" },
+      { value: "Bot", label: "Bot" },
+      { value: "ScriptKiddie", label: "Script Kiddie" },
+    ]);
+    expect(attackerTypeQueryValue("ssh", "APT")).toBe("APT");
+    expect(attackerTypeQueryValue("ssh", "ScriptKiddie")).toBe("ScriptKiddie");
+    expect(attackerTypeQueryValue("all", "APT")).toBeNull();
+    expect(attackerTypeQueryValue("http", "APT")).toBeNull();
+    expect(attackerTypeQueryValue("ssh", "All")).toBeNull();
+  });
+
   it("merges SSH and HTTP while keeping protocol-specific destinations and fields", () => {
     const rows = buildSessionDirectoryRows([sshSession], [httpSession], "all");
 

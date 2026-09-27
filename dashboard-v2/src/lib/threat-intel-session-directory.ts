@@ -2,6 +2,25 @@ import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { WebHttpSession } from "@/lib/web-http-intel";
 
 export type SessionProtocolFilter = "all" | "ssh" | "http";
+export type SessionAttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
+
+/** Values accepted by the existing threat-directory backend. */
+export const SESSION_ATTACKER_TYPE_OPTIONS: ReadonlyArray<{
+  value: Exclude<SessionAttackerTypeFilter, "All">;
+  label: string;
+}> = [
+  { value: "APT", label: "APT" },
+  { value: "Bot", label: "Bot" },
+  { value: "ScriptKiddie", label: "Script Kiddie" },
+];
+
+/** Attacker classification belongs only to the SSH directory/API query. */
+export function attackerTypeQueryValue(
+  protocol: SessionProtocolFilter,
+  attackerType: SessionAttackerTypeFilter,
+): Exclude<SessionAttackerTypeFilter, "All"> | null {
+  return protocol === "ssh" && attackerType !== "All" ? attackerType : null;
+}
 
 export type SessionDirectoryRow = {
   key: string;
