@@ -37,7 +37,10 @@ ambiguous bindings fail closed. It does not infer identity from IP or time.
 The production server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an
 owner-only regular file and forwards only the verified canonical ID to
 `http://127.0.0.1:8090/api/internal/session-commands`. Explicit local
-development review instead reads `honeypot_canonical_v1.events` on loopback.
+development review instead reads `honeypot_canonical_v1.events` on loopback
+when `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` is set in the private local
+environment and the Next server runs in development mode. The development
+projection returns command submissions only, matching the monitor route.
 The monitor additionally requires `LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a
 loopback bind/client, and the dedicated bearer token. The browser never
 receives this token. Responses are bounded and `no-store`; the v2 response
