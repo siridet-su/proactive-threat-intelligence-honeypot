@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Theme the backup schedule pickers and transitions
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses the working tree when reloaded.
+- Scope and intent: replace browser-native schedule dropdowns and date popup with theme-aware controls and add short open/close and mode-change transitions.
+- Repository branch and commit/PR: `fix/backup-schedule-themed-pickers`; commit and PR follow this entry.
+- Repository changes: add bounded, theme-aware hour/minute menus and a one-year start-date calendar using the existing Dashboard calendar; animate menu, calendar, and Permanent/Temporary form transitions while respecting reduced-motion preference. Preserve the `HH:mm` and local `YYYY-MM-DD` API values.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at its permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. This change affects only Dashboard presentation.
+- Validation performed and outcome: local TypeScript check, lint, and production build passed. The initial build exposed a browser import of the server-backed schedule module; date arithmetic was moved into the client picker and the build then passed. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the date picker limits selection to today through the next 365 Bangkok calendar days, matching server validation; schedule writes still require preview and Admin authorization. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no host or data rollback is required.
+- Follow-up: inspect the new menus in authenticated light/dark sessions and monitor the next Pi backup run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Improve Dashboard backup schedule time controls
 
 - Status: repository UI change prepared; local development Dashboard picks it up through the running dev server.
