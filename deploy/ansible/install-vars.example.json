@@ -1,0 +1,11 @@
+{
+  "pti_release_id": "REPLACE_WITH_RELEASE_ID",
+  "pti_release_source": "/absolute/path/to/reviewed/release",
+  "pti_manifest_sha256": "REPLACE_WITH_APPROVED_64_HEX_DIGEST",
+  "pti_package_versions": {
+    "ca-certificates": "REPLACE_WITH_APPROVED_VERSION",
+    "python3": "REPLACE_WITH_APPROVED_VERSION",
+    "python3-venv": "REPLACE_WITH_APPROVED_VERSION",
+    "redis-server": "REPLACE_WITH_APPROVED_VERSION"
+  }
+}

@@ -20,33 +20,46 @@ SSH, firewall, trap ports, network membership, or Dashboard services.
    OS, architecture, package source, and administrator SSH separately. Do not
    target the existing `pi-t` host or a customer Pi yet.
 2. Build the Go bundle from a clean checkout on a build host with cached Go
-   modules. The builder runs each module's tests and disables Go downloads:
+   modules. The builder runs each module's tests and disables Go downloads.
+   Record the printed `Manifest SHA-256` with the reviewed release receipt;
+   this digest must come from that trusted build record, not from a changed
+   bundle discovered during installation:
 
    ```sh
    python3 scripts/build_sensor_release.py --release-id r1 --output-root /tmp/pti-releases
-   python3 scripts/verify_sensor_release.py --release-id r1 --release-dir /tmp/pti-releases/r1
+   python3 scripts/verify_sensor_release.py --release-id r1 \
+     --release-dir /tmp/pti-releases/r1 --manifest-sha256 'REPLACE_WITH_APPROVED_64_HEX_DIGEST'
    ```
 
-3. Copy `inventory.example.ini` to a private inventory outside Git and add
-   the VM's management address and administrator account. Keep passwords and
-   private keys out of the inventory.
-4. Run Ansible from the build/control host. Set the release source to an
-   **absolute local path** and use the same release ID as the manifest. Review
-   the target and release before the second command; no production Pi is an
+3. Copy `inventory.example.ini` to an inventory outside Git and add the VM's
+   management address and administrator account. Keep passwords and private
+   keys out of the inventory. Copy `install-vars.example.json` to a reviewed
+   vars file outside Git. Fill in the absolute release path, release ID,
+   approved manifest digest, and exact versions of the four Ubuntu packages.
+   Review versions and origins on the clean VM with `apt-cache policy` before
+   filling in that file; the playbook refuses placeholders or missing versions.
+   This vars file has no credentials.
+4. Run Ansible from the build/control host. Review the target and release
+   before the second command; no production Pi is an
    approved target yet:
 
    ```sh
    ansible-playbook -i /path/to/private-inventory.ini deploy/ansible/prepare-pi.yml \
      --syntax-check
    ansible-playbook -i /path/to/private-inventory.ini deploy/ansible/prepare-pi.yml \
-     -e '{"pti_release_id":"r1","pti_release_source":"/tmp/pti-releases/r1"}'
+     -e @/path/to/reviewed-install-vars.json
    ```
 
    The playbook fails before mutation if the OS/architecture is wrong, the
    release is missing or modified, an application service is running, or
-   unmarked PTI units/private agent config already exist. Re-running a
-   prepared, inactive host is supported. The marker is
-   `/var/lib/pti-installer/prepared-release` and contains only the release ID.
+   unmarked PTI units/private agent config already exist. The playbook checks
+   the copied manifest and binary hashes on the target before installing
+   units. Re-running an interrupted preparation with the **same** release is
+   supported while all relevant services remain stopped and disabled and
+   Cowrie/Zeek or other sensor services have not yet been installed. The
+   non-secret marker `/var/lib/pti-installer/prepared-release` records the
+   release ID, approved manifest digest, and `preparing` or `prepared` state.
+   A different bundle under the same release ID is rejected.
    The existing `scripts/pti_install.py` remains a read-only planner; it does
    not invoke this Ansible playbook.
 

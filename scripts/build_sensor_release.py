@@ -283,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print(f"Release artifacts created: {release_dir}")
+    print(f"Manifest SHA-256: {_sha256(release_dir / 'manifest.json')}")
     print("No host installation or service changes were performed.")
     return 0
 

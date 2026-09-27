@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Harden offline Pi preparation before VM acceptance
+
+- Status: repository change prepared; not applied to a VM, Pi, or Dashboard host.
+- Scope and intent: make the first Ansible preparation slice resumable, pin its package and release inputs, and verify transferred binaries before units are installed.
+- Repository branch and commit/PR: `fix/installer-prepare-hardening`; commit/PR follow this entry.
+- Repository changes: require an approved manifest SHA-256 and exact top-level package versions; reject unexpected release content and malformed manifests; verify staged manifest and binary hashes on the target; reject active or enabled services and symlinked installation paths; record a release-bound `preparing`/`prepared` marker so an interrupted preparation can rerun with the same bundle. Add a focused pull-request CI workflow and update the operator runbook and tests.
+- Host/environment changes actually applied: none. Only a temporary local ARM64 build and read-only local checks were run.
+- Runtime/exposure state: existing Pi and Dashboard services remain unchanged; no VM or production service was installed, enabled, or exposed.
+- Validation performed and outcome: 25 focused Python tests, Ansible syntax check, workflow YAML parse, an offline five-agent ARM64 cross-build with pinned-digest verification, a read-only local Ansible expression check, Markdown links, and `git diff --check` passed. Full playbook execution and the new CI workflow have not yet run on GitHub.
+- Not performed / deferred: clean ARM64 VM apply/retry test, Pi hardware acceptance, Cowrie/Zeek/Compose/Dashboard installation, private-config validation, activation, and production rollback.
+- Risks and data handling: a SHA-256 supplied from the same untrusted bundle is not an authenticity proof; operators must use the reviewed build receipt. Top-level package versions are pinned, while transitive dependencies still depend on approved Ubuntu package sources. No credentials or private env contents entered this change.
+- Rollback: revert this repository change if needed; no host rollback is required because no host was modified.
+- Follow-up: exercise first run, interrupted rerun, wrong digest, active-service rejection, and rollback on a disposable ARM64 VM before declaring the preparation phase qualified.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [Ansible preparation runbook](../deploy/ansible/README.md), and [VM test target](INSTALLER-VM-TEST-TARGET.md).
+
 ### 2026-09-28 — Prepare first Ansible slice for fresh ARM64 Pi installation
 
 - Status: repository implementation prepared; not applied to a host or activated.
