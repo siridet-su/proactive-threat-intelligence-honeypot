@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Close the current Filesystem Activity round and hand off installation documentation
+
+- Status: repository documentation prepared; no host deployment in this change.
+- Scope and intent: reconcile the live working state with merged PR #96 and the operator's authenticated local Evidence review, then make the installation manual the next distinct documentation focus.
+- Repository branch and commit/PR: `docs/filesystem-activity-closure-handoff`; commit/PR follow this entry. PR #96 previously merged at `8cffe85`.
+- Repository changes: mark the accepted local `FS-025` Evidence slice `DONE`; move unaccepted `FS-020` through `FS-024` to `DEFERRED`; update the Filesystem working state, architecture snapshot, roadmap, documentation index, and installer blueprint handoff. Earlier implementation-log entries remain unchanged; this entry corrects their now-stale pending-PR and unreviewed-local-browser status.
+- Host/environment changes actually applied: none. No Pi service, Dashboard process, database, secret, or installer was changed.
+- Runtime/exposure state: the operator's localhost Dashboard displayed command rows and one canonical file-download event for the selected session after PR #96 merged. The production Dashboard deployment remains unverified. The customer installer is still proposed, not runnable.
+- Validation performed and outcome: reviewed PR #96 merge and passing CI, the operator-provided browser screenshot, and tracked FS statuses. A documentation consistency check confirmed `FS-020` through `FS-024` are `DEFERRED`, `FS-025` is `DONE`, no FS item remains `IN PROGRESS`, and local Markdown links resolve. `git diff --check` passed.
+- Not performed / deferred: production Dashboard deployment, opening the Artifact Intelligence hash link, authenticated Live radar acceptance, CWD-hop/file-operation correlation, forensic export, and installation-manual implementation.
+- Risks and data handling: closure applies only to the accepted current Filesystem scope. No real attacker content, private configuration, or credentials were copied into documentation. Historical installer control-plane examples remain marked as superseded by ADR-0007.
+- Rollback: revert this documentation commit; no host rollback is needed.
+- Follow-up: write and verify the installation manual against current deployment facts, with a declared target path and runnable versus proposed steps separated.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md), [current architecture](CURRENT-ARCHITECTURE.md), [roadmap](ROADMAP.md), [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), and [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md).
+
 ### 2026-09-27 — Add session download evidence and exact artifact hash lookup
 
 - Status: repository change prepared; not deployed.

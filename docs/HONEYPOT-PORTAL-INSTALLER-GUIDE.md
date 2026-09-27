@@ -31,9 +31,24 @@ owners:
 หากเอกสารนี้ขัดกับเอกสารสถานะจริง ให้ยึดเอกสารสถานะจริงก่อนและเปิด ADR
 เพื่ออนุมัติการเปลี่ยนสถาปัตยกรรม
 
+## Installation manual handoff — 2026-09-28
+
+The installation manual is the next documentation workstream after the accepted
+Filesystem Activity round. Define whether each procedure targets a fresh
+customer appliance or the existing managed Pi, and verify it against the
+current architecture and service runbooks before presenting any step as
+runnable. Keep prerequisites, version pins, validation, rollback, and secret
+handling explicit. The disconnect/action architecture in sections 1.1, 1.3,
+2, and 3.1 below is historical after ADR-0007; it must not become an installer
+dependency. This blueprint remains proposed and no one-line customer installer
+has been accepted or deployed.
+
 ## 1. ข้อสรุปทางสถาปัตยกรรม
 
-### 1.1 สิ่งที่พิสูจน์แล้วในระบบปัจจุบัน
+### 1.1 หลักฐานย้อนหลังของ control path ที่เลิกใช้แล้ว
+
+รายการต่อไปนี้อธิบายการทดลองก่อน ADR-0007 ไม่ใช่สถานะปัจจุบันหรือขั้นตอน
+ติดตั้งที่ยังใช้ได้
 
 - Dashboard ส่งคำสั่ง terminate session ไปยัง Pi ผ่าน Tailscale ได้
 - Go response agent รับเฉพาะ session ID ที่ผ่าน validation
@@ -70,7 +85,10 @@ Admin browser
   -> Cowrie Unix control socket
 ```
 
-### 1.3 การตัดสินใจสำคัญ
+### 1.3 ข้อเสนอเดิมที่ต้องตรวจใหม่ก่อนใช้
+
+รายการที่อาศัย Dashboard-to-Pi action path ถูกยกเลิกตาม ADR-0007;
+ข้อจำกัดด้าน least privilege ที่ไม่อาศัย path นี้ยังใช้ประกอบการออกแบบใหม่ได้
 
 1. ใช้ Tailscale direct control เป็น development และ managed-deployment path ต่อไป
 2. ใช้ outbound WSS บน TCP 443 สำหรับ customer appliance ที่ไม่ควรรับ inbound
@@ -81,7 +99,7 @@ Admin browser
 6. ห้าม mount `/var/run/docker.sock` เข้า management agent แม้จะใช้ `:ro`
 7. การ containerize Cowrie ปัจจุบันเป็น migration แยก ไม่ใช่ผลข้างเคียงของ installer
 
-## 2. ขอบเขตของ Control Plane
+## 2. ขอบเขต Control Plane เดิม (ข้อมูลย้อนหลัง)
 
 ### 2.1 Phase 1 operations
 
@@ -108,9 +126,10 @@ authorization, audit fields และ executor ที่เจาะจงกั
 
 ## 3. Transport Strategy
 
-### 3.1 Phase A: Tailscale direct control
+### 3.1 Phase A: Tailscale direct control (ยกเลิกแล้ว)
 
-ใช้กับ local development, staging และ deployment ที่ทีม PTI ดูแลเอง:
+แผนเดิมสำหรับ local development, staging และ deployment ที่ทีม PTI ดูแลเอง
+ถูกยกเลิกตาม ADR-0007; diagram ต่อไปนี้เป็นข้อมูลย้อนหลัง ไม่ใช่ขั้นตอนติดตั้ง:
 
 ```mermaid
 flowchart LR

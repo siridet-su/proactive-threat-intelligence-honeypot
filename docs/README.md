@@ -14,7 +14,7 @@ and historical material inherited from the previous team.
    its owner, telemetry, and lifecycle status.
 4. [Data ownership](DATA-OWNERSHIP.md) — which system owns each stage of data.
 5. [Roadmap](ROADMAP.md) — current work ordered by dependency.
-6. [Filesystem Activity live working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) — active Dashboard Filesystem backlog, current focus, and completion evidence.
+6. [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) — accepted current scope, deferred product additions, and completion evidence.
 7. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
    artifact handling, and threat-intelligence boundaries.
 8. [Architecture decisions](adr/) — durable decisions and their rationale.
@@ -22,7 +22,7 @@ and historical material inherited from the previous team.
    the retirement of Dashboard session termination and its Pi control path.
    [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) defines the
    Dashboard-controlled daily backup schedule and Pi execution boundary.
-9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
+9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 
 The event contract and retrieval steps for fake ERP login attempts are in
