@@ -21,8 +21,11 @@ BACKUP_ALLOW_SENSITIVE=true
 This was verified on 2026-09-25 after a successful manual run and the
 explicit sensitive-data policy review. The `threat_events` target archives the
 canonical `events` collection only after records leave the late-write safety
-hold; the current event window may therefore produce successful zero-document
-manifests until older events become eligible.
+hold. Canonical event timestamps are ISO 8601 UTC strings; the worker accepts
+those alongside BSON Dates. A successful zero-document manifest means that
+the source was checked but no eligible record was found for that day. A later
+scheduled run rechecks empty successful days and archives any records that
+have since arrived.
 
 The supported logical targets are:
 
@@ -51,10 +54,16 @@ two source collections in one daily archive. Existing hardware objects keep the
 `rollup.jsonl.gz` filename; newly created non-hardware objects use
 `archive.jsonl.gz`.
 
-The default window is the previous 28 completed days (`BACKUP_LOOKBACK_DAYS=30`
-and `BACKUP_SAFETY_DAYS=2`). The current and immediately previous day are left
-alone so late writes are not archived prematurely. Set `BACKUP_FORCE=true` for
-an intentional re-upload of existing days.
+The default window includes the UTC days from 30 days before today through
+two days before today, inclusive: 29 eligible days with
+`BACKUP_LOOKBACK_DAYS=30` and `BACKUP_SAFETY_DAYS=2`. The current and
+immediately previous day are left alone so late writes are not archived
+prematurely. The Pi timer starts at 03:30 Asia/Bangkok daily with up to five
+minutes of randomized delay and catches up after downtime. For example, on
+2026-09-27 it checked 2026-08-28 through 2026-09-25 UTC. Set
+`BACKUP_FORCE=true` for an intentional re-upload of nonempty successful days.
+Normal scheduled runs also recheck previously empty successful days without
+forcing the other targets to re-upload.
 
 ## Sensitive threat events
 
@@ -108,6 +117,14 @@ and earlier B2 file versions were retained. The old binary is held in a
 protected host rollback location. The local Dashboard read path was checked
 against MongoDB; production Dashboard deployment and a read-only restore
 rehearsal were not verified in this rollout.
+
+A later 2026-09-27 correction deployed worker source `de9304e` after finding
+that all retained `events.timestamp` values were UTC strings while the older
+query matched BSON Dates only. One manual scheduled run filled the existing
+empty event manifests: 21 of 29 eligible days contained 53,496 records and
+were uploaded to the private B2 target; the other eight days remained empty.
+The hardware and filesystem archive version counts did not increase in that
+run. No restore rehearsal was performed.
 
 Before activating a new bucket, verify its private-bucket policy, scoped key,
 target prefixes, and read-only restore path. Set `B2_BUCKET` to the new bucket
