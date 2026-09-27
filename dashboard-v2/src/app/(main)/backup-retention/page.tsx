@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { BackupSourceMap } from "@/components/dashboard/BackupSourceMap";
+import { BackupScheduleSettings } from "@/components/dashboard/BackupScheduleSettings";
 import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
 
 export default function BackupRetentionPage() {
@@ -38,6 +39,8 @@ export default function BackupRetentionPage() {
           </Link>
         </div>
       </motion.header>
+
+      <BackupScheduleSettings />
 
       <HardwareBackupStatus />
 

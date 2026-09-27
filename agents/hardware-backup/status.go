@@ -28,18 +28,19 @@ func publishTargetStatus(ctx context.Context, database *mongo.Database, cfg Conf
 	now := time.Now().UTC()
 	_, err := database.Collection(targetStatusCollection).UpdateOne(ctx, bson.M{"_id": target.ID}, bson.M{
 		"$set": bson.M{
-			"schema_version": targetStatusSchemaVersion,
-			"target_id":      target.ID,
-			"collections":    backupTargetCollectionNames(target),
-			"prefix":         target.Prefix,
-			"sensitive":      target.Sensitive,
-			"enabled":        targetEnabled(cfg.Targets, target.ID),
-			"mode":           cfg.Mode,
-			"bucket":         cfg.B2Bucket,
-			"worker_id":      workerID,
-			"poll_seconds":   cfg.ControlPollSeconds,
-			"last_seen_at":   now,
-			"updated_at":     now,
+			"schema_version":    targetStatusSchemaVersion,
+			"target_id":         target.ID,
+			"collections":       backupTargetCollectionNames(target),
+			"prefix":            target.Prefix,
+			"sensitive":         target.Sensitive,
+			"enabled":           targetEnabled(cfg.Targets, target.ID),
+			"mode":              cfg.Mode,
+			"bucket":            cfg.B2Bucket,
+			"worker_id":         workerID,
+			"poll_seconds":      cfg.ControlPollSeconds,
+			"scheduler_version": scheduleSchemaVersion,
+			"last_seen_at":      now,
+			"updated_at":        now,
 		},
 	}, options.Update().SetUpsert(true))
 	if err != nil {

@@ -2251,3 +2251,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: atomically restore the protected previous binary and restart the control service if the new worker regresses. Keep created manifests and B2 versions for audit; the older worker would again fail to archive UTC string event timestamps.
 - Follow-up: refresh the authenticated Backup & Retention page and expect 21/29 archived threat-event days with eight empty days; monitor the next 03:30 Asia/Bangkok timer run; perform a separately reviewed read-only restore rehearsal before claiming recovery readiness.
 - Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Prepare Dashboard-controlled daily backup schedule
+
+- Status: repository implementation prepared on `feat/backup-daily-schedule`; not active on the Pi at the time of this entry.
+- Scope and intent: allow an Admin to set the permanent daily Bangkok backup time or one bounded temporary override in a single Dashboard form, with a preview of catch-up, next run, and automatic return to the permanent time.
+- Repository branch and commit/PR: `feat/backup-daily-schedule`; source commit and PR pending at the time of this entry.
+- Repository changes: add ADR-0008, append-only schedule revisions and Admin-only preview/write APIs, a Dashboard schedule card, Pi control-worker daily claims and bounded retry, and schedule-aware Dashboard UTC coverage anchoring. Add Go and Dashboard schedule tests and update the API contract and worker runbook. The default time remains 03:30 Asia/Bangkok until an Admin changes it.
+- Host/environment changes actually applied: none for this prepared implementation. No Pi binary, systemd timer, environment file, MongoDB schedule document, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi still runs the fixed 03:30 systemd timer and the prior control binary. The local Dashboard shows schedule status but disables edits until it sees a fresh scheduler-capable Pi heartbeat. Backup targets, the UTC two-day safety hold, and private B2 policy remain unchanged.
+- Validation performed and outcome: `go test ./...` passed; the targeted Dashboard schedule and backup suites passed (9 tests); full Dashboard lint, TypeScript check after removing a stale generated route type, and `git diff --check` passed. No live schedule change was made.
+- Not performed / deferred: no Pi deployment, timer cutover, authenticated browser review, production Dashboard deployment, live schedule edit, archive restore, or B2 upload was performed for this prepared entry.
+- Risks and data handling: a schedule change may move a run into the current day and trigger one prompt catch-up. The worker records one claimed scheduled run per Bangkok date and keeps B2 credentials on the Pi. Revision records contain only schedule metadata and operator identity, never secrets or attacker data.
+- Rollback: revert the repository branch before deployment. After deployment, restore the previous protected Pi binary and re-enable the 03:30 timer if the control scheduler fails; retain append-only schedule revisions and run records for audit.
+- Follow-up: build and install a clean ARM64 binary, verify its heartbeat and default-time run claim, disable the old timer only after the control scheduler is healthy, then record actual host state in a dated addendum.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
