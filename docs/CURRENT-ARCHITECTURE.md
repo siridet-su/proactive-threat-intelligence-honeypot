@@ -1,7 +1,7 @@
 ---
 title: Current honeypot architecture
 status: current
-last_verified: 2026-09-25
+last_verified: 2026-09-27
 ---
 
 # Current honeypot architecture
@@ -51,7 +51,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Login pipeline uses collector/processor; hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs only for eligible observables when `THREAT_INTEL_ENABLED=true`. |
-| Retained data backup worker | Active for `hardware_metrics_1m`, `filesystem_audit`, and `threat_events` | The Pi worker writes the three approved retention targets to the private B2 bucket and reports storage/manifest state. `cwd_audit_projection` remains excluded because it is rebuildable; the sensitive threat-event archive is enabled under the reviewed private-bucket policy. |
+| Retained data backup worker | Active for `hardware_metrics_1m`, `filesystem_audit`, and `threat_events` | On 2026-09-27 the Pi worker was advanced to the schedule-capable binary from `b75749e`. Its enabled control service schedules the daily Bangkok run at the default 03:30, reads append-only Dashboard schedule revisions, and claims one run per local day. The former fixed timer is disabled and inactive. The first scheduler catch-up completed all three targets on 2026-09-27 without a duplicate run; the source window ended 2026-09-25. The prior archive verification found 29 successful bucket-tagged manifests per target, with 21 threat-event days containing 53,496 records and eight empty days. Older bucket-less manifests and B2 versions were retained. `cwd_audit_projection` remains excluded because it is rebuildable. The sensitive threat-event target remains enabled under the reviewed private-bucket policy; production Dashboard deployment and read-only restore verification remain unverified. |
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |

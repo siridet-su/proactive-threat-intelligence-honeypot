@@ -16,9 +16,10 @@ const (
 	targetStatusSchemaVersion = "pti.backup_target_status.v1"
 )
 
-// publishTargetStatus makes the worker's enabled target set observable to the
-// dashboard. A missing row means the Pi has not activated that target; it is
-// deliberately different from a manifest row with zero records.
+// publishTargetStatus makes the worker's enabled target set and heartbeat
+// observable to the dashboard. A missing row means the Pi has not activated
+// that target; it is deliberately different from a manifest row with zero
+// records.
 func publishTargetStatus(ctx context.Context, database *mongo.Database, cfg Config, target BackupTarget, workerID string) error {
 	if workerID == "" {
 		hostname, _ := os.Hostname()
@@ -27,17 +28,19 @@ func publishTargetStatus(ctx context.Context, database *mongo.Database, cfg Conf
 	now := time.Now().UTC()
 	_, err := database.Collection(targetStatusCollection).UpdateOne(ctx, bson.M{"_id": target.ID}, bson.M{
 		"$set": bson.M{
-			"schema_version": targetStatusSchemaVersion,
-			"target_id":      target.ID,
-			"collections":    backupTargetCollectionNames(target),
-			"prefix":         target.Prefix,
-			"sensitive":      target.Sensitive,
-			"enabled":        targetEnabled(cfg.Targets, target.ID),
-			"mode":           cfg.Mode,
-			"bucket":         cfg.B2Bucket,
-			"worker_id":      workerID,
-			"last_seen_at":   now,
-			"updated_at":     now,
+			"schema_version":    targetStatusSchemaVersion,
+			"target_id":         target.ID,
+			"collections":       backupTargetCollectionNames(target),
+			"prefix":            target.Prefix,
+			"sensitive":         target.Sensitive,
+			"enabled":           targetEnabled(cfg.Targets, target.ID),
+			"mode":              cfg.Mode,
+			"bucket":            cfg.B2Bucket,
+			"worker_id":         workerID,
+			"poll_seconds":      cfg.ControlPollSeconds,
+			"scheduler_version": scheduleSchemaVersion,
+			"last_seen_at":      now,
+			"updated_at":        now,
 		},
 	}, options.Update().SetUpsert(true))
 	if err != nil {

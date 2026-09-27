@@ -15,7 +15,10 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const manifestCollection = "hardware_backup_manifests"
+const (
+	manifestCollection    = "hardware_backup_manifests"
+	manifestSchemaVersion = "pti.backup_manifest.v3"
+)
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
@@ -168,13 +171,25 @@ func backupDay(
 ) error {
 	dayStart = dayStart.UTC().Truncate(24 * time.Hour)
 	dayEnd := dayStart.Add(24 * time.Hour)
-	manifestID := fmt.Sprintf("%s:%s", target.ID, dayStart.Format("2006-01-02"))
+	manifestID := backupManifestID(cfg.B2Bucket, target.ID, dayStart)
 
 	if !cfg.Force {
 		var existing bson.M
-		err := manifests.FindOne(ctx, bson.M{"_id": manifestID}, options.FindOne().SetProjection(bson.M{"status": 1})).Decode(&existing)
+		query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
+		query["day_start"] = dayStart
+		query["status"] = "success"
+		err := manifests.FindOne(ctx, query, options.FindOne().SetProjection(bson.M{"status": 1, "document_count": 1})).Decode(&existing)
 		if err == nil && existing["status"] == "success" {
-			return nil
+			if !emptySuccessfulManifest(existing) {
+				return nil
+			}
+			hasDocuments, checkErr := targetHasDocumentsForDay(ctx, database, target, dayStart, dayEnd)
+			if checkErr != nil {
+				return fmt.Errorf("recheck empty backup %s: %w", manifestID, checkErr)
+			}
+			if !hasDocuments {
+				return nil
+			}
 		}
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 			return fmt.Errorf("read backup manifest %s: %w", manifestID, err)
@@ -183,8 +198,9 @@ func backupDay(
 
 	startedAt := time.Now().UTC()
 	if err := updateManifest(ctx, manifests, manifestID, bson.M{
-		"schema_version": archiveSchemaVersion,
+		"schema_version": manifestSchemaVersion,
 		"target_id":      target.ID,
+		"bucket":         cfg.B2Bucket,
 		"collection":     target.ID,
 		"collections":    backupTargetCollectionNames(target),
 		"day_start":      dayStart,
@@ -249,6 +265,39 @@ func backupDay(
 		uploaded.FileName,
 	)
 	return nil
+}
+
+func emptySuccessfulManifest(manifest bson.M) bool {
+	switch count := manifest["document_count"].(type) {
+	case int32:
+		return count == 0
+	case int64:
+		return count == 0
+	case int:
+		return count == 0
+	default:
+		return false
+	}
+}
+
+func targetHasDocumentsForDay(ctx context.Context, database *mongo.Database, target BackupTarget, dayStart, dayEnd time.Time) (bool, error) {
+	for _, source := range target.Sources {
+		err := database.Collection(source.Collection).FindOne(ctx,
+			archiveSourceQuery(source, dayStart, dayEnd),
+			options.FindOne().SetProjection(bson.M{"_id": 1}),
+		).Err()
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return false, fmt.Errorf("check %s: %w", source.Collection, err)
+		}
+	}
+	return false, nil
+}
+
+func backupManifestID(bucket, targetID string, day time.Time) string {
+	return fmt.Sprintf("bucket:%s:%s:%s", bucket, targetID, day.UTC().Format("2006-01-02"))
 }
 
 func updateManifest(ctx context.Context, collection *mongo.Collection, id string, fields bson.M) error {

@@ -21,6 +21,8 @@ type ArchiveSource struct {
 	Collection string
 	TimeFields []string
 	SortField  string
+	// UTCStringTimes includes canonical ISO 8601 UTC strings as well as BSON Dates.
+	UTCStringTimes bool
 }
 
 type BackupTarget struct {
@@ -45,9 +47,10 @@ var backupTargetCatalog = map[string]BackupTarget{
 		Prefix:    "threat_events",
 		Sensitive: true,
 		Sources: []ArchiveSource{{
-			Collection: "events",
-			TimeFields: []string{"timestamp"},
-			SortField:  "timestamp",
+			Collection:     "events",
+			TimeFields:     []string{"timestamp"},
+			SortField:      "timestamp",
+			UTCStringTimes: true,
 		}},
 	},
 	filesystemAuditTargetID: {
@@ -124,6 +127,16 @@ func manifestTargetFilter(targetID string) bson.M {
 		bson.M{"target_id": targetID},
 		bson.M{"collection": targetID},
 	}}
+}
+
+// Legacy manifests have no bucket field. Attribute them only when the operator
+// explicitly names the bucket that received those archives.
+func manifestTargetBucketFilter(targetID, bucket, legacyBucket string) bson.M {
+	buckets := bson.A{bson.M{"bucket": bucket}}
+	if legacyBucket == bucket {
+		buckets = append(buckets, bson.M{"bucket": bson.M{"$exists": false}})
+	}
+	return bson.M{"$and": bson.A{manifestTargetFilter(targetID), bson.M{"$or": buckets}}}
 }
 
 func backupTargetCollectionNames(target BackupTarget) []string {

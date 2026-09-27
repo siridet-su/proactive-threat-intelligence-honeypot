@@ -48,6 +48,111 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Refine backup schedule toast motion and controls
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make schedule notices enter from the lower-right edge of the viewport and keep the close or Undo control readable without squeezing its label.
+- Repository branch and commit/PR: `fix/backup-toast-layout-motion`; commit and PR follow this entry.
+- Repository changes: animate the shared toast from the lower right with reduced-motion support, give the close button a fixed square size, place Undo in the same right-side action area, and close the toast directly after Undo. Keep the three-second cancellation timer and schedule API unchanged. Extend the Undo component test to check that no canceled notice remains.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduling configuration is unaffected by this UI fix; its last verified permanent time was 01:00 Asia/Bangkok. The Dashboard toast changes only where this repository UI code is loaded.
+- Validation performed and outcome: targeted Undo component test, TypeScript check, targeted lint, production Dashboard build, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, and next scheduled Pi run verification were not performed for this UI fix.
+- Risks and data handling: Undo still cancels only before the schedule POST starts. The toast layout is responsive, and reduced-motion users receive no movement. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the toast in authenticated light and dark browser sessions at desktop and narrow widths.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Add a three-second Undo window for backup schedule saves
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: give an Admin a brief chance to cancel a previewed schedule change and make save status visible.
+- Repository branch and commit/PR: `feat/backup-schedule-undo-toast`; commit and PR follow this entry.
+- Repository changes: show a themed pending toast with Undo for three seconds after Save, send the existing schedule POST only when that interval ends, and show separate saving, success, cancellation, and error notices. Add a component test for cancellation and delayed write, and document the browser-side grace period in the Dashboard API guide. Server and Pi scheduling logic are unchanged.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi control scheduler remains active with the Admin's permanent 01:00 Asia/Bangkok revision observed earlier on 2026-09-27; the former fixed timer remains disabled. This change affects only the Dashboard page when its new code is loaded.
+- Validation performed and outcome: the targeted Dashboard Undo and range-picker tests passed (3/3), TypeScript check, targeted lint, production Dashboard build, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser interaction, live Admin save or Undo, production Dashboard deployment, next scheduled Pi run, and restore rehearsal were not performed for this UI change.
+- Risks and data handling: Undo is available only before the POST begins and while this page remains mounted. A request already sent or saved is not reversed; a stale revision still returns the server's conflict response. No secrets or archive contents enter the UI change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify the pending, canceled, and saved notices in an authenticated browser and monitor the next scheduled Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Keep backup schedule card height stable across modes
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: prevent the Backup & Retention schedule card and Preview button from shifting vertically when an Admin switches Permanent and Temporary modes.
+- Repository branch and commit/PR: `fix/backup-schedule-card-height`; commit and PR follow this entry.
+- Repository changes: keep the daily time controls mounted, reserve one equal-height row below them, and show either the temporary date range or permanent-duration explanation in that row with an opacity transition. The clear-override option uses the same layout and shows the permanent base time read-only. No API payload or schedule calculation changes.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at its permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. This change affects only local Dashboard presentation until a production Dashboard deployment.
+- Validation performed and outcome: local TypeScript check, lint, production build, and `git diff --check` passed. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the fixed row still allows the temporary date-range popup to overlay the card. The Admin preview/save gate and server validation remain unchanged; no secrets or archive data enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify stable card height in authenticated light/dark browser sessions and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Choose temporary backup dates as an inclusive range
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make temporary schedule dates easier to understand by selecting the first and last backup day rather than entering a start date and counting days manually.
+- Repository branch and commit/PR: `feat/backup-schedule-range-picker`; commit and PR follow this entry.
+- Repository changes: turn the rolling calendar into an inclusive range picker with start/end highlights, a 90-day end bound, and 1/7/30-day shortcuts. Show the selected range and computed duration in the form and current schedule summary. Prefill an existing temporary override with its remaining dates. Keep the existing `start_date` plus `days` API payload and document the UI conversion.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at the permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. The new range controls are available in the local development Dashboard when reloaded.
+- Validation performed and outcome: two targeted Dashboard component tests passed for an inclusive seven-day range crossing September into October and the 90-day maximum. TypeScript check, lint, production build, and `git diff --check` passed locally. CI remains pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the picker limits the start to today through the next 365 Bangkok days and the inclusive duration to 1–90 days; the server still validates both. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect range selection in an authenticated light/dark browser session and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Show upcoming dates in the backup schedule calendar
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make the temporary schedule start-date picker useful late in a month, when a conventional current-month calendar shows mostly unavailable past dates.
+- Repository branch and commit/PR: `fix/backup-schedule-calendar-range`; commit and PR follow this entry.
+- Repository changes: replace the month grid with a rolling five-week view from the current week, readable disabled dates, bounded forward navigation, and Today/Tomorrow shortcuts. Keep the existing `YYYY-MM-DD` API value, one-year selection limit, themed colors, and reduced-motion behavior.
+- Host/environment changes actually applied: none. No Pi binary, timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at the permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. The local development Dashboard reflects this presentation change when reloaded.
+- Validation performed and outcome: local TypeScript check, lint, production build, and `git diff --check` passed. The unauthenticated local Backup & Retention route returned its expected login redirect. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the picker still restricts start dates to today through the next 365 Bangkok calendar days, with the API enforcing the same range. No secret or archive data enters the UI.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the picker in authenticated light/dark browser sessions and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Theme the backup schedule pickers and transitions
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses the working tree when reloaded.
+- Scope and intent: replace browser-native schedule dropdowns and date popup with theme-aware controls and add short open/close and mode-change transitions.
+- Repository branch and commit/PR: `fix/backup-schedule-themed-pickers`; commit and PR follow this entry.
+- Repository changes: add bounded, theme-aware hour/minute menus and a one-year start-date calendar using the existing Dashboard calendar; animate menu, calendar, and Permanent/Temporary form transitions while respecting reduced-motion preference. Preserve the `HH:mm` and local `YYYY-MM-DD` API values.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at its permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. This change affects only Dashboard presentation.
+- Validation performed and outcome: local TypeScript check, lint, and production build passed. The initial build exposed a browser import of the server-backed schedule module; date arithmetic was moved into the client picker and the build then passed. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the date picker limits selection to today through the next 365 Bangkok calendar days, matching server validation; schedule writes still require preview and Admin authorization. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no host or data rollback is required.
+- Follow-up: inspect the new menus in authenticated light/dark sessions and monitor the next Pi backup run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Improve Dashboard backup schedule time controls
+
+- Status: repository UI change prepared; local development Dashboard picks it up through the running dev server.
+- Scope and intent: make the daily backup time easy to change without relying on the browser's clock icon or native time popup.
+- Repository branch and commit/PR: `fix/backup-schedule-time-picker`; commit and PR follow this entry.
+- Repository changes: replace the native time input with two full-width themed hour/minute selects in 24-hour Bangkok time, add 01:00/02:00/03:30 quick choices, and place schedule summary and form in theme-aware panels. The stored `HH:mm` API contract and preview/save workflow are unchanged.
+- Host/environment changes actually applied: none. No Pi binary, timer, environment file, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi control scheduler remains active at the permanent 03:30 Bangkok default; the former fixed timer remains disabled. Only the local development Dashboard UI changes when the dev server reloads.
+- Validation performed and outcome: Dashboard lint, TypeScript check, production build, and `git diff --check` passed locally. CI and authenticated visual interaction remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser interaction review, live Admin schedule change, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: hour and minute controls still produce the same validated 24-hour `HH:mm` value; no secret or archive data enters the UI change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify the controls in an authenticated light and dark browser session and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Preserve complete response guidance in compact session detail
 
 - Status: installed and active on the GCP monitor API.
@@ -1947,6 +2052,146 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: confirm the remaining failed-origin marker is visible while the full explanation remains readable in Forensic Studio.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
 
+### 2026-09-25 — Add backup posture and archive operations overview
+
+- Status: prepared; dashboard and heartbeat source changes are not deployed.
+- Scope and intent: make the Backup & Retention page report operational state
+  across all enabled archive targets instead of presenting only hardware
+  coverage and a hardcoded Pi connection badge.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: extended `/api/backup/targets` with control-worker
+  heartbeat state, B2 snapshot freshness, per-target lag and coverage
+  exceptions, recent audited request activity, policy metadata, and
+  evidence-based restore readiness. The dashboard now renders a backup
+  posture strip, explicit per-target archived/empty/attention/lag values,
+  exception and activity panels, destination freshness, restore readiness, and
+  policy safeguards. The control worker now refreshes `backup_target_status`
+  on each control poll so `last_seen_at` is a real heartbeat. Error text shown
+  by the overview is normalized and bounded; raw event documents and secrets
+  are not returned.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed by this work.
+- Runtime/exposure state: the new dashboard contract and control-worker
+  heartbeat are prepared in the worktree only. The currently running Pi
+  worker and deployed dashboard remain on their previous code until a reviewed
+  deployment.
+- Validation performed and outcome: the targeted backup Vitest suite passed;
+  TypeScript `tsc --noEmit` passed; targeted ESLint for changed dashboard
+  files passed; `gofmt`, `go test ./...` in `agents/hardware-backup`, and
+  `git diff --check` passed. Full dashboard lint remains blocked by the
+  pre-existing `react-hooks/set-state-in-effect` error at
+  `dashboard-v2/src/components/filesystem/TopologyToolbar.tsx:111`. The full
+  Vitest suite was also run; 69 files passed, while three filesystem component
+  tests failed in untouched topology code (`TopologyCanvas` empty state/path
+  annotations).
+- Not performed / deferred: no live MongoDB/API smoke test, authenticated
+  browser review, B2 query, Pi deployment, worker restart, or restore
+  rehearsal was performed. `backup_restore_verifications` has no assumed
+  success record; the UI intentionally reports `Not tested` when absent.
+- Risks and data handling: threat-event archives remain sensitive and are
+  still governed by the existing private-bucket and explicit opt-in policy.
+  The dashboard exposes only bounded operational metadata, not event payloads,
+  credentials, access tokens, or private keys.
+- Rollback: do not deploy this worktree; or revert the dashboard/API and
+  heartbeat source changes from the implementation commit. No host rollback
+  is required because no host was changed.
+- Follow-up: deploy the rebuilt hardware-backup control binary and dashboard
+  separately, then verify heartbeat freshness, activity/exception rendering,
+  and an approved read-only restore rehearsal before recording any restore
+  verification result.
+- Related ADR/runbook: [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md), [hardware backup worker runbook](../agents/hardware-backup/README.md), and [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Compact backup data visualization
+
+- Status: prepared; dashboard UI refinement is not deployed.
+- Scope and intent: reduce visual density and make archive data readable at a
+  glance without removing the operational fields added in the backup overview.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: condensed the source tiles around a large coverage
+  percentage, segmented status rail, and larger archived/empty/failed/missing/
+  lag values. Removed repeated descriptions and worker text, reduced padding
+  and row height in exception/activity panels, and kept audit actor, status,
+  date, progress, and duration in compact rows. Restore readiness and policy
+  safeguards were also tightened into smaller data blocks.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed.
+- Runtime/exposure state: the compact layout is prepared in the worktree only;
+  the running dashboard remains unchanged until deployment.
+- Validation performed and outcome: targeted backup Vitest tests passed;
+  TypeScript `tsc --noEmit`, targeted ESLint for `BackupSourceMap.tsx`,
+  production build, and `git diff --check` passed.
+- Not performed / deferred: no authenticated browser screenshot review, Pi
+  deployment, or full-suite rerun was performed for this presentation-only
+  refinement.
+- Risks and data handling: presentation-only change; backup API contracts,
+  sensitive-target boundaries, and operational metadata ownership are
+  unchanged. No event payloads or secrets were added.
+- Rollback: revert the `BackupSourceMap.tsx` presentation changes; no host
+  rollback is required.
+- Follow-up: review the page at the active dashboard viewport and adjust only
+  breakpoint-specific spacing if the compact tiles still wrap poorly.
+- Related ADR/runbook: [hardware backup worker runbook](../agents/hardware-backup/README.md) and [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md).
+
+### 2026-09-25 — Remove duplicate backup coverage rail
+
+- Status: prepared; dashboard UI refinement is not deployed.
+- Scope and intent: remove the duplicate archive bars shown in each backup
+  source tile while retaining the status breakdown.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: removed the standalone archived-percentage progress bar
+  and kept one segmented coverage rail for archived, empty, failed, running,
+  and missing days. Added an accessible summary label for the single rail.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed.
+- Runtime/exposure state: the UI refinement is prepared in the worktree only;
+  no dashboard or Pi deployment was performed.
+- Validation performed and outcome: targeted backup Vitest tests passed (5/5);
+  TypeScript `tsc --noEmit`, targeted ESLint for `BackupSourceMap.tsx`, the
+  production build, and `git diff --check` also passed.
+- Not performed / deferred: no authenticated browser screenshot review, Pi
+  deployment, or restore rehearsal was performed.
+- Risks and data handling: presentation-only change; no API/data/secret
+  changes.
+- Rollback: restore the removed standalone progress-bar block; no host
+  rollback is required.
+- Follow-up: review the source tiles at the active dashboard viewport.
+- Related ADR/runbook: [hardware backup worker runbook](../agents/hardware-backup/README.md) and [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md).
+
+### 2026-09-25 — Rework Backup & Retention information layout
+
+- Status: prepared for review; not deployed to production.
+- Scope and intent: improve the hierarchy and readability of the backup
+  dashboard while retaining the page header style used by other dashboard
+  tabs.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; changes are
+  uncommitted.
+- Repository changes: moved the hardware archive view to the primary position;
+  replaced the nested source cards with a single comparison table; consolidated
+  the worker, attention, and active-target summary into one status strip; and
+  grouped attention, recent actions, restore readiness, and policy details into
+  fewer sections. Simplified the hardware archive panel, clarified the daily
+  manifest calendar and legend, and kept Pi actions, progress, cloud storage,
+  and retention settings available.
+- Host/environment changes actually applied: none. No Pi worker, systemd unit,
+  MongoDB data, B2 object, or production dashboard was changed.
+- Runtime/exposure state: local development server at port `3100` is running
+  from this worktree and receives the edits through HMR.
+- Validation performed and outcome: `npx tsc --noEmit`, targeted ESLint for the
+  three changed dashboard files, and `git diff --check` passed. Automated tests
+  and a production build were not run.
+- Not performed / deferred: no authenticated browser visual review, Pi
+  deployment, or production dashboard deployment was performed.
+- Risks and data handling: presentation-only changes; API behavior, backup
+  scope, retention policy, and sensitive-data handling are unchanged.
+- Rollback: restore the previous page layout in `BackupSourceMap.tsx`,
+  `HardwareBackupStatus.tsx`, and the page section order; no host rollback is
+  required.
+- Follow-up: review `http://localhost:3100/backup-retention` at desktop and
+  narrow widths.
+- Related ADR/runbook: none; this change affects presentation only.
 ### 2026-09-25 — Retire Dashboard session termination and decommission the Pi agent
 
 - Status: Dashboard source changes are uncommitted and not deployed; Pi response agent is decommissioned; one Cowrie restart and tailnet ACL cleanup remain deferred.
@@ -2007,17 +2252,137 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: verify Evidence against an authenticated session whose CWD alias has a matching canonical identity event; confirm no-command and unverified-binding states remain distinct.
 - Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct) and [Dashboard API contract](../dashboard-v2/docs/API.md#sensitive-admin-command-evidence).
 
-### 2026-09-27 — Frame and compact Session Analysis modules
+### 2026-09-27 — Merge current main into artifact intelligence
 
-- Status: prepared for promotion to staging through the configured CI/CD path; no manual host deployment is part of this change.
-- Scope and intent: align Session Analysis sections with the existing Priority Context and Active Deception visual language, improve timeline and source-IP list scanability, and reduce page growth from long event/session lists.
-- Repository branch and base: `integration/session-weighted-staging-20260927`, based on `origin/staging` at `07318adec`; intended target is `staging`.
-- Repository changes: add a semantic primary-navy color token (`#18227A` in light mode, contrast-adjusted navy tint in dark mode); replace numbered floating section headings with framed module headers; group provider intelligence and source-IP recurrence within one Threat Intelligence module; make the event timeline a vertical connected chain with a bounded internal scroll region; add bounded authentication, source-IP session, trusted-mapping, and observable-list scroll regions with sticky table headers; preserve existing data/state semantics. Add focused presentation assertions and update the trusted ATT&CK heading assertion.
-- Host/environment changes actually applied: none. No GCP, Pi, database, API, backend, or production service was changed.
-- Release path: pushing the reviewed change to `staging` is expected to invoke its configured CI/CD. No direct GCP, Pi, database, or service mutation is included.
-- Validation performed and outcome: ESLint on changed TypeScript files passed; `npx tsc --noEmit` passed; combined focused presentation/model/external-TI/session-semantics tests passed 41/41, including a 101-event latest-window case; `npx next build --webpack` and `git diff --check` passed after the final component changes.
-- Not performed / deferred: authenticated visual browser review against a live session, full repository test suite, and post-push CI/CD verification.
-- Risks and data handling: presentation-only changes; no mock production data, raw requests, credentials, or attacker payloads were added. The dark theme uses a lighter navy tint for legibility while preserving the orange action accent.
-- Rollback: revert this entry and the changed Session Analysis component, global color-token definitions, and associated presentation assertions; no host rollback is required.
-- Follow-up: push to `staging`, verify the CI/CD outcome, then review in an authenticated browser.
-- Related ADR/runbook: no architecture or operating procedure changed.
+- Status: repository merge prepared; no deployment performed.
+- Scope and intent: bring `feat/artifact-intelligence` up to the current `origin/main` while retaining its pending backup overview work and all newer mainline changes.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; merge commit pending at the time of this entry; PR #69 remains open.
+- Repository changes: merged `origin/main` into the branch. Resolved the sole content conflict in this append-only log by retaining both the backup overview entries and the Filesystem Evidence and response-control entries. Code and other documentation merged automatically.
+- Host/environment changes actually applied: none. No service, dashboard deployment, database, backup target, or host configuration was changed.
+- Runtime/exposure state: this merge changes repository source only; deployed services retain their previously recorded state. The backup overview remains prepared in the branch and is not active on production hosts.
+- Validation performed and outcome: merge conflict markers were removed and the resolved log passed `git diff --check`. The targeted dashboard backup Vitest suite passed (5/5), and `go test ./...` passed in `agents/hardware-backup`. `npx tsc --noEmit` reported only two stale generated `.next` validator imports for the removed session-terminate route; it reported no source diagnostics. The full staged `git diff --check` reports whitespace already present in incoming mainline research files, including intentional Markdown line breaks.
+- Not performed / deferred: no production deployment, authenticated browser review, live backup restore rehearsal, or host-level validation was performed. A clean TypeScript check after regenerating `.next` types was not performed.
+- Risks and data handling: the merge preserves both histories and adds no secrets or attacker content to the log. Runtime interactions across the merged branches require the targeted checks noted above.
+- Rollback: revert the merge commit if needed; no host rollback is required for this repository-only change.
+- Follow-up: review PR #69 against the refreshed main branch and deploy the backup changes separately after approval.
+- Related ADR/runbook: no architectural decision or operating step changed as part of this merge; existing current-state documents and runbooks from both branches are retained.
+
+### 2026-09-27 — Clear the Dashboard lint gate for artifact intelligence PR
+
+- Status: repository fix prepared for PR #69; not deployed.
+- Scope and intent: clear the staging CI lint failure introduced by the inherited Filesystem Activity toolbar while preserving View menu behavior when live topology becomes empty.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; fix commit pending at the time of this entry; PR #69.
+- Repository changes: replace the toolbar effect that synchronously closes the View menu with a guarded state adjustment when the empty-live prop changes. Extend the existing toolbar test to verify the menu closes on empty state and stays closed when live data returns.
+- Host/environment changes actually applied: none. No dashboard, Pi service, database, backup target, or host configuration was changed.
+- Runtime/exposure state: the source fix is only in the PR branch; production dashboard behavior is unchanged until a separate deployment.
+- Validation performed and outcome: full Dashboard `npm run lint`, the targeted Filesystem density/minimap suite (6/6), and `git diff --check` passed after the regression assertion was added. PR CI was pending when this entry was written.
+- Not performed / deferred: no production deployment, authenticated browser review, or host-level validation was performed. The prior TypeScript check remains blocked by stale generated `.next` route imports.
+- Risks and data handling: the change affects only local toolbar state and adds no telemetry, credentials, or attacker content.
+- Rollback: revert the toolbar state adjustment and related test; no host rollback is needed.
+- Follow-up: wait for PR CI, then merge PR #69 after the required checks pass.
+- Related ADR/runbook: no architecture decision or operating procedure changed.
+
+### 2026-09-27 — Prepare bucket-scoped retained backup rollover
+
+- Status: repository implementation prepared for review; not deployed.
+- Scope and intent: consolidate overlapping backup branches on current `main` and prevent old-bucket manifests from satisfying coverage for a new B2 bucket.
+- Repository branch and commit/PR: `feat/backup-bucket-rollover`; commit and PR pending at the time of this entry.
+- Repository changes: give new manifests and storage snapshots bucket-scoped identities; constrain scheduled skip, control-request selection, Dashboard coverage, destination status, and restore-verification display to the active bucket; permit legacy bucket-less records only when their historical bucket is explicitly configured. Update the worker runbook, Dashboard environment example, current architecture, and ADR-0006 amendment. The old branch's B2 v4 change was already present on `main`, and its older UI was superseded by PR #69, so neither was copied.
+- Host/environment changes actually applied: none. No Pi worker, systemd unit, MongoDB document, B2 object, bucket policy, key, or Dashboard deployment was changed.
+- Runtime/exposure state: the deployed worker and Dashboard retain their previous behavior. Bucket-scoped rollover is active only in this repository branch until a separate reviewed deployment.
+- Validation performed and outcome: `go test ./...` in `agents/hardware-backup`, the targeted Dashboard backup Vitest suite (6/6), `npx tsc --noEmit`, full Dashboard `npm run lint`, and `git diff --check` passed. No live service or B2 behavior was exercised.
+- Not performed / deferred: no live MongoDB/B2 query, bucket move, deployment, authenticated browser review, or restore rehearsal was performed. Legacy-manifest bucket attribution and the new bucket's key scope must be verified before rollout.
+- Risks and data handling: a bucket change may re-archive eligible days and incur storage cost. Legacy manifests without an explicitly configured historical bucket are excluded from new-bucket coverage rather than assumed successful. No credentials or attacker data were added to repository files.
+- Rollback: revert this repository change before deployment. Once deployed, restore the previous worker and Dashboard versions and keep all old manifests and B2 objects for audit; do not delete archives as part of rollback.
+- Follow-up: review the new PR, deploy worker and Dashboard separately, verify current-bucket manifests and storage snapshots, and perform an approved read-only restore check before retiring an old bucket.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Preserve backup branch audit history before branch cleanup
+
+- Status: historical addendum to records from 2026-09-24 and 2026-09-25; documentation only.
+- Scope and intent: retain the host and validation facts recorded only on the overlapping backup branches before their refs and worktrees are cleaned up. This entry does not revise those earlier records or claim a new deployment.
+- Repository branch and commit/PR: `docs/backup-branch-history-closeout`; historical source commits `894486e`, `67aaa95`, `82ef4e3` on `feat/hardware-backup-bucket-transition`, `52761c9` on `feat/dashboard-backup-status`, and `6f5d038` on `feat/backup-data`.
+- Repository changes: append this provenance summary and clarify the current architecture's distinction between the earlier hardware-only Pi validation and the new multi-target rollover source in PR #72. The old backup UI is superseded by PR #69; its local review history is retained here, not reintroduced into the current UI.
+- Host/environment changes actually applied: none by this addendum. The 2026-09-25 hardware-branch records state that an operator prepared protected Pi backup environment settings, retained the previous environment file at a protected rollback path, installed an updated ARM64 backup worker, and restarted only `honeypot-hardware-backup-control.service`. The scheduled service remained inactive at that time. No secret values or backup contents are copied here.
+- Runtime/exposure state: the 2026-09-25 record reported an active control worker using the new bucket and key; the first controlled retry produced 29 successful daily manifests, of which 14 had source data and B2 objects. It reported a storage snapshot with 14 file versions. These are historical observations, not a fresh assertion about the currently installed Pi binary, active bucket, or Dashboard deployment. The dashboard-status branch recorded only a local Dashboard runtime on port `3001`; the older backup UI branch likewise recorded local review, not production Dashboard deployment.
+- Validation performed and outcome: compared the five cited commit records with the current mainline log and confirmed their host validation facts were not previously preserved there. The historical hardware record reported successful Go tests, B2 v4 authorization and prefix listing, and an active control service; the local Dashboard records reported type-check, lint, tests, and build at their respective times. This addendum itself passed `git diff --check`.
+- Not performed / deferred: no host status check, B2 query, current binary inspection, archive download, restore rehearsal, or Dashboard deployment was performed for this addendum. The old record explicitly deferred restore verification and production Dashboard deployment.
+- Risks and data handling: old branch names and commit IDs remain as provenance after branch deletion. Protected Pi environment and rollback files remain host-held; this repository stores no credential or archive contents.
+- Rollback: revert this addendum only if a factual correction is needed, and then replace it with a dated correction so the audit trail remains append-only; no host rollback is involved.
+- Follow-up: verify current Pi worker revision, bucket scope, scheduled/control service state, and read-only restore evidence before any further bucket retirement or deployment claim.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Deploy bucket-scoped backup worker and refresh current-bucket coverage
+
+- Status: applied on the Pi; documentation prepared on `ops/backup-bucket-scope-pi-rollout`.
+- Scope and intent: correct the local Backup & Retention page showing all eligible days as missing because its bucket-scoped query excluded manifests written by the older Pi binary without a `bucket` field. Historical hardware manifests include both old-bucket rows and newer rows with a bucket encoded only in their ID, so attributing every bucket-less row to the active bucket would have been inaccurate.
+- Repository branch and commit/PR: `ops/backup-bucket-scope-pi-rollout`; deployed worker source is clean `main` revision `8302f9e` from PR #72; documentation commit pending at the time of this entry.
+- Repository changes: update the current architecture and worker runbook to reflect the verified Pi deployment and append this audit entry. No worker or Dashboard source code was changed in this branch.
+- Host/environment changes actually applied: cross-built the ARM64 worker from `8302f9e`, copied it to the Pi, preserved the previous binary in a protected host rollback location, atomically installed the new binary, restarted `honeypot-hardware-backup-control.service`, and manually started `honeypot-hardware-backup.service` once. No environment file, systemd unit, Pi Git checkout, old MongoDB manifest, or old B2 object was edited or deleted. The host Git checkout retains its pre-existing unrelated working-tree change.
+- Runtime/exposure state: the control service is active and the scheduled service completed successfully as a oneshot; its timer remains enabled. The installed binary reports revision `8302f9e`. All three previously enabled targets remain active in the same private bucket. The local development Dashboard uses the bucket-scoped read path; no production Dashboard deployment was performed.
+- Validation performed and outcome: local `go test ./...` passed, the staged Pi binary hash matched the local build, and the protected rollback copy matched the previous Pi binary. The manual scheduled run exited `0/SUCCESS` for all three targets. MongoDB read-only checks found 29 successful bucket-tagged manifests in the current 29-day Dashboard window for each target: 17 hardware days and 17 filesystem days contained archive objects; threat-event days contained zero source documents. The new B2 snapshot recorded 35 hardware and 33 filesystem file versions, up from 18 and 16 before the run; threat events remained at zero. Target heartbeats updated after the run.
+- Not performed / deferred: no authenticated browser refresh, independent archive download, read-only restore rehearsal, production Dashboard deployment, bucket retirement, or old-version deletion was performed. Restore readiness remains unverified.
+- Risks and data handling: re-archiving eligible days created additional B2 file versions and storage use. Old bucket-less manifests remain for audit but do not satisfy the active bucket's Dashboard coverage. No credentials, attacker payloads, archive contents, or protected configuration values were copied into the repository.
+- Rollback: restore the protected previous Pi binary atomically and restart the control service if runtime behavior regresses; keep new MongoDB manifests and B2 versions for audit. A rollback to the old binary would again leave future manifests without bucket fields and may make the bucket-scoped Dashboard show later days as missing.
+- Follow-up: confirm the authenticated local Backup & Retention page reports 29/29 archived days, monitor the next timer run, and perform a separately reviewed read-only restore rehearsal before claiming recovery readiness.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Prepare canonical threat-event timestamp backup fix
+
+- Status: repository fix prepared on `fix/threat-event-backup-timestamps`; host rollout not yet applied at the time of this entry.
+- Scope and intent: correct the `threat_events` archive query, which compared BSON Date bounds against ISO 8601 UTC strings in the canonical `events.timestamp` field and therefore recorded eligible days as successful but empty.
+- Repository branch and commit/PR: `fix/threat-event-backup-timestamps`; source commit and PR pending at the time of this entry.
+- Repository changes: include indexed UTC string day bounds alongside BSON Date bounds for the event source; recheck successful zero-document manifests for source records during scheduled runs so a corrected worker can fill those days without forcing unrelated targets; add a regression test for midnight and fractional-second boundaries.
+- Host/environment changes actually applied: none for this prepared fix. The Pi still runs worker source `8302f9e`; no service, database document, B2 object, environment file, or systemd unit was changed by this repository change.
+- Runtime/exposure state: the active Pi worker still treats the event window as empty until this fix is deployed and a scheduled run completes. The private B2 sensitive-target opt-in remains enabled; other target schedules and bucket scope are unchanged.
+- Validation performed and outcome: `go test ./...` passed. Read-only MongoDB metadata checks found all 87,992 then-current event timestamps were ISO 8601 UTC strings, with 53,496 in the eligible 29-day window, while the old BSON Date query matched none. The `events.timestamp` index is present. These counts may change as live ingest continues.
+- Not performed / deferred: no live archive upload, host deployment, authenticated Dashboard check, archive download, or restore rehearsal was performed for this prepared change.
+- Risks and data handling: deploying the fix will archive existing eligible sensitive events into the already reviewed private B2 target and increase storage use. No raw event contents, credentials, or protected configuration were copied into repository files or audit output.
+- Rollback: revert this source change before deployment; if deployed, restore the previous protected Pi binary and retain any created manifests and B2 versions for audit.
+- Follow-up: deploy a clean ARM64 build, run the scheduled worker once, verify event manifest and B2 counts, and record host actions in a dated addendum.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Apply threat-event timestamp fix and correct empty-source interpretation
+
+- Status: applied on the Pi; dated addendum to the earlier 2026-09-27 bucket-scoped rollout entry.
+- Scope and intent: finish the approved `threat_events` backup rollout and correct the earlier interpretation of zero archived event records. The earlier worker returned zero because it queried BSON Dates against UTC string timestamps; source events were present. The earlier log remains unchanged as a record of what that run reported.
+- Repository branch and commit/PR: `fix/threat-event-backup-timestamps`; clean ARM64 worker source commit `de9304e`; documentation completion commit and PR pending at the time of this entry.
+- Repository changes: add UTC string timestamp query support and empty-success rechecks to the backup worker, add a regression test, correct the worker schedule and event-source description in the runbook, update the current architecture, and append this audit addendum. No Dashboard source code or accepted architecture decision changed.
+- Host/environment changes actually applied: copied the ARM64 binary to the Pi, preserved the prior `8302f9e` binary in a protected rollback location, atomically installed the new binary, restarted only the backup control service, and manually started the scheduled backup service once. No host environment file, timer, systemd unit, Pi Git checkout, old manifest, or B2 object was edited or deleted.
+- Runtime/exposure state: the Pi control service is active with source `de9304e`; the scheduled oneshot completed successfully and its daily timer remains enabled. The existing private B2 target and sensitive-event opt-in are unchanged. The local Dashboard reads the new manifests from MongoDB; no production Dashboard deployment occurred.
+- Validation performed and outcome: local `go test ./...` and `git diff --check` passed; the staged binary hash and VCS revision matched the clean local build, and the protected rollback copy matched the previously active binary. The manual run exited `0/SUCCESS`. MongoDB showed 29 successful, bucket-tagged threat-event manifests in the current 29-day window, with 21 archived days, eight empty days, and 53,496 archived records. The B2 snapshot reported 21 threat-event file versions totaling 9,365,344 bytes; hardware and filesystem file-version counts stayed at 35 and 33. The worker did not force a re-upload of those other targets.
+- Not performed / deferred: no authenticated browser review, archive download, independent content/hash comparison, read-only restore rehearsal, production Dashboard deployment, bucket retirement, or old-version deletion was performed. Upload success does not establish restore readiness.
+- Risks and data handling: this run wrote eligible sensitive events to the already reviewed private B2 target. No raw event contents, attacker credentials, archive contents, access tokens, or protected configuration values were copied into repository files or audit output. Previously empty manifests were updated in place by the normal worker operation and retain their bucket-scoped identity.
+- Rollback: atomically restore the protected previous binary and restart the control service if the new worker regresses. Keep created manifests and B2 versions for audit; the older worker would again fail to archive UTC string event timestamps.
+- Follow-up: refresh the authenticated Backup & Retention page and expect 21/29 archived threat-event days with eight empty days; monitor the next 03:30 Asia/Bangkok timer run; perform a separately reviewed read-only restore rehearsal before claiming recovery readiness.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Prepare Dashboard-controlled daily backup schedule
+
+- Status: repository implementation prepared on `feat/backup-daily-schedule`; not active on the Pi at the time of this entry.
+- Scope and intent: allow an Admin to set the permanent daily Bangkok backup time or one bounded temporary override in a single Dashboard form, with a preview of catch-up, next run, and automatic return to the permanent time.
+- Repository branch and commit/PR: `feat/backup-daily-schedule`; source commit and PR pending at the time of this entry.
+- Repository changes: add ADR-0008, append-only schedule revisions and Admin-only preview/write APIs, a Dashboard schedule card, Pi control-worker daily claims and bounded retry, and schedule-aware Dashboard UTC coverage anchoring. Add Go and Dashboard schedule tests and update the API contract and worker runbook. The default time remains 03:30 Asia/Bangkok until an Admin changes it.
+- Host/environment changes actually applied: none for this prepared implementation. No Pi binary, systemd timer, environment file, MongoDB schedule document, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi still runs the fixed 03:30 systemd timer and the prior control binary. The local Dashboard shows schedule status but disables edits until it sees a fresh scheduler-capable Pi heartbeat. Backup targets, the UTC two-day safety hold, and private B2 policy remain unchanged.
+- Validation performed and outcome: `go test ./...` passed; the targeted Dashboard schedule and backup suites passed (9 tests); full Dashboard lint, TypeScript check after removing a stale generated route type, and `git diff --check` passed. No live schedule change was made.
+- Not performed / deferred: no Pi deployment, timer cutover, authenticated browser review, production Dashboard deployment, live schedule edit, archive restore, or B2 upload was performed for this prepared entry.
+- Risks and data handling: a schedule change may move a run into the current day and trigger one prompt catch-up. The worker records one claimed scheduled run per Bangkok date and keeps B2 credentials on the Pi. Revision records contain only schedule metadata and operator identity, never secrets or attacker data.
+- Rollback: revert the repository branch before deployment. After deployment, restore the previous protected Pi binary and re-enable the 03:30 timer if the control scheduler fails; retain append-only schedule revisions and run records for audit.
+- Follow-up: build and install a clean ARM64 binary, verify its heartbeat and default-time run claim, disable the old timer only after the control scheduler is healthy, then record actual host state in a dated addendum.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Activate Pi daily backup scheduler
+
+- Status: installed and active on the Pi; Dashboard production deployment remains pending.
+- Scope and intent: activate the Dashboard-controlled daily schedule while retaining the permanent 03:30 Asia/Bangkok default and the three existing archive targets.
+- Repository branch and commit/PR: `feat/backup-daily-schedule`, source commit `b75749e`; this addendum and PR follow that commit.
+- Repository changes: update the current architecture and worker runbook after the verified host cutover. No schedule policy or archive source code changed in this addendum.
+- Host/environment changes actually applied: built a clean ARM64 worker from `b75749e`, preserved the previous binary in a protected rollback location under `/var/lib/honeypot/hardware-backups/`, atomically installed the new binary, restarted the control service, then disabled and stopped `honeypot-hardware-backup.timer` after its first successful scheduler run. No host environment file, Pi Git checkout, or existing B2 object was edited or deleted.
+- Runtime/exposure state: `honeypot-hardware-backup-control.service` is enabled and active with zero restarts; its installed binary SHA-256 is `1c06e18cff683b55891ddf8e7574b3e302ebd9344a7df3df70ea78bed53795b0`. The former timer is disabled and inactive. The default schedule remains 03:30 Asia/Bangkok; no Admin revision has been saved. The three archive targets and private B2 policy remain active. The local development Dashboard includes the schedule UI; production Dashboard has not been deployed.
+- Validation performed and outcome: `go test ./...`, targeted Dashboard tests (9/9), lint, TypeScript check, and Dashboard build passed before installation. The Pi service journal shows one scheduler claim for local day 2026-09-27 at 17:36 Bangkok and successful completion of all three targets by 17:36:11; MongoDB recorded that day's `backup_schedule_runs` status as `success`. A later SSH check confirmed the control service enabled/active with zero restarts, timer disabled/inactive, and installed binary checksum matching the clean build.
+- Not performed / deferred: no live Admin schedule edit, next-day 03:30 run, authenticated browser review, production Dashboard deployment, archive download, or read-only restore rehearsal was performed. The successful run alone does not prove future scheduling or recovery readiness.
+- Risks and data handling: the control service now owns the daily trigger; if it stops and systemd cannot restart it, backup is delayed until recovery. Schedule and run records contain only operational metadata. No secrets, attacker data, or protected backup contents were copied into repository files.
+- Rollback: restore the protected previous binary and restart the control service, and re-enable the fixed 03:30 timer as a pair. Preserve schedule revisions, run claims, manifests, and B2 versions for audit.
+- Follow-up: monitor the next scheduled run and authenticated schedule UI; perform a read-only restore rehearsal before claiming recovery readiness.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
