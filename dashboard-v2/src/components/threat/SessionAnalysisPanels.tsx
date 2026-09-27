@@ -398,6 +398,23 @@ function detailPanelResult(
     : terminalResult("empty", reason, result.data, result.status);
 }
 
+function combinedPanelResult(results: CapabilityResult[], emptyReason: string): CapabilityResult {
+  if (results.some((result) => result.state === "loading")) return initialResult;
+  const ready = results.find((result) => result.state === "ready");
+  const limited = results.find((result) => result.state === "limited");
+  const unavailable = results.filter((result) => result.state === "unavailable");
+  if (ready && (limited || unavailable.length > 0)) {
+    return terminalResult("limited", "Some evidence in this section is unavailable or partial.", ready.data, ready.status);
+  }
+  if (ready) return ready;
+  if (limited) return limited;
+  if (unavailable.length === results.length && unavailable[0]) return unavailable[0];
+  if (unavailable.length > 0) {
+    return terminalResult("limited", "Some evidence in this section is unavailable.", unavailable[0].data, unavailable[0].status);
+  }
+  return terminalResult("empty", emptyReason, results[0]?.data || {});
+}
+
 const DERIVED_CAPABILITIES = [
   "hypothesis",
   "recommendations",
@@ -480,7 +497,7 @@ function Panel({
   result: CapabilityResult;
   children: ReactNode;
   className?: string;
-  variant?: "card" | "embedded" | "flat";
+  variant?: "card" | "embedded" | "flat" | "module";
   renderEmptyContent?: boolean;
   compactUnavailable?: boolean;
 }) {
@@ -514,17 +531,25 @@ function Panel({
 
   const embedded = variant === "embedded";
   const flat = variant === "flat";
+  const isModule = variant === "module";
 
   return (
     <article className={`${embedded || flat ? "min-w-0" : "ui-panel flex min-w-0 flex-col overflow-hidden"} ${className}`}>
-      <div className={`flex flex-wrap items-start justify-between gap-3 ${embedded ? "border-b border-border pb-3" : flat ? "pb-2" : "border-b border-border bg-surface px-4 py-3 sm:px-5"}`}>
-        <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
+      <div className={`flex flex-wrap items-center justify-between gap-3 ${isModule ? "border-b border-border bg-surface px-4 py-3 sm:px-5" : embedded ? "border-b border-border pb-3" : flat ? "pb-2" : "border-b border-border bg-surface px-4 py-3 sm:px-5"}`}>
+        {isModule ? (
+          <h2 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-primary-navy sm:text-xs">
             {icon}
-            {eyebrow}
+            {title}
+          </h2>
+        ) : (
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary-navy">
+              {icon}
+              {eyebrow}
+            </div>
+            <h3 className="mt-1 text-base font-semibold sm:text-lg">{title}</h3>
           </div>
-          <h2 className="mt-1 text-base font-semibold sm:text-lg">{title}</h2>
-        </div>
+        )}
         <span className="ui-badge">
           {result.state === "ready" && "PASS_WITH_DATA"}
           {result.state === "limited" && "LIMITED"}
@@ -534,7 +559,7 @@ function Panel({
           {result.state === "unavailable" && "UNAVAILABLE"}
         </span>
       </div>
-      <div className={embedded ? "pt-4" : flat ? "pt-1" : "p-4 sm:p-5"}>
+      <div className={isModule ? "p-4 sm:p-5" : embedded ? "pt-4" : flat ? "pt-1" : "p-4 sm:p-5"}>
         {result.state === "loading" ? (
           <div role="status" aria-busy="true" className={`flex items-start gap-3 rounded-lg border p-3.5 ${stateCopy.className}`}>
             {stateCopy.icon}
@@ -567,7 +592,7 @@ function Panel({
   );
 }
 
-function TimelineList({ items }: { items: unknown[] }) {
+export function TimelineList({ items }: { items: unknown[] }) {
   const orderedItems = chronologicalRecords(items).filter((item) => item.command_event !== true);
   const [filter, setFilter] = useState("all");
   const category = (item: JsonRecord) => {
@@ -577,6 +602,7 @@ function TimelineList({ items }: { items: unknown[] }) {
     return "Other";
   };
   const visibleItems = orderedItems.filter((item) => filter === "all" || category(item) === filter);
+  const timelineItems = visibleItems.slice(-100);
   const accessCount = orderedItems.filter((item) => category(item) === "Authentication").length;
   const sessionCount = orderedItems.filter((item) => category(item) === "Session").length;
   const otherCount = orderedItems.length - accessCount - sessionCount;
@@ -586,57 +612,53 @@ function TimelineList({ items }: { items: unknown[] }) {
     ["Session", "Session", orderedItems.filter((item) => category(item) === "Session").length],
     ["Other", "Other", orderedItems.filter((item) => category(item) === "Other").length],
   ] as const;
-  if (!orderedItems.length) {
-    return <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5 text-xs text-text-muted">No persisted timeline events are available.</p>;
-  }
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <dl className="grid grid-cols-4 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
         {[["Events", orderedItems.length], ["Access", accessCount], ["Session", sessionCount], ["Other", otherCount]].map(([name, count]) => <div key={name} className="min-w-0 px-2.5 py-2 text-center sm:px-3">
           <dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt>
-          <dd className="mt-0.5 text-sm font-semibold text-text">{count}</dd>
+          <dd className="mt-0.5 text-sm font-semibold text-primary-navy">{count}</dd>
         </div>)}
       </dl>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-text-muted">Oldest to newest · command input appears in Command activity.</p>
+        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-subtle">Bound event chain <span className="ml-1 font-normal normal-case tracking-normal">· oldest to newest</span></p>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter timeline events">
           {filters.map(([key, title, count]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={`rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors ${filter === key ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface text-text-muted hover:border-primary-border hover:text-text"}`}>
             {title}<span className="ml-1 opacity-70">{count}</span>
           </button>)}
         </div>
       </div>
-      <div className="overflow-x-auto rounded-xl border border-border bg-surface px-3 py-4" aria-label="Connected event chain">
-        <ol className="flex min-w-max items-start">
-        {visibleItems.slice(0, 100).map((event, index) => {
+      {timelineItems.length > 0 ? <div className="h-[min(65vh,28rem)] overflow-y-auto overscroll-contain rounded-lg border border-border bg-surface px-3 py-3" aria-label="Bounded event timeline" tabIndex={0}>
+        <ol className="space-y-0">
+        {timelineItems.map((event, index) => {
           const eventName = summaryValue(event.eventid || event.event_id || event.event_type, "event");
           const timestampValue = event.timestamp || event.received_at;
-          const timestamp = summaryValue(timestampValue, "Timestamp unavailable");
           const readableEvent = eventName.replace(/^cowrie\./i, "").replaceAll(".", " ");
           const eventCategory = category(event);
-          const isLatest = index === Math.min(visibleItems.length, 100) - 1;
+          const isLatest = index === timelineItems.length - 1;
           const EventIcon = eventCategory === "Authentication" ? Fingerprint : eventCategory === "Session" ? Network : Activity;
           const endpoint = [event.src_ip && `src ${display(event.src_ip)}`, event.dst_ip && `dst ${display(event.dst_ip)}`].filter(Boolean).join(" · ");
         return (
-          <li key={`${index}-${eventName}-${timestamp}`} className="relative flex w-64 shrink-0 flex-col pr-5 last:pr-0">
-            {index < Math.min(visibleItems.length, 100) - 1 && <span className="absolute left-5 right-0 top-[10px] h-px bg-border" aria-hidden="true" />}
-            <span className={`relative z-10 grid h-5 w-5 place-items-center rounded-full border ${isLatest ? "border-orange-300 bg-orange-50 text-orange-600" : "border-primary-border bg-surface text-primary"}`}>
-              <EventIcon className="h-3 w-3" aria-hidden="true" />
+          <li key={`${index}-${eventName}-${String(timestampValue || "unknown")}`} className="relative grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 pb-4 last:pb-0">
+            {index < timelineItems.length - 1 && <span className="absolute bottom-0 left-[0.4375rem] top-4 w-px bg-primary-navy-line" aria-hidden="true" />}
+            <span className={`relative z-10 mt-0.5 grid h-4 w-4 place-items-center rounded-full border bg-surface ${isLatest ? "border-orange-500 text-orange-600" : "border-primary-navy-line text-primary-navy"}`}>
+              <EventIcon className="h-2.5 w-2.5" aria-hidden="true" />
             </span>
-            <div className={`mr-3 mt-3 min-h-24 rounded-lg border p-3 ${isLatest ? "border-orange-200 bg-orange-50/40" : "border-border bg-surface-subtle"}`}>
-              <div className="flex items-start justify-between gap-2">
-                <p className="line-clamp-2 text-xs font-semibold capitalize leading-5 text-text">{readableEvent}</p>
-                {isLatest && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-orange-600">Latest</span>}
+            <div className="min-w-0 pb-1">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                <p className="text-xs font-semibold capitalize leading-5 text-text">{readableEvent}</p>
+                <time className="font-mono text-[10px] text-text-muted" dateTime={hasMeaningfulValue(timestampValue) ? String(timestampValue) : undefined}>{hasMeaningfulValue(timestampValue) ? thailandTimestamp(timestampValue) : "Timestamp unavailable"}</time>
+                {isLatest && <span className="text-[9px] font-semibold uppercase tracking-wide text-orange-600">Latest</span>}
               </div>
-              <time className="mt-1.5 block font-mono text-[11px] text-text-muted" dateTime={hasMeaningfulValue(timestampValue) ? String(timestampValue) : undefined}>{hasMeaningfulValue(timestampValue) ? thailandTimestamp(timestampValue) : "Timestamp unavailable"}</time>
-              <p className="mt-1 text-[10px] text-text-subtle">{eventCategory} · {summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</p>
-              {endpoint && <p className="mt-1 break-all font-mono text-[10px] text-text-muted">{endpoint}</p>}
-              {event.processed === false && <span className="mt-2 inline-flex rounded-full border border-border bg-surface px-2 py-0.5 text-[9px] font-medium text-text-muted">Processing pending</span>}
+              <p className="mt-0.5 text-[10px] text-text-subtle">{eventCategory} · {summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</p>
+              {endpoint && <p className="mt-0.5 break-all font-mono text-[10px] text-text-muted">{endpoint}</p>}
+              {event.processed === false && <span className="mt-1 inline-flex rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[9px] font-medium text-text-muted">Processing pending</span>}
             </div>
           </li>
         );
         })}
         </ol>
-      </div>
+      </div> : <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5 text-xs text-text-muted">No persisted timeline events are available.</p>}
     </div>
   );
 }
@@ -644,7 +666,7 @@ function TimelineList({ items }: { items: unknown[] }) {
 export function ClassificationList({ items, trustedMappings }: { items: unknown[]; trustedMappings: unknown[] }) {
   const classificationRecords = items.map(record);
   if (!classificationRecords.length && !trustedMappings.length) {
-    return <p className="text-xs text-text-muted">No trusted observation or classification evidence was recorded for this session.</p>;
+    return <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5 text-xs text-text-muted">No trusted observation or classification evidence recorded.</p>;
   }
   const classifiedCommandKeys = new Set(
     classificationRecords
@@ -677,16 +699,19 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
   ]));
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-primary-navy">Observed behavior &amp; ATT&amp;CK mapping</h3>
+        <span className="ui-badge text-[10px]">Observed · not model suggestions</span>
+      </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
         {[["Trusted TTPs", String(uniqueAttackTechniques.size)], ["Linked evidence", String(evidenceReferenceCount)], ["Classified events", String(classifiedCommandKeys.size)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3">
           <dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt>
-          <dd className="mt-0.5 text-base font-semibold text-text">{value}</dd>
+          <dd className="mt-0.5 text-base font-semibold text-primary-navy">{value}</dd>
         </div>)}
       </dl>
       <div className="grid gap-4 xl:grid-cols-12">
         <section className="xl:col-span-4">
-          <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Observed evidence</h3>
-          <p className="mt-1 text-xs leading-5 text-text-muted">Trusted mappings below are linked to recorded behavior. Command-level classifier outputs remain advisory and are listed separately.</p>
+          <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-primary-navy">Observed behavior</h3>
           <dl className="mt-3 divide-y divide-border rounded-lg border border-border">
             <div className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs"><dt className="text-text-muted">Trusted mappings</dt><dd className="font-semibold text-text">{trustedMappings.length}</dd></div>
             <div className="flex items-center justify-between gap-3 px-3 py-2.5 text-xs"><dt className="text-text-muted">Distinct ATT&amp;CK techniques</dt><dd className="font-semibold text-text">{uniqueAttackTechniques.size}</dd></div>
@@ -696,12 +721,12 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
         </section>
         <section className="min-w-0 xl:col-span-8">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Trusted ATT&amp;CK mappings</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-primary-navy">MITRE ATT&amp;CK</h3>
             <span className="ui-badge text-[10px]">Observed · not model suggestions</span>
           </div>
-          {trustedMappings.length ? <div className="mt-2 overflow-x-auto rounded-lg border border-border">
+          {trustedMappings.length ? <div className="mt-2 max-h-[28rem] overflow-auto overscroll-contain rounded-lg border border-border">
             <table className="w-full min-w-[620px] text-left text-xs">
-              <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.08em] text-text-subtle"><tr><th className="px-3 py-2 font-semibold">Technique</th><th className="px-3 py-2 font-semibold">Tactic</th><th className="px-3 py-2 font-semibold">Evidence</th><th className="px-3 py-2 font-semibold">Authority</th></tr></thead>
+              <thead className="bg-primary-navy-soft text-[10px] uppercase tracking-[0.08em] text-primary-navy"><tr><th className="px-3 py-2 font-semibold">Technique</th><th className="px-3 py-2 font-semibold">Tactic</th><th className="px-3 py-2 font-semibold">Evidence</th><th className="px-3 py-2 font-semibold">Authority</th></tr></thead>
               <tbody className="divide-y divide-border">
                 {trustedMappings.slice(0, 30).map((item, index) => {
                   const mapping = record(item);
@@ -710,7 +735,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
                   const tactics = list(mapping.tactics).map((value) => display(value)).filter(Boolean).join(", ") || display(mapping.tactic, "Not recorded");
                   const refs = Number(mapping.evidence_ref_count || list(mapping.evidence_refs).length || 0);
                   return <tr key={`${index}-${techniqueId}`} className="align-top">
-                    <td className="px-3 py-2.5"><span className="font-mono font-semibold text-text">{techniqueId}</span><span className="mt-0.5 block text-text-muted">{summaryValue(mapping.name || classifier.name, "Technique name not recorded")}</span></td>
+                    <td className="px-3 py-2.5"><span className="font-mono font-semibold text-primary-navy">{techniqueId}</span><span className="mt-0.5 block text-text-muted">{summaryValue(mapping.name || classifier.name, "Technique name not recorded")}</span></td>
                     <td className="px-3 py-2.5 text-text-muted">{tactics}</td>
                     <td className="px-3 py-2.5 text-text-muted">{countOf(refs)} linked reference{refs === 1 ? "" : "s"}<details className="mt-1"><summary className="cursor-pointer text-[10px] font-medium text-primary">Trace evidence</summary><div className="pt-1"><TrustedTraceability mapping={mapping} /></div></details></td>
                     <td className="px-3 py-2.5"><span className="ui-badge text-[10px]">{readableCode(mapping.trust_tier || mapping.authority || "not recorded")}</span><span className="mt-1 block text-[10px] text-text-subtle">{readableCode(mapping.mapping_semantics || "not recorded")}</span></td>
@@ -777,11 +802,11 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
   return (
     <div className="space-y-3">
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Observables", String(groups.length)], ["Sightings", sightingIds.size ? String(sightingIds.size) : "Not recorded"], ["Sessions", sessionIds.size ? String(sessionIds.size) : "Not recorded"]].map(([name, value]) => <div key={name} className="px-2.5 py-2 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
+        {[["Observables", String(groups.length)], ["Sightings", sightingIds.size ? String(sightingIds.size) : "Not recorded"], ["Sessions", sessionIds.size ? String(sessionIds.size) : "Not recorded"]].map(([name, value]) => <div key={name} className="px-2.5 py-2 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-primary-navy">{value}</dd></div>)}
       </dl>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="max-h-[28rem] overflow-auto overscroll-contain rounded-lg border border-border">
         <table className="w-full min-w-[660px] text-left text-xs">
-          <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.08em] text-text-subtle"><tr><th className="px-3 py-2 font-semibold">Observable</th><th className="px-3 py-2 font-semibold">Sightings</th><th className="px-3 py-2 font-semibold">First / last seen</th><th className="px-3 py-2 font-semibold">Source</th></tr></thead>
+          <thead className="sticky top-0 z-10 bg-primary-navy-soft text-[10px] uppercase tracking-[0.08em] text-primary-navy"><tr><th scope="col" className="px-3 py-2 font-semibold">Observable</th><th scope="col" className="px-3 py-2 font-semibold">Sightings</th><th scope="col" className="px-3 py-2 font-semibold">First / last seen</th><th scope="col" className="px-3 py-2 font-semibold">Source</th></tr></thead>
           <tbody className="divide-y divide-border">
             {groups.map((group, index) => {
               const first = group.items[0];
@@ -1084,7 +1109,7 @@ function ProviderContextRows({
   return (
     <div className="space-y-3">
       <p className="text-xs text-text-muted">Provider context is non-authoritative. Each row combines lookup state, cached result, and any separately linked finding.</p>
-      <ol className="overflow-hidden rounded-lg border border-border bg-surface divide-y divide-border">
+      <ol className="space-y-2">
         {groups.slice(0, 12).map((group) => {
           const latestCache = latestProviderRecord(group.cache, "lookup_at");
           const latestEvidence = latestProviderRecord(group.evidence, "retrieved_at");
@@ -1111,10 +1136,10 @@ function ProviderContextRows({
           const expiresAt = (latestCacheWasQueried ? latestCache?.expires_at : undefined) || latestEvidence?.expires_at || status?.expires_at;
           const provider = group.provider;
           return (
-            <li key={provider} className="min-w-0 px-3 py-3 sm:px-4">
+            <li key={provider} className="min-w-0 rounded-lg border border-border bg-surface p-3 sm:p-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <h4 className="text-base font-semibold text-text">{providerName(provider)}</h4>
+                  <h4 className="text-sm font-semibold text-primary-navy">{providerName(provider)}</h4>
                   <p className="mt-1 text-xs text-text-muted">{latestCacheWasQueried ? "Source-IP lookup" : latestEvidence ? "Linked provider finding" : "Provider status"}</p>
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
@@ -1205,13 +1230,13 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
   ));
   return (
     <div className="space-y-2.5">
-      {storedCounts && <dl className="grid grid-cols-3 divide-x divide-border border-y border-border py-1">
-        {[["Attempts", data.attempt_count], ["Succeeded", data.success_count], ["Failed", data.failure_count]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{String(name)}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{hasMeaningfulValue(value) ? countOf(value) : "Not recorded"}</dd></div>)}
-      </dl>}
+      <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle py-1">
+        {[["Attempts", data.attempt_count], ["Succeeded", data.success_count], ["Failed", data.failure_count]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{String(name)}</dt><dd className="mt-0.5 text-sm font-semibold text-primary-navy">{hasMeaningfulValue(value) ? countOf(value) : "Not recorded"}</dd></div>)}
+      </dl>
       {attempts.length > 0 && <p className="text-[11px] text-text-muted">{visibleUsernames.length ? `Observed account: ${visibleUsernames.join(", ")}.` : "Account name not retained."} Authentication records are not proof of identity.</p>}
       {attempts.length > 0 ? (
-        <section className="overflow-hidden rounded-lg border border-border">
-        <div className="bg-surface-subtle px-3 py-2 text-xs font-semibold text-text">Login activity · {attempts.length}</div>
+        <section className="max-h-[28rem] overflow-y-auto overscroll-contain rounded-lg border border-border" aria-label="Authentication attempts">
+        <div className="sticky top-0 z-10 border-b border-border bg-surface-subtle px-3 py-2 text-xs font-semibold text-primary-navy">Login activity · {attempts.length}</div>
         <ol className="divide-y divide-border">
           {attempts.slice(0, 20).map((attempt, index) => (
             <li key={`${index}-${summaryValue(attempt.timestamp, "attempt")}`} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-[11px]">
@@ -1221,39 +1246,39 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
           ))}
         </ol>
         </section>
-      ) : <p className="text-[11px] text-text-muted">{storedCounts ? "No authentication attempt records are available." : "Authentication attempt details were not retained."}</p>}
+      ) : <p className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5 text-[11px] text-text-muted">{Number(data.attempt_count) === 0 ? "No authentication attempts recorded." : storedCounts ? "No authentication attempt records are available." : "Authentication attempt details were not retained."}</p>}
       {hasMeaningfulValue(data.first_attempt_at) || hasMeaningfulValue(data.last_attempt_at) ? <p className="text-[10px] text-text-subtle">First: {thailandTimestamp(data.first_attempt_at)} · Last: {thailandTimestamp(data.last_attempt_at)}</p> : null}
     </div>
   );
 }
 
-function SourcePivotSummary({ data }: { data: JsonRecord }) {
+export function SourcePivotSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const sessions = list(data.sessions).map(record);
   const sourceIp = summaryValue(record(data.observable).value, "Source IP not recorded");
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2">
-        <p className="break-all font-mono text-base font-semibold text-text">{sourceIp}</p>
+        <p className="break-all font-mono text-base font-semibold text-primary-navy">{sourceIp}</p>
         <span className="ui-badge text-[10px]">Recurrence context · not attribution</span>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Related sessions", hasMeaningfulValue(counts.sessions_found) ? countOf(counts.sessions_found) : "Not recorded"], ["Sightings examined", hasMeaningfulValue(counts.sightings_examined) ? countOf(counts.sightings_examined) : "Not recorded"], ["Provider calls", data.provider_calls === false ? "No" : data.provider_calls === true ? "Yes" : "Not reported"]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
+        {[["Related sessions", hasMeaningfulValue(counts.sessions_found) ? countOf(counts.sessions_found) : "Not recorded"], ["Sightings examined", hasMeaningfulValue(counts.sightings_examined) ? countOf(counts.sightings_examined) : "Not recorded"], ["Provider calls", data.provider_calls === false ? "No" : data.provider_calls === true ? "Yes" : "Not reported"]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-primary-navy">{value}</dd></div>)}
       </dl>
-      {sessions.length > 0 ? <div className="overflow-x-auto rounded-lg border border-border">
+      {sessions.length > 0 ? <div className="max-h-[28rem] overflow-auto overscroll-contain rounded-lg border border-border">
         <table className="w-full min-w-[560px] text-left text-xs">
-          <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.08em] text-text-subtle"><tr><th className="px-3 py-2 font-semibold">Session</th><th className="px-3 py-2 font-semibold">First seen (ICT)</th><th className="px-3 py-2 font-semibold">Last seen (ICT)</th><th className="px-3 py-2 text-right font-semibold">Sightings</th></tr></thead>
+          <thead className="sticky top-0 z-10 bg-primary-navy-soft text-[10px] uppercase tracking-[0.08em] text-primary-navy"><tr><th scope="col" className="px-3 py-2 font-semibold">Session</th><th scope="col" className="px-3 py-2 font-semibold">First seen (ICT)</th><th scope="col" className="px-3 py-2 font-semibold">Last seen (ICT)</th><th scope="col" className="px-3 py-2 text-right font-semibold">Sightings</th></tr></thead>
           <tbody className="divide-y divide-border">
             {sessions.slice(0, 50).map((session, index) => <tr key={`${index}-${summaryValue(session.session_id, "session")}`}>
-              <td className="px-3 py-2.5"><details className="group"><summary className="max-w-[240px] cursor-pointer break-all font-mono text-[11px] font-semibold text-primary">{summaryValue(session.session_id, "Session unavailable")}</summary><div className="mt-2 rounded-md bg-surface-subtle p-2"><TraceabilityDetails title="Session recurrence provenance" fields={[["Observable role", traceList(session.roles, "source_ip")], ["Sources", traceList(session.sources)], ["Sensor IDs", traceList(session.sensor_ids)], ["First seen", thailandTimestamp(session.first_seen)], ["Last seen", thailandTimestamp(session.last_seen)], ["Sightings", countOf(session.sighting_count)]]} /></div></details></td>
+              <td className="px-3 py-2.5"><details className="group"><summary className="max-w-[240px] cursor-pointer break-all font-mono text-[11px] font-semibold text-primary-navy">{summaryValue(session.session_id, "Session unavailable")}</summary><div className="mt-2 rounded-md bg-surface-subtle p-2"><TraceabilityDetails title="Session recurrence provenance" fields={[["Observable role", traceList(session.roles, "source_ip")], ["Sources", traceList(session.sources)], ["Sensor IDs", traceList(session.sensor_ids)], ["First seen", thailandTimestamp(session.first_seen)], ["Last seen", thailandTimestamp(session.last_seen)], ["Sightings", countOf(session.sighting_count)]]} /></div></details></td>
               <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[10px] text-text-muted">{thailandTimestamp(session.first_seen)}</td>
               <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[10px] text-text-muted">{thailandTimestamp(session.last_seen)}</td>
-              <td className="px-3 py-2.5 text-right font-semibold text-text">{countOf(session.sighting_count)}</td>
+              <td className="px-3 py-2.5 text-right font-semibold text-primary-navy">{countOf(session.sighting_count)}</td>
             </tr>)}
           </tbody>
         </table>
       </div> : <p className="text-xs text-text-muted">No related session records were returned for this source IP.</p>}
-      <p className="text-[10px] leading-4 text-text-subtle">A shared source IP can represent a shared network address. Recurrence alone does not identify a person, establish intent, or determine maliciousness.</p>
+      <p className="text-[10px] leading-4 text-text-subtle">Repeated source-IP activity indicates recurrence only, not shared identity, intent, or attribution.</p>
     </div>
   );
 }
@@ -2063,130 +2088,96 @@ export function SessionAnalysisPanels({
           "No provider finding is linked to this exact session. No external intelligence is inferred.",
         );
 
+  const activityResult = combinedPanelResult([timelineResult, authenticationResult], "No activity or authentication evidence is stored.");
+  const analystResult = combinedPanelResult([get("hypothesis"), get("recommendations")], "No analyst assessment or response guidance is stored.");
+  const tiSectionResult = combinedPanelResult([etiResult, sourcePivot], "No threat-intelligence context is stored.");
+  const evidenceSectionResult = combinedPanelResult([filesResult, provenanceResult, get("reports")], "No evidence inventory or durable report is stored.");
+
   return (
-    <div className="space-y-8">
-      <section aria-label="Activity evidence" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">01</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Activity evidence</p>
-            <p className="mt-1 text-xs text-text-muted">Session chronology leads; authentication details are supporting evidence.</p>
+    <div className="space-y-5">
+      <section aria-label="Activity evidence">
+        <Panel eyebrow="" title="Activity evidence" icon={<Activity className="h-4 w-4" aria-hidden="true" />} result={activityResult} variant="module" renderEmptyContent compactUnavailable>
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,7fr)_minmax(18rem,3fr)]">
+            <Panel eyebrow="Bound event chain · oldest → newest" title="Bounded event timeline" icon={<ListTree className="h-4 w-4" aria-hidden="true" />} result={timelineResult} variant="embedded" renderEmptyContent compactUnavailable>
+              <TimelineList items={events} />
+            </Panel>
+            <Panel eyebrow="Session access" title="Authentication activity" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={authenticationResult} className="xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
+              <AuthenticationSummary data={authentication} />
+            </Panel>
           </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
-          <Panel eyebrow="Oldest → newest" title="Bounded event timeline" icon={<ListTree className="h-4 w-4" aria-hidden="true" />} result={timelineResult} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
-            <TimelineList items={events} />
-          </Panel>
-          <Panel eyebrow="Supporting evidence" title="Authentication activity" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={authenticationResult} className="xl:col-span-4 xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
-            <AuthenticationSummary data={authentication} />
-          </Panel>
-        </div>
+        </Panel>
       </section>
 
-      <section aria-label="Trusted observations" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">02</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Trusted observations</p>
-            <p className="mt-1 text-xs text-text-muted">Evidence-backed classification is kept separate from model recommendations.</p>
-          </div>
-        </div>
-        <Panel eyebrow="Validated evidence snapshot" title="Observed behavior and ATT&CK mapping" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult} variant="embedded" renderEmptyContent compactUnavailable>
+      <section aria-label="Trusted observations">
+        <Panel eyebrow="" title="Trusted observations" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult} variant="module" renderEmptyContent compactUnavailable>
           <ClassificationList items={classificationEvents} trustedMappings={trustedTtps} />
         </Panel>
       </section>
 
-      <section aria-label="Model ensemble evidence" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">03</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">TTP review workspace</p>
-            <p className="mt-1 text-xs text-text-muted">Model1 proposes candidates; exact-bound Model2 support can adjust review priority.</p>
-          </div>
-        </div>
-        <Panel eyebrow="Review queue" title="TTP candidates · review first to last" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} renderEmptyContent compactUnavailable>
+      <section aria-label="TTP review workspace">
+        <Panel eyebrow="" title="TTP review workspace" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} variant="module" renderEmptyContent compactUnavailable>
           <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>
 
-      <section aria-label="Analyst assessment" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">04</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Analyst assessment</p>
-            <p className="mt-1 text-xs text-text-muted">A conclusion workspace with hypothesis on the left and manual guidance alongside it.</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
-          <Panel eyebrow="Assessment outcome" title="Threat hypothesis" icon={<BrainCircuit className="h-4 w-4" aria-hidden="true" />} result={get("hypothesis")} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
-            <HypothesisSummary data={hypothesis} />
-          </Panel>
-          <Panel eyebrow="Human-reviewed support" title="Response guidance" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={get("recommendations")} className="xl:col-span-4 xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
-            <GuidanceSummary data={get("recommendations").data} />
-          </Panel>
-        </div>
-      </section>
-
-      <section aria-label="AI advisory" className="space-y-2">
-        <div className="flex items-start gap-3">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">05</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">AI advisory · secondary</p>
-            <p className="mt-1 text-xs text-text-muted">Stored suggestions remain advisory and do not create findings or execute response.</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-4 border-y border-border py-3 xl:grid-cols-12">
-          <Panel eyebrow="Stored selection" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} className="xl:col-span-8" variant="flat" renderEmptyContent compactUnavailable>
-            <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} canonicalFindingIds={list(record(detail.session_hypothesis_assessment).canonical_finding_ids)} />
-          </Panel>
-          <aside className="border-l border-border pl-4 xl:col-span-4" aria-label="Policy gap review">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Policy-gap review</p>
-            {aiAdvisory.state === "ready" || aiAdvisory.state === "limited"
-              ? <PolicyGapSummary data={aiAdvisory.data} />
-              : <p className="border-l-2 border-border pl-3 text-xs text-text-muted">Unavailable: this runtime has no accepted AI advisory capability.</p>}
-          </aside>
-        </div>
-      </section>
-
-      <section aria-label="Threat intelligence context" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">06</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Threat intelligence context</p>
-            <p className="mt-1 text-xs text-text-muted">Provider data is context; source-IP recurrence is an investigation pivot, not attribution.</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
-          <Panel eyebrow="Provider context" title="External threat intelligence" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} className="xl:col-span-5" variant="flat" renderEmptyContent compactUnavailable>
-            <ExternalTiSummary sessionData={sessionTi} observableData={observableTi.data} />
-          </Panel>
-          <Panel eyebrow="Investigation pivot" title="Source-IP recurrence" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={sourcePivot} className="xl:col-span-7" compactUnavailable>
-            <SourcePivotSummary data={sourcePivot.data} />
-          </Panel>
-        </div>
-      </section>
-
-      <section aria-label="Evidence ledger" className="space-y-3">
-        <div className="flex items-start gap-3 border-b border-border pb-2">
-          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">07</span>
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Evidence ledger</p>
-            <p className="mt-1 text-xs text-text-muted">A compact registry of stored artifacts, provenance, and durable reports.</p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
-          <Panel eyebrow="Evidence inventory" title="Artifacts and observables" icon={<FileSearch className="h-4 w-4" aria-hidden="true" />} result={filesResult} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
-            <ObservableList items={analystObservables} />
-          </Panel>
-          <aside className="divide-y divide-border xl:col-span-4">
-            <Panel eyebrow="Processing trace" title="Evidence and provenance" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={provenanceResult} className="pb-4" variant="flat" renderEmptyContent compactUnavailable>
-              <ProvenanceSummary value={provenance} />
+      <section aria-label="Analyst assessment">
+        <Panel eyebrow="" title="Analyst assessment" icon={<BrainCircuit className="h-4 w-4" aria-hidden="true" />} result={analystResult} variant="module" renderEmptyContent compactUnavailable>
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,7fr)_minmax(18rem,3fr)]">
+            <Panel eyebrow="Assessment outcome" title="Threat hypothesis" icon={<BrainCircuit className="h-4 w-4" aria-hidden="true" />} result={get("hypothesis")} variant="embedded" renderEmptyContent compactUnavailable>
+              <HypothesisSummary data={hypothesis} />
             </Panel>
-            <Panel eyebrow="Durable output" title="Reports" icon={<FileText className="h-4 w-4" aria-hidden="true" />} result={get("reports")} className="pt-4" variant="flat" renderEmptyContent compactUnavailable>
-              <RecordList items={reports} empty="No stored report is available." />
+            <Panel eyebrow="Manual review" title="Response guidance" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={get("recommendations")} className="xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
+              <GuidanceSummary data={get("recommendations").data} />
             </Panel>
-          </aside>
-        </div>
+          </div>
+        </Panel>
+      </section>
+
+      <section aria-label="AI advisory">
+        <Panel eyebrow="" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} variant="module" renderEmptyContent compactUnavailable>
+          <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
+            <div className="min-w-0 xl:col-span-8">
+              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} canonicalFindingIds={list(record(detail.session_hypothesis_assessment).canonical_finding_ids)} />
+            </div>
+            <aside className="min-w-0 xl:col-span-4 xl:border-l xl:border-border xl:pl-4" aria-label="Policy gap review">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-primary-navy">Policy-gap review</p>
+              {aiAdvisory.state === "ready" || aiAdvisory.state === "limited"
+                ? <PolicyGapSummary data={aiAdvisory.data} />
+                : <p className="text-xs text-text-muted">Unavailable: no accepted AI advisory is stored.</p>}
+            </aside>
+          </div>
+        </Panel>
+      </section>
+
+      <section aria-label="Threat intelligence context">
+        <Panel eyebrow="" title="Threat intelligence context" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={tiSectionResult} variant="module" renderEmptyContent compactUnavailable>
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(20rem,5fr)_minmax(0,7fr)]">
+            <Panel eyebrow="Provider results" title="External threat intelligence" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} variant="embedded" renderEmptyContent compactUnavailable>
+              <ExternalTiSummary sessionData={sessionTi} observableData={observableTi.data} />
+            </Panel>
+            <Panel eyebrow="Recurrence · not attribution" title="Source-IP recurrence" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={sourcePivot} className="xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
+              <SourcePivotSummary data={sourcePivot.data} />
+            </Panel>
+          </div>
+        </Panel>
+      </section>
+
+      <section aria-label="Evidence ledger">
+        <Panel eyebrow="" title="Evidence ledger" icon={<FileSearch className="h-4 w-4" aria-hidden="true" />} result={evidenceSectionResult} variant="module" renderEmptyContent compactUnavailable>
+          <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,8fr)_minmax(18rem,4fr)]">
+            <Panel eyebrow="Evidence inventory" title="Artifacts and observables" icon={<FileSearch className="h-4 w-4" aria-hidden="true" />} result={filesResult} variant="embedded" renderEmptyContent compactUnavailable>
+              <ObservableList items={analystObservables} />
+            </Panel>
+            <aside className="min-w-0 divide-y divide-border xl:border-l xl:border-border xl:pl-4">
+              <Panel eyebrow="Processing trace" title="Evidence and provenance" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={provenanceResult} className="pb-4" variant="flat" renderEmptyContent compactUnavailable>
+                <ProvenanceSummary value={provenance} />
+              </Panel>
+              <Panel eyebrow="Durable output" title="Reports" icon={<FileText className="h-4 w-4" aria-hidden="true" />} result={get("reports")} className="pt-4" variant="flat" renderEmptyContent compactUnavailable>
+                <RecordList items={reports} empty="No stored report is available." />
+              </Panel>
+            </aside>
+          </div>
+        </Panel>
       </section>
     </div>
   );

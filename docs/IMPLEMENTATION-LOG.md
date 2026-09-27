@@ -2006,3 +2006,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the alias resolver, response contract update, and corresponding API/data-semantics documentation. No host rollback is required.
 - Follow-up: verify Evidence against an authenticated session whose CWD alias has a matching canonical identity event; confirm no-command and unverified-binding states remain distinct.
 - Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct) and [Dashboard API contract](../dashboard-v2/docs/API.md#sensitive-admin-command-evidence).
+
+### 2026-09-27 — Frame and compact Session Analysis modules
+
+- Status: prepared for promotion to staging through the configured CI/CD path; no manual host deployment is part of this change.
+- Scope and intent: align Session Analysis sections with the existing Priority Context and Active Deception visual language, improve timeline and source-IP list scanability, and reduce page growth from long event/session lists.
+- Repository branch and base: `integration/session-weighted-staging-20260927`, based on `origin/staging` at `07318adec`; intended target is `staging`.
+- Repository changes: add a semantic primary-navy color token (`#18227A` in light mode, contrast-adjusted navy tint in dark mode); replace numbered floating section headings with framed module headers; group provider intelligence and source-IP recurrence within one Threat Intelligence module; make the event timeline a vertical connected chain with a bounded internal scroll region; add bounded authentication, source-IP session, trusted-mapping, and observable-list scroll regions with sticky table headers; preserve existing data/state semantics. Add focused presentation assertions and update the trusted ATT&CK heading assertion.
+- Host/environment changes actually applied: none. No GCP, Pi, database, API, backend, or production service was changed.
+- Release path: pushing the reviewed change to `staging` is expected to invoke its configured CI/CD. No direct GCP, Pi, database, or service mutation is included.
+- Validation performed and outcome: ESLint on changed TypeScript files passed; `npx tsc --noEmit` passed; combined focused presentation/model/external-TI/session-semantics tests passed 41/41, including a 101-event latest-window case; `npx next build --webpack` and `git diff --check` passed after the final component changes.
+- Not performed / deferred: authenticated visual browser review against a live session, full repository test suite, and post-push CI/CD verification.
+- Risks and data handling: presentation-only changes; no mock production data, raw requests, credentials, or attacker payloads were added. The dark theme uses a lighter navy tint for legibility while preserving the orange action accent.
+- Rollback: revert this entry and the changed Session Analysis component, global color-token definitions, and associated presentation assertions; no host rollback is required.
+- Follow-up: push to `staging`, verify the CI/CD outcome, then review in an authenticated browser.
+- Related ADR/runbook: no architecture or operating procedure changed.

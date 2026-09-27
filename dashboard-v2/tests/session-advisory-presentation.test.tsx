@@ -1,8 +1,57 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary, SourcePivotSummary, TimelineList } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("session assessment presentation", () => {
+  it("renders a compact vertical event chain inside its own bounded scroll region", () => {
+    const html = renderToStaticMarkup(<TimelineList items={[
+      { eventid: "cowrie.session.connect", timestamp: "2026-09-27T08:00:00Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+      { eventid: "cowrie.client.kex", timestamp: "2026-09-27T08:00:01Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+      { eventid: "cowrie.session.closed", timestamp: "2026-09-27T08:00:02Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+    ]} />);
+
+    expect(html).toContain("Bound event chain");
+    expect(html).toContain("h-[min(65vh,28rem)] overflow-y-auto");
+    expect(html).toContain("grid-cols-[1rem_minmax(0,1fr)]");
+    expect(html).toContain("bg-primary-navy-line");
+    expect(html).toContain("Latest");
+    expect(html).not.toContain("overflow-x-auto");
+  });
+
+  it("keeps the newest bounded timeline window and marks its actual latest event", () => {
+    const items = Array.from({ length: 101 }, (_, index) => ({
+      eventid: "cowrie.session.connect",
+      timestamp: new Date(Date.UTC(2026, 8, 27, 8, 0, index)).toISOString(),
+      sensor_id: `event-${index}`,
+    }));
+    const html = renderToStaticMarkup(<TimelineList items={items} />);
+
+    expect(html).not.toContain("event-0");
+    expect(html).toContain("event-100");
+    expect(html.match(/>Latest<\/span>/g)).toHaveLength(1);
+  });
+
+  it("keeps source-IP recurrence rows within a sticky-header scroll frame", () => {
+    const sessions = Array.from({ length: 25 }, (_, index) => ({
+      session_id: `session-${index + 1}`,
+      first_seen: "2026-09-27T08:00:00Z",
+      last_seen: "2026-09-27T08:01:00Z",
+      sighting_count: index + 1,
+    }));
+    const html = renderToStaticMarkup(<SourcePivotSummary data={{
+      observable: { value: "192.0.2.10" },
+      counts: { sessions_found: sessions.length, sightings_examined: 325 },
+      provider_calls: false,
+      sessions,
+    }} />);
+
+    expect(html).toContain("max-h-[28rem] overflow-auto");
+    expect(html).toContain("sticky top-0");
+    expect(html).toContain("text-primary-navy");
+    expect(html).toContain("session-25");
+    expect(html).toContain("Repeated source-IP activity indicates recurrence only");
+  });
+
   it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
     const sourceIpCache = [
       { provider: "abuseipdb", cache_key: "abuse-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { abuse_confidence_score: 100, total_reports: 1809, country_code: "SE" } },
