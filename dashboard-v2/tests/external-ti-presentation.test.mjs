@@ -73,3 +73,16 @@ test("keeps freshness unknown until the client clock has been observed", () => {
   assert.equal(result.state, "TI_EXPIRED");
   assert.equal(result.freshCacheCount, 0);
 });
+
+test("disabled provider records do not make an unexecuted lookup fresh", () => {
+  const result = externalTiFreshness({
+    rawState: "TI_FRESH",
+    evidence: [
+      { provider: "otx", lookup_status: "DISABLED", freshness_state: "FRESH" },
+      { provider: "virustotal", lookup_status: "DISABLED", freshness_state: "FRESH" },
+    ],
+    asOf,
+  });
+  assert.equal(result.state, "UNAVAILABLE");
+  assert.equal(result.freshCacheCount, 0);
+});

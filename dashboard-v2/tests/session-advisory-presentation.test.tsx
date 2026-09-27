@@ -49,6 +49,34 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Existing action selected for review");
   });
 
+  it("resolves canonical and response-guidance AI selections from their distinct ledgers", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ status: "accepted", advisory: { validated_advisory: {
+        selected_finding_ids: ["canonical-1", "guidance-1"], ranked_action_ids: ["action-1"],
+      } } }}
+      behavioralFindings={[{ finding_id: "canonical-1", statement: "Observed transfer event" }]}
+      guidanceData={{ response_guidance: {
+        findings: [{ finding_id: "guidance-1", statement: "Review download evidence" }],
+        advisory_actions: [{ action_id: "action-1", description: "Preserve logs" }],
+      } }}
+    />);
+    expect(html).toContain("Observed transfer event");
+    expect(html).toContain("Review download evidence");
+    expect(html).toContain("Canonical behavioral finding");
+    expect(html).not.toContain("Some AI selections could not be matched");
+  });
+
+  it("does not present disabled provider records as fresh intelligence", () => {
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{ status: "TI_PENDING", status_reason_text: "Provider policy blocked", freshness: { state: "TI_FRESH" }, evidence: [
+        { provider: "otx", lookup_status: "DISABLED", freshness_state: "FRESH" },
+      ] }} observableData={{}} />);
+    expect(html).toContain("No provider lookup was executed");
+    expect(html).toMatch(/Provider lookups<\/dt><dd[^>]*>0<\/dd>/);
+    expect(html).not.toContain("ti fresh");
+    expect(html).not.toContain("freshness: FRESH");
+  });
+
   it("shows validated AI selections even when no narrative template was rendered", () => {
     const html = renderToStaticMarkup(<AiAdvisorySummary
       data={{ status: "accepted", advisory: {

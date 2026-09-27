@@ -26,6 +26,7 @@ import {
 } from "@/lib/session-intelligence";
 import {
   externalTiFreshness,
+  providerLookupExecuted,
   sourceIpCacheFreshness,
 } from "@/lib/external-ti-presentation";
 import { projectAdminCommandRecords } from "@/lib/session-command-projection";
@@ -939,6 +940,7 @@ function TrustedTraceability({ mapping }: { mapping: JsonRecord }) {
 }
 
 function tiLookupState(value: JsonRecord, freshnessOverride?: unknown): string {
+  if (!providerLookupExecuted(value)) return "UNAVAILABLE";
   const freshness = String(freshnessOverride ?? value.freshness_state ?? "").trim().toUpperCase();
   if (freshness === "STALE" || freshness === "EXPIRED" || freshness === "TI_EXPIRED" || freshness === "TI_STALE") return "STALE";
   const lookup = String(value.lookup_status || value.status || "").trim().toUpperCase();
@@ -947,6 +949,10 @@ function tiLookupState(value: JsonRecord, freshnessOverride?: unknown): string {
   if (["PROVIDER_ERROR", "ERROR", "RATE_LIMITED", "AUTH_FAILED", "REQUEST_FAILED"].includes(lookup)) return "ERROR";
   if (["DISABLED", "UNAVAILABLE", "AUTH_DISABLED", "BUDGET_EXHAUSTED", "INVALID_OBSERVABLE", "PENDING"].includes(lookup)) return "UNAVAILABLE";
   return "UNAVAILABLE";
+}
+
+function providerRecordFreshness(value: JsonRecord): string {
+  return providerLookupExecuted(value) ? freshnessLabel(value.freshness_state) : "NOT APPLICABLE";
 }
 
 function freshnessLabel(value: unknown): string {
@@ -1032,7 +1038,7 @@ function ProviderContextRows({
                 <span className="ui-badge text-[11px]">{tiLookupState(status)}</span>
               </div>
               <p className="mt-1 text-text-muted">
-                finding: {summaryValue(status.finding_state, "not recorded")} · freshness: {summaryValue(status.freshness_state, "not recorded")} · records: {countOf(status.record_count)}
+                finding: {summaryValue(status.finding_state, "not recorded")} · freshness: {providerRecordFreshness(status)} · records: {countOf(status.record_count)}
               </p>
               <TraceabilityDetails
                 title="Provider state details"
@@ -1042,7 +1048,7 @@ function ProviderContextRows({
                   ["Observable type", summaryValue(status.observable_type || observable.type, "Not recorded")],
                   ["Observable role", summaryValue(status.observable_role || observable.role, "Not recorded")],
                   ["Lookup state", tiLookupState(status)],
-                  ["Freshness", freshnessLabel(status.freshness_state)],
+                  ["Freshness", providerRecordFreshness(status)],
                   ["Retrieved at", summaryValue(status.retrieved_at || status.lookup_at, "Not recorded")],
                   ["Provider observed at", summaryValue(status.provider_observed_at, "Not recorded")],
                   ["Expires at", summaryValue(status.expires_at, "Not recorded")],
@@ -1062,7 +1068,7 @@ function ProviderContextRows({
               <span className="ui-badge text-[11px]">{tiLookupState(item)}</span>
             </div>
             <p className="mt-1 text-text-muted">
-              finding: {summaryValue(item.finding_state, "not recorded")} · freshness: {summaryValue(item.freshness_state, "not recorded")}
+              finding: {summaryValue(item.finding_state, "not recorded")} · freshness: {providerRecordFreshness(item)}
             </p>
             <p className="mt-1 text-text-muted">summary: {summaryValue(item.summary, "No provider finding summary stored.")}</p>
             <p className="mt-1 text-text-muted">
@@ -1076,7 +1082,7 @@ function ProviderContextRows({
                 ["Observable type", summaryValue(item.observable_type || observable.type, "Not recorded")],
                 ["Observable role", summaryValue(item.observable_role || observable.role, "Not recorded")],
                 ["Lookup state", tiLookupState(item)],
-                ["Freshness", freshnessLabel(item.freshness_state)],
+                ["Freshness", providerRecordFreshness(item)],
                 ["Retrieved at", summaryValue(item.retrieved_at, "Not recorded")],
                 ["Provider observed at", summaryValue(item.provider_observed_at, "Not recorded")],
                 ["Expires at", summaryValue(item.expires_at, "Not recorded")],
@@ -1256,10 +1262,12 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
     providerStatus,
     asOf,
   });
+  const executedCache = cache.filter(providerLookupExecuted);
+  const availableEvidence = evidence.filter(providerLookupExecuted);
   return (
     <>
-      <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
-        {evidence.length || cache.length ? `${cache.length} source-IP provider lookup result${cache.length === 1 ? "" : "s"} and ${evidence.length} separately linked finding${evidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+      <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (availableEvidence.length > 0 || executedCache.length > 0) ? "primary" : "warning"}>
+        {tiState.state === "UNAVAILABLE" ? `No provider lookup was executed for this session. ${summaryValue(sessionData.status_reason_text, "External intelligence is unavailable.")}` : evidence.length || cache.length ? `${executedCache.length} source-IP provider lookup result${executedCache.length === 1 ? "" : "s"} and ${availableEvidence.length} separately linked finding${availableEvidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
       </Insight>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
@@ -1268,8 +1276,8 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
       </div>
       <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Linked findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
-        ["Provider lookups", countOf(cache.length)],
+        ["Linked findings", countOf(availableEvidence.length)],
+        ["Provider lookups", countOf(executedCache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
       ]} />
       {jobSummary.pending === true && (
@@ -1585,7 +1593,7 @@ export function hasBoundAvailableModel2(data: JsonRecord): boolean {
   return hasBoundModel2(data);
 }
 
-export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {
+export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [] }: { data: JsonRecord; guidanceData: JsonRecord; behavioralFindings?: unknown[] }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
   const provenance = record(advisory.provenance);
@@ -1598,6 +1606,7 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   const validated = record(advisory.validated_advisory);
   const guidance = record(guidanceData.response_guidance);
   const guidanceFindings = list(guidance.findings).map(record);
+  const canonicalFindings = behavioralFindings.map(record);
   const guidanceActions = list(guidance.advisory_actions).map(record);
   // Provider selections are validated and stored independently of the optional
   // rendered policy templates. Empty paragraphs must not erase those choices.
@@ -1610,7 +1619,7 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
     ...paragraphs.flatMap((item) => list(item.action_ids)),
   ].map((id) => label(id, "")).filter(Boolean));
   const selectedRelationshipCount = list(validated.selected_relationship_ids).length;
-  const selectedFindings = guidanceFindings.filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
+  const selectedFindings = [...canonicalFindings, ...guidanceFindings].filter((item) => selectedFindingIds.has(label(item.finding_id, "")));
   const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
   const inaccurateStoredNarrative = selectedFindings.length > 0 && storedParagraphs.some((item) => label(item.text, "").includes("canonical finding"));
   const hasSelection = selectedFindingIds.size > 0 || selectedActionIds.size > 0;
@@ -1622,7 +1631,7 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
       {hasSelection && paragraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The AI selection is stored, but no rendered narrative was recorded. The linked evidence and actions below come from the verified guidance record.</p>}
       {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
         {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
-          <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{label(item.finding_type, "Response-guidance finding")}</span></div>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{canonicalFindings.includes(item) ? "Canonical behavioral finding" : "Response-guidance finding"}</span></div>
           {summaryValue(item.statement, "Statement unavailable")}
         </article>)}
         {selectedActions.map((item) => <article key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle/50 p-3 text-sm text-text">
@@ -2049,7 +2058,7 @@ export function SessionAnalysisPanels({
 
           <div className="mt-5 grid grid-cols-1 items-start gap-5 border-t border-border pt-5 xl:grid-cols-2">
             <Panel eyebrow="Stored AI advisory" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} variant="embedded">
-              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} />
+              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} />
             </Panel>
             {aiAdvisory.state === "ready" || aiAdvisory.state === "limited" ? (
               <PolicyGapSummary data={aiAdvisory.data} />
