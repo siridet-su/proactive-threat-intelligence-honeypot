@@ -94,14 +94,14 @@ function Insight({ title, children, tone = "primary" }: { title: string; childre
   );
 }
 
-function ScrollPanel({ title, count, children, className = "", height = "max-h-72" }: { title: string; count?: number; children: ReactNode; className?: string; height?: string }) {
+function ContentPanel({ title, count, children, className = "" }: { title: string; count?: number; children: ReactNode; className?: string }) {
   return (
     <section className={`overflow-hidden rounded-xl border border-border bg-surface ${className}`}>
       <div className="flex items-center justify-between gap-3 border-b border-border bg-surface-subtle px-3.5 py-2.5">
         <h3 className="text-xs font-semibold text-text">{title}</h3>
         {count !== undefined && <span className="ui-badge text-[10px]">{count}</span>}
       </div>
-      <div role="region" aria-label={title} tabIndex={0} className={`ui-scroll-region ${height} space-y-2 overflow-y-auto overscroll-contain scroll-smooth p-2.5 pr-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary`} style={{ scrollbarColor: "var(--border-strong) transparent", scrollbarWidth: "thin" }}>
+      <div className="space-y-2 p-3">
         {children}
       </div>
     </section>
@@ -119,6 +119,32 @@ function MoreDetails({ title, children }: { title: string; children: ReactNode }
 
 function readableCode(value: unknown): string {
   return label(value, "not recorded").replaceAll("_", " ").toLowerCase();
+}
+
+function timestampMillis(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim()));
+  const numericValue = numeric ? Number(value) : Number.NaN;
+  const timestamp = numeric
+    ? (Math.abs(numericValue) < 1_000_000_000_000 ? numericValue * 1000 : numericValue)
+    : Date.parse(String(value));
+  if (Number.isFinite(timestamp)) return timestamp;
+  const legacyUtc = String(value).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(UTC|GMT)$/i);
+  if (!legacyUtc) return null;
+  return Date.UTC(Number(legacyUtc[3]), Number(legacyUtc[2]) - 1, Number(legacyUtc[1]), Number(legacyUtc[4]), Number(legacyUtc[5]), Number(legacyUtc[6] || 0));
+}
+
+function thailandTimestamp(value: unknown): string {
+  if (!hasMeaningfulValue(value)) return "Not recorded";
+  if (["not recorded", "not available", "unavailable", "unknown", "n/a"].includes(String(value).trim().toLowerCase())) return "Not recorded";
+  const timestamp = timestampMillis(value);
+  if (timestamp === null) return "Not calculable";
+  const formatted = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(timestamp);
+  return `${formatted} ICT (UTC+7)`;
 }
 
 // Allow the bounded server projection to finish over the local SSH tunnel.
@@ -555,36 +581,36 @@ function TimelineList({ items }: { items: unknown[] }) {
   }
   return (
     <div className="space-y-3">
-      <Insight title="Activity at a glance">{orderedItems.length} connection, authentication, or lifecycle event{orderedItems.length === 1 ? "" : "s"} were recorded. Commands are shown separately in Command activity.</Insight>
-      <div className="flex flex-wrap gap-2" role="group" aria-label="Filter timeline events">
-        {filters.map(([key, title, count]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filter === key ? "border-primary bg-primary text-white shadow-sm" : "border-border bg-surface text-text-muted hover:border-primary-border hover:bg-primary-subtle hover:text-text"}`}>
-          {title}<span className="ml-1.5 opacity-70">{count}</span>
-        </button>)}
-      </div>
-      <ScrollPanel title={`Session timeline · ${filter === "all" ? "all activity" : filter.toLowerCase()}`} count={visibleItems.length} height="max-h-80">
-      <ol className="relative space-y-2 border-l border-primary-border pl-4">
+      <ContentPanel title="Session timeline" count={visibleItems.length}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-text-muted">{orderedItems.length} access and session events. Command input is listed separately.</p>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Filter timeline events">
+            {filters.map(([key, title, count]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)} className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${filter === key ? "border-primary bg-primary text-white shadow-sm" : "border-border bg-surface text-text-muted hover:border-primary-border hover:bg-primary-subtle hover:text-text"}`}>
+              {title}<span className="ml-1.5 opacity-70">{count}</span>
+            </button>)}
+          </div>
+        </div>
+      <ol className="grid gap-2 sm:grid-cols-2">
         {visibleItems.slice(0, 100).map((event, index) => {
-        const eventName = summaryValue(event.eventid || event.event_id || event.event_type, "event");
-        const timestamp = summaryValue(event.timestamp || event.received_at, "Timestamp unavailable");
-        const shortTime = timestamp.includes("T") ? `${timestamp.split("T")[1].slice(0, 8)} UTC` : timestamp;
-        const readableEvent = eventName.replace(/^cowrie\./i, "").replaceAll(".", " ");
+          const eventName = summaryValue(event.eventid || event.event_id || event.event_type, "event");
+          const timestampValue = event.timestamp || event.received_at;
+          const timestamp = summaryValue(timestampValue, "Timestamp unavailable");
+          const readableEvent = eventName.replace(/^cowrie\./i, "").replaceAll(".", " ");
         return (
-          <li key={`${index}-${eventName}-${timestamp}`} className="group relative rounded-lg border border-border bg-surface-subtle px-3 py-2.5 transition duration-150 hover:border-primary-border hover:bg-primary-subtle/40 hover:shadow-sm">
-            <span className="absolute -left-[21px] top-4 h-2.5 w-2.5 rounded-full border-2 border-surface bg-primary shadow-[0_0_0_2px_var(--primary-subtle)]" aria-hidden="true" />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-semibold capitalize text-text">{readableEvent}</span>
-              <time className="rounded-full bg-surface px-2 py-1 font-mono text-[10px] text-text-muted" dateTime={timestamp}>{shortTime}</time>
+          <li key={`${index}-${eventName}-${timestamp}`} className="rounded-lg border border-border bg-surface-subtle p-3 transition-colors hover:border-primary-border hover:bg-primary-subtle/30">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <span className="text-sm font-semibold capitalize text-text">{readableEvent}</span>
+                <p className="mt-1 text-[11px] text-text-muted">{category(event)} · {summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</p>
+              </div>
+              {event.processed === false && <span className="ui-badge border-warning-border bg-warning-subtle text-warning">Needs review</span>}
             </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">
-              <span className="rounded bg-surface px-2 py-0.5">{category(event)}</span>
-              <span>{summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</span>
-              {event.processed === false && <span className="rounded bg-warning-subtle px-2 py-0.5 text-warning">Needs review</span>}
-            </div>
+            <time className="mt-2 block font-mono text-xs text-text-muted" dateTime={hasMeaningfulValue(timestampValue) ? String(timestampValue) : undefined}>{hasMeaningfulValue(timestampValue) ? thailandTimestamp(timestampValue) : "Timestamp unavailable"}</time>
           </li>
         );
         })}
       </ol>
-      </ScrollPanel>
+      </ContentPanel>
     </div>
   );
 }
@@ -712,7 +738,7 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
   const timestamps = records
     .map((item) => String(item.timestamp || item.first_seen || "").trim())
     .filter(Boolean)
-    .sort();
+    .sort((left, right) => (timestampMillis(left) ?? 0) - (timestampMillis(right) ?? 0));
   const sessionIds = new Set(records.map((item) => String(item.session_id || "").trim()).filter(Boolean));
   const sightingIds = records.map((item) => String(item.sighting_id || "").trim()).filter(Boolean);
   const hasSightingMetadata = timestamps.length > 0 || sessionIds.size > 0 || sightingIds.length > 0;
@@ -722,8 +748,8 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
         ["Returned sightings", sightingIds.length ? String(sightingIds.length) : String(records.length)],
         ["Unique observables", String(groups.length)],
         ["Distinct sessions", sessionIds.size ? String(sessionIds.size) : "Not recorded"],
-        ["First seen", timestamps[0] || "Not recorded"],
-        ["Last seen", timestamps[timestamps.length - 1] || "Not recorded"],
+        ["First seen", thailandTimestamp(timestamps[0])],
+        ["Last seen", thailandTimestamp(timestamps[timestamps.length - 1])],
       ]} />}
       <ol className="mt-3 grid gap-2 xl:grid-cols-2">
         {groups.map((group, index) => {
@@ -748,7 +774,7 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
                         </div>
                         <div>
                           <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">Timestamp</dt>
-                          <dd className="mt-1 break-all font-mono text-[11px] text-text">{summaryValue(observable.timestamp || observable.first_seen, "Not recorded")}</dd>
+                          <dd className="mt-1 break-all font-mono text-[11px] text-text">{thailandTimestamp(observable.timestamp || observable.first_seen)}</dd>
                         </div>
                         <div>
                           <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">Source / event</dt>
@@ -971,8 +997,8 @@ function freshnessLabel(value: unknown): string {
 
 function dataAge(value: unknown): string {
   if (!hasMeaningfulValue(value)) return "Not recorded";
-  const timestamp = Date.parse(String(value));
-  if (!Number.isFinite(timestamp)) return "Not calculable";
+  const timestamp = timestampMillis(value);
+  if (timestamp === null) return "Not calculable";
   const ageSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
   if (ageSeconds < 60) return `${ageSeconds}s`;
   if (ageSeconds < 3_600) return `${Math.floor(ageSeconds / 60)}m`;
@@ -981,13 +1007,7 @@ function dataAge(value: unknown): string {
 }
 
 function tiTimestampLabel(value: unknown): string {
-  if (!hasMeaningfulValue(value)) return "Not recorded";
-  const timestamp = Date.parse(String(value));
-  if (!Number.isFinite(timestamp)) return "Not calculable";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(timestamp);
+  return thailandTimestamp(value);
 }
 
 function providerName(value: unknown): string {
@@ -1015,6 +1035,20 @@ function providerResult(provider: unknown, normalized: JsonRecord): string {
   return "Provider context is stored; inspect the details below for its bounded result.";
 }
 
+function normalizedProviderKey(value: unknown): string {
+  const key = String(value || "").trim().toLowerCase();
+  if (key.includes("abuseipdb")) return "abuseipdb";
+  if (key === "otx" || key.includes("alienvault")) return "otx";
+  if (key.includes("shodan")) return "shodan_official";
+  return key || "unknown_provider";
+}
+
+function latestProviderRecord(items: JsonRecord[], timestampField: string): JsonRecord | null {
+  return [...items].sort((left, right) => {
+    return (timestampMillis(right[timestampField]) ?? 0) - (timestampMillis(left[timestampField]) ?? 0);
+  })[0] ?? null;
+}
+
 function ProviderContextRows({
   evidence,
   cache,
@@ -1028,125 +1062,143 @@ function ProviderContextRows({
   observable: JsonRecord;
   asOf: number | null;
 }) {
-  const statuses = Object.entries(providerStatus)
-    .map(([provider, value]) => [provider, record(value)] as const)
-    .filter(([, value]) => Number(value.record_count || 0) > 0 || hasMeaningfulValue(value.lookup_status));
-  if (evidence.length === 0 && cache.length === 0 && statuses.length === 0) return null;
+  const providerGroups = new Map<string, { provider: string; status: JsonRecord | null; evidence: JsonRecord[]; cache: JsonRecord[] }>();
+  const getGroup = (provider: unknown) => {
+    const key = normalizedProviderKey(provider);
+    let group = providerGroups.get(key);
+    if (!group) {
+      group = { provider: key, status: null, evidence: [], cache: [] };
+      providerGroups.set(key, group);
+    }
+    return group;
+  };
+  for (const [provider, value] of Object.entries(providerStatus)) {
+    const status = record(value);
+    if (Number(status.record_count || 0) > 0 || hasMeaningfulValue(status.lookup_status)) {
+      getGroup(provider).status = status;
+    }
+  }
+  for (const item of evidence) getGroup(item.provider).evidence.push(item);
+  for (const item of cache) getGroup(item.provider).cache.push(item);
+  const groups = Array.from(providerGroups.values()).sort((left, right) => {
+    const order = ["abuseipdb", "otx", "shodan_official"];
+    const leftOrder = order.indexOf(left.provider);
+    const rightOrder = order.indexOf(right.provider);
+    if (leftOrder !== rightOrder) return (leftOrder < 0 ? order.length : leftOrder) - (rightOrder < 0 ? order.length : rightOrder);
+    return providerName(left.provider).localeCompare(providerName(right.provider));
+  });
+  if (groups.length === 0) return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No provider status, lookup result, or linked finding was returned for this observable.</p>;
   return (
-    <div className="mt-3 space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-[0.1em] text-text-subtle">Stored provider context · non-authoritative</p>
-      {statuses.length > 0 && (
-        <ol className="space-y-2">
-          {statuses.slice(0, 12).map(([provider, status]) => (
-            <li key={provider} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-mono font-semibold text-text">{provider}</span>
-                <span className="ui-badge text-[11px]">{tiLookupState(status)}</span>
+    <div className="space-y-3">
+      <p className="text-xs text-text-muted">Provider context is non-authoritative. Each card combines the lookup state, cached result, and any separately linked finding for that provider.</p>
+      <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {groups.slice(0, 12).map((group) => {
+          const latestCache = latestProviderRecord(group.cache, "lookup_at");
+          const latestEvidence = latestProviderRecord(group.evidence, "retrieved_at");
+          const status = group.status;
+          const source = latestCache || latestEvidence || status || {};
+          const lookupWasExecuted = Boolean(latestCache)
+            || Boolean(latestEvidence && providerLookupExecuted(latestEvidence))
+            || Boolean(status && hasMeaningfulValue(status.lookup_status) && providerLookupExecuted(status));
+          const normalized = record(latestCache?.normalized_context);
+          const cacheFreshness = latestCache ? sourceIpCacheFreshness(latestCache, asOf) : undefined;
+          const freshness = latestCache ? freshnessLabel(cacheFreshness) : providerRecordFreshness(latestEvidence || status || {});
+          const lookupState = latestCache
+            ? tiLookupState(latestCache, cacheFreshness)
+            : latestEvidence
+              ? tiLookupState(latestEvidence)
+              : status
+                ? tiLookupState(status)
+                : "UNAVAILABLE";
+          const context = selectedProviderFields(normalized).filter(([key]) => key !== "pulses");
+          const pulses = list(normalized.pulses).map(record);
+          const extension = latestEvidence ? selectedProviderFields(latestEvidence.normalized_extension) : [];
+          const reportedAt = latestCache?.lookup_at || latestEvidence?.retrieved_at || status?.retrieved_at || status?.lookup_at;
+          const expiresAt = latestCache?.expires_at || latestEvidence?.expires_at || status?.expires_at;
+          const provider = group.provider;
+          return (
+            <li key={provider} className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 shadow-sm">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h4 className="text-base font-semibold text-text">{providerName(provider)}</h4>
+                  <p className="mt-1 text-xs text-text-muted">{latestCache ? "Source-IP lookup" : latestEvidence ? "Linked provider finding" : "Provider status"}</p>
+                </div>
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  <span className={`ui-badge text-[10px] ${lookupState === "ERROR" || lookupState === "UNAVAILABLE" ? "border-warning-border bg-warning-subtle text-warning" : ""}`}>{readableCode(lookupState)}</span>
+                  <span className="ui-badge text-[10px]">{readableCode(freshness)}</span>
+                </div>
               </div>
-              <p className="mt-1 text-text-muted">
-                finding: {summaryValue(status.finding_state, "not recorded")} · freshness: {providerRecordFreshness(status)} · records: {countOf(status.record_count)}
+
+              {latestCache ? (
+                <>
+                  <p className="mt-3 text-sm leading-6 text-text">{providerResult(provider, normalized)}</p>
+                  {provider === "otx" && pulses.length > 0 && <p className="mt-1 text-xs text-text-muted">Example pulse: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
+                </>
+              ) : latestEvidence ? (
+                <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-3">
+                  <p className="text-xs font-semibold text-text">Finding: {readableCode(latestEvidence.finding_state || "not recorded")}</p>
+                  <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(latestEvidence.summary, "No provider finding summary stored.")}</p>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs leading-5 text-text-muted">
+                  {lookupWasExecuted ? `No normalized provider result is available. State: ${summaryValue(source.lookup_status || source.status, "not reported")}.` : status && hasMeaningfulValue(status.lookup_status) ? `No provider lookup was executed. State: ${summaryValue(status.lookup_status, "not reported")}.` : "Provider lookup state was not reported and no normalized result was returned."}
+                </div>
+              )}
+
+              {(latestEvidence || status) && <p className="mt-2 text-xs text-text-muted">
+                Linked finding{group.evidence.length === 1 ? "" : "s"}: {group.evidence.length ? `${group.evidence.length} · ${readableCode(latestEvidence?.finding_state || "not recorded")}` : "none"}
+                {status && hasMeaningfulValue(status.record_count) ? ` · provider records: ${countOf(status.record_count)}` : ""}
+              </p>}
+              <p className="mt-auto pt-3 text-xs leading-5 text-text-muted">
+                {lookupWasExecuted ? "Checked" : "Recorded"} {tiTimestampLabel(reportedAt)}
+                {hasMeaningfulValue(expiresAt) ? ` · valid until ${tiTimestampLabel(expiresAt)}` : lookupWasExecuted ? " · expiry not recorded" : status && hasMeaningfulValue(status.lookup_status) ? " · provider not queried" : " · lookup state not reported"}
               </p>
+
               <TraceabilityDetails
-                title="Provider state details"
+                title="Lookup provenance and technical details"
                 fields={[
-                  ["Provider", provider],
-                  ["Observable", summaryValue(status.observable_value || observable.value, "Not recorded")],
-                  ["Observable type", summaryValue(status.observable_type || observable.type, "Not recorded")],
-                  ["Observable role", summaryValue(status.observable_role || observable.role, "Not recorded")],
-                  ["Lookup state", tiLookupState(status)],
-                  ["Freshness", providerRecordFreshness(status)],
-                  ["Retrieved at", summaryValue(status.retrieved_at || status.lookup_at, "Not recorded")],
-                  ["Provider observed at", summaryValue(status.provider_observed_at, "Not recorded")],
-                  ["Expires at", summaryValue(status.expires_at, "Not recorded")],
-                  ["Data age", dataAge(status.retrieved_at || status.lookup_at)],
+                  ["Provider", providerName(provider)],
+                  ["Observable", summaryValue(latestCache?.observable_value || latestEvidence?.observable_value || record(latestEvidence?.safe_observable_reference).display_value || status?.observable_value || observable.value, "Not recorded")],
+                  ["Observable type", summaryValue(latestCache?.observable_type || latestEvidence?.observable_type || status?.observable_type || observable.type, "source_ip")],
+                  ["Observable role", summaryValue(latestCache?.observable_role || latestEvidence?.observable_role || status?.observable_role || "source_ip", "Not recorded")],
+                  ["Lookup state", lookupState],
+                  ["Freshness", freshness],
+                  ["Retrieved at", thailandTimestamp(reportedAt)],
+                  ["Provider observed at", thailandTimestamp(latestCache?.provider_observed_at || latestEvidence?.provider_observed_at || status?.provider_observed_at)],
+                  ["Expires at", thailandTimestamp(expiresAt)],
+                  ["Data age", dataAge(reportedAt)],
+                  ["Session binding", summaryValue(latestEvidence?.session_id || latestCache?.session_id, "Not recorded")],
+                  ["Finding state", summaryValue(latestEvidence?.finding_state || status?.finding_state, "Not recorded")],
+                  ["Provider record count", countOf(status?.record_count)],
                 ]}
               />
+
+              {(context.length > 0 || extension.length > 0) && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
+                <summary className="cursor-pointer font-semibold text-text">Additional provider fields</summary>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">
+                  {[...context, ...extension].slice(0, 16).map(([key, value]) => (
+                    <div key={key} className="min-w-0 rounded-md border border-border bg-surface-subtle p-2">
+                      <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">{readableCode(key)}</dt>
+                      <dd className="mt-1 break-words text-xs text-text">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>}
+
+              {group.evidence.length > 1 && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
+                <summary className="cursor-pointer font-semibold text-text">Other linked findings · {group.evidence.length - 1}</summary>
+                <ol className="mt-3 space-y-2">
+                  {group.evidence.filter((item) => item !== latestEvidence).slice(0, 10).map((item, index) => <li key={`${index}-${label(item.evidence_id, "finding")}`} className="rounded-md border border-border bg-surface-subtle p-2">
+                    <p className="font-semibold text-text">{readableCode(item.finding_state || "not recorded")}</p>
+                    <p className="mt-1 text-text-muted">{summaryValue(item.summary, "No provider finding summary stored.")}</p>
+                    <p className="mt-1 text-[11px] text-text-subtle">{thailandTimestamp(item.retrieved_at)} · evidence {summaryValue(item.evidence_id, "not linked")}</p>
+                  </li>)}
+                </ol>
+              </details>}
             </li>
-          ))}
-        </ol>
-      )}
-      {evidence.slice(0, 20).map((item, index) => {
-        const extension = selectedProviderFields(item.normalized_extension);
-        return (
-          <div key={`evidence-${index}-${summaryValue(item.evidence_id, "provider")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="font-mono font-semibold text-text">{summaryValue(item.provider, "provider unavailable")}</span>
-              <span className="ui-badge text-[11px]">{tiLookupState(item)}</span>
-            </div>
-            <p className="mt-1 text-text-muted">
-              finding: {summaryValue(item.finding_state, "not recorded")} · freshness: {providerRecordFreshness(item)}
-            </p>
-            <p className="mt-1 text-text-muted">summary: {summaryValue(item.summary, "No provider finding summary stored.")}</p>
-            <p className="mt-1 text-text-muted">
-              {providerLookupExecuted(item) ? "retrieved" : "recorded"}: {summaryValue(item.retrieved_at, "Not recorded")}{providerLookupExecuted(item) ? ` · expires: ${summaryValue(item.expires_at, "Not recorded")}` : " · provider not queried"}
-            </p>
-            <TraceabilityDetails
-              title="Provider and observable traceability"
-              fields={[
-                ["Provider", summaryValue(item.provider, "Not recorded")],
-                ["Observable", summaryValue(item.observable_value || record(item.safe_observable_reference).display_value || observable.value, "Not recorded")],
-                ["Observable type", summaryValue(item.observable_type || observable.type, "Not recorded")],
-                ["Observable role", summaryValue(item.observable_role || observable.role, "Not recorded")],
-                ["Lookup state", tiLookupState(item)],
-                ["Freshness", providerRecordFreshness(item)],
-                ["Retrieved at", summaryValue(item.retrieved_at, "Not recorded")],
-                ["Provider observed at", summaryValue(item.provider_observed_at, "Not recorded")],
-                ["Expires at", summaryValue(item.expires_at, "Not recorded")],
-                ["Data age", dataAge(item.retrieved_at)],
-                ["Session binding", summaryValue(item.session_id, "Not recorded")],
-              ]}
-            />
-            {providerLookupExecuted(item) && extension.length > 0 && (
-              <dl className="mt-2 grid gap-2 sm:grid-cols-2">
-                {extension.map(([key, value]) => (
-                  <div key={key} className="rounded border border-border bg-surface p-2">
-                    <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">{key.replaceAll("_", " ")}</dt>
-                    <dd className="mt-1 break-words font-mono text-[11px] text-text">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-          </div>
-        );
-      })}
-      {cache.slice(0, 20).map((item, index) => {
-        const normalized = record(item.normalized_context);
-        const context = selectedProviderFields(normalized).filter(([key]) => key !== "pulses");
-        const pulses = list(normalized.pulses).map(record);
-        const freshness = sourceIpCacheFreshness(item, asOf);
-        return (
-          <div key={`cache-${index}-${summaryValue(item.provider, "provider")}`} className="rounded-xl border border-border bg-surface p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-base font-semibold text-text">{providerName(item.provider)}</span>
-              <span className="ui-badge text-xs">{freshnessLabel(freshness)}</span>
-            </div>
-            <p className="mt-2 text-sm leading-6 text-text">{providerResult(item.provider, normalized)}</p>
-            {item.provider === "otx" && pulses.length > 0 && <p className="mt-1 text-sm text-text-muted">Example: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
-            <p className="mt-2 text-xs text-text-muted">Checked {tiTimestampLabel(item.lookup_at)} · valid until {tiTimestampLabel(item.expires_at)}</p>
-            <TraceabilityDetails
-              title="Lookup provenance and technical details"
-              fields={[
-                ["Provider", summaryValue(item.provider, "Not recorded")],
-                ["Observable", summaryValue(item.observable_value || observable.value, "Not recorded")],
-                ["Observable type", summaryValue(item.observable_type || observable.type, "source_ip")],
-                ["Observable role", summaryValue(item.observable_role || "source_ip", "Not recorded")],
-                ["Lookup state", tiLookupState(item, freshness)],
-                ["Freshness", freshnessLabel(freshness)],
-                ["Retrieved at", summaryValue(item.lookup_at, "Not recorded")],
-                ["Provider observed at", summaryValue(item.provider_observed_at, "Not recorded")],
-                ["Expires at", summaryValue(item.expires_at, "Not recorded")],
-                ["Data age", dataAge(item.lookup_at)],
-              ]}
-            />
-            {context.length > 0 && <details className="mt-3 rounded-lg border border-border p-3 text-sm"><summary className="cursor-pointer font-medium text-text">Additional provider fields</summary><dl className="mt-3 grid gap-2 sm:grid-cols-2">{context.slice(0, 12).map(([key, value]) => (
-              <div key={key} className="rounded-md border border-border bg-surface-subtle p-2">
-                <dt className="text-xs text-text-subtle">{readableCode(key)}</dt>
-                <dd className="mt-1 break-words text-sm text-text">{value}</dd>
-              </div>
-            ))}</dl></details>}
-          </div>
-        );
-      })}
+          );
+        })}
+      </ol>
     </div>
   );
 }
@@ -1165,7 +1217,7 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
         ["Failed", countOf(data.failure_count)],
       ]} />
       {attempts.length > 0 && (
-        <ScrollPanel title="Login activity" count={attempts.length} height="max-h-64">
+        <ContentPanel title="Login activity" count={attempts.length}>
         <ol className="space-y-2">
           {attempts.slice(0, 20).map((attempt, index) => (
             <li key={`${index}-${summaryValue(attempt.timestamp, "attempt")}`} className="flex items-start gap-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
@@ -1175,18 +1227,18 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
               <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-semibold capitalize text-text">{readableCode(attempt.outcome || "login attempt")}</span>
-                <span className="font-mono text-text-muted">{summaryValue(attempt.timestamp, "Timestamp unavailable")}</span>
+                <time className="font-mono text-text-muted" dateTime={String(attempt.timestamp || "")}>{thailandTimestamp(attempt.timestamp)}</time>
               </div>
               <p className="mt-1 text-text-muted">Account: <span className="font-mono text-text">{analystAttackerUsername(attempt) || summaryValue(attempt.username_visibility, "Not retained")}</span>{hasMeaningfulValue(attempt.method) ? ` · method: ${readableCode(attempt.method)}` : ""}</p>
               </div>
             </li>
           ))}
         </ol>
-        </ScrollPanel>
+        </ContentPanel>
       )}
       <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-text-muted">
-        <span>First seen: {summaryValue(data.first_attempt_at, "Not recorded")}</span>
-        <span>Last seen: {summaryValue(data.last_attempt_at, "Not recorded")}</span>
+        <span>First seen: {thailandTimestamp(data.first_attempt_at)}</span>
+        <span>Last seen: {thailandTimestamp(data.last_attempt_at)}</span>
       </div>
     </div>
   );
@@ -1195,24 +1247,40 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
 function SourcePivotSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const sessions = list(data.sessions).map(record);
+  const sourceIp = summaryValue(record(data.observable).value, "Source IP not recorded");
   return (
     <div className="space-y-3">
-      <Insight title="Source-IP recurrence">{summaryValue(record(data.observable).value, "This source")} appears in {countOf(counts.sessions_found)} recorded session{Number(counts.sessions_found) === 1 ? "" : "s"}. This is repeated source context, not attribution.</Insight>
-      <MetricStrip fields={[
-        ["Sessions found", countOf(counts.sessions_found)],
-        ["Sightings examined", countOf(counts.sightings_examined)],
-        ["Provider calls", data.provider_calls === false ? "0" : "Not reported"],
-      ]} />
+      <section className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Repeated source observable</p>
+            <p className="mt-1 break-all font-mono text-xl font-semibold text-text">{sourceIp}</p>
+            <p className="mt-1 text-sm text-text-muted">Seen in {countOf(counts.sessions_found)} recorded session{Number(counts.sessions_found) === 1 ? "" : "s"} within the returned pivot results.</p>
+          </div>
+          <span className="ui-badge shrink-0">Context only · not attribution</span>
+        </div>
+        <dl className="mt-4 grid gap-2 sm:grid-cols-3">
+          {[
+            ["Related sessions", countOf(counts.sessions_found)],
+            ["Sightings examined", countOf(counts.sightings_examined)],
+            ["Provider calls", data.provider_calls === false ? "0" : "Not reported"],
+          ].map(([title, value]) => <div key={title} className="rounded-lg border border-border bg-surface-subtle px-3 py-2.5">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-subtle">{title}</dt>
+            <dd className="mt-1 text-sm font-semibold text-text">{value}</dd>
+          </div>)}
+        </dl>
+        <p className="mt-3 text-xs leading-5 text-text-muted">A shared source IP can represent a shared network address. Recurrence alone does not prove that the same person controlled each session, establish intent, or determine maliciousness.</p>
+      </section>
       {sessions.length > 0 && (
-        <ScrollPanel title="Related sessions" count={sessions.length} height="max-h-80">
-        <ol className="space-y-2">
+        <ContentPanel title="Related sessions" count={sessions.length}>
+        <ol className="grid gap-3 sm:grid-cols-2">
           {sessions.slice(0, 20).map((session, index) => (
-            <li key={`${index}-${summaryValue(session.session_id, "session")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border hover:bg-primary-subtle/30">
+            <li key={`${index}-${summaryValue(session.session_id, "session")}`} className="min-w-0 rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(session.session_id, "Session unavailable")}</span>
                 <span className="ui-badge text-[11px]">{countOf(session.sighting_count)} sightings</span>
               </div>
-              <p className="mt-1 text-text-muted"><time>{summaryValue(session.first_seen, "First seen unavailable")}</time> <span aria-hidden="true">→</span> <time>{summaryValue(session.last_seen, "Last seen unavailable")}</time></p>
+              <p className="mt-2 text-text-muted"><span>First: </span><time dateTime={String(session.first_seen || "")}>{thailandTimestamp(session.first_seen)}</time><span className="mx-1" aria-hidden="true">→</span><span>Last: </span><time dateTime={String(session.last_seen || "")}>{thailandTimestamp(session.last_seen)}</time></p>
               <TraceabilityDetails
                 title="Observable recurrence details"
                 fields={[
@@ -1220,16 +1288,15 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
                   ["Sources", traceList(session.sources)],
                   ["Sensor IDs", traceList(session.sensor_ids)],
                   ["Sighting count", countOf(session.sighting_count)],
-                  ["First seen", summaryValue(session.first_seen, "Not recorded")],
-                  ["Last seen", summaryValue(session.last_seen, "Not recorded")],
+                  ["First seen", thailandTimestamp(session.first_seen)],
+                  ["Last seen", thailandTimestamp(session.last_seen)],
                 ]}
               />
             </li>
           ))}
         </ol>
-        </ScrollPanel>
+        </ContentPanel>
       )}
-      <p className="text-xs text-text-subtle">Repeated source context does not establish attribution, intent, or classification.</p>
     </div>
   );
 }
@@ -1275,19 +1342,39 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
     ? unavailableReason : `No provider lookup was executed for this session. ${unavailableReason}`;
   return (
     <>
-      <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (availableEvidence.length > 0 || executedCache.length > 0) ? "primary" : "warning"}>
-        {tiState.state === "UNAVAILABLE" ? unavailableMessage : evidence.length || cache.length ? `${executedCache.length} source-IP provider lookup result${executedCache.length === 1 ? "" : "s"} and ${availableEvidence.length} separately linked finding${availableEvidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
-      </Insight>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
-        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Observable: {summaryValue(observable.value, "Not available")}</span>
-        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Last lookup: {tiState.state === "UNAVAILABLE" ? "Not executed" : tiTimestampLabel(tiState.latestRetrievedAt)}</span>
-      </div>
+      <section className="rounded-xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-primary">External intelligence overview</p>
+            <h3 className="mt-1 text-base font-semibold text-text">Provider results for this observable</h3>
+            <p className="mt-1 text-sm leading-6 text-text-muted">
+              {tiState.state === "UNAVAILABLE"
+                ? unavailableMessage
+                : evidence.length || cache.length
+                  ? `${executedCache.length} stored lookup result${executedCache.length === 1 ? "" : "s"} and ${availableEvidence.length} linked provider finding${availableEvidence.length === 1 ? "" : "s"}. Inspect each provider card and its freshness below.`
+                  : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+            </p>
+          </div>
+          <span className={`ui-badge shrink-0 ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
+        </div>
+        <dl className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            ["Observable", summaryValue(observable.value, "Not available")],
+            ["Eligible observables", countOf(sessionCounts.eligible_observables)],
+            ["Provider lookups", countOf(executedCache.length)],
+            ["Last lookup", tiState.state === "UNAVAILABLE" ? "Not executed" : tiTimestampLabel(tiState.latestRetrievedAt)],
+          ].map(([title, value]) => <div key={title} className="min-w-0 rounded-lg border border-border bg-surface-subtle px-3 py-2.5">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-text-subtle">{title}</dt>
+            <dd className="mt-1 break-words text-sm font-medium text-text">{value}</dd>
+          </div>)}
+        </dl>
+        <p className="mt-3 text-xs leading-5 text-text-muted">Provider reputation, pulse matches, and Internet exposure are contextual attributes. They do not confirm this session’s behavior, identify an actor, or authorize a response.</p>
+      </section>
       <MetricStrip fields={[
-        ["Eligible observables", countOf(sessionCounts.eligible_observables)],
         ["Linked findings", countOf(availableEvidence.length)],
-        ["Provider lookups", countOf(executedCache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
+        ["Fresh cache results", countOf(tiState.freshCacheCount)],
+        ["Stale results", countOf(tiState.staleCacheCount + tiState.staleEvidenceCount)],
       ]} />
       {jobSummary.pending === true && (
         <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-text-muted">
@@ -1300,10 +1387,10 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
           Fresh source-IP cache data is available ({tiState.freshCacheCount} provider result{tiState.freshCacheCount === 1 ? "" : "s"}); older stored provider evidence is stale ({tiState.staleEvidenceCount} record{tiState.staleEvidenceCount === 1 ? "" : "s"}). Freshness is shown per record below.
         </p>
       )}
-      {entities.length > 0 && <ScrollPanel title="Shared entities" count={entities.length} height="max-h-64"><ObservableList items={entities} empty="No shared entities are recorded." /></ScrollPanel>}
-      <ScrollPanel title="What the providers reported" count={evidence.length + cache.length} height="max-h-[32rem]">
+      {entities.length > 0 && <ContentPanel title="Related observables and sightings" count={entities.length}><ObservableList items={entities} empty="No shared entities are recorded." /></ContentPanel>}
+      <ContentPanel title="Provider details" count={new Set([...evidence.map((item) => normalizedProviderKey(item.provider)), ...cache.map((item) => normalizedProviderKey(item.provider)), ...Object.keys(providerStatus).filter((provider) => hasMeaningfulRecord(record(providerStatus[provider]))).map(normalizedProviderKey)]).size}>
         <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
-      </ScrollPanel>
+      </ContentPanel>
       {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (
         <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this session. Read state: {readableCode(summary.uncertainty || sessionData.status || "context only")}.</p>
       )}
@@ -1355,7 +1442,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
         <p className="mt-2 text-xs text-text-muted">These are assessment gates, not missing classification records. An observed command is not proof that its effect succeeded.</p>
       </div>}
       {sessionFamilies.length > 0 && (
-        <ScrollPanel title="Behavior checks across this session" count={sessionFamilies.length} height="max-h-80">
+        <ContentPanel title="Behavior checks across this session" count={sessionFamilies.length}>
           <p className="mb-2 px-1 text-[11px] text-text-muted">Each behavior family shows whether observed evidence passed its review gate.</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {sessionFamilies.map((family, index) => (
@@ -1369,7 +1456,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
               </li>
             ))}
           </ul>
-        </ScrollPanel>
+        </ContentPanel>
       )}
       {contextualHypotheses.length > 0 && (
         <section className="rounded-xl border border-warning-border bg-warning-subtle/30 p-3" aria-label="Related ATT&CK context">
@@ -1393,7 +1480,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
         </section>
       )}
       {hypothesisSets.length > 0 && (
-        <ScrollPanel title="Evidence-bounded hypothesis sets" count={hypothesisSets.length} height="max-h-80">
+        <ContentPanel title="Evidence-bounded hypothesis sets" count={hypothesisSets.length}>
         <ol className="space-y-2">
           {hypothesisSets.slice(0, 10).map((hypothesisSet, index) => (
             <li key={`${index}-${summaryValue(hypothesisSet.hypothesis_set_id, "hypothesis-set")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
@@ -1408,7 +1495,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
             </li>
           ))}
         </ol>
-        </ScrollPanel>
+        </ContentPanel>
       )}
       {hypotheses.length === 0 && hypothesisSets.length === 0 && <div className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text-muted">No session-correlated ATT&amp;CK context was recorded.</div>}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2 text-[11px] text-text-subtle">
@@ -1452,7 +1539,7 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
         <span className="rounded-full border border-warning-border bg-warning-subtle px-3 py-1.5 text-xs text-warning">{guidance.requires_manual_approval === false ? "Manual approval not required" : "Manual approval required"}</span>
       </div>
       {actions.length > 0 ? (
-        <ScrollPanel title="Suggested analyst actions" count={actions.length} height="max-h-80">
+        <ContentPanel title="Suggested analyst actions" count={actions.length}>
         <ol className="space-y-2">
           {actions.slice(0, 20).map((action, index) => (
             <li key={`${index}-${summaryValue(action.action_id, "action")}`} className="rounded-lg border border-primary-border bg-primary-subtle/30 p-3 text-sm transition-colors hover:bg-primary-subtle/60">
@@ -1467,7 +1554,7 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
             </li>
           ))}
         </ol>
-        </ScrollPanel>
+        </ContentPanel>
       ) : <p className="mt-3 text-xs text-text-muted">No stored recommendation content is available.</p>}
       {unmatchedFindingCount !== null && unmatchedFindingCount > 0 && (
         <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
@@ -1605,7 +1692,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         ["Measurement ID", summaryValue(model2.measurement_id || binding.measurement_id, "Not reported")],
         ["Episode ID", summaryValue(model2.episode_id || binding.episode_id, "Not reported")],
         ["Score-level model ensemble", ensemble.fused_score === null ? "NONE (fused_score=null)" : display(ensemble.fused_score)],
-        ["Computed at", summaryValue(ensemble.ensemble_computed_at, "Not reported")],
+        ["Computed at", thailandTimestamp(ensemble.ensemble_computed_at)],
       ]} />
       </MoreDetails>
     </div>
@@ -1660,7 +1747,7 @@ export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [],
         {hasSelection ? `AI selected ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for review${selectedRelationshipCount ? `, with ${selectedRelationshipCount} relationship${selectedRelationshipCount === 1 ? "" : "s"}` : ""}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
       </Insight>
       {hasSelection && paragraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The AI selection is stored, but no rendered narrative was recorded. The linked evidence and actions below come from the verified guidance record.</p>}
-      {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
+      {hasSelection && <ContentPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size}>
         {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
           <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{canonicalFindings.includes(item) ? "Canonical behavioral finding" : "Response-guidance finding"}</span></div>
           {summaryValue(item.statement, "Statement unavailable")}
@@ -1671,7 +1758,7 @@ export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [],
           <p className="font-semibold">{summaryValue(item.description, "Action description unavailable")}</p>
           {hasMeaningfulValue(item.rationale) && <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(item.rationale)}</p>}
         </article>)}
-      </ScrollPanel>}
+      </ContentPanel>}
       {(selectedFindingIds.size > selectedFindings.length || selectedActionIds.size > selectedActions.length) && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">Some AI selections could not be matched to the stored evidence or action details.</p>}
       {inaccurateStoredNarrative && displayParagraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The stored text calls this a canonical finding, but its selected ID belongs to response guidance. The item shown above comes from the verified guidance record.</p>}
       <MoreDetails title="AI provider, validation and original response">
@@ -1699,7 +1786,7 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
         <span className="ui-badge text-[11px]">Not approved policy</span>
       </div>
       <p className="mt-2 text-sm text-text">{proposals.length ? `AI proposed ${proposals.length} possible pattern${proposals.length === 1 ? "" : "s"} to investigate. These are not verified findings or new response actions.` : "AI did not propose a new pattern for this session."}</p>
-      {proposals.length > 0 && <ScrollPanel title="Candidate patterns to review" count={proposals.length} height="max-h-96">
+      {proposals.length > 0 && <ContentPanel title="Candidate patterns to review" count={proposals.length}>
         <ol className="space-y-2">
           {proposals.slice(0, 8).map((proposal, index) => {
             const predicates = record(proposal.predicates);
@@ -1724,7 +1811,7 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
             </li>;
           })}
         </ol>
-      </ScrollPanel>}
+      </ContentPanel>}
       {proposals.length === 0 && <p className="mt-3 rounded-lg border border-border bg-surface p-3 text-sm text-text-muted">No policy-gap candidate was proposed for this session.</p>}
       <MoreDetails title="Policy proposal safeguards">
       <SummaryGrid fields={[

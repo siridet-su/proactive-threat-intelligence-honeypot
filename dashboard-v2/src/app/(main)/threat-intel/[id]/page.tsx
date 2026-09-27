@@ -74,12 +74,52 @@ function commandInput(value: unknown): string | null {
   return analystCommandText(value);
 }
 
+function thailandTimestamp(value: unknown): string {
+  if (value === null || value === undefined || value === "" || ["not recorded", "not available", "unavailable", "unknown", "n/a"].includes(String(value).trim().toLowerCase())) return "Not recorded";
+  const numeric = typeof value === "number" || (typeof value === "string" && /^\d+(?:\.\d+)?$/.test(value.trim()));
+  const numericValue = numeric ? Number(value) : Number.NaN;
+  let timestamp = numeric
+    ? (Math.abs(numericValue) < 1_000_000_000_000 ? numericValue * 1000 : numericValue)
+    : Date.parse(String(value));
+  if (!Number.isFinite(timestamp)) {
+    const legacyUtc = String(value).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(UTC|GMT)$/i);
+    if (legacyUtc) timestamp = Date.UTC(Number(legacyUtc[3]), Number(legacyUtc[2]) - 1, Number(legacyUtc[1]), Number(legacyUtc[4]), Number(legacyUtc[5]), Number(legacyUtc[6] || 0));
+  }
+  if (!Number.isFinite(timestamp)) return "Not calculable";
+  const formatted = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(timestamp);
+  return `${formatted} ICT (UTC+7)`;
+}
+
 function commandTimestamp(value: unknown): string {
   const item = recordValue(value);
-  const timestamp = authoritativeEventTimestamp(item);
-  if (typeof timestamp === "string" && timestamp.trim()) return timestamp;
-  if (typeof timestamp === "number" && Number.isFinite(timestamp)) return String(timestamp);
-  return "Not recorded";
+  return thailandTimestamp(authoritativeEventTimestamp(item));
+}
+
+function commandClockTime(value: unknown): string {
+  const item = recordValue(value);
+  const raw = authoritativeEventTimestamp(item);
+  if (raw === null || raw === undefined || raw === "") return "—";
+  const numeric = typeof raw === "number" || (typeof raw === "string" && /^\d+(?:\.\d+)?$/.test(raw.trim()));
+  const numericValue = numeric ? Number(raw) : Number.NaN;
+  let timestamp = numeric
+    ? (Math.abs(numericValue) < 1_000_000_000_000 ? numericValue * 1000 : numericValue)
+    : Date.parse(String(raw));
+  if (!Number.isFinite(timestamp)) {
+    const legacyUtc = String(raw).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(UTC|GMT)$/i);
+    if (legacyUtc) timestamp = Date.UTC(Number(legacyUtc[3]), Number(legacyUtc[2]) - 1, Number(legacyUtc[1]), Number(legacyUtc[4]), Number(legacyUtc[5]), Number(legacyUtc[6] || 0));
+  }
+  if (!Number.isFinite(timestamp)) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(timestamp);
 }
 
 function commandEventId(value: unknown): string {
@@ -154,9 +194,8 @@ function nextDistinctState(result: NextDistinctResult): {
     : isEnded
       ? "The final observed path is authoritative for this closed session; no session-end class is emitted."
       : "Read-only Next-Distinct PoC projection; no fallback inference path is used.");
-  const updatedAt = textValue(
+  const updatedAt = thailandTimestamp(
     data.timestamp || data.generated_at || data.updated_at || freshness.as_of || freshness.updated_at,
-    "Not recorded"
   );
 
   return {
@@ -787,11 +826,12 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const protocol = threatData?.protocol || textValue(detailOverview.protocol);
   const sensor = threatData?.sensor || textValue(detailOverview.sensor);
   const durationCandidate = textValue(detailOverview.duration || threatData?.duration);
-  const capturedAt = threatData ? threatData.date + " " + threatData.time : textValue(detailOverview.start_time);
-  const endTime = textValue(
+  const capturedAt = thailandTimestamp(detailOverview.start_time || (threatData ? threatData.date + " " + threatData.time : undefined));
+  const rawEndTime = textValue(
     detailOverview.end_time,
     sessionLifecycleStatus(detailData) === "Active" ? "Active" : "Not recorded"
   );
+  const endTime = ["Active", "Not recorded"].includes(rawEndTime) ? rawEndTime : thailandTimestamp(rawEndTime);
   const observedDurationSeconds = Math.max(
     0,
     Math.round(
@@ -1132,7 +1172,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                             )}
                           </div>
                           <div className="text-[10px] text-slate-500 shrink-0 mt-1 whitespace-nowrap">
-                            {commandTimestamp(command).split(" ")[1]}
+                            {commandClockTime(command)} ICT
                           </div>
                         </li>
                       );
