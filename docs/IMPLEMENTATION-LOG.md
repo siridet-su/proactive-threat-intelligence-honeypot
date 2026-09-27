@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Choose temporary backup dates as an inclusive range
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make temporary schedule dates easier to understand by selecting the first and last backup day rather than entering a start date and counting days manually.
+- Repository branch and commit/PR: `feat/backup-schedule-range-picker`; commit and PR follow this entry.
+- Repository changes: turn the rolling calendar into an inclusive range picker with start/end highlights, a 90-day end bound, and 1/7/30-day shortcuts. Show the selected range and computed duration in the form and current schedule summary. Prefill an existing temporary override with its remaining dates. Keep the existing `start_date` plus `days` API payload and document the UI conversion.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at the permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. The new range controls are available in the local development Dashboard when reloaded.
+- Validation performed and outcome: two targeted Dashboard component tests passed for an inclusive seven-day range crossing September into October and the 90-day maximum. TypeScript check, lint, production build, and `git diff --check` passed locally. CI remains pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the picker limits the start to today through the next 365 Bangkok days and the inclusive duration to 1–90 days; the server still validates both. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect range selection in an authenticated light/dark browser session and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Show upcoming dates in the backup schedule calendar
 
 - Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.

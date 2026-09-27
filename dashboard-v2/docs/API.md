@@ -73,6 +73,11 @@ Dashboard never sends a systemd command or B2 credential.
   365 days ahead and last 1–90 days. The permanent base remains intact while
   a temporary override is active.
 
+The Dashboard temporary form lets Admins choose the first and last backup
+dates as an inclusive range. It calculates `days` from that range before
+calling the existing preview and save endpoints; the API contract remains
+`start_date` plus `days`.
+
 The Pi control worker claims at most one scheduled run per Bangkok date. A
 time moved into the past causes one catch-up run if today's run has not
 completed. Manual hardware actions retain their separate request contract.

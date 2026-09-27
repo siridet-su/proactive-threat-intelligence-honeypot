@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { CalendarClock, Clock3, RotateCcw, ShieldCheck } from "lucide-react";
 
-import { ScheduleDatePicker, ScheduleNumberPicker } from "@/components/dashboard/BackupSchedulePickers";
+import { ScheduleNumberPicker, ScheduleRangePicker } from "@/components/dashboard/BackupSchedulePickers";
 import type { BackupScheduleEdit, BackupSchedulePreview, BackupScheduleSettings, BackupScheduleView } from "@/lib/backupSchedule";
 
 type EditMode = "permanent" | "temporary" | "clear_override";
@@ -26,6 +26,10 @@ function validView(value: unknown): value is BackupScheduleView {
 
 function overrideEndDate(startDate: string, days: number): string {
   return new Date(Date.parse(`${startDate}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function overrideLastDate(startDate: string, days: number): string {
+  return new Date(Date.parse(`${startDate}T00:00:00Z`) + (days - 1) * 86_400_000).toISOString().slice(0, 10);
 }
 
 export function BackupScheduleSettings() {
@@ -123,6 +127,17 @@ export function BackupScheduleSettings() {
     setPreview(null);
     setSaved(false);
   }
+  function selectTemporaryMode() {
+    if (!view) return;
+    setMode("temporary");
+    changeTime(temporary?.time ?? "01:00");
+    const draftStart = temporary && temporary.start_date > view.local_date ? temporary.start_date : view.local_date;
+    const remainingDays = temporary
+      ? Math.max(1, Math.round((Date.parse(`${overrideEndDate(temporary.start_date, temporary.days)}T00:00:00Z`) - Date.parse(`${draftStart}T00:00:00Z`)) / 86_400_000))
+      : 7;
+    setStartDate(draftStart);
+    setDays(remainingDays);
+  }
   return (
     <section className="relative z-20 rounded-2xl border border-border bg-surface shadow-sm" aria-labelledby="backup-schedule-title">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
@@ -138,7 +153,7 @@ export function BackupScheduleSettings() {
       <div className="grid gap-5 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
         <div className="space-y-3 rounded-xl border border-border bg-surface-subtle p-4 text-sm">
           <div><span className="text-text-muted">Permanent time</span><p className="mt-0.5 font-mono font-semibold text-text">{settings?.base_time ?? "—"}</p></div>
-          <div><span className="text-text-muted">Temporary change</span><p className="mt-0.5 text-text">{temporary ? `${temporary.time} · ${temporary.start_date} for ${temporary.days} day${temporary.days === 1 ? "" : "s"}` : "None"}</p></div>
+          <div><span className="text-text-muted">Temporary change</span><p className="mt-0.5 text-text">{temporary ? `${temporary.time} · ${temporary.start_date} – ${overrideLastDate(temporary.start_date, temporary.days)} (${temporary.days} day${temporary.days === 1 ? "" : "s"})` : "None"}</p></div>
           <div><span className="text-text-muted">Today&apos;s scheduled run</span><p className="mt-0.5 text-text">{view?.today_run_status === "success" ? "Completed" : view?.today_run_status === "running" ? "Running" : view?.today_run_status === "failed" ? "Retry pending" : "Not run yet"}</p></div>
           {temporary && <p className="text-xs text-text-muted">Returns to the permanent time on {formatBangkok(view?.preview.return_at ?? null)}.</p>}
           <p className="text-xs text-text-muted">Archive days use UTC with a two-day safety hold. Coverage follows the latest scheduled run.</p>
@@ -151,7 +166,7 @@ export function BackupScheduleSettings() {
               <legend className="text-sm font-semibold">Change schedule</legend>
               <div className="flex flex-wrap gap-2 text-sm">
                 <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "permanent" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); changeTime(settings?.base_time ?? "03:30"); }} />Permanent</label>
-                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={() => { setMode("temporary"); changeTime(temporary?.time ?? "01:00"); setStartDate(view.local_date); setDays(temporary?.days ?? 7); }} />Temporary</label>
+                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={selectTemporaryMode} />Temporary</label>
                 {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); setPreview(null); }} />Return to permanent</label>}
               </div>
               <AnimatePresence initial={false} mode="wait">
@@ -168,10 +183,7 @@ export function BackupScheduleSettings() {
                   {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
                 </div>
               </div>
-              {mode === "temporary" && <div className="grid gap-3 sm:grid-cols-2">
-                <ScheduleDatePicker value={startDate} today={view.local_date} disabled={!editable || busy} onChange={(day) => { setStartDate(day); setPreview(null); }} />
-                <label className="block text-xs text-text-muted">Number of days<input className="ui-field mt-1 w-full" type="number" min={1} max={90} value={days} onChange={(event) => { setDays(Number(event.target.value)); setPreview(null); }} required /></label>
-              </div>}
+              {mode === "temporary" && <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); setSaved(false); }} />}
               </motion.div>}
               </AnimatePresence>
               <button type="button" className="ui-button min-h-9 px-3 text-xs" onClick={() => void previewChange()}>Preview change</button>
