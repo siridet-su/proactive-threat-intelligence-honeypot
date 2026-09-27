@@ -294,11 +294,13 @@ def with_rrf_advisory(
         latest_event_at=latest_event_at,
     )
     result["ensemble_method_comparison"] = {
-        "status": "BOTH_RETAINED_PENDING_FIELD_EVALUATION",
+        "status": "POC_WEIGHTED_VOTING_SELECTED",
         "primary_review_method": "evidence_gated_weighted_voting",
+        "selection_scope": "CONTROLLED_SYNTHETIC_POC_ADVISORY_ONLY",
+        "field_performance_status": "NOT_ESTABLISHED",
         "methods": ["evidence_gated_weighted_voting", "evidence_gated_reciprocal_rank_fusion"],
         "controlled_synthetic_leader": "evidence_gated_weighted_voting",
         "production_winner": None,
-        "reason": "controlled synthetic results are not real-world accuracy",
+        "reason": "weighted voting led the five-method controlled synthetic comparison; field accuracy is unmeasured",
     }
     return result

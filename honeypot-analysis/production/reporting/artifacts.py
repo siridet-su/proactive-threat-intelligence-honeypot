@@ -2419,7 +2419,7 @@ def write_pdf_report(
     ):
         story.append(_p(
             "Model2 does not run either ensemble formula internally. The downstream advisory layer "
-            "uses gated weighted voting for the primary review order and retains gated reciprocal-rank "
+            "selects gated weighted voting for the PoC review order and retains gated reciprocal-rank "
             "as an experimental comparator. Both start "
             "with Model1 candidates and may add support only when the matching "
             "exact-session Model2 head reports PRESENT and passes its evidence gate. Model2 cannot "
@@ -2448,8 +2448,8 @@ def write_pdf_report(
                 small,
             ))
         story.append(_p(
-            "Controlled synthetic comparison favors weighted voting, but no field-performance "
-            "winner is claimed.", small,
+            "Weighted voting led the controlled synthetic comparison and is selected for this PoC. "
+            "Field accuracy and superiority over the comparator are not established.", small,
         ))
     else:
         story.append(_p(

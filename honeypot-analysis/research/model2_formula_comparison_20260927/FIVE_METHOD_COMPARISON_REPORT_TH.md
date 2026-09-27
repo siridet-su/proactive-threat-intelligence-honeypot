@@ -4,7 +4,7 @@
 
 ผลรอบนี้เป็น `CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY` เท่านั้น ชุด SEALED_FINAL มี 120 แถวจาก 30 procedure families ซึ่งแยก family จาก FIT/SELECTION แต่ label ยังอยู่ใน corpus ไฟล์เดียวกัน ไม่ใช่ blind holdout ที่ฝากไว้กับบุคคลอิสระ ดังนั้นใช้ตัดสินกลไก PoC ได้ แต่ห้ามเขียนว่าเป็นความแม่นยำบนทราฟฟิกจริง
 
-ในชุดนี้ **Model1 + Model2 ใหม่ 54F + Weighted Voting ได้ผลดีที่สุด**: Hit@1 = 0.8750, MRR = 0.8750 และ nDCG@5 = 0.8508 อย่างไรก็ตามยังไม่ประกาศเป็น production winner เพราะไม่มี paired field evaluation ที่ independently adjudicated ทั้ง Weighted Voting และ Gated Weighted Reciprocal-Rank จึงถูกเก็บไว้พร้อมกันเพื่อเปรียบเทียบต่อ โดยหน้า live/PDF ต้องเรียกทั้งสองว่า advisory late-fusion ไม่ใช่ probability/confidence และไม่ใช้เลือก response อัตโนมัติ
+ในชุดนี้ **Model1 + Model2 ใหม่ 54F + Weighted Voting ได้ผลดีที่สุด**: Hit@1 = 0.8750, MRR = 0.8750 และ nDCG@5 = 0.8508 จึง **เลือก Weighted Voting เป็นสูตรจัดลำดับคำแนะนำของ PoC นี้** และเก็บ Gated Weighted Reciprocal-Rank เป็นตัวเปรียบเทียบ การเลือกสูตรสำหรับ PoC ไม่ใช่การยืนยันว่าแม่นยำที่สุดกับทราฟฟิกจริง เพราะยังไม่มี paired field evaluation ที่ independently adjudicated ทั้งสองสูตรเป็น advisory late-fusion ไม่ใช่ probability/confidence และไม่ใช้เลือก response อัตโนมัติ
 
 ## Artifact ที่ใช้
 
@@ -58,9 +58,9 @@ Gate นี้เป็น evidence eligibility ไม่ได้แก้ห�
 
 ## ข้อจำกัดและสถานะใช้งาน
 
-- Weighted Voting เป็นผู้นำเฉพาะ controlled synthetic set นี้
-- Gated Weighted Reciprocal-Rank ยังเก็บไว้เป็น comparator ตามสูตรในรายงาน
-- ระบบต้องแสดงทั้งสอง order จนมี paired field evaluation ก่อนเลือก production winner
+- Weighted Voting เป็นสูตรที่เลือกใช้จัดลำดับคำแนะนำใน PoC ตามผล controlled synthetic set นี้
+- Gated Weighted Reciprocal-Rank ยังเก็บไว้เป็น comparator ตามสูตรในรายงาน ไม่ใช่ลำดับหลัก
+- ระบบแสดงทั้งสอง order เพื่อความโปร่งใส แต่ยังไม่อ้างว่าประสิทธิภาพใน field เหนือกว่าวิธีอื่น
 - Model2 ยังคงเป็น non-authoritative shadow; ห้ามสร้าง canonical finding หรือสั่ง response
 - คะแนนทั้งสองสูตรเป็น ordinal advisory score ไม่ใช่ probability/confidence
 - Model2 32F ที่ไม่มี Zeek flow เป็น unavailable และ fallback ไป Model1-only

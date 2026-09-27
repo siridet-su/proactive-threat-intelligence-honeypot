@@ -1483,7 +1483,6 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const recommendations = rankTtpRecommendations(data);
   const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
   const weighted = record(record(data.session_ttp_advisory).weighted_voting_recommendation);
-  const methodComparison = record(record(data.session_ttp_advisory).ensemble_method_comparison);
   const weightedReady = weighted.schema_version === "session_ttp_weighted_voting_advisory.v1"
     && weighted.session_id === data.session_id
     && recommendations.some((item) => item.rankingScore !== null);
@@ -1513,12 +1512,12 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <p className="font-semibold">Why Model2 is partial</p>
         <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
       </div>}
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the only source of candidates. Two late-fusion ranking candidates are retained for evaluation: 0.5/0.5 gated weighted voting and gated weighted reciprocal-rank. Model2 PRESENT can promote only an existing Model1 candidate; ABSENT never subtracts. Native model scores are never added together or treated as probabilities.</p>
+      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the only source of candidates. Gated weighted voting (0.5/0.5) is selected for this PoC review order; gated reciprocal-rank is retained as a comparator. Model2 PRESENT can promote only an existing Model1 candidate; ABSENT never subtracts. Native model scores are never added together or treated as probabilities.</p>
       {weighted.schema_version === "session_ttp_weighted_voting_advisory.v1" && <div className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
         <p className="font-semibold text-text">Ensemble formula comparison</p>
         <p className="mt-1">Weighted voting order: {list(weighted.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
         <p className="mt-1">Reciprocal-rank order: {list(rrf.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
-        <p className="mt-1">Status: {readableCode(methodComparison.status || "comparison pending")}. Controlled synthetic results favor weighted voting, but no production winner is claimed without paired field evaluation.</p>
+        <p className="mt-1">Selected for this PoC: weighted voting. It led the controlled synthetic comparison; field accuracy and superiority are not established. Reciprocal-rank remains a comparator.</p>
       </div>}
       {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-2">

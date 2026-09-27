@@ -46,6 +46,8 @@ describe("Model1 + Model2 advisory panel", () => {
     expect(html).toContain("Model1 only");
     expect(html).toContain("Weighted vote score");
     expect(html).toContain("0.5*I(Model1 candidate)");
+    expect(html).toContain("selected for this PoC review order");
+    expect(html).toContain("field accuracy and superiority are not established");
     expect(html).not.toContain("RRF rank score");
     expect(html).not.toContain("priority score");
     expect(html).not.toContain("Confidence: ");

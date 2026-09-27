@@ -109,7 +109,10 @@ class RrfTests(unittest.TestCase):
 
     def test_projection_marks_weighted_voting_as_primary_and_rrf_as_comparator(self):
         result = module.with_rrf_advisory(advisory(), ensemble(), session_id="s1", session_ended=True)
+        self.assertEqual(result["ensemble_method_comparison"]["status"], "POC_WEIGHTED_VOTING_SELECTED")
         self.assertEqual(result["ensemble_method_comparison"]["primary_review_method"], "evidence_gated_weighted_voting")
+        self.assertEqual(result["ensemble_method_comparison"]["selection_scope"], "CONTROLLED_SYNTHETIC_POC_ADVISORY_ONLY")
+        self.assertEqual(result["ensemble_method_comparison"]["field_performance_status"], "NOT_ESTABLISHED")
         self.assertEqual(result["ensemble_method_comparison"]["production_winner"], None)
         self.assertEqual(result["weighted_voting_recommendation"]["recommendation_order"][0], "T1105")
 
