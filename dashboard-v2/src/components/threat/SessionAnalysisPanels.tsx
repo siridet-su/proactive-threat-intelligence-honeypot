@@ -1072,7 +1072,7 @@ function ProviderContextRows({
             </p>
             <p className="mt-1 text-text-muted">summary: {summaryValue(item.summary, "No provider finding summary stored.")}</p>
             <p className="mt-1 text-text-muted">
-              retrieved: {summaryValue(item.retrieved_at, "Not recorded")} · expires: {summaryValue(item.expires_at, "Not recorded")}
+              {providerLookupExecuted(item) ? "retrieved" : "recorded"}: {summaryValue(item.retrieved_at, "Not recorded")}{providerLookupExecuted(item) ? ` · expires: ${summaryValue(item.expires_at, "Not recorded")}` : " · provider not queried"}
             </p>
             <TraceabilityDetails
               title="Provider and observable traceability"
@@ -1090,7 +1090,7 @@ function ProviderContextRows({
                 ["Session binding", summaryValue(item.session_id, "Not recorded")],
               ]}
             />
-            {extension.length > 0 && (
+            {providerLookupExecuted(item) && extension.length > 0 && (
               <dl className="mt-2 grid gap-2 sm:grid-cols-2">
                 {extension.map(([key, value]) => (
                   <div key={key} className="rounded border border-border bg-surface p-2">
@@ -1264,15 +1264,18 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   });
   const executedCache = cache.filter(providerLookupExecuted);
   const availableEvidence = evidence.filter(providerLookupExecuted);
+  const unavailableReason = summaryValue(sessionData.status_reason_text, "External intelligence is unavailable.");
+  const unavailableMessage = unavailableReason.toLowerCase().includes("no provider lookup")
+    ? unavailableReason : `No provider lookup was executed for this session. ${unavailableReason}`;
   return (
     <>
       <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (availableEvidence.length > 0 || executedCache.length > 0) ? "primary" : "warning"}>
-        {tiState.state === "UNAVAILABLE" ? `No provider lookup was executed for this session. ${summaryValue(sessionData.status_reason_text, "External intelligence is unavailable.")}` : evidence.length || cache.length ? `${executedCache.length} source-IP provider lookup result${executedCache.length === 1 ? "" : "s"} and ${availableEvidence.length} separately linked finding${availableEvidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+        {tiState.state === "UNAVAILABLE" ? unavailableMessage : evidence.length || cache.length ? `${executedCache.length} source-IP provider lookup result${executedCache.length === 1 ? "" : "s"} and ${availableEvidence.length} separately linked finding${availableEvidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
       </Insight>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
         <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Observable: {summaryValue(observable.value, "Not available")}</span>
-        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Last lookup: {tiTimestampLabel(tiState.latestRetrievedAt)}</span>
+        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Last lookup: {tiState.state === "UNAVAILABLE" ? "Not executed" : tiTimestampLabel(tiState.latestRetrievedAt)}</span>
       </div>
       <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],

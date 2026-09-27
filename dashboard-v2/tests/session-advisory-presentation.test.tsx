@@ -86,6 +86,8 @@ describe("session assessment presentation", () => {
     expect(html).toMatch(/Provider lookups<\/dt><dd[^>]*>0<\/dd>/);
     expect(html).not.toContain("ti fresh");
     expect(html).not.toContain("freshness: FRESH");
+    expect(html).toContain("Last lookup: Not executed");
+    expect(html).toContain("provider not queried");
   });
 
   it("shows validated AI selections even when no narrative template was rendered", () => {
