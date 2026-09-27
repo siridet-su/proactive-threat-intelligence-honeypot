@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Reorganize the backup schedule overview
+
+- Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: remove the tall, mostly empty schedule summary panel and give the current schedule, temporary change, and today's run balanced space above the editor.
+- Repository branch and commit/PR: `feat/backup-schedule-overview-layout`; commit and PR follow this entry.
+- Repository changes: replace the stretched left/right card layout with three compact status tiles, place the editor below in responsive time and scope columns, move the one-run guidance beside the scope control, and present the preview as a horizontal confirmation row. Preserve the mode transitions, temporary range picker, preview, three-second Undo, and backend no-op check. No schedule/API behavior changes.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi and stored schedule are unaffected; the local Dashboard displays this layout when the new UI code is loaded.
+- Validation performed and outcome: Dashboard TypeScript check, targeted schedule picker and Undo tests (4/4), targeted ESLint, production build, and `git diff --check` passed. Chromium mock-data visual review covered wide and narrow layouts, both schedule modes, and the range calendar.
+- Not performed / deferred: live Admin edit, production Dashboard deployment, and next scheduled Pi run verification were not performed for this UI change.
+- Risks and data handling: responsive columns leave calendar popovers free to overlay neighboring space; schedule authorization and server validation remain unchanged. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the overview with live Admin data after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Prevent identical backup schedule revisions
 
 - Status: repository Dashboard and API change prepared; local development Dashboard uses it when reloaded.
