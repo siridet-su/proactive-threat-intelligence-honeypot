@@ -29,6 +29,12 @@ function cacheLookupSucceeded(item: ExternalTiRecord): boolean {
   );
 }
 
+export function providerLookupExecuted(item: ExternalTiRecord): boolean {
+  return !["DISABLED", "AUTH_DISABLED", "BUDGET_EXHAUSTED", "INVALID_OBSERVABLE", "PENDING", "POLICY_BLOCKED", "UNAVAILABLE", "ERROR", "PROVIDER_ERROR", "RATE_LIMITED", "AUTH_FAILED", "REQUEST_FAILED", "SKIPPED"].includes(
+    normalized(item.lookup_status ?? item.status),
+  );
+}
+
 export function sourceIpCacheFreshness(
   item: ExternalTiRecord,
   asOf: string | number | Date | null = Date.now(),
@@ -95,6 +101,10 @@ export function externalTiFreshness(input: {
   if (freshCacheCount > 0 && staleEvidenceCount > 0) state = "MIXED";
   else if (freshCacheCount > 0) state = "FRESH";
   else if (staleEvidenceCount > 0 && !state) state = "STALE";
+  const records = [...(input.cache ?? []), ...(input.evidence ?? [])];
+  if (records.length > 0 && records.every((item) => !providerLookupExecuted(item))) {
+    state = "UNAVAILABLE";
+  }
 
   return {
     state,

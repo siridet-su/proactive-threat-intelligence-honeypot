@@ -152,6 +152,18 @@ def _config(tmp_path: Path) -> monitor_web.MonitorConfig:
     )
 
 
+def test_compact_detail_exposes_bounded_canonical_findings_for_ai_selection(tmp_path: Path) -> None:
+    storage = DetailStorage(report_payload_extra={"behavioral_findings": [
+        {"finding_id": "canonical-1", "finding_type": "observed_transfer", "statement": "Observed file transfer", "status": "supported", "internal": "not public"},
+    ]})
+    detail = monitor_web.load_dashboard_session_detail(_config(tmp_path), SESSION_ID, _storage=storage)
+    findings = session_detail_view(detail, compact=True)["behavioral_findings"]
+    assert findings == [{
+        "finding_id": "canonical-1", "finding_type": "observed_transfer",
+        "statement": "Observed file transfer", "status": "supported",
+    }]
+
+
 def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
     tmp_path: Path,
     monkeypatch,

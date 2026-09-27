@@ -13,6 +13,9 @@
   --border: #CBD5E1;
   --border-strong: #94A3B8;
   --primary: #B45309;
+  --color-primary-navy: #18227A;
+  --color-primary-navy-soft: color-mix(in srgb, var(--color-primary-navy) 4%, var(--surface));
+  --color-primary-navy-line: color-mix(in srgb, var(--color-primary-navy) 30%, var(--border));
   --primary-action: #D97706;
   --primary-action-hover: #B45309;
   --on-primary: #FFFFFF;
@@ -54,6 +57,9 @@
   --border: #334155;
   --border-strong: #475569;
   --primary: #FBBF24;
+  --color-primary-navy: #A5B4FC;
+  --color-primary-navy-soft: color-mix(in srgb, var(--color-primary-navy) 7%, var(--surface));
+  --color-primary-navy-line: color-mix(in srgb, var(--color-primary-navy) 34%, var(--border));
   --primary-action: #F59E0B;
   --primary-action-hover: #D97706;
   --on-primary: #FFFFFF;
@@ -204,6 +210,10 @@
 
 @layer components {
   .ui-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); transition: background-color 150ms, border-color 150ms, box-shadow 150ms, transform 150ms; }
+  .text-primary-navy { color: var(--color-primary-navy); }
+  .bg-primary-navy-soft { background-color: var(--color-primary-navy-soft); }
+  .border-primary-navy-line { border-color: var(--color-primary-navy-line); }
+  .bg-primary-navy-line { background-color: var(--color-primary-navy-line); }
   .ui-panel-interactive:hover { border-color: var(--border-strong); box-shadow: var(--shadow-raised); transform: translateY(-2px); }
   .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; transition: all 150ms ease; }
   .ui-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); box-shadow: var(--shadow-card); transform: translateY(-1px); }

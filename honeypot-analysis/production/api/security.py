@@ -1211,6 +1211,11 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         "hypothesis_sets": _compact_hypothesis_sets(
             detail.get("hypothesis_sets")
         ),
+        "behavioral_findings": [
+            _pick(item, ("finding_id", "finding_type", "statement", "status"))
+            for item in (detail.get("behavioral_findings") or [])[:50]
+            if isinstance(item, Mapping) and item.get("finding_id")
+        ],
         "session_hypothesis_assessment": _compact_session_hypothesis_assessment(
             detail.get("session_hypothesis_assessment")
         ),

@@ -29,6 +29,7 @@ ATLAS_FLEX_CAPACITY_BYTES = 5_000_000_000
 CANONICAL_DATABASE = "honeypot_canonical_v1"
 SCHEMA_MANIFEST_ID = load_mongodb_schema_manifest().sha256
 RUNTIME_ROLE_ID = load_mongodb_runtime_identity().sha256
+SUCCESSOR_RELEASE_RECEIPT_DIR = Path("/etc/honeypot/storage_release_successors")
 POLICY_BINDING_FIELDS = {
     "classification_rules_file_sha256",
     "classification_trust_policy_file_sha256",
@@ -248,7 +249,13 @@ def verify_runtime_deployment(
     }
 
 
-def require_active_release(receipt: Dict[str, Any]) -> str:
+def require_active_release(
+    receipt: Dict[str, Any],
+    *,
+    release_root: Path | None = None,
+    successor_path: Path | None = None,
+    trusted_uid: int = 0,
+) -> str:
     configured = str(os.getenv("DEPLOYED_COMMIT") or "").strip()
     candidates = [configured] if configured else []
     for root in (Path.cwd(), Path(__file__).resolve().parents[2]):
@@ -257,8 +264,7 @@ def require_active_release(receipt: Dict[str, Any]) -> str:
         except OSError:
             pass
     expected = str(receipt["reviewed_release_sha"])
-    if expected not in candidates:
-        raise ValueError("storage epoch receipt does not bind the active release")
+    legacy_commit_matches = expected in candidates
     expected_tree = str(receipt["reviewed_release_tree"])
     configured_tree = str(os.getenv("DEPLOYED_TREE") or "").strip()
     tree_candidates = [configured_tree] if configured_tree else []
@@ -274,11 +280,76 @@ def require_active_release(receipt: Dict[str, Any]) -> str:
                 target.append((root / name).read_text(encoding="utf-8").strip())
             except OSError:
                 pass
-    if expected_tree not in tree_candidates:
-        raise ValueError("storage epoch receipt does not bind the active release tree")
-    if expected_manifest not in manifest_candidates:
-        raise ValueError("storage epoch receipt does not bind the active release manifest")
-    return expected
+    legacy_tree_matches = expected_tree in tree_candidates
+    legacy_manifest_matches = expected_manifest in manifest_candidates
+    if legacy_commit_matches:
+        if not legacy_tree_matches:
+            raise ValueError("storage epoch receipt does not bind the active release tree")
+        if not legacy_manifest_matches:
+            raise ValueError("storage epoch receipt does not bind the active release manifest")
+        return expected
+
+    # The epoch receipt remains an immutable cutover record. A later release
+    # needs an independently protected, exact successor receipt; historical
+    # markers alone must never authorize a different source tree.
+    root = release_root or Path(__file__).resolve().parents[2]
+    root = root.resolve()
+    if release_root is None and Path("/opt/honeypot").resolve() != root:
+        raise ValueError("active release pointer does not select running source")
+    marker = root / "DEPLOYED_COMMIT"
+    marker_info = marker.lstat()
+    if (not stat.S_ISREG(marker_info.st_mode) or marker_info.st_uid != trusted_uid
+            or marker_info.st_mode & 0o022):
+        raise ValueError("successor release marker is unsafe")
+    deployed_sha = marker.read_text(encoding="utf-8").strip()
+    if len(deployed_sha) != 40 or any(character not in "0123456789abcdef" for character in deployed_sha):
+        raise ValueError("successor release marker is invalid")
+    successor_path = successor_path or SUCCESSOR_RELEASE_RECEIPT_DIR / f"{deployed_sha}.json"
+    info = successor_path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != trusted_uid or info.st_mode & 0o022:
+        raise ValueError("successor receipt has unsafe ownership or mode")
+    if info.st_size > 4096:
+        raise ValueError("successor receipt is too large")
+    successor = json.loads(successor_path.read_text(encoding="utf-8"))
+    fields = {
+        "schema_version", "epoch_receipt_sha256", "release_sha",
+        "release_tree_sha256", "release_manifest_sha256", "receipt_sha256",
+    }
+    if not isinstance(successor, dict) or set(successor) != fields:
+        raise ValueError("successor receipt fields are invalid")
+    if successor["schema_version"] != "storage_release_successor.v1":
+        raise ValueError("successor receipt schema is invalid")
+    for name in fields - {"schema_version", "release_sha"}:
+        _require_sha256(successor[name], name)
+    release_sha = str(successor["release_sha"])
+    if len(release_sha) != 40 or any(character not in "0123456789abcdef" for character in release_sha):
+        raise ValueError("successor release SHA is invalid")
+    if successor["receipt_sha256"] != _digest(successor, "receipt_sha256"):
+        raise ValueError("successor receipt hash mismatch")
+    if successor["epoch_receipt_sha256"] != receipt["receipt_sha256"]:
+        raise ValueError("successor receipt does not bind storage epoch")
+    root_info = root.stat()
+    if root_info.st_uid != trusted_uid or root_info.st_mode & 0o022:
+        raise ValueError("successor release has unsafe ownership or mode")
+    if deployed_sha != release_sha:
+        raise ValueError("successor receipt does not bind deployed commit")
+    manifest_path = root / "DEPLOYMENT_MANIFEST.json"
+    manifest_info = manifest_path.lstat()
+    if not stat.S_ISREG(manifest_info.st_mode) or manifest_info.st_uid != trusted_uid or manifest_info.st_mode & 0o022:
+        raise ValueError("successor release manifest is missing")
+    if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != successor["release_manifest_sha256"]:
+        raise ValueError("successor release manifest hash mismatch")
+    # The privileged deployment gate verifies the entire manifest before
+    # issuing this root-owned receipt. The unprivileged runtime cannot read
+    # the root-protected source package and model/config receipts, so it pins
+    # their already-verified manifest bytes and the immutable release tree.
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if (manifest.get("schema_version") != "honeypot_release_manifest.v7"
+            or manifest.get("git_revision") != release_sha
+            or manifest.get("release_tree_sha256") != successor["release_tree_sha256"]
+            or Path(str(manifest.get("release_path") or "")).resolve() != root):
+        raise ValueError("successor receipt does not bind verified release")
+    return release_sha
 
 
 def capacity_policy() -> Dict[str, Any]:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
+import os
 
 import pytest
 
@@ -302,6 +304,73 @@ def test_epoch_receipt_rejects_other_release_tree_or_manifest(tmp_path, monkeypa
     monkeypatch.setenv("RELEASE_MANIFEST_SHA256", "0" * 64)
     with pytest.raises(ValueError, match="release manifest"):
         require_active_release(receipt)
+
+
+def _successor_release(tmp_path, receipt):
+    root = tmp_path / "successor"
+    root.mkdir()
+    revision = "a" * 40
+    tree = "b" * 64
+    (root / "DEPLOYED_COMMIT").write_text(revision + "\n")
+    manifest = {
+        "schema_version": "honeypot_release_manifest.v7",
+        "git_revision": revision,
+        "release_tree_sha256": tree,
+        "release_path": str(root),
+    }
+    manifest_path = root / "DEPLOYMENT_MANIFEST.json"
+    manifest_path.write_text(stable_json(manifest) + "\n")
+    successor = {
+        "schema_version": "storage_release_successor.v1",
+        "epoch_receipt_sha256": receipt["receipt_sha256"],
+        "release_sha": revision,
+        "release_tree_sha256": tree,
+        "release_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    }
+    successor["receipt_sha256"] = hashlib.sha256(stable_json(successor).encode()).hexdigest()
+    path = tmp_path / "successor.json"
+    path.write_text(stable_json(successor) + "\n")
+    return root, path, successor
+
+
+def test_protected_successor_release_binds_immutable_epoch(tmp_path, monkeypatch):
+    path, _ = _receipt(tmp_path)
+    epoch = load_storage_epoch(path)
+    root, successor_path, successor = _successor_release(tmp_path, epoch)
+    monkeypatch.setenv("DEPLOYED_COMMIT", "0" * 40)
+    monkeypatch.setenv("DEPLOYED_TREE", "0" * 40)
+    monkeypatch.setenv("RELEASE_MANIFEST_SHA256", "0" * 64)
+    assert require_active_release(
+        epoch, release_root=root, successor_path=successor_path, trusted_uid=os.geteuid()
+    ) == successor["release_sha"]
+
+
+@pytest.mark.parametrize("mutation", ["epoch", "manifest", "commit", "receipt_mode", "release_mode"])
+def test_successor_release_fails_closed(tmp_path, monkeypatch, mutation):
+    path, _ = _receipt(tmp_path)
+    epoch = load_storage_epoch(path)
+    root, successor_path, successor = _successor_release(tmp_path, epoch)
+    monkeypatch.setenv("DEPLOYED_COMMIT", "0" * 40)
+    monkeypatch.setenv("DEPLOYED_TREE", "0" * 40)
+    monkeypatch.setenv("RELEASE_MANIFEST_SHA256", "0" * 64)
+    if mutation == "epoch":
+        successor["epoch_receipt_sha256"] = "0" * 64
+        successor["receipt_sha256"] = hashlib.sha256(stable_json({
+            key: value for key, value in successor.items() if key != "receipt_sha256"
+        }).encode()).hexdigest()
+        successor_path.write_text(stable_json(successor) + "\n")
+    elif mutation == "manifest":
+        (root / "DEPLOYMENT_MANIFEST.json").write_text("{}\n")
+    elif mutation == "commit":
+        (root / "DEPLOYED_COMMIT").write_text("0" * 40 + "\n")
+    elif mutation == "receipt_mode":
+        successor_path.chmod(0o666)
+    else:
+        root.chmod(0o777)
+    with pytest.raises(ValueError):
+        require_active_release(
+            epoch, release_root=root, successor_path=successor_path, trusted_uid=os.geteuid()
+        )
 
 
 class _Database:

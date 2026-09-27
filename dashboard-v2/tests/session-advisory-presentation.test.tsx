@@ -1,8 +1,57 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary, SourcePivotSummary, TimelineList } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("session assessment presentation", () => {
+  it("renders a compact vertical event chain inside its own bounded scroll region", () => {
+    const html = renderToStaticMarkup(<TimelineList items={[
+      { eventid: "cowrie.session.connect", timestamp: "2026-09-27T08:00:00Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+      { eventid: "cowrie.client.kex", timestamp: "2026-09-27T08:00:01Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+      { eventid: "cowrie.session.closed", timestamp: "2026-09-27T08:00:02Z", sensor_id: "test-sensor", src_ip: "192.0.2.10" },
+    ]} />);
+
+    expect(html).toContain("Bound event chain");
+    expect(html).toContain("h-[min(65vh,28rem)] overflow-y-auto");
+    expect(html).toContain("grid-cols-[1rem_minmax(0,1fr)]");
+    expect(html).toContain("bg-primary-navy-line");
+    expect(html).toContain("Latest");
+    expect(html).not.toContain("overflow-x-auto");
+  });
+
+  it("keeps the newest bounded timeline window and marks its actual latest event", () => {
+    const items = Array.from({ length: 101 }, (_, index) => ({
+      eventid: "cowrie.session.connect",
+      timestamp: new Date(Date.UTC(2026, 8, 27, 8, 0, index)).toISOString(),
+      sensor_id: `event-${index}`,
+    }));
+    const html = renderToStaticMarkup(<TimelineList items={items} />);
+
+    expect(html).not.toContain("event-0");
+    expect(html).toContain("event-100");
+    expect(html.match(/>Latest<\/span>/g)).toHaveLength(1);
+  });
+
+  it("keeps source-IP recurrence rows within a sticky-header scroll frame", () => {
+    const sessions = Array.from({ length: 25 }, (_, index) => ({
+      session_id: `session-${index + 1}`,
+      first_seen: "2026-09-27T08:00:00Z",
+      last_seen: "2026-09-27T08:01:00Z",
+      sighting_count: index + 1,
+    }));
+    const html = renderToStaticMarkup(<SourcePivotSummary data={{
+      observable: { value: "192.0.2.10" },
+      counts: { sessions_found: sessions.length, sightings_examined: 325 },
+      provider_calls: false,
+      sessions,
+    }} />);
+
+    expect(html).toContain("max-h-[28rem] overflow-auto");
+    expect(html).toContain("sticky top-0");
+    expect(html).toContain("text-primary-navy");
+    expect(html).toContain("session-25");
+    expect(html).toContain("Repeated source-IP activity indicates recurrence only");
+  });
+
   it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
     const sourceIpCache = [
       { provider: "abuseipdb", cache_key: "abuse-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { abuse_confidence_score: 100, total_reports: 1809, country_code: "SE" } },
@@ -49,6 +98,47 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Existing action selected for review");
   });
 
+  it("resolves canonical and response-guidance AI selections from their distinct ledgers", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ status: "accepted", advisory: { validated_advisory: {
+        selected_finding_ids: ["canonical-1", "guidance-1"], ranked_action_ids: ["action-1"],
+      } } }}
+      behavioralFindings={[{ finding_id: "canonical-1", statement: "Observed transfer event" }]}
+      guidanceData={{ response_guidance: {
+        findings: [{ finding_id: "guidance-1", statement: "Review download evidence" }],
+        advisory_actions: [{ action_id: "action-1", description: "Preserve logs" }],
+      } }}
+    />);
+    expect(html).toContain("Observed transfer event");
+    expect(html).toContain("Review download evidence");
+    expect(html).toContain("Canonical behavioral finding");
+    expect(html).not.toContain("Some AI selections could not be matched");
+  });
+
+  it("uses a canonical ID-only fallback when the active backend has not exposed finding details", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ advisory: { validated_advisory: { selected_finding_ids: ["canonical-older"] } } }}
+      guidanceData={{ response_guidance: { findings: [] } }}
+      canonicalFindingIds={["canonical-older"]}
+    />);
+    expect(html).toContain("Canonical behavioral finding recorded in the immutable assessment");
+    expect(html).toContain("canonical-older");
+    expect(html).not.toContain("Some AI selections could not be matched");
+  });
+
+  it("does not present disabled provider records as fresh intelligence", () => {
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{ status: "TI_PENDING", status_reason_text: "Provider policy blocked", freshness: { state: "TI_FRESH" }, evidence: [
+        { provider: "otx", lookup_status: "DISABLED", freshness_state: "FRESH" },
+      ] }} observableData={{}} />);
+    expect(html).toContain("No provider lookup was executed");
+    expect(html).toMatch(/Providers with results<\/dt><dd[^>]*>0<\/dd>/);
+    expect(html).not.toContain("ti fresh");
+    expect(html).not.toContain("freshness: FRESH");
+    expect(html).toContain("Last lookup: Not executed");
+    expect(html).toContain("provider not queried");
+  });
+
   it("shows validated AI selections even when no narrative template was rendered", () => {
     const html = renderToStaticMarkup(<AiAdvisorySummary
       data={{ status: "accepted", advisory: {
@@ -77,6 +167,23 @@ describe("session assessment presentation", () => {
     }} />);
     expect(html).toContain("No session-bound Model2 result is available");
     expect(html).toContain("no ensemble corroboration or combined score is claimed");
+  });
+
+  it("distinguishes raw Model2 agreement from an evidence-qualified vote", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-v1",
+      ensemble_evidence: {
+        model1: { applicable: true }, model2: { available: true },
+        results: [{ technique_id: "T1105", evidence_state: "AGREE", model1_result: "PRESENT", model2_result: "PRESENT" }],
+      },
+      session_ttp_advisory: { weighted_voting_recommendation: { rows: [{
+        technique_id: "T1105", model2_support_added: false,
+        exclusion_reason: "t1105_session_bound_transfer_evidence_required",
+      }] } },
+    }} />);
+    expect(html).toContain("RAW AGREE · NO VOTE");
+    expect(html).toContain("did not vote or change the recommendation");
+    expect(html).toContain("t1105 session bound transfer evidence required");
   });
 
   it("labels Model2-only predictions as experimental and explains unbound T1046 context", () => {

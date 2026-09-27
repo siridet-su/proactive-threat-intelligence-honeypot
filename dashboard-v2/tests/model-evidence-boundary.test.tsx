@@ -113,7 +113,8 @@ describe("retired command shadow versus session-bound Model2", () => {
 
     expect(hasClassificationEvidence([], [trustedMapping])).toBe(true);
     expect(hasClassificationEvidence([], [])).toBe(false);
-    expect(html).toContain("Trusted ATT&amp;CK mappings");
+    expect(html).toContain("Observed behavior &amp; ATT&amp;CK mapping");
+    expect(html).toContain("MITRE ATT&amp;CK");
     expect(html).toContain("T1033");
     expect(html).not.toContain("No classification evidence is available");
   });
