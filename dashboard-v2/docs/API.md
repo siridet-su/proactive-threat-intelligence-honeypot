@@ -49,6 +49,35 @@ from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
 Invalid/missing credentials or mismatched canonical sensor/session identity
 fail closed. Text already redacted before persistence cannot be recovered.
 
+## Backup daily schedule endpoints
+
+The schedule is a single daily `Asia/Bangkok` time with a permanent base
+(default `03:30`) and an optional temporary override. It applies to all
+enabled backup targets. All responses use `Cache-Control: no-store`; the
+Dashboard never sends a systemd command or B2 credential.
+
+- `GET /api/backup/schedule` requires a dashboard session. It returns the
+  current revision, permanent and temporary settings, today's local scheduler
+  state, worker readiness, next run, and automatic return time. Only Admins
+  receive `can_edit: true`.
+- `POST /api/backup/schedule/preview` requires Admin. The body is one of
+  `{mode:"permanent",time:"HH:mm"}`,
+  `{mode:"temporary",time:"HH:mm",start_date:"YYYY-MM-DD",days:1..90}`,
+  or `{mode:"clear_override"}`. It validates the edit and returns the next
+  run, catch-up indication, and return time without changing the schedule.
+- `POST /api/backup/schedule` requires Admin. Its body is
+  `{edit:<the previewed edit>,expected_revision:<revision>}`. It appends a
+  complete schedule revision with the operator ID and timestamp. A stale
+  revision or concurrent edit returns `409`; a worker without a recent
+  scheduler heartbeat rejects edits. Temporary starts may be today through
+  365 days ahead and last 1–90 days. The permanent base remains intact while
+  a temporary override is active.
+
+The Pi control worker claims at most one scheduled run per Bangkok date. A
+time moved into the past causes one catch-up run if today's run has not
+completed. Manual hardware actions retain their separate request contract.
+See [ADR-0008](../../docs/adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ## Dedicated hardware endpoints
 
 Both routes require a valid dashboard session and run in the Next.js Node

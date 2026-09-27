@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import type { Document } from "mongodb";
 
 import { getMongoClient, getMongoDatabaseName } from "./mongodb";
+import { getBackupCoverageAnchor } from "./backupSchedule";
 import type {
   HardwareBackupDay,
   HardwareBackupDayStatus,
@@ -500,7 +501,7 @@ function backupPolicy(window: ReturnType<typeof getHardwareBackupWindow>): Backu
     lookback_days: LOOKBACK_DAYS,
     safety_days: SAFETY_DAYS,
     eligible_days: window.days,
-    schedule: "Daily systemd timer",
+    schedule: "Daily Pi control worker",
     archive_format: "gzip Extended JSON Lines",
     destination_visibility: "Private Backblaze B2",
     sensitive_target_policy: "Threat events require explicit opt-in",
@@ -528,7 +529,7 @@ function restoreReadinessView(document: Document | null): BackupRestoreReadiness
 }
 
 export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
-  const window = getHardwareBackupWindow();
+  const window = getHardwareBackupWindow(await getBackupCoverageAnchor());
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
   const targetStatus = await database.collection(TARGET_STATUS_COLLECTION).findOne(
@@ -641,7 +642,7 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
 export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
-  const window = getHardwareBackupWindow();
+  const window = getHardwareBackupWindow(await getBackupCoverageAnchor());
   const now = new Date();
   const targetIds = BACKUP_TARGET_CATALOG.map((target) => target.target_id);
   const statusDocuments = await database.collection(TARGET_STATUS_COLLECTION).find({

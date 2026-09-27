@@ -90,6 +90,13 @@ func runControlLoop(
 	}()
 
 	for {
+		scheduled, scheduleErr := runDueBackupSchedule(ctx, database, cfg, manifests, snapshots, workerID)
+		if scheduleErr != nil {
+			log.Printf("backup daily schedule failed: %v", scheduleErr)
+		}
+		if scheduled {
+			continue
+		}
 		request, err := claimNextBackupRequest(ctx, requests, backupTargetRequestSources(cfg.Targets), workerID)
 		if err != nil {
 			log.Printf("backup request claim failed: %v", err)

@@ -58,12 +58,33 @@ The default window includes the UTC days from 30 days before today through
 two days before today, inclusive: 29 eligible days with
 `BACKUP_LOOKBACK_DAYS=30` and `BACKUP_SAFETY_DAYS=2`. The current and
 immediately previous day are left alone so late writes are not archived
-prematurely. The Pi timer starts at 03:30 Asia/Bangkok daily with up to five
-minutes of randomized delay and catches up after downtime. For example, on
+prematurely. The Pi control service schedules a daily run at 03:30
+Asia/Bangkok by default and catches up after downtime. For example, on
 2026-09-27 it checked 2026-08-28 through 2026-09-25 UTC. Set
 `BACKUP_FORCE=true` for an intentional re-upload of nonempty successful days.
 Normal scheduled runs also recheck previously empty successful days without
 forcing the other targets to re-upload.
+
+## Dashboard daily schedule
+
+The schedule implementation in this repository keeps a permanent daily
+`Asia/Bangkok` time and, optionally, one temporary start date, 1–90 day
+duration, and replacement time. An Admin can preview and append a complete
+revision through the Dashboard. The Pi control worker reads that revision,
+claims one run per Bangkok date, and catches up promptly if today's selected
+time has passed without a completed run. A completed or running day is not
+started twice; failures retry after a bounded delay. The worker keeps its B2
+credentials on the Pi.
+
+The Pi control service is the active daily scheduler. The former fixed 03:30
+systemd timer is disabled and inactive; keep it disabled to avoid a second
+independent run. The oneshot service remains available for operator recovery.
+The control service must remain enabled and active. Verify scheduler health
+through its service state, a fresh target status heartbeat, and the latest
+`backup_schedule_runs` record. If the scheduler cannot recover, restore the
+protected previous binary and re-enable the fixed timer as a rollback pair.
+Schedule changes do not alter
+the UTC backup window, the two-day hold, target activation, or bucket policy.
 
 ## Sensitive threat events
 
