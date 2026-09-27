@@ -1484,8 +1484,9 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
   const weighted = record(record(data.session_ttp_advisory).weighted_voting_recommendation);
   const methodComparison = record(record(data.session_ttp_advisory).ensemble_method_comparison);
-  const rrfReady = rrf.schema_version === "session_ttp_rrf_advisory.v1"
-    && rrf.session_id === data.session_id;
+  const weightedReady = weighted.schema_version === "session_ttp_weighted_voting_advisory.v1"
+    && weighted.session_id === data.session_id
+    && recommendations.some((item) => item.rankingScore !== null);
 
   if (!hasMeaningfulRecord(ensemble) && recommendations.length === 0) {
     return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No stored Model1 + Model2 ensemble evidence is available for this exact session.</p>;
@@ -1523,7 +1524,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
-            <p className="mt-1 text-xs leading-5 text-text-muted">{rrfReady && rrf.status === "EXPERIMENTAL_RRF" ? "Experimental evidence-gated RRF review order from Model1 rank plus qualified Model2 support." : "Model1 review order; no qualified Model2 support changed this list."} This is not a confidence percentage, trusted finding, or response authorization.</p>
+            <p className="mt-1 text-xs leading-5 text-text-muted">{weightedReady && recommendations.some((item) => item.model2SupportAdded) ? "Experimental evidence-gated weighted-voting review order from Model1 candidates plus qualified Model2 support." : "Model1 review order; no qualified Model2 support changed this list."} This is not a confidence percentage, trusted finding, or response authorization.</p>
           </div>
           <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
         </div>
@@ -1534,12 +1535,12 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
               <span className="ui-badge text-[10px]">{item.model2SupportAdded ? "Model1 + Model2" : item.model2Support === "does_not_support" ? "Model1 only · Model2 ABSENT" : item.model2Support === "not_supported" ? "Model1 only · outside Model2" : "Model1 only"}</span>
             </div>
             <p className="mt-1 text-xs text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support this Model1 suggestion.</p>
-            {item.rrfScore !== null && <p className="mt-1 text-xs font-medium text-text">RRF rank score: {item.rrfScore.toFixed(4)}{item.model2SupportAdded ? ` · Model2 bonus +${item.model2RrfComponent.toFixed(4)}` : ""}{item.rank !== item.baselineRank ? ` · Model1 position #${item.baselineRank}` : ""}</p>}
+            {item.rankingScore !== null && <p className="mt-1 text-xs font-medium text-text">Weighted vote score: {item.rankingScore.toFixed(2)}{item.model2SupportAdded ? ` · Model2 vote +${item.model2RankingComponent.toFixed(2)}` : ""}{item.rank !== item.baselineRank ? ` · Model1 position #${item.baselineRank}` : ""}</p>}
             {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command refs: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
             {item.model2Support === "does_not_support" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT for its independent head; review before drawing a conclusion.</p>}
           </li>)}
         </ol>
-        <p className="mt-2 text-[11px] text-text-subtle">Method: {summaryValue(rrf.formula, "Gated weighted reciprocal-rank")}. Model2 cannot add a new TTP or lower a Model1 candidate. Scores are ordinal review signals, not probabilities.</p>
+        <p className="mt-2 text-[11px] text-text-subtle">Method: {weightedReady ? summaryValue(weighted.formula, "Gated weighted voting") : "Model1-only order"}. Model2 cannot add a new TTP or lower a Model1 candidate. Scores are review signals, not probabilities.</p>
       </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
       {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
         <ol className="space-y-2">

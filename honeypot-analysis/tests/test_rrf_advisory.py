@@ -107,6 +107,12 @@ class RrfTests(unittest.TestCase):
         self.assertEqual(result["recommendation_order"], ["T1082", "T1105", "T1110"])
         self.assertFalse(result["ordering_changed"])
 
+    def test_projection_marks_weighted_voting_as_primary_and_rrf_as_comparator(self):
+        result = module.with_rrf_advisory(advisory(), ensemble(), session_id="s1", session_ended=True)
+        self.assertEqual(result["ensemble_method_comparison"]["primary_review_method"], "evidence_gated_weighted_voting")
+        self.assertEqual(result["ensemble_method_comparison"]["production_winner"], None)
+        self.assertEqual(result["weighted_voting_recommendation"]["recommendation_order"][0], "T1105")
+
     def test_full_formula_uses_per_command_topk_ranks(self):
         value = advisory()
         value["command_rank_lists"] = [

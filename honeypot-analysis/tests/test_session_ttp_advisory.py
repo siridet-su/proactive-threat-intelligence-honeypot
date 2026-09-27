@@ -116,7 +116,7 @@ def test_rendered_pdf_agrees_with_session_advisory(tmp_path: Path):
     importlib.util.find_spec("reportlab") is None or importlib.util.find_spec("pypdf") is None,
     reason="optional PDF renderer/parser unavailable",
 )
-def test_pdf_distinguishes_model2_inference_from_downstream_rrf(tmp_path: Path):
+def test_pdf_uses_weighted_voting_as_primary_and_rrf_only_as_comparator(tmp_path: Path):
     from pypdf import PdfReader
 
     report = {
@@ -159,7 +159,11 @@ def test_pdf_distinguishes_model2_inference_from_downstream_rrf(tmp_path: Path):
         "schema_version": "session_ttp_weighted_voting_advisory.v1",
         "session_id": "session-a",
         "formula": "0.5*I(Model1 candidate) + 0.5*I(gated Model2 PRESENT)",
-        "rows": [],
+        "rows": [{
+            "technique_id": "T1105", "baseline_rank": 1,
+            "recommendation_rank": 1, "model2_support_added": True,
+            "weighted_vote_score": 1.0,
+        }],
     }
     output = tmp_path / "reports"
     output.mkdir(mode=0o700)
@@ -172,10 +176,11 @@ def test_pdf_distinguishes_model2_inference_from_downstream_rrf(tmp_path: Path):
     )
     extracted = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
     compact = " ".join(extracted.split())
-    assert "Advisory recommendation ranking (two retained late-fusion candidates)" in compact
-    assert "Model2 does not run RRF internally" in compact
+    assert "Advisory recommendation ranking (weighted voting; reciprocal-rank comparator)" in compact
+    assert "Model2 does not run either ensemble formula internally" in compact
     assert "gated weighted voting" in compact
-    assert "PRESENT bonus" in compact
+    assert "PRESENT vote" in compact
+    assert "Reciprocal-rank comparator order" in compact
     assert "T1105" in compact
 
 

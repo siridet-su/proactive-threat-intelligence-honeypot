@@ -295,6 +295,7 @@ def with_rrf_advisory(
     )
     result["ensemble_method_comparison"] = {
         "status": "BOTH_RETAINED_PENDING_FIELD_EVALUATION",
+        "primary_review_method": "evidence_gated_weighted_voting",
         "methods": ["evidence_gated_weighted_voting", "evidence_gated_reciprocal_rank_fusion"],
         "controlled_synthetic_leader": "evidence_gated_weighted_voting",
         "production_winner": None,
