@@ -15,14 +15,16 @@ The accepted local Evidence slice and deferred FS additions are recorded in
 Production Dashboard deployment remains unverified; closure does not claim a
 production rollout.
 
-The next documentation workstream is the installation manual. State its target
-deployment path explicitly before writing runnable steps. Start from the
-verified
+The next documentation workstream is the installation manual for a **fresh
+ARM64 Raspberry Pi from a clean OS**. Start from the verified
 [current architecture](CURRENT-ARCHITECTURE.md) and the proposed
-[installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), separating runnable
+[installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), using the
+[installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) to resolve
+the current release/env gaps. Separate runnable
 instructions from future appliance design. The blueprint's retired
 Dashboard-to-Pi disconnect/control path is historical, not an installation
-requirement. No customer installer is currently declared ready to run.
+requirement. Existing-Pi migration is a later, separate procedure. No
+customer installer is currently declared ready to run.
 
 ## Phase 0 — Establish project truth
 
