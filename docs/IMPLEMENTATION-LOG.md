@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Align backup schedule scope with time inputs
+
+- Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.
+- Scope and intent: align the schedule scope field with the Hour and Minute controls for easier scanning.
+- Repository branch and commit/PR: `fix/backup-schedule-scope-alignment`; commit and PR follow this entry.
+- Repository changes: add a small "Schedule scope" heading above the existing Permanent, Temporary, and return-to-permanent scope field. The shared spacing places its label and value on the same rows as the time controls without changing form behavior.
+- Host/environment changes actually applied: none. No Pi worker, schedule revision, manifest, or B2 object was changed.
+- Runtime/exposure state: the active backup schedule remains unchanged; the alignment appears only where the updated Dashboard revision is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review and production Dashboard deployment were not performed.
+- Risks and data handling: layout-only change; no new data flow or credential exposure.
+- Rollback: revert this UI commit.
+- Follow-up: inspect Permanent and Temporary modes after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ### 2026-09-27 — Clarify backup coverage and add bounded hardware history
 
 - Status: repository Dashboard change prepared; Dashboard deployment not performed.
