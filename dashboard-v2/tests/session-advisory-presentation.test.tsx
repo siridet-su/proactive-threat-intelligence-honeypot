@@ -66,6 +66,17 @@ describe("session assessment presentation", () => {
     expect(html).not.toContain("Some AI selections could not be matched");
   });
 
+  it("uses a canonical ID-only fallback when the active backend has not exposed finding details", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ advisory: { validated_advisory: { selected_finding_ids: ["canonical-older"] } } }}
+      guidanceData={{ response_guidance: { findings: [] } }}
+      canonicalFindingIds={["canonical-older"]}
+    />);
+    expect(html).toContain("Canonical behavioral finding recorded in the immutable assessment");
+    expect(html).toContain("canonical-older");
+    expect(html).not.toContain("Some AI selections could not be matched");
+  });
+
   it("does not present disabled provider records as fresh intelligence", () => {
     const html = renderToStaticMarkup(<ExternalTiSummary
       sessionData={{ status: "TI_PENDING", status_reason_text: "Provider policy blocked", freshness: { state: "TI_FRESH" }, evidence: [

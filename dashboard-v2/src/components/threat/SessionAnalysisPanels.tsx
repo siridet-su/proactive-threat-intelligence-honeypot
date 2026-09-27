@@ -1593,7 +1593,7 @@ export function hasBoundAvailableModel2(data: JsonRecord): boolean {
   return hasBoundModel2(data);
 }
 
-export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [] }: { data: JsonRecord; guidanceData: JsonRecord; behavioralFindings?: unknown[] }) {
+export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [], canonicalFindingIds = [] }: { data: JsonRecord; guidanceData: JsonRecord; behavioralFindings?: unknown[]; canonicalFindingIds?: unknown[] }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
   const provenance = record(advisory.provenance);
@@ -1607,6 +1607,14 @@ export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [] 
   const guidance = record(guidanceData.response_guidance);
   const guidanceFindings = list(guidance.findings).map(record);
   const canonicalFindings = behavioralFindings.map(record);
+  const knownCanonicalIds = new Set(canonicalFindings.map((item) => label(item.finding_id, "")));
+  for (const value of canonicalFindingIds) {
+    const id = label(value, "");
+    if (id && !knownCanonicalIds.has(id)) {
+      canonicalFindings.push({ finding_id: id, statement: "Canonical behavioral finding recorded in the immutable assessment; see the report for its full statement." });
+      knownCanonicalIds.add(id);
+    }
+  }
   const guidanceActions = list(guidance.advisory_actions).map(record);
   // Provider selections are validated and stored independently of the optional
   // rendered policy templates. Empty paragraphs must not erase those choices.
@@ -1633,6 +1641,7 @@ export function AiAdvisorySummary({ data, guidanceData, behavioralFindings = [] 
         {selectedFindings.map((item) => <article key={label(item.finding_id)} className="rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text">
           <div className="mb-1.5 flex flex-wrap items-center gap-2"><span className="ui-badge text-[10px]">Observed evidence</span><span className="text-[10px] text-text-subtle">{canonicalFindings.includes(item) ? "Canonical behavioral finding" : "Response-guidance finding"}</span></div>
           {summaryValue(item.statement, "Statement unavailable")}
+          {!hasMeaningfulValue(item.finding_type) && canonicalFindings.includes(item) && <p className="mt-1 font-mono text-[10px] text-text-muted">ID: {label(item.finding_id)}</p>}
         </article>)}
         {selectedActions.map((item) => <article key={label(item.action_id)} className="rounded-lg border border-primary-border bg-primary-subtle/50 p-3 text-sm text-text">
           <div className="mb-1.5 flex items-center gap-2"><span className="ui-badge text-[10px]">Existing action selected for review</span><span className="text-[10px] text-text-subtle">For analyst review</span></div>
@@ -2058,7 +2067,7 @@ export function SessionAnalysisPanels({
 
           <div className="mt-5 grid grid-cols-1 items-start gap-5 border-t border-border pt-5 xl:grid-cols-2">
             <Panel eyebrow="Stored AI advisory" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} variant="embedded">
-              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} />
+              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} canonicalFindingIds={list(record(detail.session_hypothesis_assessment).canonical_finding_ids)} />
             </Panel>
             {aiAdvisory.state === "ready" || aiAdvisory.state === "limited" ? (
               <PolicyGapSummary data={aiAdvisory.data} />
