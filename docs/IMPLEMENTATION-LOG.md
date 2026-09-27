@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Restore local Filesystem Evidence access and align command rows
+
+- Status: repository correction prepared; private local development source enabled; production Dashboard deployment not performed.
+- Scope and intent: investigate the Evidence Retry/error state in Session audit & replay and make local command review match the production monitor's submission-only list.
+- Repository branch and commit/PR: `fix/filesystem-command-evidence-dev`; commit and PR follow this entry.
+- Repository changes: limit the local Admin command query to `cowrie.command.input` so outcome events do not duplicate submissions; isolate the route's missing-alias test from live Mongo; document the explicit development gate and current Evidence source. No authentication, canonical binding, or production monitor contract was relaxed.
+- Host/environment changes actually applied: set `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` in the ignored, owner-only `dashboard-v2/.env.local` for this development workspace. No Pi service, production Dashboard configuration, or canonical record was changed. The existing Dashboard process was not restarted from this environment.
+- Runtime/exposure state: the flag is available to a development-mode Next server on loopback after it reloads the local environment. The route still requires an authenticated Admin and exact verified session binding. Production remains on the separate protected monitor path.
+- Validation performed and outcome: read-only Mongo metadata showed 5,341 stored command-input events and a valid alias for a sampled command session. A temporary live route smoke test returned commands for that sensor-local session with submission-only rows; 9 focused tests passed. The committed 12-test command suite, targeted ESLint, TypeScript, and `git diff --check` passed locally. No raw inputs were printed or added to fixtures.
+- Not performed / deferred: authenticated browser review in the operator's running localhost process and production Dashboard deployment were not performed; that process may need a restart to load the changed environment.
+- Risks and data handling: the local route can return sensitive retained command input to an Admin on loopback. The flag and credentials remain outside Git; responses are private/no-store. Redacted-before-persistence originals remain unrecoverable.
+- Rollback: remove the local development flag and restart that dev server; revert the repository correction if the submission-only query must be restored.
+- Follow-up: verify the Evidence tab after the operator's dev server reloads, then continue FS-025 acceptance with an authenticated browser review.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Dashboard API contract](../dashboard-v2/docs/API.md).
+
 ### 2026-09-27 — Balance backup schedule form layout
 
 - Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.

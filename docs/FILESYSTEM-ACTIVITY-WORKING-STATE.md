@@ -69,6 +69,13 @@ session but is not correlated to a CWD hop. A recorded command input does not
 prove execution, success, or file access. The collector does not currently
 provide file-operation events in this view.
 
+Local development review needs the explicit private
+`PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` setting and loopback access; without
+it or a configured production monitor credential, the Evidence API reports
+unavailable even when canonical command events exist. Both paths return
+submitted command inputs only, avoiding duplicate success/failure outcome
+rows. The local route remains Admin-only and no-store.
+
 Remaining evidence direction:
 
 - Add session lifecycle/source metadata only when the selected-session model
@@ -303,3 +310,4 @@ claims about the 2026-09-15 historical baseline.
 | 2026-09-25 | Start `FS-025`: replace the Evidence placeholder with a selected-session CWD ledger, source identifiers, hop/time/status, pagination coverage, and an explicit boundary against inferring commands or file access. | Scoped ESLint and `git diff --check` passed; type-check is blocked by stale generated `.next/types` for the removed terminate API. No tests or authenticated visual review were run. |
 | 2026-09-25 | Removed Dashboard session termination and decommissioned the Pi response agent; left Tailscale enabled for administration and deferred tailnet ACL editing to its Admin Console. | Dashboard route/UI and Pi agent files were removed; host checks confirmed the agent disabled/absent and port 8788 closed. Cowrie was left running with existing sessions; its drop-in is removed for the next restart. |
 | 2026-09-25 | Correct `FS-025`: remove the CWD ledger because it duplicated Route Replay; make Evidence a session-scoped view of Admin-only Cowrie command input, with redaction/truncation and explicit no-correlation/no-file-operation boundaries. | Scoped ESLint and `git diff --check` passed; type-check is blocked only by stale generated `.next/types` references to the removed terminate API. No host deployment, automated tests, or authenticated visual review. |
+| 2026-09-27 | Correct local `FS-025` Evidence availability and match the production submission-only command projection. | The private local development gate was enabled in the ignored environment file; read-only metadata confirmed retained commands and a verified alias; a live route smoke test and 12 focused command tests passed. The operator's running browser session and production deployment were not verified. |
