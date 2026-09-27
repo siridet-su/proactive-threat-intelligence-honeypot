@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Align backup schedule time and scope controls
+
+- Status: repository Dashboard UI correction prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: align the Daily time and Applies for controls shown side by side on wide screens.
+- Repository branch and commit/PR: `fix/backup-schedule-field-alignment`; commit and PR follow this entry.
+- Repository changes: move the Permanent, Temporary, and Return to permanent mode choices above both editor columns so their control panels start at the same vertical position. Schedule behavior and API remain unchanged.
+- Host/environment changes actually applied: none. No Pi service, stored schedule, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler is unaffected; this layout appears where the updated Dashboard code is loaded.
+- Validation performed and outcome: Dashboard production build including TypeScript check, targeted ESLint, and `git diff --check` passed locally. The two control panels now share the same CSS grid row below the mode selector.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, and next Pi run verification were not performed for this visual correction.
+- Risks and data handling: no new data flow or permission change. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the aligned fields with live Admin data after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ### 2026-09-27 — Reorganize the backup schedule overview
 
 - Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.

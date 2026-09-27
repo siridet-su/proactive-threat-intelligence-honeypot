@@ -211,13 +211,13 @@ export function BackupScheduleSettings() {
           <div className="space-y-4 rounded-xl border border-border bg-surface-subtle p-4 sm:p-5">
             <fieldset disabled={!editable || busy} className="disabled:opacity-60">
               <legend className="text-sm font-semibold">Change schedule</legend>
+              <div className="mt-3 flex flex-wrap gap-2 text-sm">
+                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "permanent" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); changeTime(settings?.base_time ?? "03:30"); }} />Permanent</label>
+                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={selectTemporaryMode} />Temporary</label>
+                {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); changeTime(settings?.base_time ?? "03:30"); }} />Return to permanent</label>}
+              </div>
               <div className="mt-3 grid gap-4 xl:grid-cols-2">
-                <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2 text-sm">
-                    <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "permanent" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); changeTime(settings?.base_time ?? "03:30"); }} />Permanent</label>
-                    <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={selectTemporaryMode} />Temporary</label>
-                    {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); changeTime(settings?.base_time ?? "03:30"); }} />Return to permanent</label>}
-                  </div>
+                <div>
                   <div className="rounded-lg border border-border bg-surface p-3">
                     <p className="text-xs font-medium text-text-muted">{mode === "clear_override" ? "Permanent time resumes · Asia/Bangkok (24-hour)" : "Daily time · Asia/Bangkok (24-hour)"}</p>
                     <div className="mt-2 flex items-center gap-2">
