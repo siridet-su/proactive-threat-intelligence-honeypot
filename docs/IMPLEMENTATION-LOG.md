@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Audit fresh-Pi installation readiness and tighten an exposed env file
+
+- Status: repository readiness document prepared; one Pi file-permission correction applied; no installation or deployment performed.
+- Scope and intent: compare current repository and Dashboard environment contracts with the running `pi-t` host before drafting a clean-OS Raspberry Pi installation manual.
+- Repository branch and commit/PR: `docs/installation-readiness-audit`; commit/PR follow this entry.
+- Repository changes: add a sanitized installation-readiness audit and link it from the documentation index and roadmap. The target is a fresh ARM64 Pi; migration of the existing Pi remains separate.
+- Host/environment changes actually applied: changed only the Pi checkout's `dashboard-v2/.env.local` mode from `0664` to `0600` and verified the result. No env value, service, binary, database, firewall rule, or active release pointer was changed.
+- Runtime/exposure state: Cowrie, Redis, Zeek, collector, processor, hardware, TI, backup control, and legacy forwarder remained active during the read-only inventory. Dashboard services were not installed on that Pi. The Dashboard production host was not accessed.
+- Validation performed and outcome: inspected source and Pi branch status, OS/architecture, service and Compose inventory, env key names and modes without printing values, and current Dashboard runtime key references. Local Markdown links resolved and `git diff --check` passed.
+- Not performed / deferred: fresh-OS installation test, Dashboard production env audit, backup restore rehearsal, existing-Pi migration, and changes to the stale staging Dashboard env bootstrap/template.
+- Risks and data handling: the Pi checkout is dirty and divergent; current Dashboard staging env names do not match current application auth settings. No credential values or raw attacker content were copied to the repo. The permission correction limits local read access to a file containing `MONGODB_URI`.
+- Rollback: restore the prior mode only if an owner-approved operational dependency requires it; otherwise retain `0600`. Revert the documentation commit separately if the audit record is superseded, using a dated correction rather than rewriting historical facts.
+- Follow-up: define a pinned fresh-Pi release and reconcile Dashboard env/bootstrap and external Compose ownership before publishing runnable installation steps.
+- Related ADR/runbook: [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md), [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), [current architecture](CURRENT-ARCHITECTURE.md), and [security policy](SECURITY-AND-MALWARE-POLICY.md).
+
 ### 2026-09-28 — Close the current Filesystem Activity round and hand off installation documentation
 
 - Status: repository documentation prepared; no host deployment in this change.

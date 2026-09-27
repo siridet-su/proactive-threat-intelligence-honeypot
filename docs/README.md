@@ -23,7 +23,8 @@ and historical material inherited from the previous team.
    [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) defines the
    Dashboard-controlled daily backup schedule and Pi execution boundary.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
-10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
+10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
+11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 
 The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the
