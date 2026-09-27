@@ -4,6 +4,7 @@ import {
   AlertCircle,
   Bot,
   BrainCircuit,
+  ChevronDown,
   FileSearch,
   FileText,
   Fingerprint,
@@ -619,69 +620,74 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
       .filter(Boolean),
   );
   return (
-    <div className="space-y-3">
-      <Insight title="Trusted classification">{trustedMappings.length} trusted mapping{trustedMappings.length === 1 ? "" : "s"} across {uniqueAttackTechniques.size} ATT&amp;CK technique{uniqueAttackTechniques.size === 1 ? "" : "s"}, from {classificationRecords.length} command-level record{classificationRecords.length === 1 ? "" : "s"}. Model1 is advisory; Model2 has its own panel.</Insight>
-      {uniqueAttackTechniques.size > 0 && <div className="flex flex-wrap gap-2">{[...uniqueAttackTechniques].map((technique) => <span key={technique} className="rounded-md border border-primary-border bg-primary-subtle px-2.5 py-1 font-mono text-xs text-text transition-transform hover:-translate-y-0.5">{technique}</span>)}</div>}
+    <div className="space-y-4">
       <MetricStrip fields={[
-        ["Classification records", String(classificationRecords.length)],
+        ["Trusted mappings", String(trustedMappings.length)],
+        ["ATT&CK techniques", String(uniqueAttackTechniques.size)],
         ["Classified command events", String(classifiedCommandKeys.size)],
-        ["Trusted ATT&CK", String(uniqueAttackTechniques.size)],
       ]} />
-      {classificationRecords.length > 0 && <p className="text-xs text-text-muted">Command-level classification is shown with its evidence. Model1 scores are advisory.</p>}
-      {classificationRecords.length > 0 && <ScrollPanel title="Classified activity" count={classificationRecords.length} height="max-h-96">
-      <ol className="space-y-2">
-        {classificationRecords.slice(0, 50).map((mapping, index) => {
-          const authority = record(mapping.authority_decision);
-          const advisory = record(mapping.s1_advisory);
-          const technique = mapping.ttp || mapping.technique_id || "NO_TECHNIQUE_ASSIGNED";
-          const sourceCommand = commandText(mapping.source_command || mapping.command || mapping.original_command);
-          return (
-            <li key={`${index}-${String(mapping.evidence_id || technique)}`} className="rounded-lg border border-border bg-surface-subtle px-3 py-3 transition-colors hover:border-primary-border hover:bg-primary-subtle/30">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-sm font-semibold text-text">{summaryValue(technique)}</span>
-                  <span className="text-xs text-text-muted">{summaryValue(mapping.name, "Technique not assigned")}</span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <span className="ui-badge text-[11px]">{summaryValue(authority.decision || mapping.evidence_tier, "advisory")}</span>
-                </div>
-              </div>
-              {sourceCommand && <p className="mt-2 rounded border border-border bg-surface px-2.5 py-2 font-mono text-xs text-text">{sourceCommand}</p>}
-              <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
-                <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(mapping.tactic, "Tactic not recorded")}</span>
-                <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-text-muted">{summaryValue(authority.decision || mapping.authority, "Advisory only")}</span>
-                {hasMeaningfulValue(advisory.predicted_technique) && <span className="rounded-full border border-primary-border bg-primary-subtle px-2.5 py-1 text-text">Model1 advisory: {summaryValue(advisory.predicted_technique)}</span>}
-              </div>
-              <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
-            </li>
-          );
-        })}
-      </ol></ScrollPanel>}
-      <div className="rounded-xl border border-primary-border bg-primary-subtle/50 p-3">
-        <div className="flex items-center justify-between gap-3">
-          <p className="text-xs font-semibold text-primary">Trusted ATT&amp;CK mappings</p>
-          <span className="ui-badge text-[10px]">{trustedMappings.length}</span>
+      <div className="rounded-xl border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-text">ATT&amp;CK techniques supported by session evidence</h3>
+            <p className="mt-1 text-xs leading-5 text-text-muted">These are trusted mappings from recorded behavior. Model predictions appear separately below.</p>
+          </div>
+          <span className="ui-badge">{trustedMappings.length} mapping{trustedMappings.length === 1 ? "" : "s"}</span>
         </div>
         {trustedMappings.length ? (
-          <ol className="ui-scroll-region mt-2 max-h-64 space-y-2 overflow-y-auto pr-2">
+          <ol className="mt-3 grid gap-2 sm:grid-cols-2">
             {trustedMappings.slice(0, 20).map((item, index) => {
               const mapping = record(item);
               const tactics = list(mapping.tactics).map((value) => display(value)).filter(Boolean).join(", ");
               return (
-                <li key={`${index}-${summaryValue(mapping.technique_id, "mapping")}`} className="rounded border border-primary-border bg-surface px-3 py-2 text-xs">
+                <li key={`${index}-${summaryValue(mapping.technique_id, "mapping")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="font-mono font-semibold text-text">{summaryValue(mapping.technique_id, "Technique unavailable")}</span>
                     <span className="ui-badge text-[11px]">{summaryValue(mapping.trust_tier || mapping.authority, "trusted_observation")}</span>
                   </div>
-                  <p className="mt-1 text-text-muted">{tactics || "Tactic unavailable"} · {summaryValue(mapping.mapping_semantics, "Observed command evidence")}</p>
-                  <p className="mt-1 text-text-muted">{countOf(mapping.evidence_ref_count || list(mapping.evidence_refs).length)} evidence reference{Number(mapping.evidence_ref_count || list(mapping.evidence_refs).length) === 1 ? "" : "s"}</p>
-                  <TrustedTraceability mapping={mapping} />
+                  <p className="mt-2 font-medium text-text">{tactics || "Tactic not recorded"}</p>
+                  <p className="mt-1 leading-5 text-text-muted">{readableCode(mapping.mapping_semantics || "observed_command_evidence")}</p>
+                  <p className="mt-2 text-[11px] text-text-subtle">{countOf(mapping.evidence_ref_count || list(mapping.evidence_refs).length)} linked evidence reference{Number(mapping.evidence_ref_count || list(mapping.evidence_refs).length) === 1 ? "" : "s"}</p>
+                  <details className="mt-2 rounded-md border border-border bg-surface px-2.5 py-2">
+                    <summary className="cursor-pointer select-none font-semibold text-text">Evidence links</summary>
+                    <div className="pt-2"><TrustedTraceability mapping={mapping} /></div>
+                  </details>
                 </li>
               );
             })}
           </ol>
-        ) : <p className="mt-2 text-xs text-text-muted">No trusted mapping was established.</p>}
+        ) : <p className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-sm text-text-muted">No trusted ATT&amp;CK mapping was established for this session.</p>}
       </div>
+
+      {classificationRecords.length > 0 && <details className="group rounded-xl border border-border bg-surface">
+        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <span>
+            <span className="block text-sm font-semibold text-text">Command classification details</span>
+            <span className="mt-0.5 block text-xs text-text-muted">Review the command, predicted technique, and decision record.</span>
+          </span>
+          <span className="flex items-center gap-2"><span className="ui-badge">{classificationRecords.length} records</span><ChevronDown className="h-4 w-4 text-text-muted transition-transform group-open:rotate-180" aria-hidden="true" /></span>
+        </summary>
+        <ol className="grid gap-2 border-t border-border p-3 sm:grid-cols-2">
+          {classificationRecords.slice(0, 50).map((mapping, index) => {
+            const authority = record(mapping.authority_decision);
+            const advisory = record(mapping.s1_advisory);
+            const technique = mapping.ttp || mapping.technique_id || "NO_TECHNIQUE_ASSIGNED";
+            const sourceCommand = commandText(mapping.source_command || mapping.command || mapping.original_command);
+            return (
+              <li key={`${index}-${String(mapping.evidence_id || technique)}`} className="min-w-0 rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-text">{summaryValue(technique)}</span>
+                  <span className="ui-badge text-[10px]">{summaryValue(authority.decision || mapping.evidence_tier, "advisory")}</span>
+                </div>
+                <p className="mt-1 text-text-muted">{summaryValue(mapping.name, "Technique not assigned")} · {summaryValue(mapping.tactic, "Tactic not recorded")}</p>
+                {sourceCommand && <p className="mt-2 break-words rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[11px] text-text">{sourceCommand}</p>}
+                {hasMeaningfulValue(advisory.predicted_technique) && <p className="mt-2 text-text-muted">Model1 advisory: <span className="font-mono text-text">{summaryValue(advisory.predicted_technique)}</span></p>}
+                <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
+              </li>
+            );
+          })}
+        </ol>
+      </details>}
     </div>
   );
 }
@@ -1490,7 +1496,6 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const model2OnlyPredictions = hasBoundAvailableModel2(data)
     ? results.filter((item) => item.model2_relation === "MODEL2_ONLY" && item.model2_result === "PRESENT")
     : [];
-  const model1Only = list(ensemble.model1_only_labels).map(record);
   const recommendations = rankTtpRecommendations(data);
   const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
   const weighted = record(record(data.session_ttp_advisory).weighted_voting_recommendation);
@@ -1510,34 +1515,34 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
       : "Not reported";
 
   return (
-    <div className="space-y-3">
-      <Insight title="Model corroboration" tone={hasBoundAvailableModel2(data) ? "primary" : "warning"}>
-        {hasBoundAvailableModel2(data) ? (model2.availability === "PARTIAL" ? `Model2 is bound to this session, but ${unavailableHeads.length} technique head${unavailableHeads.length === 1 ? " is" : "s are"} unavailable. Only evidence-qualified heads may affect the review order.` : "A session-bound Model2 result is available for comparison with Model1; only evidence-qualified heads may affect the review order.") : "No session-bound Model2 result is available. Model1 remains primary; no ensemble corroboration or combined score is claimed."}
-      </Insight>
-      {model2OnlyPredictions.length > 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-sm text-warning">Experimental Model2-only prediction for {model2OnlyPredictions.map((item) => summaryValue(item.technique_id, "unknown technique")).join(", ")}. This is not a confirmed observed behavior, canonical finding, or response instruction; check the session evidence before drawing a conclusion.</p>}
+    <div className="space-y-4">
+      <section className="rounded-xl border border-border bg-surface p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-primary">Selected PoC ranking method</p>
+            <h3 className="mt-1 text-base font-semibold text-text">{weightedReady ? "Gated weighted voting" : "Model1 ranking"}</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-text-muted">{weightedReady ? "Model1 supplies the TTP candidates. Model2 can add support to an existing candidate only when its result is bound to this session and passes that TTP’s evidence check. The order guides review; it is not a confidence estimate." : "Model1 supplies the TTP candidates for this session. No weighted-voting order is available, so this list follows Model1. It is a review aid, not a confidence estimate."}</p>
+          </div>
+          <span className="ui-badge shrink-0">{weightedReady ? "Ranking available" : "Model1 order"}</span>
+        </div>
+      </section>
+      {model2OnlyPredictions.length > 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-sm text-warning">Model2 also predicted {model2OnlyPredictions.map((item) => summaryValue(item.technique_id, "unknown technique")).join(", ")}. These predictions do not add a TTP to the review list or establish observed behavior.</p>}
       <MetricStrip fields={[
-        ["Model1", model1.applicable === true || recommendations.length > 0 ? "Ready" : model1.applicable === false ? "N/A" : "Unknown"],
-        ["Model2", hasBoundAvailableModel2(data) ? "Bound" : "Unavailable"],
-        ["Comparisons", String(results.length)],
+        ["Model1 TTP candidates", model1.applicable === true || recommendations.length > 0 ? String(recommendations.length) : model1.applicable === false ? "Not applicable" : "Unavailable"],
+        ["Model2 session result", hasBoundAvailableModel2(data) ? model2.availability === "PARTIAL" ? "Bound · partial" : "Bound" : "Unavailable"],
+        ["TTPs compared", String(results.length)],
       ]} />
-      {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <div className="rounded-xl border border-warning-border bg-warning-subtle p-4 text-sm text-text">
-        <p className="font-semibold">Why Model2 is partial</p>
-        <ul className="mt-2 space-y-1">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
-      </div>}
-      <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs leading-5 text-warning">Model1 remains the only source of candidates. Gated weighted voting (0.5/0.5) is selected for this PoC review order; gated reciprocal-rank is retained as a comparator. Model2 PRESENT can promote only an existing Model1 candidate; ABSENT never subtracts. Native model scores are never added together or treated as probabilities.</p>
-      {weighted.schema_version === "session_ttp_weighted_voting_advisory.v1" && <div className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">
-        <p className="font-semibold text-text">Ensemble formula comparison</p>
-        <p className="mt-1">Weighted voting order: {list(weighted.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
-        <p className="mt-1">Reciprocal-rank order: {list(rrf.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
-        <p className="mt-1">Selected for this PoC: weighted voting. It led the controlled synthetic comparison; field accuracy and superiority are not established. Reciprocal-rank remains a comparator.</p>
-      </div>}
+      {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <details className="rounded-xl border border-warning-border bg-warning-subtle/50">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Why some Model2 results are unavailable <span className="ui-badge ml-2">{unavailableHeads.length}</span></summary>
+        <ul className="space-y-2 border-t border-warning-border px-4 py-3 text-sm text-text">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
+      </details>}
       {recommendations.length > 0 ? <section className="rounded-xl border border-primary-border bg-primary-subtle p-3.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <h3 className="text-sm font-semibold text-text">TTPs to investigate first</h3>
-            <p className="mt-1 text-xs leading-5 text-text-muted">{weightedReady && recommendations.some((item) => item.model2SupportAdded) ? "Experimental evidence-gated weighted-voting review order from Model1 candidates plus qualified Model2 support." : "Model1 review order; no qualified Model2 support changed this list."} This is not a confidence percentage, trusted finding, or response authorization.</p>
+            <h3 className="text-sm font-semibold text-text">TTPs to review first</h3>
+            <p className="mt-1 text-xs leading-5 text-text-muted">{weightedReady && recommendations.some((item) => item.model2SupportAdded) ? "Model1 candidates reordered with qualified Model2 support." : "Ordered from Model1; Model2 did not change this session’s list."} Review priority only, not a finding or response decision.</p>
           </div>
-          <span className="ui-badge text-[10px]">Command evidence · advisory only</span>
+          <span className="ui-badge text-[10px]">Analyst review</span>
         </div>
         <ol className="mt-3 grid gap-2 sm:grid-cols-2">
           {recommendations.map((item) => <li key={item.techniqueId} className="rounded-lg border border-border bg-surface p-3">
@@ -1546,19 +1551,34 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
               <span className="ui-badge text-[10px]">{item.model2SupportAdded ? "Model1 + Model2" : item.model2Support === "does_not_support" ? "Model1 only · Model2 ABSENT" : item.model2Support === "not_supported" ? "Model1 only · outside Model2" : "Model1 only"}</span>
             </div>
             <p className="mt-1 text-xs text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support this Model1 suggestion.</p>
-            {item.rankingScore !== null && <p className="mt-1 text-xs font-medium text-text">Weighted vote score: {item.rankingScore.toFixed(2)}{item.model2SupportAdded ? ` · Model2 vote +${item.model2RankingComponent.toFixed(2)}` : ""}{item.rank !== item.baselineRank ? ` · Model1 position #${item.baselineRank}` : ""}</p>}
-            {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command refs: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
+            {item.rankingScore !== null && <p className="mt-1 text-xs font-medium text-text">Review score: {item.rankingScore.toFixed(2)}{item.model2SupportAdded ? ` · Model2 support +${item.model2RankingComponent.toFixed(2)}` : ""}{item.rank !== item.baselineRank ? ` · Model1 position #${item.baselineRank}` : ""}</p>}
+            {item.evidenceRefs.length > 0 && <p className="mt-1 text-[11px] text-text-subtle">Command references: {item.evidenceRefs.slice(0, 8).map((ref) => ref.commandRef).join(", ")}{item.evidenceRefs.length > 8 ? " …" : ""}</p>}
             {item.model2Support === "does_not_support" && <p className="mt-1 text-xs text-warning">Model2 reported ABSENT for its independent head; review before drawing a conclusion.</p>}
           </li>)}
         </ol>
-        <p className="mt-2 text-[11px] text-text-subtle">Method: {weightedReady ? summaryValue(weighted.formula, "Gated weighted voting") : "Model1-only order"}. Model2 cannot add a new TTP or lower a Model1 candidate. Scores are review signals, not probabilities.</p>
+        <p className="mt-3 text-[11px] text-text-subtle">Model2 cannot introduce a new TTP. Scores order analyst review; they are not probabilities.</p>
       </section> : <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available for this session. Older snapshots may lack stable command references.</p>}
-      {results.length > 0 && <ScrollPanel title="Technique-by-technique comparison" count={results.length} height="max-h-80">
-        <ol className="space-y-2">
+      {weighted.schema_version === "session_ttp_weighted_voting_advisory.v1" && <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Compare ranking formulas <span className="ui-badge ml-2">PoC</span></summary>
+        <div className="grid gap-3 border-t border-border p-4 md:grid-cols-2">
+          <div className="rounded-lg border border-primary-border bg-primary-subtle/40 p-3 text-xs">
+            <p className="font-semibold text-text">Selected: gated weighted voting</p>
+            <p className="mt-1 text-text-muted">Order: {list(weighted.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+            <p className="font-semibold text-text">Comparator: reciprocal-rank</p>
+            <p className="mt-1 text-text-muted">Order: {list(rrf.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
+          </div>
+          <p className="text-xs leading-5 text-text-muted md:col-span-2">Weighted voting led the controlled synthetic comparison. Field accuracy and superiority have not been established; this PoC result is not a real-world performance claim.</p>
+        </div>
+      </details>}
+      {results.length > 0 && <details className="rounded-xl border border-border bg-surface">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Per-technique model results <span className="ui-badge ml-2">{results.length}</span></summary>
+        <ol className="grid gap-2 border-t border-border p-3 sm:grid-cols-2">
           {results.map((item, index) => {
             const qualified = record(weightedRows.get(label(item.technique_id, "")));
             const rawAgreementOnly = item.evidence_state === "AGREE" && qualified.model2_support_added !== true;
-            return <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs transition-colors hover:border-primary-border">
+            return <li key={`${index}-${summaryValue(item.technique_id, "technique")}`} className="min-w-0 rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono font-semibold text-text">{summaryValue(item.technique_id, "Technique unavailable")}</span>
                 <span className="ui-badge text-[11px]">{rawAgreementOnly ? "RAW AGREE · NO VOTE" : summaryValue(item.evidence_state, "UNAVAILABLE")}</span>
@@ -1572,12 +1592,8 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
             </li>;
           })}
         </ol>
-      </ScrollPanel>}
-      {model1Only.length > 0 && <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium text-text-muted">Model1 only:</span>
-        {model1Only.map((item) => <span key={summaryValue(item.technique_id, "unknown")} className="ui-badge font-mono text-[10px]">{summaryValue(item.technique_id, "unknown")}</span>)}
-      </div>}
-      <MoreDetails title="Model artifact and run information">
+      </details>}
+      <MoreDetails title="Technical model and session-binding details">
       <SummaryGrid fields={[
         ["Authority", summaryValue(ensemble.ensemble_authority, "ADVISORY_ONLY")],
         ["Model2 status", summaryValue(model2.status, "Unavailable")],
@@ -2040,19 +2056,19 @@ export function SessionAnalysisPanels({
       <section aria-label="Classification evidence">
         <div className="mb-3">
           <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Trusted observations</p>
-          <p className="mt-1 text-xs text-text-muted">Classification and ATT&amp;CK mappings remain separate from advisory analysis.</p>
+          <p className="mt-1 text-xs text-text-muted">See which ATT&amp;CK techniques are supported by recorded evidence. Model suggestions appear in the next section.</p>
         </div>
-        <Panel eyebrow="Trusted observations" title="Classification and ATT&CK mappings" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult}>
+        <Panel eyebrow="Trusted observations" title="Observed classifications and ATT&CK mappings" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult}>
           <ClassificationList items={classificationEvents} trustedMappings={trustedTtps} />
         </Panel>
       </section>
 
       <section aria-label="Model ensemble evidence">
         <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Shadow corroboration</p>
-          <p className="mt-1 text-xs text-text-muted">The stored late-fusion evidence is read-only; Model1 remains primary and Model2 never authorizes response.</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Model comparison</p>
+          <p className="mt-1 text-xs text-text-muted">Model1 proposes TTP candidates; Model2 can add support when its session evidence passes the required checks.</p>
         </div>
-        <Panel eyebrow="Model evidence" title="Model1 + Model2 ensemble" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult}>
+        <Panel eyebrow="TTP review priority" title="Model comparison and TTP review order" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult}>
           <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>
