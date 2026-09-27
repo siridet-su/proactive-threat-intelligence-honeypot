@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Show upcoming dates in the backup schedule calendar
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make the temporary schedule start-date picker useful late in a month, when a conventional current-month calendar shows mostly unavailable past dates.
+- Repository branch and commit/PR: `fix/backup-schedule-calendar-range`; commit and PR follow this entry.
+- Repository changes: replace the month grid with a rolling five-week view from the current week, readable disabled dates, bounded forward navigation, and Today/Tomorrow shortcuts. Keep the existing `YYYY-MM-DD` API value, one-year selection limit, themed colors, and reduced-motion behavior.
+- Host/environment changes actually applied: none. No Pi binary, timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at the permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. The local development Dashboard reflects this presentation change when reloaded.
+- Validation performed and outcome: local TypeScript check, lint, production build, and `git diff --check` passed. The unauthenticated local Backup & Retention route returned its expected login redirect. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the picker still restricts start dates to today through the next 365 Bangkok calendar days, with the API enforcing the same range. No secret or archive data enters the UI.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the picker in authenticated light/dark browser sessions and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Theme the backup schedule pickers and transitions
 
 - Status: repository Dashboard UI change prepared; local development Dashboard uses the working tree when reloaded.
