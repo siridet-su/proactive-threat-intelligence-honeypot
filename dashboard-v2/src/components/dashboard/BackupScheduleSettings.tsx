@@ -7,6 +7,9 @@ import type { BackupScheduleEdit, BackupSchedulePreview, BackupScheduleSettings,
 
 type EditMode = "permanent" | "temporary" | "clear_override";
 type PreviewResult = { revision: string; settings: BackupScheduleSettings; preview: BackupSchedulePreview };
+const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
+const MINUTES = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"));
+const QUICK_TIMES = ["01:00", "02:00", "03:30"];
 
 function formatBangkok(value: string | null): string {
   if (!value) return "—";
@@ -111,6 +114,12 @@ export function BackupScheduleSettings() {
   const temporary = settings?.override && view && overrideEndDate(settings.override.start_date, settings.override.days) > view.local_date
     ? settings.override : null;
   const editable = Boolean(view?.can_edit && view?.worker_ready);
+  const [selectedHour = "03", selectedMinute = "30"] = time.split(":");
+  function changeTime(next: string) {
+    setTime(next);
+    setPreview(null);
+    setSaved(false);
+  }
   return (
     <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm" aria-labelledby="backup-schedule-title">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
@@ -124,7 +133,7 @@ export function BackupScheduleSettings() {
         <span className="ui-badge text-xs"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />Next run {view ? formatBangkok(view.preview.next_run_at) : "checking…"}</span>
       </div>
       <div className="grid gap-5 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-        <div className="space-y-3 text-sm">
+        <div className="space-y-3 rounded-xl border border-border bg-surface-subtle p-4 text-sm">
           <div><span className="text-text-muted">Permanent time</span><p className="mt-0.5 font-mono font-semibold text-text">{settings?.base_time ?? "—"}</p></div>
           <div><span className="text-text-muted">Temporary change</span><p className="mt-0.5 text-text">{temporary ? `${temporary.time} · ${temporary.start_date} for ${temporary.days} day${temporary.days === 1 ? "" : "s"}` : "None"}</p></div>
           <div><span className="text-text-muted">Today&apos;s scheduled run</span><p className="mt-0.5 text-text">{view?.today_run_status === "success" ? "Completed" : view?.today_run_status === "running" ? "Running" : view?.today_run_status === "failed" ? "Retry pending" : "Not run yet"}</p></div>
@@ -134,15 +143,34 @@ export function BackupScheduleSettings() {
           {!view?.worker_ready && <p className="text-xs text-warning">Pi scheduler is not ready. Changes are unavailable until the control worker is active.</p>}
         </div>
         {view?.can_edit && (
-          <div className="space-y-3">
+          <div className="space-y-4 rounded-xl border border-border bg-surface-subtle p-4">
             <fieldset disabled={!editable || busy} className="space-y-3 disabled:opacity-60">
               <legend className="text-sm font-semibold">Change schedule</legend>
-              <div className="flex flex-wrap gap-3 text-sm">
-                <label className="flex items-center gap-1.5"><input type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); setTime(settings?.base_time ?? "03:30"); setPreview(null); }} />Permanent</label>
-                <label className="flex items-center gap-1.5"><input type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={() => { setMode("temporary"); setTime(temporary?.time ?? "01:00"); setStartDate(view.local_date); setDays(temporary?.days ?? 7); setPreview(null); }} />Temporary</label>
-                {temporary && <label className="flex items-center gap-1.5"><input type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); setPreview(null); }} />Return to permanent</label>}
+              <div className="flex flex-wrap gap-2 text-sm">
+                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "permanent" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); changeTime(settings?.base_time ?? "03:30"); }} />Permanent</label>
+                <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={() => { setMode("temporary"); changeTime(temporary?.time ?? "01:00"); setStartDate(view.local_date); setDays(temporary?.days ?? 7); }} />Temporary</label>
+                {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); setPreview(null); }} />Return to permanent</label>}
               </div>
-              {mode !== "clear_override" && <label className="block text-xs text-text-muted">Daily time (Bangkok)<input className="ui-field mt-1 w-full" type="time" value={time} onChange={(event) => { setTime(event.target.value); setPreview(null); }} required /></label>}
+              {mode !== "clear_override" && <div className="rounded-lg border border-border bg-surface p-3">
+                <p className="text-xs font-medium text-text-muted">Daily time · Asia/Bangkok (24-hour)</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="min-w-0 flex-1 text-xs text-text-muted" htmlFor="backup-schedule-hour">Hour
+                    <select id="backup-schedule-hour" className="ui-field mt-1 cursor-pointer font-mono text-base font-semibold" value={selectedHour} onChange={(event) => changeTime(`${event.target.value}:${selectedMinute}`)}>
+                      {HOURS.map((hour) => <option key={hour} value={hour}>{hour}</option>)}
+                    </select>
+                  </label>
+                  <span className="pt-4 text-lg font-semibold text-text-muted" aria-hidden="true">:</span>
+                  <label className="min-w-0 flex-1 text-xs text-text-muted" htmlFor="backup-schedule-minute">Minute
+                    <select id="backup-schedule-minute" className="ui-field mt-1 cursor-pointer font-mono text-base font-semibold" value={selectedMinute} onChange={(event) => changeTime(`${selectedHour}:${event.target.value}`)}>
+                      {MINUTES.map((minute) => <option key={minute} value={minute}>{minute}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="mr-1 text-text-muted">Quick times</span>
+                  {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
+                </div>
+              </div>}
               {mode === "temporary" && <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block text-xs text-text-muted">Start date<input className="ui-field mt-1 w-full" type="date" min={view.local_date} value={startDate} onChange={(event) => { setStartDate(event.target.value); setPreview(null); }} required /></label>
                 <label className="block text-xs text-text-muted">Number of days<input className="ui-field mt-1 w-full" type="number" min={1} max={90} value={days} onChange={(event) => { setDays(Number(event.target.value)); setPreview(null); }} required /></label>

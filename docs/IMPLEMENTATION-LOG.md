@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Improve Dashboard backup schedule time controls
+
+- Status: repository UI change prepared; local development Dashboard picks it up through the running dev server.
+- Scope and intent: make the daily backup time easy to change without relying on the browser's clock icon or native time popup.
+- Repository branch and commit/PR: `fix/backup-schedule-time-picker`; commit and PR follow this entry.
+- Repository changes: replace the native time input with two full-width themed hour/minute selects in 24-hour Bangkok time, add 01:00/02:00/03:30 quick choices, and place schedule summary and form in theme-aware panels. The stored `HH:mm` API contract and preview/save workflow are unchanged.
+- Host/environment changes actually applied: none. No Pi binary, timer, environment file, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi control scheduler remains active at the permanent 03:30 Bangkok default; the former fixed timer remains disabled. Only the local development Dashboard UI changes when the dev server reloads.
+- Validation performed and outcome: Dashboard lint, TypeScript check, production build, and `git diff --check` passed locally. CI and authenticated visual interaction remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser interaction review, live Admin schedule change, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: hour and minute controls still produce the same validated 24-hour `HH:mm` value; no secret or archive data enters the UI change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify the controls in an authenticated light and dark browser session and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Preserve complete response guidance in compact session detail
 
 - Status: installed and active on the GCP monitor API.
