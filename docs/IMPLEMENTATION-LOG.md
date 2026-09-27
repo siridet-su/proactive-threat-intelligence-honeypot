@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Balance backup schedule form layout
+
+- Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.
+- Scope and intent: remove the uneven nested cards and excess space in the schedule editor reported after the preceding alignment change.
+- Repository branch and commit/PR: `fix/backup-schedule-form-layout`; commit and PR follow this entry.
+- Repository changes: place the time and scope controls in one shared surface with aligned columns, move quick times and the scheduling explanation into a full-width footer, and align Preview change to the right. The existing fixed-height scope transition remains for stable Permanent and Temporary switching.
+- Host/environment changes actually applied: none. No schedule revision, Pi service, manifest, or B2 object was changed.
+- Runtime/exposure state: the active daily backup schedule remains unchanged; the layout appears only where the updated Dashboard revision is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint, TypeScript compilation, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review and production Dashboard deployment were not performed.
+- Risks and data handling: layout-only change; no new data flow or credential exposure.
+- Rollback: revert this UI commit.
+- Follow-up: inspect Permanent and Temporary layouts after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ### 2026-09-27 — Align backup schedule scope with time inputs
 
 - Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.
