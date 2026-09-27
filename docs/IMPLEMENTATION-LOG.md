@@ -2432,6 +2432,7 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: build and install a clean ARM64 binary, verify its heartbeat and default-time run claim, disable the old timer only after the control scheduler is healthy, then record actual host state in a dated addendum.
 - Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
 
+
 ### 2026-09-27 — Activate Pi daily backup scheduler
 
 - Status: installed and active on the Pi; Dashboard production deployment remains pending.
@@ -2446,3 +2447,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the protected previous binary and restart the control service, and re-enable the fixed 03:30 timer as a pair. Preserve schedule revisions, run claims, manifests, and B2 versions for audit.
 - Follow-up: monitor the next scheduled run and authenticated schedule UI; perform a read-only restore rehearsal before claiming recovery readiness.
 - Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Align Activity Evidence timeline and compact technical details
+
+- Status: repository Dashboard UI change prepared on an isolated branch; staging deployment pending.
+- Scope and intent: keep event timestamps aligned when only the latest event has a state label, and make technical/provenance fields secondary to analyst-facing summaries.
+- Repository branch and commit/PR: `codex/fix-activity-evidence-timeline-20260927`; commit and staging push follow this entry.
+- Repository changes: render Activity Evidence rows with a consistent information, timestamp, and reserved state-label grid; retain the connected navy timeline, use orange only for LATEST, and slightly reduce event spacing. Keep expandable technical details collapsed by default, avoid duplicated fields and unnecessary nested disclosures, and compact mostly unavailable or zero-valued field sets. Add presentation regression assertions.
+- Host/environment changes actually applied: none. No GCP service, application, backend, MongoDB data, or production configuration was changed manually.
+- Runtime/exposure state: not yet deployed. Pushing the change to staging is intended to trigger the configured CI/CD workflow; workflow completion and live visibility are not verified by this entry.
+- Validation performed and outcome: focused session-analysis and classification-detail tests passed (21/21); full Dashboard lint and `npx tsc --noEmit` passed; the staging workflow's external-TI tests passed (8/8) and BFF/staging contract tests passed (10/10); the production build passed with `npm run build -- --webpack`. The full Dashboard suite reported 815 passed, 5 failed, 2 expected failures, and 14 skipped (74 files). The five failures are in filesystem-topology empty states, filesystem CWD/path-interest presentation, and a session-command route status assertion; they are outside the changed files and were not investigated as part of this UI fix. The default Turbopack build could not run in this local linked-dependency setup because Turbopack rejects the external `node_modules` symlink; this is not a clean CI checkout.
+- Not performed / deferred: authenticated browser visual review, default-Turbopack build in a clean dependency installation, resolution of the unrelated full-suite failures, and confirmation of the staging CI/CD result.
+- Risks and data handling: presentation-only; event data, server behavior, policies, and response authority are unchanged. No session payloads or secrets were added.
+- Rollback: revert the UI commit on the staging branch; no host or data rollback is required.
+- Follow-up: inspect the staging workflow result and review the event alignment and collapsed technical-detail sections in an authenticated browser.
+- Related ADR/runbook: N/A; no operating procedure or architecture decision changed.

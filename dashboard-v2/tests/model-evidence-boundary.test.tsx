@@ -29,6 +29,24 @@ describe("retired command shadow versus session-bound Model2", () => {
     expect(html).not.toContain("MODEL2_UNAVAILABLE");
   });
 
+  it("keeps command-classification technical evidence inside one collapsed disclosure", () => {
+    const html = renderToStaticMarkup(createElement(ClassificationList, {
+      items: [{
+        evidence_id: "classification-1",
+        technique_id: "T1105",
+        s1_advisory: { predicted_technique: "T1105" },
+        traceability: { event_id: "event-1", model_source: "Model1" },
+        authority_decision: { decision: "advisory" },
+      }],
+      trustedMappings: [],
+    }));
+
+    expect(html).toContain("Command classification details");
+    expect(html).toContain("Evidence trace · technical details");
+    expect(html.match(/<details/g)).toHaveLength(1);
+    expect(html).not.toMatch(/<details[^>]*open(?:=|\s|>)/);
+  });
+
   it("renders Model2 only from the exact-session ensemble projection", () => {
     const html = renderToStaticMarkup(createElement(Model2EnsembleSummary, {
       data: {

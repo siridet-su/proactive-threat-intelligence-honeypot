@@ -103,8 +103,8 @@ function ContentPanel({ title, count, children, className = "" }: { title: strin
 function MoreDetails({ title, children }: { title: string; children: ReactNode }) {
   return (
     <details className="group rounded-lg border border-border bg-surface">
-      <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text marker:text-primary">{title}</summary>
-      <div className="border-t border-border px-4 py-4">{children}</div>
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-semibold text-text marker:text-primary"><span className="ui-badge text-[9px]">Technical details</span><span>{title}</span><ChevronDown className="ml-auto h-4 w-4 shrink-0 text-text-muted transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+      <div className="space-y-3 border-t border-border px-4 py-3">{children}</div>
     </details>
   );
 }
@@ -639,20 +639,22 @@ export function TimelineList({ items }: { items: unknown[] }) {
           const EventIcon = eventCategory === "Authentication" ? Fingerprint : eventCategory === "Session" ? Network : Activity;
           const endpoint = [event.src_ip && `src ${display(event.src_ip)}`, event.dst_ip && `dst ${display(event.dst_ip)}`].filter(Boolean).join(" · ");
         return (
-          <li key={`${index}-${eventName}-${String(timestampValue || "unknown")}`} className="relative grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 pb-4 last:pb-0">
-            {index < timelineItems.length - 1 && <span className="absolute bottom-0 left-[0.4375rem] top-4 w-px bg-primary-navy-line" aria-hidden="true" />}
+          <li key={`${index}-${eventName}-${String(timestampValue || "unknown")}`} className="relative grid grid-cols-[1rem_minmax(0,1fr)] gap-x-3 pb-3 last:pb-0">
+            {index < timelineItems.length - 1 && <span className="absolute -bottom-2.5 left-[0.4375rem] top-4 w-px bg-primary-navy-line" aria-hidden="true" />}
             <span className={`relative z-10 mt-0.5 grid h-4 w-4 place-items-center rounded-full border bg-surface ${isLatest ? "border-orange-500 text-orange-600" : "border-primary-navy-line text-primary-navy"}`}>
               <EventIcon className="h-2.5 w-2.5" aria-hidden="true" />
             </span>
             <div className="min-w-0 pb-1">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <div className="grid grid-cols-[minmax(0,1fr)_9.5rem_3.5rem] items-start gap-x-2 sm:grid-cols-[minmax(0,1fr)_15rem_4rem] sm:gap-x-3" data-testid="timeline-event-row">
+                <div className="min-w-0">
                 <p className="text-xs font-semibold capitalize leading-5 text-text">{readableEvent}</p>
-                <time className="font-mono text-[10px] text-text-muted" dateTime={hasMeaningfulValue(timestampValue) ? String(timestampValue) : undefined}>{hasMeaningfulValue(timestampValue) ? thailandTimestamp(timestampValue) : "Timestamp unavailable"}</time>
-                {isLatest && <span className="text-[9px] font-semibold uppercase tracking-wide text-orange-600">Latest</span>}
+                  <p className="mt-0.5 text-[10px] text-text-subtle">{eventCategory} · {summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</p>
+                  {endpoint && <p className="mt-0.5 break-all font-mono text-[10px] text-text-muted">{endpoint}</p>}
+                  {event.processed === false && <span className="mt-1 inline-flex rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[9px] font-medium text-text-muted">Processing pending</span>}
+                </div>
+                <time className="min-w-0 break-words pt-0.5 text-right font-mono text-[9px] text-text-muted sm:text-[10px]" dateTime={hasMeaningfulValue(timestampValue) ? String(timestampValue) : undefined}>{hasMeaningfulValue(timestampValue) ? thailandTimestamp(timestampValue) : "Timestamp unavailable"}</time>
+                <span className={`w-14 justify-self-end pt-0.5 text-right text-[9px] font-semibold uppercase tracking-wide ${isLatest ? "text-orange-600" : "text-transparent"}`} aria-label={isLatest ? "Latest event" : undefined} aria-hidden={!isLatest} data-testid="timeline-state-slot">{isLatest ? "LATEST" : "\u00a0"}</span>
               </div>
-              <p className="mt-0.5 text-[10px] text-text-subtle">{eventCategory} · {summaryValue(event.sensor_id || event.sensor, "Sensor unavailable")}</p>
-              {endpoint && <p className="mt-0.5 break-all font-mono text-[10px] text-text-muted">{endpoint}</p>}
-              {event.processed === false && <span className="mt-1 inline-flex rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[9px] font-medium text-text-muted">Processing pending</span>}
             </div>
           </li>
         );
@@ -737,7 +739,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
                   return <tr key={`${index}-${techniqueId}`} className="align-top">
                     <td className="px-3 py-2.5"><span className="font-mono font-semibold text-primary-navy">{techniqueId}</span><span className="mt-0.5 block text-text-muted">{summaryValue(mapping.name || classifier.name, "Technique name not recorded")}</span></td>
                     <td className="px-3 py-2.5 text-text-muted">{tactics}</td>
-                    <td className="px-3 py-2.5 text-text-muted">{countOf(refs)} linked reference{refs === 1 ? "" : "s"}<details className="mt-1"><summary className="cursor-pointer text-[10px] font-medium text-primary">Trace evidence</summary><div className="pt-1"><TrustedTraceability mapping={mapping} /></div></details></td>
+                    <td className="px-3 py-2.5 text-text-muted">{countOf(refs)} linked reference{refs === 1 ? "" : "s"}<div className="mt-1"><TrustedTraceability mapping={mapping} /></div></td>
                     <td className="px-3 py-2.5"><span className="ui-badge text-[10px]">{readableCode(mapping.trust_tier || mapping.authority || "not recorded")}</span><span className="mt-1 block text-[10px] text-text-subtle">{readableCode(mapping.mapping_semantics || "not recorded")}</span></td>
                   </tr>;
                 })}
@@ -770,7 +772,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
                 <p className="mt-1 text-text-muted">{summaryValue(mapping.name, "Technique not assigned")} · {summaryValue(mapping.tactic, "Tactic not recorded")}</p>
                 {sourceCommand && <p className="mt-2 break-words rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-[11px] text-text">{sourceCommand}</p>}
                 {hasMeaningfulValue(advisory.predicted_technique) && <p className="mt-2 font-mono text-text-muted">Model1 advisory: {summaryValue(advisory.predicted_technique)}</p>}
-                <ClassificationTraceability mapping={mapping} sourceCommand={sourceCommand} />
+                <ClassificationTraceability mapping={mapping} />
               </li>
             );
           })}
@@ -852,16 +854,40 @@ function RecordList({ items, empty }: { items: unknown[]; empty: string }) {
   );
 }
 
+function isEmptyTechnicalValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replaceAll("_", " ").replaceAll(/\s+/g, " ");
+  return normalized === "" || [
+    "not recorded", "not available", "unavailable", "unknown", "n/a", "na", "not reported",
+    "not calculable", "not linked", "not assessed", "empty", "none",
+  ].includes(normalized) || /^0+(?:\.0+)?$/.test(normalized);
+}
+
+function TechnicalFieldGrid({ fields, empty = "No additional technical values were recorded." }: { fields: Array<readonly [string, string]>; empty?: string }) {
+  const populatedFields = fields.filter(([, value]) => !isEmptyTechnicalValue(value));
+  if (populatedFields.length === 0) return <p role="status" className="rounded-md bg-surface-subtle px-3 py-2 text-xs text-text-muted">{empty}{fields.length > 0 ? ` (${fields.length} fields are empty, unavailable, or zero.)` : ""}</p>;
+  const mostlyEmpty = fields.length > 0 && fields.length - populatedFields.length > fields.length / 2;
+  if (mostlyEmpty) {
+    return <div className="space-y-2">
+      <p className="text-[11px] text-text-muted">Limited technical detail · {populatedFields.length} of {fields.length} fields recorded.</p>
+      <dl className="divide-y divide-border rounded-md border border-border px-3">
+        {populatedFields.map(([name, value]) => <div key={name} className="grid gap-1 py-2 sm:grid-cols-[minmax(9rem,0.8fr)_minmax(0,1.2fr)] sm:gap-3">
+          <dt className="text-[10px] font-medium uppercase tracking-[0.08em] text-text-subtle">{name}</dt>
+          <dd className="break-words font-mono text-[11px] text-text">{value}</dd>
+        </div>)}
+      </dl>
+    </div>;
+  }
+  return <dl className="grid gap-2 sm:grid-cols-2">
+    {fields.map(([name, value]) => <div key={name} className="min-w-0 rounded-md border border-border bg-surface-subtle p-2">
+      <dt className="text-[10px] font-medium uppercase tracking-[0.08em] text-text-subtle">{name}</dt>
+      <dd className="mt-1 break-words font-mono text-[11px] text-text">{value}</dd>
+    </div>)}
+  </dl>;
+}
+
 function SummaryGrid({ fields }: { fields: Array<readonly [string, string]> }) {
   return (
-    <dl className="grid gap-3 sm:grid-cols-2">
-      {fields.map(([name, value]) => (
-        <div key={name} className="rounded-lg border border-border bg-surface-subtle p-3">
-          <dt className="text-[11px] font-medium uppercase tracking-[0.1em] text-text-subtle">{name}</dt>
-          <dd className="mt-1 break-words font-mono text-xs text-text">{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <TechnicalFieldGrid fields={fields} />
   );
 }
 
@@ -881,20 +907,10 @@ function TraceabilityDetails({
   fields: Array<readonly [string, string]>;
   empty?: string;
 }) {
-  const hasValue = fields.some(([, value]) => value !== "Not recorded" && value !== "Unavailable" && value !== "");
   return (
     <details className="mt-3 rounded-lg border border-border bg-surface px-3 py-2 text-xs">
-      <summary className="cursor-pointer select-none font-semibold text-text">{title}</summary>
-      {hasValue ? (
-        <dl className="mt-3 grid gap-2 sm:grid-cols-2">
-          {fields.map(([name, value]) => (
-            <div key={name} className="rounded border border-border bg-surface-subtle p-2">
-              <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">{name}</dt>
-              <dd className="mt-1 break-words font-mono text-[11px] text-text">{value}</dd>
-            </div>
-          ))}
-        </dl>
-      ) : <p className="mt-2 text-text-muted">{empty}</p>}
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-text"><span className="ui-badge text-[9px]">Technical details</span><span>{title}</span></summary>
+      <div className="mt-3"><TechnicalFieldGrid fields={fields} empty={empty} /></div>
     </details>
   );
 }
@@ -933,9 +949,9 @@ function GuidanceTraceability({ action, guidance }: { action: JsonRecord; guidan
     : traceList(action.evidence_refs);
   const sessionId = summaryValue(trace.session_id || guidance.session_id || record(guidance.binding).session_id, "Not recorded");
   return (
-    <TraceabilityDetails
-      title="Why this guidance was selected"
-      fields={[
+    <div className="mt-2 space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-subtle">Selection and source binding · technical details</p>
+      <TechnicalFieldGrid fields={[
         ["Action ID", summaryValue(trace.action_id || action.action_id, "Not recorded")],
         ["Policy / rule", guidancePolicyRuleLabel(trace.policy_rule || { rule_id: action.rule_id })],
         ["Matched predicates", predicates.length ? predicates.map(predicateTraceLabel).join(" | ") : "Not recorded"],
@@ -943,32 +959,27 @@ function GuidanceTraceability({ action, guidance }: { action: JsonRecord; guidan
         ["Source event IDs", traceList(trace.source_event_ids)],
         ["Source command IDs", traceList(trace.source_command_ids)],
         ["Exact session", sessionId],
-      ]}
-    />
+      ]} empty="No additional action-selection trace was recorded." />
+    </div>
   );
 }
 
-function ClassificationTraceability({ mapping, sourceCommand }: { mapping: JsonRecord; sourceCommand: string | null }) {
+function ClassificationTraceability({ mapping }: { mapping: JsonRecord }) {
   const trace = record(mapping.traceability);
   const sourceEvent = record(trace.source_event);
   const durableOrder = record(mapping.durable_evidence_order);
   return (
-    <TraceabilityDetails
-      title="Why this technique is shown"
-      fields={[
-        ["Technique", summaryValue(mapping.ttp || mapping.technique_id, "Not recorded")],
-        ["Technique name", summaryValue(mapping.name, "Not recorded")],
-        ["Source command", sourceCommand || "Not recorded"],
+    <div className="mt-2 space-y-1.5">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-text-subtle">Evidence trace · technical details</p>
+      <TechnicalFieldGrid fields={[
         ["Source event", summaryValue(sourceEvent.cowrie_eventid || sourceEvent.event_type || mapping.cowrie_eventid, "Not recorded")],
         ["Event ID", summaryValue(trace.event_id || durableOrder.event_id || mapping.evidence_id, "Not recorded")],
         ["Procedure / evidence anchor", summaryValue(trace.procedure_anchor, "Not recorded")],
         ["Evidence references", traceList(trace.evidence_references || mapping.evidence_id)],
         ["Policy / rule", guidancePolicyRuleLabel(trace.policy_or_rule_identifier)],
         ["Model source", summaryValue(trace.model_source || mapping.source, "Not recorded")],
-        ["Authority state", summaryValue(trace.authority_state, "Not recorded")],
-        ["Evidence tier", summaryValue(trace.evidence_tier || mapping.evidence_tier, "Not recorded")],
-      ]}
-    />
+      ]} empty="No additional classification evidence trace was recorded." />
+    </div>
   );
 }
 
@@ -976,14 +987,11 @@ function TrustedTraceability({ mapping }: { mapping: JsonRecord }) {
   const trace = record(mapping.traceability);
   return (
     <TraceabilityDetails
-      title="Trusted evidence anchors"
+      title="Evidence trace"
       fields={[
-        ["Technique", summaryValue(mapping.technique_id || mapping.ttp, "Not recorded")],
         ["Source command", traceList(trace.source_commands)],
         ["Evidence references", traceList(trace.evidence_references)],
         ["Policy / rule", guidancePolicyRuleLabel(trace.policy_or_rule_identifier)],
-        ["Authority state", summaryValue(trace.authority_state || mapping.authority, "Not recorded")],
-        ["Evidence tier", summaryValue(trace.evidence_tier || mapping.evidence_tier, "Not recorded")],
       ]}
     />
   );
@@ -1129,9 +1137,10 @@ function ProviderContextRows({
               : status
                 ? tiLookupState(status)
                 : "UNAVAILABLE";
-          const context = selectedProviderFields(normalized).filter(([key]) => key !== "pulses");
+          const summarizedProviderKeys = new Set(["pulses", "pulse_count", "abuse_confidence_score", "total_reports", "ports", "asn"]);
+          const context = selectedProviderFields(normalized).filter(([key]) => !summarizedProviderKeys.has(key.toLowerCase()));
           const pulses = list(normalized.pulses).map(record);
-          const extension = latestEvidence ? selectedProviderFields(latestEvidence.normalized_extension) : [];
+          const extension = latestEvidence ? selectedProviderFields(latestEvidence.normalized_extension).filter(([key]) => !summarizedProviderKeys.has(key.toLowerCase())) : [];
           const reportedAt = (latestCacheWasQueried ? latestCache?.lookup_at : undefined) || latestEvidence?.retrieved_at || status?.retrieved_at || status?.lookup_at;
           const expiresAt = (latestCacheWasQueried ? latestCache?.expires_at : undefined) || latestEvidence?.expires_at || status?.expires_at;
           const provider = group.provider;
@@ -1176,32 +1185,18 @@ function ProviderContextRows({
               <TraceabilityDetails
                 title="Lookup provenance and technical details"
                 fields={[
-                  ["Provider", providerName(provider)],
-                  ["Observable", summaryValue(latestCache?.observable_value || latestEvidence?.observable_value || record(latestEvidence?.safe_observable_reference).display_value || status?.observable_value || observable.value, "Not recorded")],
                   ["Observable type", summaryValue(latestCache?.observable_type || latestEvidence?.observable_type || status?.observable_type || observable.type, "source_ip")],
                   ["Observable role", summaryValue(latestCache?.observable_role || latestEvidence?.observable_role || status?.observable_role || "source_ip", "Not recorded")],
-                  ["Lookup state", lookupState],
-                  ["Freshness", freshness],
-                  ["Retrieved at", thailandTimestamp(reportedAt)],
                   ["Provider observed at", thailandTimestamp(latestCache?.provider_observed_at || latestEvidence?.provider_observed_at || status?.provider_observed_at)],
-                  ["Expires at", thailandTimestamp(expiresAt)],
                   ["Data age", dataAge(reportedAt)],
                   ["Session binding", summaryValue(latestEvidence?.session_id || latestCache?.session_id, "Not recorded")],
-                  ["Finding state", summaryValue(latestEvidence?.finding_state || status?.finding_state, "Not recorded")],
                   ["Provider record count", countOf(status?.record_count)],
                 ]}
               />
 
               {(context.length > 0 || extension.length > 0) && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
                 <summary className="cursor-pointer font-semibold text-text">Additional provider fields</summary>
-                <dl className="mt-3 grid gap-2 sm:grid-cols-2">
-                  {[...context, ...extension].slice(0, 16).map(([key, value]) => (
-                    <div key={key} className="min-w-0 rounded-md border border-border bg-surface-subtle p-2">
-                      <dt className="text-[10px] uppercase tracking-[0.1em] text-text-subtle">{readableCode(key)}</dt>
-                      <dd className="mt-1 break-words text-xs text-text">{value}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <div className="mt-3"><TechnicalFieldGrid fields={[...context, ...extension].slice(0, 16).map(([key, value]) => [readableCode(key), value] as const)} /></div>
               </details>}
 
               {group.evidence.length > 1 && <details className="mt-2 rounded-lg border border-border p-3 text-xs">
@@ -1270,7 +1265,7 @@ export function SourcePivotSummary({ data }: { data: JsonRecord }) {
           <thead className="sticky top-0 z-10 bg-primary-navy-soft text-[10px] uppercase tracking-[0.08em] text-primary-navy"><tr><th scope="col" className="px-3 py-2 font-semibold">Session</th><th scope="col" className="px-3 py-2 font-semibold">First seen (ICT)</th><th scope="col" className="px-3 py-2 font-semibold">Last seen (ICT)</th><th scope="col" className="px-3 py-2 text-right font-semibold">Sightings</th></tr></thead>
           <tbody className="divide-y divide-border">
             {sessions.slice(0, 50).map((session, index) => <tr key={`${index}-${summaryValue(session.session_id, "session")}`}>
-              <td className="px-3 py-2.5"><details className="group"><summary className="max-w-[240px] cursor-pointer break-all font-mono text-[11px] font-semibold text-primary-navy">{summaryValue(session.session_id, "Session unavailable")}</summary><div className="mt-2 rounded-md bg-surface-subtle p-2"><TraceabilityDetails title="Session recurrence provenance" fields={[["Observable role", traceList(session.roles, "source_ip")], ["Sources", traceList(session.sources)], ["Sensor IDs", traceList(session.sensor_ids)], ["First seen", thailandTimestamp(session.first_seen)], ["Last seen", thailandTimestamp(session.last_seen)], ["Sightings", countOf(session.sighting_count)]]} /></div></details></td>
+              <td className="px-3 py-2.5"><details className="group"><summary className="max-w-[240px] cursor-pointer break-all font-mono text-[11px] font-semibold text-primary-navy">{summaryValue(session.session_id, "Session unavailable")}</summary><div className="mt-2 rounded-md bg-surface-subtle p-2"><p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-text-subtle">Technical details</p><TechnicalFieldGrid fields={[["Observable role", traceList(session.roles, "source_ip")], ["Sources", traceList(session.sources)], ["Sensor IDs", traceList(session.sensor_ids)]]} empty="No additional session-source details were recorded." /></div></details></td>
               <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[10px] text-text-muted">{thailandTimestamp(session.first_seen)}</td>
               <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[10px] text-text-muted">{thailandTimestamp(session.last_seen)}</td>
               <td className="px-3 py-2.5 text-right font-semibold text-primary-navy">{countOf(session.sighting_count)}</td>
@@ -1487,7 +1482,6 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
     ? list(guidance.advisory_actions).map(record)
     : list(recommendations.recommended_actions_structured).map(record);
   const validation = record(guidance.validation);
-  const safety = record(guidance.safety);
   const findingCount = Number(guidance.finding_count || 0);
   const boundFindingIds = new Set(actions.flatMap((action) => list(action.finding_ids).map((id) => label(id, "")).filter(Boolean)));
   const hasFindingBindings = actions.some((action) => Array.isArray(action.finding_ids));
@@ -1526,7 +1520,7 @@ function GuidanceSummary({ data }: { data: JsonRecord }) {
         </p>
       )}
       <MoreDetails title="Guidance policy and validation">
-        <SummaryGrid fields={[["Validation", summaryValue(validation.status, "Not recorded")], ["Manual approval", guidance.requires_manual_approval === false ? "Not required" : "Required"], ["Automatic execution", safety.automatic_execution === true ? "Enabled by policy" : "Disabled"], ["Authority", summaryValue(guidance.authority, "Not recorded")]]} />
+        <SummaryGrid fields={[["Validation", summaryValue(validation.status, "Not recorded")], ["Authority", summaryValue(guidance.authority, "Not recorded")]]} />
         {hasMeaningfulValue(validation.error) && <p className="mt-2 text-xs text-warning">{summaryValue(validation.error)}</p>}
       </MoreDetails>
     </div>
@@ -1742,7 +1736,7 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
     return <div className="space-y-2 border-l-2 border-border pl-3 text-xs text-text-muted">
       <p>Policy-gap review: no candidate pattern was recorded.</p>
       <MoreDetails title="Policy proposal safeguards">
-        <SummaryGrid fields={[["Mode", summaryValue(gap.mode, "Read-only")], ["Proposals", "0"], ["Authority", summaryValue(gap.authority, "PROPOSED_UNVALIDATED")], ["Review", gap.requires_review === false ? "Not required" : "REQUIRES_REVIEW"], ["Policy mutation", gap.automatic_policy_mutation === true ? "Enabled" : "Disabled"]]} />
+        <SummaryGrid fields={[["Mode", summaryValue(gap.mode, "Read-only")], ["Authority", summaryValue(gap.authority, "PROPOSED_UNVALIDATED")], ["Review", gap.requires_review === false ? "Not required" : "REQUIRES_REVIEW"], ["Policy mutation", gap.automatic_policy_mutation === true ? "Enabled" : "Disabled"]]} />
         <p className="mt-3 text-xs text-text-subtle">Candidates are for review. Policy updates and automatic execution remain disabled.</p>
       </MoreDetails>
     </div>;
@@ -1783,7 +1777,6 @@ function PolicyGapSummary({ data }: { data: JsonRecord }) {
       <MoreDetails title="Policy proposal safeguards">
       <SummaryGrid fields={[
         ["Mode", summaryValue(gap.mode, "Read-only")],
-        ["Proposals", countOf(proposals.length)],
         ["Authority", summaryValue(gap.authority, "PROPOSED_UNVALIDATED")],
         ["Review", gap.requires_review === false ? "Not required" : "REQUIRES_REVIEW"],
         ["Policy mutation", gap.automatic_policy_mutation === true ? "Enabled" : "Disabled"],
@@ -1810,13 +1803,9 @@ export function ProvenanceSummary({ value }: { value: JsonRecord }) {
         {[["Analysis jobs", countOf(list(value.analysis_jobs).length)], ["Report summary", hasMeaningfulRecord(reportSummary) ? "Stored" : "None"], ["Processing errors", countOf(nonEmptyErrors)], ["AI advisory", readableCode(currentAiStatus)]].map(([name, result]) => <div key={name} className="min-w-0 border-b border-border px-2 py-2 last:border-b-0 sm:border-b-0 sm:px-2.5"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className={`mt-0.5 break-words text-[11px] font-semibold ${nonEmptyErrors > 0 && name === "Processing errors" ? "text-warning" : "text-text"}`}>{result}</dd></div>)}
       </dl>
       {hasMeaningfulRecord(reportSummary) && <p className="text-[10px] leading-4 text-text-muted">{immutableEnrichmentCopy} Current AI advisory: {readableCode(currentAiStatus)}. The current advisory is stored separately and does not rewrite the original assessment.</p>}
-      <MoreDetails title="Schema, session ID and processing trace">
+      <MoreDetails title="Schema and processing-error detail">
       <SummaryGrid fields={[
         ["Schema", summaryValue(value.schema_version, "Not recorded")],
-        ["Session", summaryValue(value.session_id, "Unknown")],
-        ["Analysis jobs", countOf(list(value.analysis_jobs).length)],
-        ["Report summary", hasMeaningfulRecord(reportSummary) ? "Present" : "Empty"],
-        ["Errors", countOf(nonEmptyErrors)],
       ]} />
       {nonEmptyErrors > 0 && <SummaryGrid fields={Object.entries(errors).filter(([, error]) => hasMeaningfulValue(error)).map(([name, error]) => [readableCode(name), summaryValue(error)] as const)} />}
       </MoreDetails>

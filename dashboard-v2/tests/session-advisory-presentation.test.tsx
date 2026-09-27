@@ -13,8 +13,13 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Bound event chain");
     expect(html).toContain("h-[min(65vh,28rem)] overflow-y-auto");
     expect(html).toContain("grid-cols-[1rem_minmax(0,1fr)]");
+    expect(html).toContain("grid-cols-[minmax(0,1fr)_9.5rem_3.5rem]");
+    expect(html).toContain("sm:grid-cols-[minmax(0,1fr)_15rem_4rem]");
+    expect(html.match(/data-testid="timeline-event-row"/g)).toHaveLength(3);
+    expect(html.match(/data-testid="timeline-state-slot"/g)).toHaveLength(3);
+    expect(html).toContain("-bottom-2.5 left-[0.4375rem] top-4 w-px bg-primary-navy-line");
     expect(html).toContain("bg-primary-navy-line");
-    expect(html).toContain("Latest");
+    expect(html).toContain("LATEST");
     expect(html).not.toContain("overflow-x-auto");
   });
 
@@ -28,7 +33,19 @@ describe("session assessment presentation", () => {
 
     expect(html).not.toContain("event-0");
     expect(html).toContain("event-100");
-    expect(html.match(/>Latest<\/span>/g)).toHaveLength(1);
+    expect(html.match(/>LATEST<\/span>/g)).toHaveLength(1);
+  });
+
+  it("keeps technical model details collapsed and compacts mostly unavailable fields", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-technical-details",
+      ensemble_evidence: { model1: { applicable: true } },
+    }} />);
+
+    expect(html).toContain("Technical details");
+    expect(html).toContain("Limited technical detail · 1 of 11 fields recorded.");
+    expect(html).not.toMatch(/<details[^>]*open(?:=|\s|>)/);
+    expect(html.match(/<details/g)).toHaveLength(1);
   });
 
   it("keeps source-IP recurrence rows within a sticky-header scroll frame", () => {
