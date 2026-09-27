@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Align manual backup actions with displayed coverage
+
+- Status: repository Pi worker correction prepared; not deployed to the Pi.
+- Scope and intent: make Run missing days and Retry failed days use the same UTC coverage window that the Dashboard displays under the current Bangkok schedule.
+- Repository branch and commit/PR: `fix/backup-manual-window-anchor`; commit and PR follow this entry.
+- Repository changes: anchor manual request day selection to the latest scheduled occurrence, including temporary times, instead of the current UTC date. Show an explicit no-eligible-days result in the Dashboard for a completed `0/0` request, instead of a misleading 100% progress bar. Add boundary tests and update the worker runbook. Scheduled runs, manifest schema, bucket matching, and retention policy remain unchanged.
+- Host/environment changes actually applied: none. No Pi binary, service, stored schedule, manifest, or B2 object was changed by this repository edit.
+- Runtime/exposure state: the running Pi worker still uses its previous manual window calculation until deployed. At 2026-09-27 21:09 Bangkok time, its log recorded a `run_missing` request for hardware rollups with `days=0` while the Dashboard showed 2026-08-27 missing; the request completed without an upload.
+- Validation performed and outcome: `go test ./...` passed for the Pi worker, including UTC/Bangkok boundary and temporary schedule cases; Linux ARM64 cross-build produced a static executable. Dashboard TypeScript and targeted ESLint checks plus `git diff --check` passed locally. Read-only Pi journal inspection confirmed the 2026-09-27 21:09 request selected zero days.
+- Not performed / deferred: Pi deployment, live retry of the missing day, and restore verification were not performed.
+- Risks and data handling: manual actions may archive an eligible day that was previously skipped because the worker window had moved one day ahead of the Dashboard; B2 storage use may increase by that archive. No secrets or archive contents enter this change.
+- Rollback: restore the previous worker binary and restart the Pi control service if runtime behavior regresses; repository rollback is a revert of this commit.
+- Follow-up: deploy the tested worker, rerun the missing-day action, and verify its manifest and Dashboard coverage.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [hardware backup worker runbook](../agents/hardware-backup/README.md).
+
 ### 2026-09-27 — Align backup schedule time and scope controls
 
 - Status: repository Dashboard UI correction prepared; local development Dashboard uses it when reloaded.
