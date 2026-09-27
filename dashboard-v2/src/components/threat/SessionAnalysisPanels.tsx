@@ -1306,7 +1306,17 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   const observableCounts = record(observableData.counts);
   const summary = { ...record(sessionData.external_ti_summary), ...record(observableData.external_ti_summary) };
   const entities = list(sessionData.shared_entities).map(record);
-  const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
+  const evidence = Array.from(new Map(
+    [...list(sessionData.evidence), ...list(observableData.evidence)]
+      .map(record)
+      .map((item) => {
+        const identity = label(
+          item.evidence_id,
+          [item.provider, item.observable_value, item.retrieved_at, item.finding_state, item.summary].map((value) => label(value, "")).join(":"),
+        );
+        return [identity, item] as const;
+      }),
+  ).values());
   const cache = Array.from(new Map(
     [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)]
       .map(record)
