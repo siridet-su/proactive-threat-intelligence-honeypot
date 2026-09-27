@@ -91,6 +91,12 @@ below.
 
 ## Recommended installation sequence
 
+The accepted responsibility boundary is [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
+The installer prepares dependencies, versioned artifacts, service units, and
+non-secret configuration. It leaves application services stopped and does not
+create or modify private env files. Operators add credentials separately;
+validation and activation follow as an explicit second phase.
+
 ### Selected path: fresh Pi, after the blockers above are resolved
 
 1. Freeze a reviewed release manifest: exact Git revision, ARM64 Go binary
@@ -100,19 +106,22 @@ below.
    Mongo/B2/TI reachability, port ownership, firewall, and a separately proven
    administrative SSH route. Do not replace the working SSH route during
    staging.
-3. Provision per-service credentials outside Git with owner-only permissions.
-   Use separate Mongo roles and provider/B2 keys for Pi workers and Dashboard.
-   Validate required key names without printing values. Do not copy the
-   existing Pi's private env files into a customer appliance image.
-4. Install versioned packages and base services in dependency order: Redis and
+3. Install versioned packages and base services in dependency order: Redis and
    sensor prerequisites; Cowrie and its sanitized-output/retention boundary;
    Zeek and Go collector/processor; optional hardware, TI, and backup workers;
-   then the reviewed Docker decoys. Keep stopped/future decoys stopped.
-5. Install the Dashboard on its separate host from an immutable standalone
-   artifact. Correct its current env contract before enabling production
-   authentication or staging deployment. Restrict monitor access to the
-   intended private/loopback route.
-6. Run synthetic, non-public smoke tests for session telemetry, canonical
+   then the reviewed Docker decoys. Install units and non-secret config, but
+   leave application services stopped; keep future decoys uninstalled.
+4. Install the Dashboard on its separate host from an immutable standalone
+   artifact, also without credentials. Correct its current env contract before
+   activation. Restrict monitor access to the intended private/loopback route.
+5. On each host, the operator provisions private env files outside Git with
+   service-appropriate owner-only permissions. Use separate Mongo roles and
+   provider/B2 keys for Pi workers and Dashboard. Do not copy the existing
+   Pi's private files into a customer appliance image. Validate private file
+   ownership, required key names, and connectivity without displaying values;
+   stop if any required input is missing.
+6. Explicitly activate only selected services, then run synthetic, non-public
+   smoke tests for session telemetry, canonical
    events, Dashboard login and Evidence, TI hash lookup, backup scheduling,
    and a read-only restore. Expose trap ports only after those checks pass.
 7. Record a sanitized installation receipt and retain the previous release,

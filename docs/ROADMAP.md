@@ -26,6 +26,13 @@ Dashboard-to-Pi disconnect/control path is historical, not an installation
 requirement. Existing-Pi migration is a later, separate procedure. No
 customer installer is currently declared ready to run.
 
+The accepted installer boundary is in
+[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md): prepare
+versioned dependencies, service units, and non-secret configuration; leave
+application services stopped while the operator supplies private `.env` files
+and credentials; validate and activate in a separate step. The installer must
+not generate or copy credentials.
+
 ## Phase 0 — Establish project truth
 
 - Maintain this documentation spine and service catalog.

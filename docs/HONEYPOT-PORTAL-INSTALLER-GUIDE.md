@@ -327,6 +327,13 @@ requested -> queued -> delivered -> verified
 - **Fresh appliance:** ใช้ versioned package และ deployment layout ที่ผ่าน test matrix
 - **Existing PTI Pi:** ใช้ migration runbook, staging transcript และ rollback receipt
 
+สำหรับรุ่นแรก ขอบเขตที่ยอมรับตาม
+[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) คือ installer
+ลง dependency, release artifact, service unit และ config ที่ไม่มี secret เท่านั้น
+ปล่อย application service ในสถานะ stopped/disabled ผู้ดูแลเป็นผู้สร้างไฟล์ `.env`
+และใส่ credential บนโฮสต์ที่ถูกต้องเอง จากนั้นจึงตรวจและ activate เป็นอีกขั้น
+installer ห้ามสร้างหรือแก้ไข private env file และห้ามเก็บค่า credential ใน receipt
+
 ### 6.2 Target package layout
 
 ```text
@@ -445,13 +452,14 @@ Installer ต้อง:
 1. ดาวน์โหลด release ลง temporary directory
 2. verify manifest, signature และทุก checksum
 3. extract ไปยัง versioned release directory เช่น `/opt/pti/releases/<version>`
-4. สร้าง config/secrets นอก immutable release directory
-5. validate Compose และ systemd unit ก่อน enable
-6. start บน staging/non-public trap port
-7. รัน readiness และ synthetic-session smoke test
-8. สลับ symlink `current` แบบ atomic เมื่อทุก check ผ่าน
-9. apply firewall/exposure change เป็นขั้นสุดท้าย
-10. เขียน installation receipt ที่ไม่มี secret
+4. ลงเฉพาะ non-secret config นอก immutable release directory; ไม่สร้างหรือแตะ `.env`
+5. validate Compose และ systemd unit แล้วจบ preparation โดยยังไม่ enable application service
+6. ให้ผู้ดูแลเพิ่ม private env/credential เอง และตรวจ path, owner, mode, key names โดยไม่แสดงค่า
+7. เมื่อผู้ดูแลสั่ง activate จึง start บน staging/non-public trap port
+8. รัน readiness และ synthetic-session smoke test
+9. สลับ symlink `current` แบบ atomic เมื่อทุก check ผ่าน
+10. apply firewall/exposure change เป็นขั้นสุดท้าย
+11. เขียน installation receipt ที่ไม่มี secret
 
 หากขั้นใดล้มเหลว ต้องคืน service, firewall และ SSH config จาก backup เดิม ไม่ทิ้ง
 deployment ครึ่งทาง
