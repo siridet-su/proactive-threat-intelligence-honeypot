@@ -52,6 +52,17 @@ from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
 Invalid/missing credentials or mismatched canonical sensor/session identity
 fail closed. Text already redacted before persistence cannot be recovered.
 
+`GET /api/sessions/{id}/file-downloads` uses the same Admin check and verified
+canonical session binding. It reads at most 101 canonical
+`cowrie.session.file_download` rows and returns at most 100 newest events with
+event ID, timestamp, and valid SHA-256 (or `null`). The response includes the
+requested and canonical session IDs, a truncation flag, and private/no-store
+headers. Raw payloads, URLs, paths, and bytes are excluded. The Evidence UI
+links the hash to `/malware-vault?q={sha256}`. Exact hash search checks observed
+events when no enrichment record matches that hash, even when other hashes
+already have threat intel. A download event alone does not establish file
+execution or virtual filesystem read/write activity.
+
 ## Backup daily schedule endpoints
 
 The schedule is a single daily `Asia/Bangkok` time with a permanent base

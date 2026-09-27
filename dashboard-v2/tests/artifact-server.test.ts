@@ -179,4 +179,15 @@ describe("artifact intelligence projection", () => {
     expect(page.items[0]?.intel.status).toBe("pending");
     expect(page.items[0]?.artifactSha256).toBe(HASH);
   });
+
+  it("finds a download hash by exact search even when other hashes have threat intel", async () => {
+    const database = fakeDatabase(
+      "artifact-download-exact-fallback",
+      { events: [{ _id: "download-event", timestamp: "2026-09-23T00:00:00Z", session: { id: "session-1" }, raw: { payload: { shasum: HASH } } }] },
+      { threat_intel: [1, 0], enrichment_records: [0] },
+    );
+    const page = await getArtifactPage(database, { query: HASH, now: new Date("2026-09-23T01:00:00Z") });
+    expect(page.dataSource).toBe("events");
+    expect(page.items[0]).toMatchObject({ artifactSha256: HASH, sessionIds: ["session-1"] });
+  });
 });
