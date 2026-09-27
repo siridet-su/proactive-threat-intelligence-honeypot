@@ -49,7 +49,9 @@ describe("backup schedule Undo", () => {
     expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/backup/schedule" && init?.method === "POST")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    expect(screen.queryByText("Change canceled")).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(screen.queryByRole("button", { name: "Undo" })).toBeNull();
     expect(fetchMock.mock.calls.filter(([path, init]) => String(path) === "/api/backup/schedule" && init?.method === "POST")).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));

@@ -148,7 +148,7 @@ export function BackupScheduleSettings() {
     window.clearTimeout(pendingSave.current);
     pendingSave.current = null;
     setBusy(false);
-    setToast({ kind: "info", title: "Change canceled", description: "The schedule was not changed. Your preview is still available." });
+    setToast(null);
   }
 
   const settings = view?.settings;
@@ -236,7 +236,9 @@ export function BackupScheduleSettings() {
         )}
         {error && <p role="alert" className="text-xs text-danger lg:col-span-2">{error}</p>}
       </div>
-      {toast && <OperationToast kind={toast.kind} title={toast.title} description={toast.description} onDismiss={() => setToast(null)} actionLabel={toast.undoable ? "Undo" : undefined} onAction={undoSave} dismissible={!toast.pending} />}
+      <AnimatePresence>
+        {toast && <OperationToast key="backup-schedule-toast" kind={toast.kind} title={toast.title} description={toast.description} onDismiss={() => setToast(null)} actionLabel={toast.undoable ? "Undo" : undefined} onAction={undoSave} dismissible={!toast.pending} />}
+      </AnimatePresence>
     </section>
   );
 }
