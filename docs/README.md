@@ -18,6 +18,8 @@ and historical material inherited from the previous team.
 7. [Security and malware policy](SECURITY-AND-MALWARE-POLICY.md) — containment,
    artifact handling, and threat-intelligence boundaries.
 8. [Architecture decisions](adr/) — durable decisions and their rationale.
+   [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md) records
+   the retirement of Dashboard session termination and its Pi control path.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed outbound gateway, scoped control plane, safe installer contract, and delivery gates.
 10. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 

@@ -150,7 +150,7 @@ function ReplayHistoryHarness({
   history: SessionCwdHistoryEvent[];
   selectedId: string | null;
   anchoredHop?: SessionCwdHistoryEvent | null;
-  activeTab?: "replay" | "evidence" | "actions";
+  activeTab?: "replay" | "evidence";
 }) {
   const [currentId, setCurrentId] = useState(selectedId);
   const replay = useAuditReplay({
@@ -176,7 +176,6 @@ function ReplayHistoryHarness({
     replay: replay.presentation,
     activeTab,
     onTabChange: () => {},
-    responsePanel: null,
     onClearHop: () => {},
     onShowLatestHop: () => {},
     onSelectHistoryEventId: (id) => setCurrentId(id),

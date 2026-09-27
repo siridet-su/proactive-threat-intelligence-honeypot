@@ -32,7 +32,6 @@ import {
   calculateTouchPinchZoom,
   clampZoom,
 } from "../src/components/filesystem/useTopologyViewport";
-import { terminateCapabilityFrom } from "../src/components/filesystem/useResponseAction";
 
 function makeSession(
   sessionId: string,
@@ -184,16 +183,6 @@ describe("Automated Coverage Expansion (FS-018)", () => {
       expect(failRoute?.isFailedAttempt).toBe(true);
       expect(failRoute?.fromPath).toBe("/home");
       expect(failRoute?.toPath).toBeNull();
-    });
-  });
-
-  describe("Empty-History Response Capabilities", () => {
-    it("determines response termination capability regardless of history presence", () => {
-      expect(terminateCapabilityFrom({ available: true, authorized: true, configured: true })).toBe("available");
-      expect(terminateCapabilityFrom({ available: false, authorized: false })).toBe("forbidden");
-      expect(terminateCapabilityFrom({ available: false, authorized: true, configured: false })).toBe("unconfigured");
-      expect(terminateCapabilityFrom({ available: false, authorized: true, configured: true })).toBe("error");
-      expect(terminateCapabilityFrom({})).toBe("forbidden");
     });
   });
 

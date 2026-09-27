@@ -27,13 +27,23 @@ Every public backend JSON response passes through a redaction projection. Raw co
 
 ## Sensitive Admin command evidence
 
-`GET /api/sessions/{canonical_session_id}/commands` requires a valid dashboard
-Admin session and denies sessions that must change their password. The Next
-server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an owner-only regular file
-and forwards only to `http://127.0.0.1:8090/api/internal/session-commands`.
+`GET /api/sessions/{id}/commands` requires a valid dashboard Admin session
+and denies sessions that must change their password. `{id}` may be the
+canonical session ID or the sensor-local Cowrie ID selected in Filesystem
+Activity. For a sensor-local ID, the Next server resolves exactly one
+canonical ID from `honeypot_canonical_v1.events` only after verifying the
+authenticated sensor/session binding and its canonical hash; missing or
+ambiguous bindings fail closed. It does not infer identity from IP or time.
+The production server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an
+owner-only regular file and forwards only the verified canonical ID to
+`http://127.0.0.1:8090/api/internal/session-commands`. Explicit local
+development review instead reads `honeypot_canonical_v1.events` on loopback.
 The monitor additionally requires `LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a
 loopback bind/client, and the dedicated bearer token. The browser never
-receives this token. Responses are bounded and `no-store`; command input is
+receives this token. Responses are bounded and `no-store`; the v2 response
+returns the canonical ID as `session_id` and the selected ID as
+`requested_session_id` so the client can reject stale or mismatched results.
+Command input is
 sensitive and may contain attacker-entered credentials. The UI excludes it
 from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
 Invalid/missing credentials or mismatched canonical sensor/session identity
@@ -83,7 +93,7 @@ Authentication errors are `503` when server auth configuration is incomplete, `4
 | GET | `/api/ready` | `/ready` | Readiness alias | `monitor_web` health check; `{ok,service,timestamp}` | None |
 | GET | `/api/sessions` | `/api/sessions` | Bounded session snapshot | `sessions`, plus bounded jobs/reports/events/evidence joins; `{ok,timestamp,summary,sessions,selected_session_id,error}` | Dashboard, Threat Intel |
 | GET | `/api/session` | `/api/session-detail` | One-session detail | Exact `sessions` lookup plus bounded session-scoped `events`, `analysis_jobs`, `reports`, and `prediction_snapshots`; `session_detail_view` projection | Threat Intel session detail |
-| GET | `/api/sessions/{id}/commands` | Loopback `/api/internal/session-commands?session_id={id}` | Sensitive raw Cowrie command input for Admin review | Verified canonical sensor/session event identity; bounded exact-session command-only projection | Threat Intel session detail (Admin only; no-store; excluded from print/PDF) |
+| GET | `/api/sessions/{id}/commands` | Loopback `/api/internal/session-commands?session_id={verified_canonical_id}` (production) | Sensitive raw Cowrie command input for Admin review | Canonical ID or exact sensor-local alias resolved through an authenticated canonical event binding; bounded exact-session command-only projection | Filesystem Activity Evidence and Threat Intel session detail (Admin only; no-store; excluded from print/PDF) |
 | GET | `/api/events` | `/api/events` | Global or session event view | `events`; `{ok,timestamp,events,error}` | Dashboard freshness/activity |
 | GET | `/api/ai-advisory` | `/api/ai-advisory` | Stored advisory status/detail | advisory/outbox/report records; `{ok,status,advisory,metrics,...}` | Threat Intel session detail |
 | GET | `/api/predictions/current` | `/predictions/current` | Current model snapshot and guidance | `prediction_snapshots` plus feedback; `{item,current_prediction,response_guidance,...}` | Threat Intel session detail |

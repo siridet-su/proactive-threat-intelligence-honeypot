@@ -48,6 +48,20 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Preserve complete response guidance in compact session detail
+
+- Status: installed and active on the GCP monitor API.
+- Scope and intent: keep complete policy-authored finding and action text in the compact session detail projection so the dashboard does not cut an artifact SHA-256 or the final qualification from an advisory sentence.
+- Repository branch and commit/PR: `fix/session-display-operational-closeout-20260927`, based on `origin/release/model2-54f-rrf-closeout-20260926` at `9d9cf7fb0`; this entry ships with the fix commit.
+- Repository changes: set a separate 2,048-character limit for response-guidance finding/action text and list entries; retain the 160-character limit for unrelated compact metadata. Raise the Model2 bridge client timeout from 0.25 to 3.0 seconds after measuring 215–250 ms normal spool lookup time. Add full-hash, full-sentence, upper-bound and delayed-bridge regression assertions.
+- Host/environment changes actually applied: installed checksum-verified `security.py` and `evidence.py` at their respective paths under `/opt/honeypot/production/`; restarted only `honeypot-monitor-web` after each installation. Owner-only backups are at `/home/siridet_s_dev/security.py.pre-guidance-projection-20260927` and `/home/siridet_s_dev/evidence.py.pre-bridge-timeout-20260927` on the GCP host. No dashboard or model service was restarted.
+- Runtime/exposure state: monitor API is active; its `/health` endpoint returned HTTP 200 after warm-up. The public dashboard tunnel remains on its existing address and `/login` returned HTTP 200. The active release directory is named for `9d9cf7fb0`, while its copied manifest and `DEPLOYED_COMMIT` marker still identify an older `00d3fde...` backend package. A read-only manifest verification fails at release-path matching. This provenance drift predates the two-file patch, which was installed into the active directory in place; the functional checks below do not constitute an immutable-release verification.
+- Validation performed and outcome: targeted regression suites passed 128 tests with 3 skips; `py_compile` and `git diff --check` passed. A known session's compact detail returned HTTP 200 with two findings and two actions; the first finding and action include a complete 64-character SHA-256 and terminal sentence punctuation (lengths 200 and 170). Guidance still requires manual approval and cannot auto-execute. After the timeout fix, the same session's HTTP API returned a bound V3 Model2 result and `EXPERIMENTAL_RRF`, moving T1105 to the first recommendation. Two additional current V3 sessions returned bound Model2 results; their RRF review order remained Model1-only because no gated support changed the order. PDF returned HTTP 200; dashboard login returned HTTP 200 and protected session route HTTP 307 without authentication.
+- Not performed / deferred: authenticated browser visual review. A historical V2 session still has one valid hypothesis but currently falls back to Model1-only because the active V3 identity gate does not accept that older artifact; historical report wording describes its original V2 runtime, not current live fusion.
+- Risks and data handling: the larger limit applies only to policy-authored guidance projection. The protected session API response used for validation was owner-only on the GCP host, then removed with the two upload staging files after validation. No response payload was committed; the two rollback backups remain owner-only.
+- Rollback: restore both protected backups to their exact backend paths with root ownership and their original modes (`security.py` 0664, `evidence.py` 0644), compile and restart `honeypot-monitor-web`; verify `/health` and the original checksums `c9f2f53a28ff148515340c21f7257e28faa5df776a9d31c9ebee571987e3e3b6` and `e3c5986ac9c3bdfa144d7fa2bc3842b4768de58d5a261c69c7850821055ae959`.
+- Follow-up: rebuild and promote a clean manifest-bound backend release from the committed revision, then verify the complete guidance in an authenticated browser session. See [validation note](validation/2026-09-27-session-guidance-projection-closeout.md).
+
 ### 2026-09-24 — Confirm canonical backup control-plane decisions
 
 - Status: planning decisions approved; implementation not started.
@@ -2073,3 +2087,77 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: review `http://localhost:3100/backup-retention` at desktop and
   narrow widths.
 - Related ADR/runbook: none; this change affects presentation only.
+### 2026-09-25 — Retire Dashboard session termination and decommission the Pi agent
+
+- Status: Dashboard source changes are uncommitted and not deployed; Pi response agent is decommissioned; one Cowrie restart and tailnet ACL cleanup remain deferred.
+- Scope and intent: remove the Filesystem Activity Response/kill feature and its Dashboard-to-Pi control path, retaining Route Replay and Evidence while preserving Tailscale for host administration.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3810e5b`; this change is uncommitted.
+- Repository changes: remove the Response tab, Dashboard terminate API, response-action UI/controller/client and related types/tests; remove the Cowrie control hook integration, agent source/service/drop-in and Tailscale response-grant example; update current and historical docs with retirement status and Evidence provenance guidance. MongoDB action history is retained.
+- Host/environment changes actually applied: on `pi-t`, stop and disable `honeypot-response-agent.service`; remove its systemd unit, binary, environment and token files and dedicated `cowrie-response` account; remove Cowrie's `40-session-control.conf` drop-in and run `systemctl daemon-reload`. Port 8788 had no listener after decommission. Cowrie was left running because existing TCP sessions were observed; the already-running process may retain its old environment or hook until a later restart. Tailscale remains active.
+- Runtime/exposure state: the Pi response endpoint is unavailable. The Dashboard source no longer contains the terminate API or control UI, but no production Dashboard deployment was performed, so an older deployed app may still show the former UI/API. Local `npm run dev` remains active at `http://localhost:3000`; an unauthenticated Filesystem Activity request redirects to login. The tailnet ACL was not inspected or changed; any former TCP 8788 grant must be removed in the Tailscale Admin Console.
+- Validation performed and outcome: read-only host checks confirmed the response unit is absent/inactive, port 8788 has no listener, Cowrie is active, and the response drop-in is absent from its systemd configuration. The unauthenticated local route returned HTTP 307 to login. Static source/reference review and `git diff --check` passed; automated tests, lint, and build were not run.
+- Not performed / deferred: restart Cowrie after existing sessions drain to clear the old process environment/hook; remove any stale tailnet ACL grant through Admin Console; deploy the Dashboard source; implement expanded Evidence content. No MongoDB records were deleted.
+- Risks and data handling: active Cowrie sessions were not interrupted. Existing response-action records remain in MongoDB. No secret values or attacker data were copied into repository documentation.
+- Rollback: restoring this control path would require a deliberate reimplementation/redeployment and newly issued credentials; removed credentials are not retained in the repository.
+- Follow-up: remove any old `tcp:8788` tailnet grant, then restart Cowrie during a controlled window and verify the response hook is no longer loaded.
+- Related ADR/runbook: see [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md), the retirement status in [Cowrie response control plane](RESPONSE-CONTROL-PLANE.md), [Tailscale response-control identity](../integrations/tailscale/README.md), and [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md).
+
+### 2026-09-25 — Add the selected-session CWD Evidence ledger
+
+- Status: prepared for review; local Dashboard only; not deployed.
+- Scope and intent: replace the Evidence placeholder with an evidence view grounded in retained Cowrie CWD transition records.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3810e5b`; this implementation is uncommitted.
+- Repository changes: add `CwdEvidenceLedger` with selected session/source scope, latest CWD state and provenance, oldest-first retained transitions, path/action/status/time/hop and source identifiers, loaded-versus-retained counts, earlier-page loading, and selected-hop context. Preserve the exact selected event ID when a replay filter hides that event. Failed destinations are suppressed as unverified. The panel states that CWD transitions do not prove command execution or file access. Update the Filesystem Activity working state and this log.
+- Host/environment changes actually applied: none for this Evidence UI change. No production Dashboard, service, database, reverse proxy, or Cowrie configuration was changed.
+- Runtime/exposure state: the Pi response agent remains decommissioned as recorded above; Tailscale remains active for administration. The local `npm run dev` Dashboard remains the only UI runtime; this Evidence change has not been deployed.
+- Validation performed and outcome: scoped ESLint and `git diff --check` passed. The local `/filesystem-activity` route returned HTTP 307 to login. `npx tsc --noEmit` was attempted but is blocked by stale generated `.next/types` imports for the removed `actions/terminate` route; no source error from the new ledger was reported. No automated tests were run.
+- Not performed / deferred: authenticated visual review and production build; correlate admin-only command input to CWD events, render filesystem read/write/create/delete operations, and add forensic export. No test suite was run.
+- Risks and data handling: the panel presents retained session path telemetry only and does not infer commands or file access. It displays event identifiers already present in the selected-session history; no raw command input or attacker payload is added.
+- Rollback: remove `CwdEvidenceLedger`, restore the former Evidence availability placeholder, and revert the optional selected-event ID in the replay presentation; revert the `FS-025` current-state update. No host rollback is required.
+- Follow-up: review the selected-session Evidence view at desktop and narrow widths; retain `FS-025` as in progress until UI and coverage semantics are accepted.
+- Related ADR/runbook: no deployed operating procedure or architecture decision changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Replace duplicate CWD Evidence with command input evidence
+
+- Status: prepared for review; local Dashboard only; not deployed.
+- Scope and intent: correct the Evidence direction after confirming that another CWD ledger duplicates Route Replay.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics` at `3810e5b`; this correction is uncommitted.
+- Repository changes: remove `CwdEvidenceLedger`; use the exact-session Admin-only Cowrie command endpoint from Evidence; validate response scope and session identity; render retained event type, ID, timestamp, command input, and redaction/truncation state; distinguish sign-in, Admin authorization, empty, and unavailable states; state that input is not joined to a CWD hop and does not prove execution or file access. Revert the optional replay-event presentation field and update the Filesystem Activity working state.
+- Host/environment changes actually applied: none. No Pi service, Dashboard deployment, database, reverse proxy, Cowrie configuration, or Tailscale setting changed.
+- Runtime/exposure state: the existing local `npm run dev` at `http://localhost:3000` was not restarted; no production deployment was performed. Pi response-agent and Tailscale status remain as recorded in the preceding entry.
+- Validation performed and outcome: scoped ESLint passed and `git diff --check` passed. `npx tsc --noEmit` remains blocked by three stale generated `.next/types` references to the removed terminate route; it reported no other TypeScript diagnostics. No automated tests or authenticated visual review were run.
+- Not performed / deferred: authenticated verification against retained command records, browser review, production build/deployment, command-to-CWD correlation, file-operation event collection, and forensic export.
+- Risks and data handling: Cowrie command input is sensitive. The UI uses the existing Admin-only endpoint, requests `no-store`, keeps data in component memory, and does not write command text to logs or documentation. Input is not presented as proof of command execution or file access.
+- Rollback: remove `CommandEvidencePanel`, restore the Evidence unavailable placeholder, and revert the `FS-025` current-state correction. No host rollback is required.
+- Follow-up: review Evidence with an authenticated Admin session and confirm empty, redacted, truncated, and unavailable states against retained command data.
+- Related ADR/runbook: no deployed operating procedure or architecture decision changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
+
+### 2026-09-25 — Resolve Filesystem Evidence session aliases safely
+
+- Status: prepared for review; not deployed.
+- Scope and intent: allow the Admin-only Evidence view to load Cowrie commands when Filesystem Activity supplies a sensor-local session ID, while preserving exact canonical session binding.
+- Repository branch and commit/PR: `feat/filesystem-visualization-semantics`; uncommitted.
+- Repository changes: validate opaque sensor-local IDs; resolve them only from canonical session metadata events whose stored identity binding and canonical hash verify; reject missing or ambiguous mappings; pass only the verified canonical ID to the existing command source; version the response contract and bind the requested ID to the canonical response ID. Update command API and Filesystem Activity data semantics.
+- Host/environment changes actually applied: none. No dashboard deployment, MongoDB mutation, monitor service, Cowrie service, Pi configuration, or network setting was changed.
+- Runtime/exposure state: no production runtime change. The local development process was not restarted or independently checked for hot reload.
+- Validation performed and outcome: scoped ESLint and `git diff --check` passed. The connected MongoDB snapshot contained command events overall but no verified mapping for the selected local ID, so the selected session could not be confirmed against that snapshot.
+- Not performed / deferred: no automated tests, type-check, authenticated browser verification, production build, or deployment was performed. A live Evidence check still requires a session with a persisted canonical identity binding.
+- Risks and data handling: alias lookup is Admin-gated, exact, time-bounded, restricted to session metadata event types, and fails closed on ambiguous identity. Raw command text remains in the existing bounded `no-store` command projection and is not added to logs or documentation.
+- Rollback: revert the alias resolver, response contract update, and corresponding API/data-semantics documentation. No host rollback is required.
+- Follow-up: verify Evidence against an authenticated session whose CWD alias has a matching canonical identity event; confirm no-command and unverified-binding states remain distinct.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct) and [Dashboard API contract](../dashboard-v2/docs/API.md#sensitive-admin-command-evidence).
+
+### 2026-09-27 — Merge current main into artifact intelligence
+
+- Status: repository merge prepared; no deployment performed.
+- Scope and intent: bring `feat/artifact-intelligence` up to the current `origin/main` while retaining its pending backup overview work and all newer mainline changes.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; merge commit pending at the time of this entry; PR #69 remains open.
+- Repository changes: merged `origin/main` into the branch. Resolved the sole content conflict in this append-only log by retaining both the backup overview entries and the Filesystem Evidence and response-control entries. Code and other documentation merged automatically.
+- Host/environment changes actually applied: none. No service, dashboard deployment, database, backup target, or host configuration was changed.
+- Runtime/exposure state: this merge changes repository source only; deployed services retain their previously recorded state. The backup overview remains prepared in the branch and is not active on production hosts.
+- Validation performed and outcome: merge conflict markers were removed and the resolved log passed `git diff --check`. The targeted dashboard backup Vitest suite passed (5/5), and `go test ./...` passed in `agents/hardware-backup`. `npx tsc --noEmit` reported only two stale generated `.next` validator imports for the removed session-terminate route; it reported no source diagnostics. The full staged `git diff --check` reports whitespace already present in incoming mainline research files, including intentional Markdown line breaks.
+- Not performed / deferred: no production deployment, authenticated browser review, live backup restore rehearsal, or host-level validation was performed. A clean TypeScript check after regenerating `.next` types was not performed.
+- Risks and data handling: the merge preserves both histories and adds no secrets or attacker content to the log. Runtime interactions across the merged branches require the targeted checks noted above.
+- Rollback: revert the merge commit if needed; no host rollback is required for this repository-only change.
+- Follow-up: review PR #69 against the refreshed main branch and deploy the backup changes separately after approval.
+- Related ADR/runbook: no architectural decision or operating step changed as part of this merge; existing current-state documents and runbooks from both branches are retained.

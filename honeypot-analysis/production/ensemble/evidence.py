@@ -33,12 +33,23 @@ MODEL2_V5_FEATURE_CONTRACT_SHA256 = "cf985643ce89c3d1f86f6c45943c3ba3af6cf13c60c
 MODEL2_BACKEND_POC_ARTIFACT_SHA256 = "127a5b0bd18b0f7b76a8bcce6a51294db554220045ffc2a19c4cd16bb72e9316"
 MODEL2_BACKEND_POC_VERSION = "MODEL2_V5_BACKEND_SSH_ONLY_EXPERIMENTAL_POC_20260924_V1"
 MODEL2_BACKEND_POC_PROJECTION_SHA256 = "2679fe6ff98c833ed497597e37f26fa05a6bc428aba7df561bb828fbf3fee80f"
+MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.v1"
+MODEL2_UNIFIED54_ARTIFACT_SHA256 = "fb56940ba2ca90c0942813168d9f5a85cb80a58da5c62e2dd7e343da5f71d5fa"
+MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256 = "28cc1a43e59259c5939dacdb889cdbe4e13fbdaa71b197264e27907a071d13c1"
+MODEL2_UNIFIED54_VERSION = "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260927_V3"
 
 
 def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
     """Allow exact old history and one explicit experimental replacement only."""
     actual = _clean(value.get("model_artifact_sha256")).lower()
     version = _clean(value.get("model_version"))
+    if version == MODEL2_UNIFIED54_VERSION:
+        if (actual != MODEL2_UNIFIED54_ARTIFACT_SHA256
+                or value.get("quality_status") != "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY"
+                or value.get("source_feature_contract_sha256") != MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256
+                or value.get("capture_selection") != "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"):
+            raise EnsembleContractError("unified 54F Model2 identity/capture mismatch")
+        return MODEL2_UNIFIED54_ARTIFACT_SHA256
     if version == MODEL2_BACKEND_POC_VERSION:
         if (actual != MODEL2_BACKEND_POC_ARTIFACT_SHA256
                 or value.get("quality_status") != "EXPERIMENTAL_POC_UNVALIDATED"
@@ -51,8 +62,18 @@ def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
     raise EnsembleContractError("unrecognized Model2 artifact identity")
 
 
+def expected_feature_contract_sha256(value: Mapping[str, Any]) -> str:
+    if _clean(value.get("model_version")) == MODEL2_UNIFIED54_VERSION:
+        return MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256
+    return MODEL2_V5_FEATURE_CONTRACT_SHA256
+
+
 MODEL2_V5_RESULT_ROOT = Path("/var/lib/model2-v7/results")
 MODEL2_V5_BRIDGE_SOCKET = Path("/run/model2-v7-ensemble/bridge.sock")
+# The bridge validates one exact result by scanning its bounded spool. In the
+# deployed spool this regularly takes 215-250 ms, so a 250 ms client deadline
+# intermittently converts valid evidence into a Model1-only fallback.
+MODEL2_V5_BRIDGE_TIMEOUT_SECONDS = 3.0
 SHARED_TECHNIQUES = ("T1105", "T1046", "T1110")
 # Model2/ensemble presentation is intentionally parent-technique only.  A
 # sub-technique label is normalized to its parent; no sub-technique graph or
@@ -574,19 +595,25 @@ def normalize_model2_v5_shadow_result(
         )
         return unavailable
 
-    if _clean(value.get("schema_version")) != MODEL2_V5_RESULT_SCHEMA:
+    result_schema = _clean(value.get("schema_version"))
+    is_unified54 = result_schema == MODEL2_UNIFIED54_RESULT_SCHEMA
+    if result_schema not in {MODEL2_V5_RESULT_SCHEMA, MODEL2_UNIFIED54_RESULT_SCHEMA}:
         raise EnsembleContractError("V5 Model2 result schema is unsupported")
     if _clean(value.get("authority")) != "NON_AUTHORITATIVE_SHADOW_ONLY":
         raise EnsembleContractError("V5 Model2 result authority is invalid")
     if value.get("one_model") is not True or value.get("one_inference_call") is not True:
         raise EnsembleContractError("V5 Model2 result is not a one-model result")
-    if value.get("independent_binary_heads") is not False or value.get("argmax_used") is not False:
+    expected_independent_heads = True if is_unified54 else False
+    if value.get("independent_binary_heads") is not expected_independent_heads or value.get("argmax_used") is not False:
         raise EnsembleContractError("V5 Model2 result violates the unified-model contract")
     if value.get("canonical_write_authority") is not False:
         raise EnsembleContractError("V5 Model2 result has canonical write authority")
     if _clean(value.get("model_artifact_sha256")).lower() != expected_model:
         raise EnsembleContractError("V5 Model2 artifact identity mismatch")
-    reported_features = _clean(value.get("feature_contract_sha256"))
+    reported_features = _clean(
+        value.get("feature_contract_sha256")
+        or value.get("source_feature_contract_sha256")
+    )
     if reported_features and reported_features.lower() != expected_features:
         raise EnsembleContractError("V5 Model2 feature contract identity mismatch")
     if _clean(value.get("model_version")) == "":
@@ -599,7 +626,7 @@ def normalize_model2_v5_shadow_result(
         raise EnsembleContractError("V5 Model2 result must contain all shared outputs")
     normalized: dict[str, dict[str, Any]] = {}
     unavailable_heads: dict[str, str] = {}
-    available_at = _timestamp(value.get("available_at") or value.get("completed_at"))
+    available_at = _timestamp(value.get("available_at") or value.get("completed_at") or value.get("generated_at"))
     for label in SHARED_TECHNIQUES:
         item = outputs.get(label)
         if not isinstance(item, Mapping) or _clean(item.get("availability")) != "AVAILABLE":
@@ -629,7 +656,7 @@ def normalize_model2_v5_shadow_result(
             "available": True,
             "result": result,
             "score": score,
-            "score_type": "raw_score",
+            "score_type": _clean(item.get("score_semantics")) or "raw_score",
             "status": MODEL2_V5_SHADOW_STATUS,
             "calibrated_probability": None,
             "available_at": _timestamp(item.get("available_at")) or available_at,
@@ -650,9 +677,15 @@ def normalize_model2_v5_shadow_result(
         "model_version": _clean(value.get("model_version")),
         "quality_status": _clean(value.get("quality_status")) or "LEGACY_EXPERIMENTAL_SHADOW",
         "input_projection_contract_sha256": _clean(value.get("input_projection_contract_sha256")),
+        "capture_selection": _clean(value.get("capture_selection")),
+        "t1105_transfer_observed": value.get("t1105_transfer_observed") is True,
+        "t1110_repeated_auth_observed": value.get("t1110_repeated_auth_observed") is True,
+        "t1105_evidence_semantics": _clean(value.get("t1105_evidence_semantics")),
+        "auth_binding": _clean(value.get("auth_binding")),
+        "episode_flow_count": value.get("episode_flow_count"),
         "one_model": True,
         "one_inference_call": True,
-        "independent_binary_heads": False,
+        "independent_binary_heads": expected_independent_heads,
         "argmax_used": False,
         "calibrated_probability": None,
         "available_at": available_at,
@@ -774,7 +807,7 @@ def _normalize_bound_result(
             value,
             binding=binding,
             expected_model_sha256=expected_v5_artifact_sha256(value),
-            expected_feature_contract_sha256=MODEL2_V5_FEATURE_CONTRACT_SHA256,
+            expected_feature_contract_sha256=expected_feature_contract_sha256(value),
         )
     except EnsembleContractError:
         return None
@@ -796,7 +829,7 @@ def _query_model2_v5_bridge(
     }
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(0.25)
+            connection.settimeout(MODEL2_V5_BRIDGE_TIMEOUT_SECONDS)
             connection.connect(str(socket_path))
             connection.sendall(
                 (json.dumps(request, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -1003,6 +1036,14 @@ def compute_ensemble_evidence(
             "artifact_sha256": _clean(model2.get("artifact_sha256")),
             "feature_contract_sha256": _clean(model2.get("feature_contract_sha256")),
             "model_version": _clean(model2.get("model_version")),
+            "quality_status": _clean(model2.get("quality_status")),
+            "input_projection_contract_sha256": _clean(model2.get("input_projection_contract_sha256")),
+            "capture_selection": _clean(model2.get("capture_selection")),
+            "t1105_transfer_observed": model2.get("t1105_transfer_observed") is True,
+            "t1110_repeated_auth_observed": model2.get("t1110_repeated_auth_observed") is True,
+            "t1105_evidence_semantics": _clean(model2.get("t1105_evidence_semantics")),
+            "auth_binding": _clean(model2.get("auth_binding")),
+            "episode_flow_count": model2.get("episode_flow_count"),
             "source_session_id": _clean(model2.get("source_session_id")),
             "measurement_id": _clean(model2.get("measurement_id")),
             "episode_id": _clean(model2.get("episode_id")),

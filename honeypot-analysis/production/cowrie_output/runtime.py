@@ -99,8 +99,6 @@ REQUIRED_BUNDLE_FILES = frozenset(
         "deployment/cowrie_output/rollback-sanitized-output.sh",
         "deployment/cowrie_output/run-sanitized-cowrie.sh",
         "production/__init__.py",
-        "production/cowrie_control/__init__.py",
-        "production/cowrie_control/session_control.py",
         "production/cowrie_output/__init__.py",
         "production/cowrie_output/lifecycle.py",
         "production/cowrie_output/observer_diagnostics.py",

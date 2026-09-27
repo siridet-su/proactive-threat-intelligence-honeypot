@@ -9,6 +9,14 @@ owners:
 
 # PTI Honeypot Portal and Installer Blueprint
 
+> **Architecture addendum — 2026-09-25:** The former Dashboard-to-Pi
+> `DISCONNECT_SESSION` feature and direct Tailscale response channel have been
+> retired by [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md).
+> This blueprint remains proposed, but its response-agent, action-store,
+> disconnect, and shared transport decisions below are historical and must not
+> be used as current requirements. Reintroducing a session-control capability
+> requires a new decision and operational review.
+
 เอกสารนี้เป็นพิมพ์เขียวสำหรับเปลี่ยนระบบ PTI จาก deployment ที่ทีมควบคุมเอง
 ไปเป็น software appliance ที่ติดตั้งบน Raspberry Pi ของลูกค้าได้อย่างปลอดภัย
 เอกสารนี้ **ไม่ใช่ installer ที่พร้อมนำไปรัน** และ code block ทุกส่วนเป็น contract

@@ -29,6 +29,7 @@ approval remains an explicit operational decision.
 
 ## Evidence notes
 
+- [Session guidance projection closeout — 2026-09-27](2026-09-27-session-guidance-projection-closeout.md): production API text-completeness check, bounded policy projection, and the remaining Model2 API discrepancy.
 - [Web-corp login pipeline — 2026-09-24](2026-09-24-web-login-pipeline.md): synthetic deployed event verified in raw/redacted Redis paths; pending spool drained and processor acknowledged it after MongoDB write.
 - [Web-corp HTTPS listener — 2026-09-24](2026-09-24-web-corp-https.md): HTTP/HTTPS page parity, TLS 1.3, overlay-only bindings, scheme/port unit coverage, and deployment limitations.
 - [Web-login-only scope and service posture — 2026-09-25](2026-09-25-web-login-scope.md): login-only telemetry test, HTTP `:80` deployment, and stopped web-only containers.

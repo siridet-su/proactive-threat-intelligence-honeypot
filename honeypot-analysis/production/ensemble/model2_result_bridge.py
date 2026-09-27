@@ -15,7 +15,9 @@ from typing import Any, Mapping
 
 sys.path.insert(0, "/opt/honeypot")
 from production.ensemble.evidence import (  # noqa: E402
-    expected_v5_artifact_sha256, normalize_model2_v5_shadow_result,
+    expected_feature_contract_sha256,
+    expected_v5_artifact_sha256,
+    normalize_model2_v5_shadow_result,
 )
 
 
@@ -24,6 +26,7 @@ BRIDGE_RESPONSE_SCHEMA = "model2_v5_ensemble_bridge_response.v1"
 MODEL2_V5_RESULT_SCHEMA = "model2_v5_style_unified_production_native_shadow_result.v1"
 MODEL2_V5_ARTIFACT_SHA256 = "104d4c77a3e1536b847561abb19fc7c0d6d7dc0111cd98d1ff2d9c9d74a2ed1a"
 MODEL2_V5_FEATURE_CONTRACT_SHA256 = "cf985643ce89c3d1f86f6c45943c3ba3af6cf13c60c4b41e215c7c7bc8990a20"
+MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.v1"
 BINDING_SHA256 = "2aa0cfebe1298943517610c3e62e0c9a38651ea93b65747dc69250d814b26c7b"
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESULT_BYTES = 128 * 1024
@@ -55,13 +58,15 @@ def _valid_result(value: Any, *, session_id: str, run_id: str) -> bool:
     if run_id and _clean(value.get("run_id")) != run_id:
         return False
     if (
-        _clean(value.get("schema_version")) != MODEL2_V5_RESULT_SCHEMA
+        _clean(value.get("schema_version")) not in {MODEL2_V5_RESULT_SCHEMA, MODEL2_UNIFIED54_RESULT_SCHEMA}
         or _clean(value.get("status")) != "VALID_SHADOW"
         or _clean(value.get("availability")) != "AVAILABLE"
         or value.get("authority") != "NON_AUTHORITATIVE_SHADOW_ONLY"
         or value.get("one_model") is not True
         or value.get("one_inference_call") is not True
-        or value.get("independent_binary_heads") is not False
+        or value.get("independent_binary_heads") is not (
+            _clean(value.get("schema_version")) == MODEL2_UNIFIED54_RESULT_SCHEMA
+        )
         or value.get("argmax_used") is not False
         or value.get("canonical_write_authority") is not False
         or value.get("pcap_binding") != "PASS"
@@ -70,8 +75,8 @@ def _valid_result(value: Any, *, session_id: str, run_id: str) -> bool:
         or value.get("source_binding") != "PASS"
         or value.get("session_binding") != "PASS"
         or value.get("run_id_binding") != "PASS"
-        or value.get("feature_count") != 32
-        or value.get("source_feature_count") != 32
+        or value.get("feature_count") != (54 if _clean(value.get("schema_version")) == MODEL2_UNIFIED54_RESULT_SCHEMA else 32)
+        or value.get("source_feature_count") != (54 if _clean(value.get("schema_version")) == MODEL2_UNIFIED54_RESULT_SCHEMA else 32)
         or value.get("zero_fill") is not False
         or value.get("source_ip_only_binding") is not False
         or value.get("cross_session_contamination") != "NO"
@@ -87,7 +92,7 @@ def _valid_result(value: Any, *, session_id: str, run_id: str) -> bool:
             value,
             binding=binding,
             expected_model_sha256=expected_v5_artifact_sha256(value),
-            expected_feature_contract_sha256=MODEL2_V5_FEATURE_CONTRACT_SHA256,
+            expected_feature_contract_sha256=expected_feature_contract_sha256(value),
         )
     except (TypeError, ValueError):
         return False

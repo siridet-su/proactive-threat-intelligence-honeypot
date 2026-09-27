@@ -1,5 +1,10 @@
 # Filesystem Activity — Production UX/UI Redesign Plan
 
+> **Historical addendum — 2026-09-25:** This proposal predates retirement of
+> Dashboard session termination. References below to a Response tab, response
+> action, or `ResponseActionPanel` are historical and are not part of the
+> current design. The current Forensic Studio keeps Route Replay and Evidence.
+
 Status: **Proposed for review — no implementation yet**
 
 Date: 2026-09-20

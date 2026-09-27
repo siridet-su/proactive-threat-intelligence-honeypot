@@ -126,6 +126,8 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
         external_ti_projection=None,
         ai_advisory_projection=None,
         prediction_snapshot=None,
+        ensemble_projection=None,
+        session_ttp_advisory_projection=None,
     ):
         captured["report"] = report
         captured["session"] = session
@@ -133,6 +135,8 @@ def test_session_report_pdf_uses_exact_stored_report_without_persistence(
         captured["external_ti_projection"] = external_ti_projection
         captured["ai_advisory_projection"] = ai_advisory_projection
         captured["prediction_snapshot"] = prediction_snapshot
+        captured["ensemble_projection"] = ensemble_projection
+        captured["session_ttp_advisory_projection"] = session_ttp_advisory_projection
         return b"%PDF-1.7 bounded fixture"
 
     monkeypatch.setattr(monitor_web, "render_pdf_report_bytes", render)

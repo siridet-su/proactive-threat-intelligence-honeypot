@@ -193,6 +193,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
         "analyst_feedback",
         "observable_sightings",
         "prediction_snapshots",
+        "enrichment_jobs",
     }
     assert {table: limit for table, _, limit in storage.calls} == {
         "sessions": 1,
@@ -202,6 +203,7 @@ def test_dashboard_detail_is_session_scoped_bounded_and_publicly_redacted(
         "analyst_feedback": 50,
         "observable_sightings": 100,
         "prediction_snapshots": 50,
+        "enrichment_jobs": 100,
     }
     serialized = json.dumps(public, sort_keys=True)
     assert "payload_json" not in serialized
@@ -237,6 +239,35 @@ def test_session_model1_advisory_matches_full_and_compact_projection(
     assert advisory["techniques"][0]["supporting_command_events"] == 1
     assert "private command text" not in json.dumps(advisory)
     assert "decision_score" not in json.dumps(advisory)
+
+
+def test_current_enrichment_status_replaces_stale_queued_snapshot(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        monitor_web,
+        "build_session_ti_projection",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "timestamp": "2026-09-27T00:00:00Z",
+            "enrichment_job_summary": {
+                "total": 3,
+                "pending": False,
+                "status_counts": {"completed": 3},
+            },
+        },
+    )
+    status = monitor_web._current_enrichment_status(
+        object(),
+        SESSION_ID,
+        {"status": "queued", "source": "enrichment_queue", "jobs_submitted": 3},
+        config=_config(tmp_path),
+    )
+    assert status["status"] == "completed"
+    assert status["stored_status"] == "queued"
+    assert status["jobs_pending"] is False
+    assert status["job_status_counts"] == {"completed": 3}
+    assert status["read_only_projection"] is True
 
 
 def test_dashboard_detail_merges_hypothesis_sets_from_report_artifact(
@@ -341,6 +372,15 @@ def test_dashboard_detail_end_time_uses_latest_event_not_storage_row_order(
 
 def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
     credential_sentinel = "credential-value-must-not-cross-read-model"
+    artifact_sha256 = "f" * 64
+    complete_finding = (
+        "Cowrie recorded a direct file-transfer event for the resolved artifact "
+        f"SHA-256 {artifact_sha256}; execution and any real-host effect are not established."
+    )
+    complete_action = (
+        "Search authorized proxy, file, and endpoint telemetry for the exact "
+        f"artifact SHA-256 observed by Cowrie: {artifact_sha256}."
+    )
     guidance = _compact_session_guidance(
         {
             "schema_version": "response_guidance.v3",
@@ -353,7 +393,7 @@ def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
                     "finding_id": "finding-1",
                     "finding_type": "authentication_review",
                     "severity": "medium",
-                    "statement": "Review the observed authentication activity.",
+                    "statement": complete_finding,
                     "rule_id": "rule-auth-review",
                     "evidence_status": "observed",
                     "evidence_refs": [credential_sentinel],
@@ -362,7 +402,7 @@ def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
             "advisory_actions": [
                 {
                     "action_id": "action-1",
-                    "description": "Review the authenticated source in authorized logs.",
+                    "description": complete_action,
                     "rationale": "Confirm whether the activity repeats or escalates.",
                     "rule_id": "rule-auth-review",
                     "priority": "P20",
@@ -384,7 +424,7 @@ def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
             "finding_id": "finding-1",
             "finding_type": "authentication_review",
             "severity": "medium",
-            "statement": "Review the observed authentication activity.",
+            "statement": complete_finding,
             "rule_id": "rule-auth-review",
             "evidence_status": "observed",
         }
@@ -392,7 +432,7 @@ def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
     assert guidance["advisory_actions"] == [
         {
             "action_id": "action-1",
-            "description": "Review the authenticated source in authorized logs.",
+            "description": complete_action,
             "rationale": "Confirm whether the activity repeats or escalates.",
             "rule_id": "rule-auth-review",
             "priority": "P20",
@@ -406,6 +446,29 @@ def test_compact_guidance_preserves_safe_manual_action_content_only() -> None:
     assert credential_sentinel not in serialized
     assert "evidence_refs" not in serialized
     assert "command" not in guidance["advisory_actions"][0]
+    assert artifact_sha256 in guidance["findings"][0]["statement"]
+    assert guidance["findings"][0]["statement"].endswith("not established.")
+    assert artifact_sha256 in guidance["advisory_actions"][0]["description"]
+    assert guidance["advisory_actions"][0]["description"].endswith(".")
+
+
+def test_compact_guidance_keeps_oversized_policy_text_bounded() -> None:
+    guidance = _compact_session_guidance(
+        {
+            "findings": [{"finding_id": "finding-1", "statement": "x" * 4_096}],
+            "advisory_actions": [
+                {
+                    "action_id": "action-1",
+                    "description": "y" * 4_096,
+                    "preconditions": ["z" * 4_096],
+                }
+            ],
+        }
+    )
+
+    assert len(guidance["findings"][0]["statement"]) == 2_048
+    assert len(guidance["advisory_actions"][0]["description"]) == 2_048
+    assert len(guidance["advisory_actions"][0]["preconditions"][0]) == 2_048
 
 
 def test_cwd_history_projects_canonical_cowrie_event_without_payload_text(tmp_path: Path) -> None:

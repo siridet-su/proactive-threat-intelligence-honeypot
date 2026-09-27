@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
-import { loadAdminCowrieCommands, loadLocalAdminCowrieCommands } from "@/lib/session-command-server";
-import { CANONICAL_SESSION_ID_PATTERN } from "@/lib/sensor-session-identity";
+import {
+  loadAdminCowrieCommands,
+  loadLocalAdminCowrieCommands,
+  resolveCanonicalSessionIdForCommandEvidence,
+} from "@/lib/session-command-server";
+import { CANONICAL_SESSION_ID_PATTERN, isValidSensorSessionIdentifier } from "@/lib/sensor-session-identity";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,7 +35,7 @@ export async function GET(
     }
 
     const { id } = await context.params;
-    if (!CANONICAL_SESSION_ID_PATTERN.test(id)) {
+    if (!CANONICAL_SESSION_ID_PATTERN.test(id) && !isValidSensorSessionIdentifier(id)) {
       return json({ ok: false, error: "Invalid session identifier" }, 400);
     }
 
@@ -40,10 +44,18 @@ export async function GET(
     if (localReview && !new Set(["127.0.0.1", "localhost", "[::1]"]).has(new URL(request.url).hostname)) {
       return json({ ok: false, error: "Local command review requires loopback access" }, 403);
     }
+    const canonicalSessionId = await resolveCanonicalSessionIdForCommandEvidence(id);
+    if (!canonicalSessionId) {
+      return json({ ok: false, error: "No unique authenticated session binding is available" }, 400);
+    }
     const projection = localReview
-      ? await loadLocalAdminCowrieCommands(id)
-      : await loadAdminCowrieCommands(id);
-    return json(projection as unknown as Record<string, unknown>, 200);
+      ? await loadLocalAdminCowrieCommands(canonicalSessionId)
+      : await loadAdminCowrieCommands(canonicalSessionId);
+    return json({
+      ...projection,
+      schema_version: "dashboard.admin_cowrie_commands.v2",
+      requested_session_id: id,
+    }, 200);
   } catch {
     // Do not log or return command text or event payloads on any failure path.
     return json({ ok: false, error: "Sensitive command evidence is temporarily unavailable" }, 503);

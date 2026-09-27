@@ -1,7 +1,7 @@
 ---
 title: Filesystem Activity live working state
 status: active
-last_updated: 2026-09-24
+last_updated: 2026-09-25
 owner: Dashboard Filesystem workstream
 ---
 
@@ -52,8 +52,33 @@ around its center. It does not reopen or change any FA evidence contract.
 
 `FS-007` is `DONE`: FA-001, FA-002, FA-011, and accepted FA-016 jointly
 complete the live-topology/Audit-directory separation and its bounded,
-truthful retained-session behavior. The outstanding manual/live response-agent
-validation remains recorded as an unrelated gate and was not performed.
+truthful retained-session behavior. Its earlier manual/live response-agent
+validation gate is superseded by the dated retirement below; that test is no
+longer planned.
+
+**Product direction — 2026-09-25:** Session termination and the Response tab
+have been retired because disconnecting one transport does not prevent a
+returning client from reconnecting. The current Forensic Studio keeps Route
+Replay and Evidence as separate views. Route Replay owns CWD transition history;
+Evidence uses the exact-session, Admin-only Cowrie command endpoint and displays
+retained command event type, event ID, timestamp, and input with redaction and
+truncation states. It resolves the selected sensor-local Cowrie ID to one
+canonical session only through an authenticated event binding; missing or
+ambiguous matches fail closed. Command evidence is scoped to the selected
+session but is not correlated to a CWD hop. A recorded command input does not
+prove execution, success, or file access. The collector does not currently
+provide file-operation events in this view.
+
+Remaining evidence direction:
+
+- Add session lifecycle/source metadata only when the selected-session model
+  exposes those authoritative fields.
+- Correlate command events to a path hop only when authoritative event/time
+  provenance supports that link.
+- Add filesystem reads/writes/creates/deletes only when the collector actually
+  emits those operations; CWD changes alone do not prove file access.
+- Add an export that preserves event IDs, session scope, and selected time
+  range.
 
 ## Historical baseline
 
@@ -76,7 +101,9 @@ state must not be read as evidence about the current repository.
 The original FS rows below retain their historical implementation evidence.
 Their corrective acceptance and current validation are cross-referenced to the
 canonical audit tracker; the final FA-013 audit evidence is recorded there to
-avoid duplicating a large evidence block.
+avoid duplicating a large evidence block. In particular, `FS-003` and `FS-011`
+describe previously accepted Response behavior that was retired on 2026-09-25;
+they are not current product requirements.
 
 ### Now — correctness and truthful UI
 
@@ -113,7 +140,9 @@ avoid duplicating a large evidence block.
 
 ## Product additions after the foundation is correct
 
-These remain product backlog items and are not the active remediation focus.
+These additions sit beyond the completed data-correctness remediation. `FS-025`
+is the current local Evidence UI slice; correlated command/file telemetry and
+forensic export remain backlog items.
 
 | ID | Status | Addition | Acceptance criteria | Evidence |
 | --- | --- | --- | --- | --- |
@@ -123,6 +152,7 @@ These remain product backlog items and are not the active remediation focus.
 | `FS-022` | `TODO` | Correlated command and file telemetry. | Command/file events are shown only when joined by authoritative identifiers, with provenance and explicit unavailable states. | Backlog; not part of FA-014. |
 | `FS-023` | `TODO` | Forensic export and shareable evidence links. | Exported JSON/CSV preserves session, event IDs, timestamps, status, and filter scope; shared links open the same session/hop without embedding sensitive data. | Backlog; not part of FA-014. |
 | `FS-024` | `IN PROGRESS` | Add a full-surface square radar treatment to Live topology. | Establish a 1000×1000 logical radar plane that fills the available Live panel; omit persistent inner and outer range-frame boxes and use canvas-edge ticks instead; add four short diagonal corner rays anchored at the actual responsive canvas corners with angles recalculated from each canvas width/height ratio so each ray stays collinear with the sweep from center to corner; connect opposing edge ticks with visible, continuous, perpendicular full-canvas crosshairs through the exact center and beneath the sweep; add two subtle full-canvas diagonal guides between opposite corners, through the exact center, scaled to the responsive canvas aspect ratio; use a shared 1.5px stroke width for crosshairs and edge ticks; set perpendicular crosshair opacity to 0.2 to match the diagonal guides while preserving the brighter primary-color edge ticks and their glow; compute the sweep beam's first rectangle-boundary intersection as its angle turns; keep the multi-stop gradient wave in a 48-degree sector behind the crisp moving beam and restore its peak opacity to 0.48; omit the extra blurred bloom and static center haze, and retain a restrained glow attached to the beam; retain the solid 32×32 circular primary-color emitter at the exact center, without an icon; animate one circular wave from the exact center until it passes the farthest responsive canvas corner; calculate its radius from the measured canvas dimensions plus 16px of overscan so the wave remains circular on rectangular canvases; expand quickly from the source and ease down as it approaches the boundary while attenuation dims the wave and its aura from high intensity at the source to a faint outline at the corner; hold the wave beyond the boundary while it fades, then keep the origin quiet for about 0.6 seconds before the next pulse in a 7-second cycle; disable the wave for reduced-motion users; render the full themed radar plane and overlay only when the live snapshot has no sessions; once a session exists, use the normal neutral map surface; omit the themed radar grid, axes, edge/corner ticks, sweep, and pulse outline; render a neutral background grid only while View > Show background grid is enabled, phase it so both grid axes intersect at the canvas center and align with the radar crosshairs; omit the status title in the steady listening state while retaining operator-facing copy during loading/reconnect; derive grid, emitter, wave, edge-tick, and sweep colors from the system primary token (brick orange in light theme and bright brass in dark theme); keep the radar plane a solid untinted surface (white in light theme and the dark surface token in dark theme); keep corner marks decorative without adding telemetry, omit corner readouts; place retained-session count beside the Session Audit control, keep topology controls interactive when live sessions are present; disable navigation, view, appearance, and layout actions in the Live empty state, keeping the fullscreen toggle enabled so operators can enter and exit the expanded canvas; leave Audit presentation unchanged. | Implemented in the local dashboard; the authenticated `/filesystem-activity` page returned HTTP 200. Screenshot review remains needed to confirm the themed standby treatment disappears on populated topology while the neutral grid still follows View > Show background grid. |
+| `FS-025` | `IN PROGRESS` | Replace duplicated CWD content in Evidence with an Admin-only, exact-session Cowrie command view. | Resolve sensor-local IDs only through one authenticated canonical event binding; validate both requested and canonical IDs in the response; show event type, ID, timestamp, input, redaction, and truncation; distinguish sign-in/admin, empty, and unavailable states; state that command input is not linked to a CWD hop and does not prove execution or file access. | Implemented locally in `CommandEvidencePanel.tsx` and the Admin command route; alias resolution is bounded to canonical session metadata events and fails closed on missing/ambiguous identity. Scoped ESLint and `git diff --check` passed. No automated tests, type-check, or authenticated visual review have been run for this slice. |
 
 ## Deferred outside this workstream
 
@@ -130,8 +160,9 @@ These remain product backlog items and are not the active remediation focus.
   [`design/returning-attacker-continuity.md`](design/returning-attacker-continuity.md).
 - Customer appliance packaging and the outbound WSS gateway remain governed by
   [`HONEYPOT-PORTAL-INSTALLER-GUIDE.md`](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
-- Do not expand the scoped Response surface beyond approved, allow-listed
-  operations as part of a Filesystem UI change.
+- Correlating command input to a CWD hop, file-operation evidence, and forensic
+  export remain deferred. The current command view does not claim that
+  telemetry provides filesystem operation events.
 
 ## Current validation and evidence policy
 
@@ -139,8 +170,9 @@ FA-015 was accepted `DONE` on `725102189587477bd9eafe13c8ac2d6e2e97e20c`.
 FA-016 was accepted `DONE` at terminal implementation commit
 `24586f20665564e8d4c58997d8c475791819db59` (`24586f2`). There is no active FA
 remediation item, and FS-007 is `DONE` through FA-001, FA-002, FA-011, and
-accepted FA-016. The manual/live response-agent validation remains unrelated,
-outstanding, and not performed.
+accepted FA-016. The former manual/live response-agent validation gate was
+retired with the response feature on 2026-09-25; it was not performed and is no
+longer an active validation item.
 
 FA-016 implementation and follow-up re-audit evidence is recorded in
 [`validation/FA-016-audit-scale.md`](validation/FA-016-audit-scale.md). The
@@ -169,6 +201,7 @@ claims about the 2026-09-15 historical baseline.
 
 | Date | Decision | Reason |
 | --- | --- | --- |
+| 2026-09-25 | Retire Filesystem Activity session termination, the Response tab, and the Dashboard-to-Pi control path; retain the Tailscale host-management connection. | A disconnect does not prevent a client from reconnecting, while a Dashboard-to-Pi action path adds operational coupling; Filesystem Activity should focus on evidence and replay. |
 | 2026-09-24 | Live topology uses a `1000×1000` logical square radar plane centered within the responsive canvas; Audit retains its existing map treatment. | The range frames must stay square at any viewport ratio, while the radar grid can fill the complete Live workspace without implying geography or changing evidence. |
 | 2026-09-24 | In the empty Live state, the radar plane expands to the remaining panel height and a sweep rotates from the center; reduced-motion preferences disable the sweep. | This uses the available workspace while preserving square geometry and avoiding animation for users who request reduced motion. |
 | 2026-09-24 | Place the four accent ticks at the actual canvas edges; keep the square range frames centered. | Edge ticks should anchor the full responsive canvas even when the square radar plane is letterboxed by a wide viewport. |
@@ -267,3 +300,6 @@ claims about the 2026-09-15 historical baseline.
 | 2026-09-25 | Refined `FS-024`: offset each background-grid layer by half a cell so grid lines meet at the exact canvas center and align with the radar crosshairs. | Next.js HMR and `git diff --check` results are recorded in the implementation log; no host or telemetry behavior changed. |
 | 2026-09-25 | Refined failed-change visualization: move the origin warning into the transformed graph plane and align its lower edge 0.75rem above the measured origin node. | `git diff --check` passed; the local route probe redirected to login (307), so authenticated visual placement was not confirmed; no tests were run. |
 | 2026-09-25 | Corrected the failed-change canvas treatment: remove both anchored and fallback warning text from the map while retaining the node marker and Forensic Studio detail. | Next.js HMR compiled in 175ms; the authenticated Audit route returned HTTP 200; `git diff --check` passed; no automated tests were run. |
+| 2026-09-25 | Start `FS-025`: replace the Evidence placeholder with a selected-session CWD ledger, source identifiers, hop/time/status, pagination coverage, and an explicit boundary against inferring commands or file access. | Scoped ESLint and `git diff --check` passed; type-check is blocked by stale generated `.next/types` for the removed terminate API. No tests or authenticated visual review were run. |
+| 2026-09-25 | Removed Dashboard session termination and decommissioned the Pi response agent; left Tailscale enabled for administration and deferred tailnet ACL editing to its Admin Console. | Dashboard route/UI and Pi agent files were removed; host checks confirmed the agent disabled/absent and port 8788 closed. Cowrie was left running with existing sessions; its drop-in is removed for the next restart. |
+| 2026-09-25 | Correct `FS-025`: remove the CWD ledger because it duplicated Route Replay; make Evidence a session-scoped view of Admin-only Cowrie command input, with redaction/truncation and explicit no-correlation/no-file-operation boundaries. | Scoped ESLint and `git diff --check` passed; type-check is blocked only by stale generated `.next/types` references to the removed terminate API. No host deployment, automated tests, or authenticated visual review. |

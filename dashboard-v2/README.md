@@ -20,23 +20,14 @@ DASHBOARD_V2_OPERATOR_ID=<deployment operator id>
 DASHBOARD_V2_ACCESS_KEY=<deployment dashboard access key>
 DASHBOARD_V2_SESSION_SECRET=<deployment session secret>
 MONGODB_URI=<server-only MongoDB connection string>
-COWRIE_RESPONSE_AGENT_URL=http://<pi-tailscale-ip>:8788
-COWRIE_RESPONSE_AGENT_TOKEN_FILE=/run/credentials/honeypot-dashboard-v2.service/response-agent-token
 ```
 
-The app fails closed when dashboard authentication is not configured. The two
-response-agent settings are optional; without the URL and one valid credential,
-the Response tab remains read-only. Production should use
-`COWRIE_RESPONSE_AGENT_TOKEN_FILE`, pointing to an absolute, regular,
-non-symlink file with no group/other permissions. `COWRIE_RESPONSE_AGENT_TOKEN`
-remains available only as a local-development fallback. If a token-file path is
-configured but unsafe or unreadable, the dashboard fails closed and never falls
-back to the inline token. When configured, only Admin operators can request the
-allow-listed terminate-session action. The browser never receives the agent
-token, and the dashboard records requested, delivered, verified, or failed
-action state in MongoDB. MongoDB credentials remain server-only and are never
-exposed through a `NEXT_PUBLIC_*` variable. The sensitive monitor command-detail
-route remains excluded and is not used as a control channel.
+The app fails closed when dashboard authentication is not configured.
+Filesystem Activity is read-only: it provides Route Replay and Evidence views
+and has no session-termination UI or API. No Pi response-agent URL or credential
+is required. MongoDB credentials remain server-only and are never exposed
+through a `NEXT_PUBLIC_*` variable. The sensitive monitor command-detail route
+remains excluded from generic browser APIs and is not a control channel.
 
 ## API and data documentation
 
