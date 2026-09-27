@@ -167,25 +167,30 @@ export function BackupScheduleSettings() {
               <div className="flex flex-wrap gap-2 text-sm">
                 <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "permanent" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "permanent"} onChange={() => { setMode("permanent"); changeTime(settings?.base_time ?? "03:30"); }} />Permanent</label>
                 <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={selectTemporaryMode} />Temporary</label>
-                {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); setPreview(null); }} />Return to permanent</label>}
+                {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); changeTime(settings?.base_time ?? "03:30"); }} />Return to permanent</label>}
               </div>
-              <AnimatePresence initial={false} mode="wait">
-              {mode !== "clear_override" && <motion.div key={mode} layout initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.18 }} className="space-y-3">
               <div className="rounded-lg border border-border bg-surface p-3">
-                <p className="text-xs font-medium text-text-muted">Daily time · Asia/Bangkok (24-hour)</p>
+                <p className="text-xs font-medium text-text-muted">{mode === "clear_override" ? "Permanent time resumes · Asia/Bangkok (24-hour)" : "Daily time · Asia/Bangkok (24-hour)"}</p>
                 <div className="mt-2 flex items-center gap-2">
-                  <ScheduleNumberPicker label="Hour" value={selectedHour} values={HOURS} disabled={!editable || busy} onChange={(hour) => changeTime(`${hour}:${selectedMinute}`)} />
+                  <ScheduleNumberPicker label="Hour" value={selectedHour} values={HOURS} disabled={!editable || busy || mode === "clear_override"} onChange={(hour) => changeTime(`${hour}:${selectedMinute}`)} />
                   <span className="pt-4 text-lg font-semibold text-text-muted" aria-hidden="true">:</span>
-                  <ScheduleNumberPicker label="Minute" value={selectedMinute} values={MINUTES} disabled={!editable || busy} onChange={(minute) => changeTime(`${selectedHour}:${minute}`)} />
+                  <ScheduleNumberPicker label="Minute" value={selectedMinute} values={MINUTES} disabled={!editable || busy || mode === "clear_override"} onChange={(minute) => changeTime(`${selectedHour}:${minute}`)} />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
                   <span className="mr-1 text-text-muted">Quick times</span>
-                  {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
+                  {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" disabled={mode === "clear_override"} aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
                 </div>
               </div>
-              {mode === "temporary" && <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); setSaved(false); }} />}
-              </motion.div>}
+              <div className="relative h-[68px]">
+              <AnimatePresence initial={false}>
+                {mode === "temporary" ? <motion.div key="temporary-range" className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
+                  <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); setSaved(false); }} />
+                </motion.div> : <motion.div key={mode} className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
+                  <span className="text-xs text-text-muted">{mode === "clear_override" ? "Effect" : "Applies for"}</span>
+                  <div className="ui-field mt-1 flex items-center text-sm">{mode === "clear_override" ? "Return to the permanent schedule after saving" : temporary ? "Ongoing base time · temporary dates stay in effect" : "Every day until changed"}</div>
+                </motion.div>}
               </AnimatePresence>
+              </div>
               <button type="button" className="ui-button min-h-9 px-3 text-xs" onClick={() => void previewChange()}>Preview change</button>
             </fieldset>
             {preview && <div className="rounded-xl border border-info-border bg-info-subtle p-3 text-xs text-text">

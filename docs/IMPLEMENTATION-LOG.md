@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Keep backup schedule card height stable across modes
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: prevent the Backup & Retention schedule card and Preview button from shifting vertically when an Admin switches Permanent and Temporary modes.
+- Repository branch and commit/PR: `fix/backup-schedule-card-height`; commit and PR follow this entry.
+- Repository changes: keep the daily time controls mounted, reserve one equal-height row below them, and show either the temporary date range or permanent-duration explanation in that row with an opacity transition. The clear-override option uses the same layout and shows the permanent base time read-only. No API payload or schedule calculation changes.
+- Host/environment changes actually applied: none. No Pi binary, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler remains active at its permanent 03:30 Asia/Bangkok default; the former fixed timer remains disabled. This change affects only local Dashboard presentation until a production Dashboard deployment.
+- Validation performed and outcome: local TypeScript check, lint, production build, and `git diff --check` passed. CI and authenticated visual review remain pending at the time of this entry.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, next-day scheduled run, and restore rehearsal were not performed.
+- Risks and data handling: the fixed row still allows the temporary date-range popup to overlay the card. The Admin preview/save gate and server validation remain unchanged; no secrets or archive data enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: verify stable card height in authenticated light/dark browser sessions and monitor the next Pi run.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Choose temporary backup dates as an inclusive range
 
 - Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
