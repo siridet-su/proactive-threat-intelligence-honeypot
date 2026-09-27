@@ -285,8 +285,8 @@ export function BackupSourceMap() {
       <section className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm" aria-labelledby="source-coverage-title">
         <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
-            <h3 id="source-coverage-title" className="text-sm font-semibold">30-day archive coverage</h3>
-            <p className="mt-0.5 text-xs text-text-muted">A manifest check is shown separately from archived records.</p>
+            <h3 id="source-coverage-title" className="text-sm font-semibold">Current archive coverage</h3>
+            <p className="mt-0.5 text-xs text-text-muted">29 eligible UTC days after the two-day safety hold. A completed empty check creates no archive object.</p>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-text-muted" aria-label="Coverage status legend">
             <LegendDot className="bg-success" label="Archived" />

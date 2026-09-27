@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Clarify backup coverage and add bounded hardware history
+
+- Status: repository Dashboard change prepared; Dashboard deployment not performed.
+- Scope and intent: distinguish completed manifest checks from actual archive objects, explain empty days, allow bounded historical review, and remove unused space in the hardware card.
+- Repository branch and commit/PR: `feat/backup-coverage-history`; commit and PR follow this entry.
+- Repository changes: add an authenticated, read-only hardware history endpoint with non-overlapping 29-day windows and a 36-period bound; add Older/Newer/Latest controls, separate checked/archived/empty/review counts, clearer empty-day text, and a full-width card layout with live Pi controls below the calendar. Clarify the source summary's eligible-day wording and document the endpoint contract.
+- Host/environment changes actually applied: none. No Pi worker, MongoDB manifest, schedule, or B2 object was changed.
+- Runtime/exposure state: the existing Pi schedule remains 01:00 Asia/Bangkok. The new history view becomes active only where this Dashboard revision is deployed; manual actions continue to use the latest live window.
+- Validation performed and outcome: targeted hardware backup tests, Dashboard production build, TypeScript compilation, targeted ESLint, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review, production Dashboard deployment, Pi worker changes, and restore rehearsal were not performed.
+- Risks and data handling: historical gaps before target activation can appear as missing, so the UI labels history read-only and leaves actions on the live window. The endpoint reads only bounded manifest metadata and does not expose archive contents or credentials.
+- Rollback: revert this Dashboard change; no host rollback is needed unless separately deployed.
+- Follow-up: verify layout and historical paging in an authenticated browser after deployment.
+- Related ADR/runbook: [Dashboard API contract](../dashboard-v2/docs/API.md) and [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
 ### 2026-09-27 — Remove stale fixed-time label from hardware backup card
 
 - Status: repository Dashboard UI correction prepared; production Dashboard deployment not performed.

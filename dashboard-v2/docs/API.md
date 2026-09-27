@@ -122,6 +122,23 @@ capacity values, root-disk percentage and capacity values, temperature, and
 collector fields are kept outside this browser-facing live ring. Older v2
 documents remain readable during the rolling deployment.
 
+## Hardware backup history
+
+`GET /api/hardware/backup` remains the live hardware backup status and control
+view. `GET /api/hardware/backup/history?period=N` is an authenticated,
+read-only history view. `N` is an integer from 1 through 36; period 1 is the
+29 eligible UTC days immediately before the live window. Each later period
+moves back by another 29 days, so the windows do not overlap. The response
+contains `period`, `expected_window`, 29 daily manifest states, and
+`has_older`. Both routes use `Cache-Control: no-store`.
+
+The Dashboard labels a successful zero-record day as **Empty** and counts it
+as a completed manifest check, not as a B2 archive. The archived-day count
+requires an archive object name. Historical navigation changes only the
+calendar and its counts; the Pi controls, latest request, and storage snapshot
+continue to show live state. Days before a target was activated can appear as
+missing in historical windows and are not queued by navigating history.
+
 ## Error contract
 
 The BFF returns `401` for a missing/invalid dashboard session, `404` for an unknown allowlist key, `503` for an unsafe origin or unavailable upstream, and `502` for a non-JSON or oversized upstream response. An upstream `401`/`403` is normalized to `dashboard backend authorization failed`; an upstream `404` is normalized to `dashboard data was not found`; other upstream status codes are preserved with `dashboard backend request failed`. Backend route-specific errors below are therefore visible only after the BFF has admitted the request.
