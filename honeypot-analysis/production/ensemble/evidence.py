@@ -70,6 +70,10 @@ def expected_feature_contract_sha256(value: Mapping[str, Any]) -> str:
 
 MODEL2_V5_RESULT_ROOT = Path("/var/lib/model2-v7/results")
 MODEL2_V5_BRIDGE_SOCKET = Path("/run/model2-v7-ensemble/bridge.sock")
+# The bridge validates one exact result by scanning its bounded spool. In the
+# deployed spool this regularly takes 215-250 ms, so a 250 ms client deadline
+# intermittently converts valid evidence into a Model1-only fallback.
+MODEL2_V5_BRIDGE_TIMEOUT_SECONDS = 3.0
 SHARED_TECHNIQUES = ("T1105", "T1046", "T1110")
 # Model2/ensemble presentation is intentionally parent-technique only.  A
 # sub-technique label is normalized to its parent; no sub-technique graph or
@@ -825,7 +829,7 @@ def _query_model2_v5_bridge(
     }
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(0.25)
+            connection.settimeout(MODEL2_V5_BRIDGE_TIMEOUT_SECONDS)
             connection.connect(str(socket_path))
             connection.sendall(
                 (json.dumps(request, sort_keys=True, separators=(",", ":")) + "\n").encode()

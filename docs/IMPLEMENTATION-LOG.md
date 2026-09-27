@@ -48,6 +48,20 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Preserve complete response guidance in compact session detail
+
+- Status: installed and active on the GCP monitor API.
+- Scope and intent: keep complete policy-authored finding and action text in the compact session detail projection so the dashboard does not cut an artifact SHA-256 or the final qualification from an advisory sentence.
+- Repository branch and commit/PR: `fix/session-display-operational-closeout-20260927`, based on `origin/release/model2-54f-rrf-closeout-20260926` at `9d9cf7fb0`; this entry ships with the fix commit.
+- Repository changes: set a separate 2,048-character limit for response-guidance finding/action text and list entries; retain the 160-character limit for unrelated compact metadata. Raise the Model2 bridge client timeout from 0.25 to 3.0 seconds after measuring 215–250 ms normal spool lookup time. Add full-hash, full-sentence, upper-bound and delayed-bridge regression assertions.
+- Host/environment changes actually applied: installed checksum-verified `security.py` and `evidence.py` at their respective paths under `/opt/honeypot/production/`; restarted only `honeypot-monitor-web` after each installation. Owner-only backups are at `/home/siridet_s_dev/security.py.pre-guidance-projection-20260927` and `/home/siridet_s_dev/evidence.py.pre-bridge-timeout-20260927` on the GCP host. No dashboard or model service was restarted.
+- Runtime/exposure state: monitor API is active; its `/health` endpoint returned HTTP 200 after warm-up. The public dashboard tunnel remains on its existing address.
+- Validation performed and outcome: targeted regression suites passed 128 tests with 3 skips; `py_compile` and `git diff --check` passed. A known session's compact detail returned HTTP 200 with two findings and two actions; the first finding and action include a complete 64-character SHA-256 and terminal sentence punctuation (lengths 200 and 170). Guidance still requires manual approval and cannot auto-execute. After the timeout fix, the same session's HTTP API returned a bound V3 Model2 result and `EXPERIMENTAL_RRF`, moving T1105 to the first recommendation. Two additional current V3 sessions returned bound Model2 results; their RRF review order remained Model1-only because no gated support changed the order. PDF returned HTTP 200; dashboard login returned HTTP 200 and protected session route HTTP 307 without authentication.
+- Not performed / deferred: authenticated browser visual review. A historical V2 session still has one valid hypothesis but currently falls back to Model1-only because the active V3 identity gate does not accept that older artifact; historical report wording describes its original V2 runtime, not current live fusion.
+- Risks and data handling: the larger limit applies only to policy-authored guidance projection. The protected session API response used for validation was kept owner-only on the GCP host and is not committed.
+- Rollback: restore both protected backups to their exact backend paths with root ownership and their original modes (`security.py` 0664, `evidence.py` 0644), compile and restart `honeypot-monitor-web`; verify `/health` and the original checksums `c9f2f53a28ff148515340c21f7257e28faa5df776a9d31c9ebee571987e3e3b6` and `e3c5986ac9c3bdfa144d7fa2bc3842b4768de58d5a261c69c7850821055ae959`.
+- Follow-up: verify the complete guidance in an authenticated browser session. See [validation note](validation/2026-09-27-session-guidance-projection-closeout.md).
+
 ### 2026-09-24 — Confirm canonical backup control-plane decisions
 
 - Status: planning decisions approved; implementation not started.
