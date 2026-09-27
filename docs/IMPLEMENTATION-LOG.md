@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Add session download evidence and exact artifact hash lookup
+
+- Status: repository change prepared; not deployed.
+- Scope and intent: show retained Cowrie file-download events alongside command submissions in Filesystem Activity Evidence and link their SHA-256 to Artifact Intelligence.
+- Repository branch and commit/PR: `feat/filesystem-session-download-evidence`; commit/PR pending.
+- Repository changes: add an Admin-only, no-store exact-session canonical download endpoint with bounded event ID, timestamp, and hash metadata; add a separate Evidence section while retaining command rows; make exact SHA-256 search fall back to observed events if no enrichment record matches; read the hash from the Artifact Intelligence URL; update API and working-state documentation.
+- Host/environment changes actually applied: read-only Pi inspection of canonical and normalized event metadata. No service, database document, configuration, or Pi binary was changed.
+- Runtime/exposure state: the active Dashboard and Pi remain unchanged. The new Evidence section becomes available when this Dashboard revision is deployed.
+- Validation performed and outcome: Pi metadata showed 725 canonical file-download events across 496 canonical sessions; a sampled canonical row carried a valid SHA-256. The normalized collection held 804 file-download events. Eleven focused tests, targeted ESLint, TypeScript, and webpack production build passed. Default Turbopack build could not bind an internal port in this execution environment.
+- Not performed / deferred: authenticated browser review and Dashboard deployment; CWD-hop correlation, file read/write inference, and artifact byte retrieval.
+- Risks and data handling: response is Admin-only and exposes hash metadata, never raw Cowrie payloads, URLs, paths, or bytes. Canonical and normalized collections have different event counts; the view deliberately uses only canonical rows with verified session identity. Exact hash fallback remains bounded by the existing event scan limit.
+- Rollback: revert this Dashboard change; no host rollback is required until separately deployed.
+- Follow-up: verify a known session with a canonical download event in an authenticated browser after deployment.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md), [Dashboard API contract](../dashboard-v2/docs/API.md), and [ADR-0002](adr/ADR-0002-hash-only-malware-handling.md).
+
 ### 2026-09-27 — Restore local Filesystem Evidence access and align command rows
 
 - Status: repository correction prepared; private local development source enabled; production Dashboard deployment not performed.

@@ -6,6 +6,7 @@ import { AlertTriangle, Clock3, RefreshCw, ShieldCheck, Terminal } from "lucide-
 import { RegionState } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession } from "@/lib/dashboardTypes";
 import { formatTimestamp } from "./filesystemUtils";
+import { FileDownloadEvidencePanel } from "./FileDownloadEvidencePanel";
 
 const COMMAND_EVENT_IDS = new Set([
   "cowrie.command.failed",
@@ -227,7 +228,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
   const commands = projection ? sortCommandEvents(projection.commands) : [];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="command-evidence-panel">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pr-1 pb-2" data-testid="command-evidence-panel">
       <section className="rounded-xl border border-border bg-surface-subtle p-3" aria-label="Command evidence scope">
         <div className="flex items-center gap-2 text-xs font-semibold text-text">
           <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
@@ -245,16 +246,16 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
           </div>
           <div>
             <dt className="text-text-subtle">Evidence source</dt>
-            <dd className="mt-0.5 text-text">Cowrie command events</dd>
+            <dd className="mt-0.5 text-text">Cowrie command and file download events</dd>
           </div>
         </dl>
         <div className="mt-2 space-y-1.5 border-t border-border pt-2 text-xs leading-relaxed text-text-muted">
           <p>Command input is session-level evidence. It is not automatically linked to the selected CWD hop and does not prove the command succeeded or that a file was read or written.</p>
-          <p>Command input redacted before persistence cannot be reconstructed. File-operation events are not available in this view.</p>
+          <p>Command input redacted before persistence cannot be reconstructed. Download telemetry is separate from filesystem read/write evidence.</p>
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-surface p-3" aria-label="Cowrie command events">
+      <section className="flex flex-col rounded-xl border border-border bg-surface p-3" aria-label="Cowrie command events">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 font-semibold text-text">
             <Terminal className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
@@ -294,7 +295,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
         ) : commands.length === 0 ? (
           <div className="mt-3"><RegionState kind="empty" title="No command events returned" description="No Cowrie command events were returned for this session. This result does not establish that the session had no other activity." /></div>
         ) : (
-          <ol className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 pb-2" aria-label="Session command evidence">
+          <ol className="mt-3 space-y-2" aria-label="Session command evidence">
             {commands.map((command) => {
               const isRedacted = command.input.trim() === "[REDACTED]";
               const commandTextVisible = command.command_text_available && command.input.length > 0 && !isRedacted;
@@ -333,6 +334,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
           </ol>
         )}
       </section>
+      <FileDownloadEvidencePanel sessionId={sessionId} />
     </div>
   );
 }

@@ -444,7 +444,7 @@ function escapeRegex(value: string): string {
 }
 
 function hashMatcher(query: string): RegExp {
-  return query ? new RegExp(escapeRegex(query), "i") : HASH_MONGO_PATTERN;
+  return query ? new RegExp(HASH_PATTERN.test(query) ? `^${escapeRegex(query)}$` : escapeRegex(query), "i") : HASH_MONGO_PATTERN;
 }
 
 function hashQuery(query: string): string {
@@ -551,8 +551,13 @@ export async function getArtifactPage(
     { maxTimeMS: 5_000 },
   );
 
-  if (threatHashCount > 0) {
-    const total = await db.collection<Document>("threat_intel").countDocuments(threatFilter, { maxTimeMS: 5_000 });
+  const exactHashQuery = HASH_PATTERN.test(query);
+  const threatTotal = threatHashCount > 0
+    ? await db.collection<Document>("threat_intel").countDocuments(threatFilter, { maxTimeMS: 5_000 })
+    : 0;
+
+  if (threatHashCount > 0 && (!exactHashQuery || threatTotal > 0)) {
+    const total = threatTotal;
     const records = await db.collection<Document>("threat_intel")
       .find(threatFilter, { projection: THREAT_INTEL_PROJECTION })
       .sort({ queried_at: -1, _id: -1 })
@@ -585,8 +590,12 @@ export async function getArtifactPage(
     { maxTimeMS: 5_000 },
   );
 
-  if (legacyHashCount > 0) {
-    const total = await db.collection<Document>("enrichment_records").countDocuments(legacyFilter, { maxTimeMS: 5_000 });
+  const legacyTotal = legacyHashCount > 0
+    ? await db.collection<Document>("enrichment_records").countDocuments(legacyFilter, { maxTimeMS: 5_000 })
+    : 0;
+
+  if (legacyHashCount > 0 && (!exactHashQuery || legacyTotal > 0)) {
+    const total = legacyTotal;
     const records = await db.collection<Document>("enrichment_records")
       .find(legacyFilter, { projection: LEGACY_PROJECTION })
       .sort({ first_seen: -1, _id: -1 })
