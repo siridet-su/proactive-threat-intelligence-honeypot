@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Set installer boundary for operator-managed private configuration
+
+- Status: design and documentation prepared; no installer apply mode or host deployment performed.
+- Scope and intent: define the first fresh-Pi installer as a preparatory installation of services, dependencies, and non-secret configuration, with operator-managed `.env` and credentials.
+- Repository branch and commit/PR: `docs/installer-operator-credentials`; commit/PR follow this entry.
+- Repository changes: add ADR-0009 and align the installer blueprint, readiness audit, roadmap, and documentation index with a separate validation/activation phase.
+- Host/environment changes actually applied: none in this change; no private file was created, read, changed, or copied.
+- Runtime/exposure state: the existing Pi and Dashboard services remain as previously audited. No new service was installed or enabled.
+- Validation performed and outcome: reviewed the current plan-only profile, readiness findings, and installer blueprint; checked changed Markdown links and `git diff --check` locally.
+- Not performed / deferred: apply/activate implementation, ARM64 VM and Pi installation tests, Dashboard staging env correction, and existing-Pi migration.
+- Risks and data handling: a prepared installation is deliberately not operational; activation must fail if required operator inputs are absent. No credential values or raw attacker material enter this record.
+- Rollback: revert the documentation change with a dated ADR supersession if the accepted boundary changes; no host rollback is needed.
+- Follow-up: implement versioned, non-secret preparation artifacts and a value-redacting activation preflight on the installer branch; then qualify them on a disposable ARM64 VM.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md), and [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
 ### 2026-09-28 — Addendum: identify unmerged installer planning branch
 
 - Status: documentation corrected; no host change or installation performed.
