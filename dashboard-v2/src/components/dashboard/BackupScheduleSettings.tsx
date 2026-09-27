@@ -6,10 +6,9 @@ import { CalendarClock, Clock3, ShieldCheck } from "lucide-react";
 
 import { ScheduleNumberPicker, ScheduleRangePicker } from "@/components/dashboard/BackupSchedulePickers";
 import { OperationToast, type OperationToastKind } from "@/components/ui/OperationToast";
-import type { BackupScheduleEdit, BackupSchedulePreview, BackupScheduleSettings, BackupScheduleView } from "@/lib/backupSchedule";
+import type { BackupScheduleEdit, BackupSchedulePreviewResult, BackupScheduleSaveResult, BackupScheduleView } from "@/lib/backupSchedule";
 
 type EditMode = "permanent" | "temporary" | "clear_override";
-type PreviewResult = { revision: string; settings: BackupScheduleSettings; preview: BackupSchedulePreview };
 const HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, "0"));
 const MINUTES = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, "0"));
 const QUICK_TIMES = ["01:00", "02:00", "03:30"];
@@ -43,7 +42,7 @@ export function BackupScheduleSettings() {
   const [time, setTime] = useState("03:30");
   const [startDate, setStartDate] = useState("");
   const [days, setDays] = useState(7);
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
+  const [preview, setPreview] = useState<BackupSchedulePreviewResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<ScheduleToast | null>(null);
@@ -97,7 +96,7 @@ export function BackupScheduleSettings() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not preview schedule");
-      setPreview(payload as PreviewResult);
+      setPreview(payload as BackupSchedulePreviewResult);
     } catch (reason: unknown) {
       setError(reason instanceof Error ? reason.message : "Could not preview schedule");
     } finally {
@@ -115,11 +114,14 @@ export function BackupScheduleSettings() {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not save schedule");
-      setView(payload as BackupScheduleView);
+      const result = payload as BackupScheduleSaveResult;
+      setView(result);
       setPreview(null);
-      setToast({ kind: "success", title: "Schedule saved", description: "The new schedule is queued for the Pi worker." });
+      setToast(result.unchanged
+        ? { kind: "info", title: "Schedule unchanged", description: "These settings are already active. No new revision was created." }
+        : { kind: "success", title: "Schedule saved", description: "The new schedule is queued for the Pi worker." });
       setMode("permanent");
-      setTime((payload as BackupScheduleView).settings.base_time);
+      setTime(result.settings.base_time);
     } catch (reason: unknown) {
       const message = reason instanceof Error ? reason.message : "Could not save schedule";
       setError(message);
@@ -132,7 +134,7 @@ export function BackupScheduleSettings() {
   }
 
   function queueSave() {
-    if (!preview || pendingSave.current !== null || busy) return;
+    if (!preview || preview.unchanged || pendingSave.current !== null || busy) return;
     const request = { edit: edit(), expected_revision: preview.revision };
     setBusy(true);
     setError(null);
@@ -230,7 +232,8 @@ export function BackupScheduleSettings() {
               <p className="font-semibold">Next run: {preview.preview.catch_up ? "as soon as the Pi worker checks the schedule" : formatBangkok(preview.preview.next_run_at)}</p>
               {preview.preview.return_at && <p className="mt-1">Returns to {preview.settings.base_time} on {formatBangkok(preview.preview.return_at)}.</p>}
               <p className="mt-1 text-text-muted">A completed run today will not run twice. An active run will finish before the new schedule takes effect.</p>
-              <button type="button" className="ui-button ui-button-primary mt-3 min-h-9 px-3 text-xs" disabled={busy || !editable} onClick={queueSave}><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Save schedule</button>
+              {preview.unchanged && <p className="mt-2 text-text-muted">These settings already match the current schedule.</p>}
+              <button type="button" className="ui-button ui-button-primary mt-3 min-h-9 px-3 text-xs" disabled={busy || !editable || preview.unchanged} onClick={queueSave}><ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />Save schedule</button>
             </div>}
           </div>
         )}

@@ -64,12 +64,17 @@ Dashboard never sends a systemd command or B2 credential.
   `{mode:"permanent",time:"HH:mm"}`,
   `{mode:"temporary",time:"HH:mm",start_date:"YYYY-MM-DD",days:1..90}`,
   or `{mode:"clear_override"}`. It validates the edit and returns the next
-  run, catch-up indication, and return time without changing the schedule.
+  run, catch-up indication, return time, and `unchanged` flag without changing
+  the schedule. The Dashboard disables Save when `unchanged` is true.
 - `POST /api/backup/schedule` requires Admin. Its body is
   `{edit:<the previewed edit>,expected_revision:<revision>}`. It appends a
-  complete schedule revision with the operator ID and timestamp. A stale
-  revision or concurrent edit returns `409`; a worker without a recent
-  scheduler heartbeat rejects edits. Temporary starts may be today through
+  complete schedule revision with the operator ID and timestamp only when the
+  proposed permanent time and temporary override differ from the latest
+  settings. The server checks this again on every POST. A matching request
+  returns `200` with `unchanged:true` and creates no revision; an applied edit
+  returns `unchanged:false`. A stale revision or concurrent edit returns `409`;
+  a worker without a recent scheduler heartbeat rejects actual edits.
+  Temporary starts may be today through
   365 days ahead and last 1–90 days. The permanent base remains intact while
   a temporary override is active.
 
