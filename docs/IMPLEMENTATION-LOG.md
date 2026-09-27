@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Deploy and verify manual backup window correction on Pi
+
+- Status: Pi control worker correction installed and active; Dashboard UI correction is merged into `main` but no production Dashboard deployment was performed.
+- Scope and intent: apply the tested manual-window fix from [PR #89](https://github.com/siridet-su/proactive-threat-intelligence-honeypot/pull/89) and verify the previously skipped 2026-08-27 hardware day.
+- Repository branch and commit/PR: deployment used merge commit `8527d31` from PR #89; this dated deployment record was added on `docs/backup-manual-window-rollout`.
+- Repository changes: no worker source change beyond PR #89. This entry records host application and read-only validation after that merge.
+- Host/environment changes actually applied: built the Linux ARM64 worker from clean merge commit `8527d31`, verified its SHA-256 on the Pi, saved the previous root-owned binary at `/var/backups/hardware-backup-control-20260927-1c06e18c.bin`, installed the new binary atomically, and restarted only `honeypot-hardware-backup-control.service`. The Pi repository branch and its unrelated modified file were not changed. An operator-approved `run_missing` request was inserted directly into the audited control collection for this maintenance verification, without using the Dashboard API.
+- Runtime/exposure state: the Pi control service is active with the new binary and a fresh heartbeat. The approved request completed successfully for 1/1 selected day, 2026-08-27. Its active-bucket manifest is successful but empty: 0 records, 0 archive bytes, and no B2 object. The stored daily schedule remains 01:00 Asia/Bangkok.
+- Validation performed and outcome: `go test ./...`, Dashboard TypeScript and targeted ESLint checks, Linux ARM64 cross-build, GitHub Dashboard staging CI, local/Pi binary hash comparison, service status, Pi journal, request progress, and manifest metadata all passed. Read-only counts found zero `hardware_metrics_1m` records for that UTC day with either BSON Date or ISO string timestamps, confirming the empty result is not caused by an old timestamp field.
+- Not performed / deferred: production Dashboard deployment, read-only restore rehearsal, and the next scheduled Pi run were not tested in this deployment.
+- Risks and data handling: the worker now follows the displayed scheduled-run window for manual actions; a later eligible day with records may create a B2 object. This verified day was empty and created none. No credentials, source records, archive contents, or protected configuration contents were copied into the repository.
+- Rollback: restore the protected previous binary atomically and restart the control service if needed; PR #89 can be reverted separately for repository rollback.
+- Follow-up: verify the next scheduled run and inspect the Dashboard after its UI code is deployed; the other two 2026-08-27 target exceptions remain separate from the hardware request.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [hardware backup worker runbook](../agents/hardware-backup/README.md).
+
 ### 2026-09-27 — Align manual backup actions with displayed coverage
 
 - Status: repository Pi worker correction prepared; not deployed to the Pi.

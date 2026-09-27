@@ -212,5 +212,7 @@ audited requests from `hardware_backup_requests`, B2 snapshot freshness, and
 policy details. Restore readiness is intentionally evidence-based: without a
 record in the optional `backup_restore_verifications` collection it displays
 `Not tested`; the page never infers restore success from an upload manifest.
-Only the existing hardware action endpoint can queue manual actions. Other
-targets remain review-only until a target-specific action contract is added.
+Only the existing hardware action endpoint exposes manual actions through the
+Dashboard. Direct insertion into the audited control collection is reserved
+for approved operator maintenance. Other targets remain review-only until a
+target-specific action contract is added.
