@@ -2,15 +2,17 @@
 title: Current honeypot architecture
 status: current
 last_verified: 2026-09-27
+last_updated: 2026-09-28
 ---
 
 # Current honeypot architecture
 
 ## Purpose and scope
 
-This is one inherited-and-evolving multi-service honeypot project. The present
-development focus is the adaptive SSH shell delivered through Cowrie. The
-active web scope is limited to capturing rejected ERP-style login attempts;
+This is one inherited-and-evolving multi-service honeypot project. The next
+documentation focus is the installation manual. The adaptive SSH shell remains
+a separate target workstream. The active web scope is limited to capturing
+rejected ERP-style login attempts;
 Odoo, direct-Pi HTTPS, FTP, and SMTP are stopped/future work.
 
 The project does not execute attacker-controlled commands or malware on the
@@ -55,7 +57,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | Redis and Zeek | Active | Redis streams and all configured Zeek workers were healthy at the last verification. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
-| Dashboard Filesystem Activity | Source retirement prepared; production deployment pending | The current branch removes session termination and keeps Route Replay/Evidence, but the production Dashboard has not been redeployed and may still serve its earlier UI/API. The Pi agent is unavailable. Tailnet ACL cleanup and the next Cowrie restart are pending; see [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md) and the [retirement runbook](RESPONSE-CONTROL-PLANE.md). |
+| Dashboard Filesystem Activity | Current source merged; local Evidence reviewed; production deployment unverified | `main` retains Route Replay and Admin-only command/download Evidence after retiring session termination. An authenticated localhost screenshot showed command submissions and one canonical file-download event after PR #96 merged. This does not verify a production Dashboard deployment or the Artifact Intelligence link destination. The Pi response agent remains retired; tailnet ACL cleanup and the next Cowrie restart remain pending. See [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md), the [retirement runbook](RESPONSE-CONTROL-PLANE.md), and the [Filesystem working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md). |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
 | Post-session/cloud analysis | Target workstream | Under active development. |
 | Hailo/Ollama runtime | Experimental candidate | Not the current Cowrie execution path. |

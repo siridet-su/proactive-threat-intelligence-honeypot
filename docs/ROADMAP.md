@@ -2,9 +2,27 @@
 title: Project roadmap
 status: target
 last_verified: 2026-09-24
+last_updated: 2026-09-28
 ---
 
 # Project roadmap
+
+## Current delivery focus — installation manual
+
+The current Filesystem Activity implementation round closed on 2026-09-28.
+The accepted local Evidence slice and deferred FS additions are recorded in
+[Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md).
+Production Dashboard deployment remains unverified; closure does not claim a
+production rollout.
+
+The next documentation workstream is the installation manual. State its target
+deployment path explicitly before writing runnable steps. Start from the
+verified
+[current architecture](CURRENT-ARCHITECTURE.md) and the proposed
+[installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), separating runnable
+instructions from future appliance design. The blueprint's retired
+Dashboard-to-Pi disconnect/control path is historical, not an installation
+requirement. No customer installer is currently declared ready to run.
 
 ## Phase 0 — Establish project truth
 
