@@ -72,6 +72,22 @@ func runControlLoop(
 
 	poll := time.NewTicker(time.Duration(cfg.ControlPollSeconds) * time.Second)
 	defer poll.Stop()
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go func() {
+		heartbeat := time.NewTicker(time.Duration(cfg.ControlPollSeconds) * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-heartbeat.C:
+				if err := publishConfiguredTargetStatuses(heartbeatCtx, database, cfg, workerID); err != nil {
+					log.Printf("backup target heartbeat failed: %v", err)
+				}
+			}
+		}
+	}()
 
 	for {
 		request, err := claimNextBackupRequest(ctx, requests, backupTargetRequestSources(cfg.Targets), workerID)

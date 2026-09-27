@@ -10,10 +10,16 @@ import type {
   HardwareBackupRequestView,
   HardwareBackupStorageStatus,
   HardwareBackupStatus,
+  BackupActivityEntry,
   BackupTargetCoverage,
+  BackupDestinationStatus,
+  BackupException,
+  BackupPolicy,
   BackupTargetId,
   BackupTargetOverview,
   BackupTargetState,
+  BackupRestoreReadiness,
+  BackupWorkerStatus,
 } from "./dashboardTypes";
 
 const BACKUP_COLLECTION = "hardware_backup_manifests";
@@ -25,6 +31,10 @@ const LOOKBACK_DAYS = 30;
 const SAFETY_DAYS = 2;
 const MAX_MANIFESTS = 90;
 const TARGET_STATUS_COLLECTION = "backup_target_status";
+const RESTORE_VERIFICATION_COLLECTION = "backup_restore_verifications";
+const BACKUP_CONTROL_POLL_SECONDS = 15;
+const BACKUP_HEALTHY_AFTER_SECONDS = BACKUP_CONTROL_POLL_SECONDS * 6;
+const BACKUP_STALE_AFTER_SECONDS = 30 * 60;
 
 const BACKUP_TARGET_CATALOG = [
   { target_id: "hardware_metrics_1m", collections: ["hardware_metrics_1m"], sensitive: false },
@@ -68,6 +78,12 @@ function dateValue(value: unknown): string | null {
   return asDate(value)?.toISOString() ?? null;
 }
 
+function textValue(value: unknown, maxLength = 240): string | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 1)}…` : normalized;
+}
+
 function statusValue(value: unknown): HardwareBackupDayStatus | null {
   return value === "success" || value === "failed" || value === "running" ? value : null;
 }
@@ -90,7 +106,7 @@ function manifestDay(document: Document): HardwareBackupDay | null {
     started_at: dateValue(document.started_at),
     completed_at: dateValue(document.completed_at),
     object_name: typeof document.object_name === "string" ? document.object_name : null,
-    error: typeof document.error === "string" ? document.error : null,
+    error: textValue(document.error),
   };
 }
 
@@ -158,7 +174,17 @@ function requestView(document: Document | null): HardwareBackupRequestView | nul
     completed_at: dateValue(document.completed_at),
     heartbeat_at: dateValue(document.heartbeat_at),
     progress: requestProgress(document),
-    error: typeof document.error === "string" ? document.error : null,
+    error: textValue(document.error),
+  };
+}
+
+function destinationSnapshotView(document: Document | null, now = new Date()): BackupDestinationStatus | null {
+  const storage = storageSnapshotView(document);
+  if (!storage) return null;
+  const checkedAt = asDate(storage.checked_at);
+  return {
+    ...storage,
+    age_seconds: checkedAt ? Math.max(0, Math.floor((now.getTime() - checkedAt.getTime()) / 1_000)) : 0,
   };
 }
 
@@ -318,6 +344,10 @@ export function buildBackupTargetCoverage(
   const latestRun = [...days]
     .filter((day) => day.started_at !== null)
     .sort((left, right) => (right.started_at ?? "").localeCompare(left.started_at ?? ""))[0] ?? null;
+  const latestSuccessDay = successfulDays.at(-1)?.day ?? null;
+  const lagDays = latestSuccessDay
+    ? Math.max(0, Math.floor((window.to.getTime() - new Date(`${latestSuccessDay}T00:00:00Z`).getTime()) / (24 * 60 * 60 * 1_000)))
+    : window.days;
 
   return {
     expected_days: window.days,
@@ -329,10 +359,140 @@ export function buildBackupTargetCoverage(
     missing_days: days.filter((day) => day.status === "missing").length,
     archived_documents: archivedDocuments,
     archive_bytes: archiveBytes,
-    latest_success_day: successfulDays.at(-1)?.day ?? null,
+    latest_success_day: latestSuccessDay,
+    lag_days: lagDays,
     last_started_at: latestDate(days, "started_at"),
     last_completed_at: latestDate(days, "completed_at"),
     latest_run_status: latestRun?.status ?? null,
+  };
+}
+
+export function buildBackupTargetExceptions(
+  documents: Document[],
+  targetId: BackupTargetId,
+  window = getHardwareBackupWindow(),
+): BackupException[] {
+  const manifests = new Map<string, HardwareBackupDay>();
+  for (const document of documents) {
+    if (manifestTargetId(document) !== targetId) continue;
+    const day = manifestDay(document);
+    if (day) manifests.set(day.day, day);
+  }
+
+  const exceptions: BackupException[] = [];
+  for (let day = window.from; day <= window.to; day = addUtcDays(day, 1)) {
+    const manifest = expectedDay(day, manifests.get(dayKey(day)));
+    if (manifest.status === "success") continue;
+    exceptions.push({
+      target_id: targetId,
+      day: manifest.day,
+      status: manifest.status,
+      detail: manifest.status === "failed"
+        ? manifest.error ?? "Manifest marked failed without an error detail."
+        : manifest.status === "running"
+          ? "Manifest is still being written by the Pi worker."
+          : "No manifest has been recorded for this eligible UTC day.",
+      document_count: manifest.document_count,
+      archive_bytes: manifest.archive_bytes,
+      started_at: manifest.started_at,
+      completed_at: manifest.completed_at,
+      action_supported: targetId === HARDWARE_COLLECTION,
+    });
+  }
+  return exceptions;
+}
+
+function requestDurationSeconds(request: HardwareBackupRequestView, now = new Date()): number | null {
+  const start = asDate(request.started_at ?? request.created_at);
+  if (!start) return null;
+  const end = asDate(request.completed_at) ?? (request.status === "pending" || request.status === "running" ? now : null);
+  if (!end) return null;
+  return Math.max(0, Math.floor((end.getTime() - start.getTime()) / 1_000));
+}
+
+function backupActivityView(document: Document, now = new Date()): BackupActivityEntry | null {
+  const request = requestView(document);
+  if (!request) return null;
+  return { ...request, duration_seconds: requestDurationSeconds(request, now) };
+}
+
+function workerStatus(
+  documents: Document[],
+  targetCount: number,
+  attentionCount: number,
+  now = new Date(),
+): BackupWorkerStatus {
+  const reports = documents
+    .map((document) => ({
+      seenAt: asDate(document.last_seen_at),
+      mode: document.mode === "control" || document.mode === "scheduled" ? document.mode : null,
+      pollSeconds: numberValue(document.poll_seconds),
+    }))
+    .filter((report): report is { seenAt: Date; mode: "control" | "scheduled" | null; pollSeconds: number | null } => report.seenAt !== null);
+  const latest = reports.sort((left, right) => right.seenAt.getTime() - left.seenAt.getTime())[0];
+  if (!latest) {
+    return {
+      state: "unknown",
+      mode: null,
+      poll_seconds: null,
+      last_seen_at: null,
+      heartbeat_age_seconds: null,
+      target_count: targetCount,
+      attention_count: attentionCount,
+    };
+  }
+
+  const ageSeconds = Math.max(0, Math.floor((now.getTime() - latest.seenAt.getTime()) / 1_000));
+  const pollSeconds = latest.pollSeconds ?? BACKUP_CONTROL_POLL_SECONDS;
+  const healthyAfterSeconds = Math.max(BACKUP_HEALTHY_AFTER_SECONDS, pollSeconds * 6);
+  const staleAfterSeconds = Math.max(BACKUP_STALE_AFTER_SECONDS, pollSeconds * 120);
+  const state = latest.mode === "scheduled"
+    ? "scheduled"
+    : ageSeconds <= healthyAfterSeconds
+      ? "healthy"
+      : ageSeconds <= staleAfterSeconds
+        ? "stale"
+        : "offline";
+  return {
+    state,
+    mode: latest.mode,
+    poll_seconds: pollSeconds,
+    last_seen_at: latest.seenAt.toISOString(),
+    heartbeat_age_seconds: ageSeconds,
+    target_count: targetCount,
+    attention_count: attentionCount,
+  };
+}
+
+function backupPolicy(window: ReturnType<typeof getHardwareBackupWindow>): BackupPolicy {
+  return {
+    lookback_days: LOOKBACK_DAYS,
+    safety_days: SAFETY_DAYS,
+    eligible_days: window.days,
+    schedule: "Daily systemd timer",
+    archive_format: "gzip Extended JSON Lines",
+    destination_visibility: "Private Backblaze B2",
+    sensitive_target_policy: "Threat events require explicit opt-in",
+  };
+}
+
+function restoreReadinessView(document: Document | null): BackupRestoreReadiness {
+  const status = document?.status === "verified" || document?.status === "failed" || document?.status === "not_tested" || document?.status === "unavailable"
+    ? document.status
+    : null;
+  if (!status) {
+    return {
+      status: "not_tested",
+      last_verified_at: null,
+      detail: "No restore rehearsal has been recorded yet; the read-only restore path remains documented but unverified.",
+      source: "Read-only restore operator path",
+    };
+  }
+  return {
+    status,
+    last_verified_at: dateValue(document?.last_verified_at ?? document?.verified_at),
+    detail: textValue(document?.detail) ?? "Restore verification record has no detail.",
+    source: textValue(document?.source, 120) ?? "Read-only restore operator path",
   };
 }
 
@@ -441,12 +601,13 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   const client = await getMongoClient();
   const database = client.db(getMongoDatabaseName());
   const window = getHardwareBackupWindow();
+  const now = new Date();
   const targetIds = BACKUP_TARGET_CATALOG.map((target) => target.target_id);
-  const [statusDocuments, manifestDocuments] = await Promise.all([
+  const [statusDocuments, manifestDocuments, requestDocuments, storageDocuments, restoreDocument] = await Promise.all([
     database.collection(TARGET_STATUS_COLLECTION).find({
       target_id: { $in: targetIds },
       enabled: true,
-    }).project({ target_id: 1, enabled: 1, last_seen_at: 1 }).toArray(),
+    }).project({ target_id: 1, enabled: 1, last_seen_at: 1, mode: 1, poll_seconds: 1 }).toArray(),
     database.collection(BACKUP_COLLECTION).find({
       day_start: { $gte: window.from, $lte: window.to },
       $or: [
@@ -465,6 +626,30 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
       object_name: 1,
       error: 1,
     }).sort({ day_start: 1 }).limit(MAX_MANIFESTS * BACKUP_TARGET_CATALOG.length).toArray(),
+    database.collection(REQUEST_COLLECTION).find({ source: { $in: targetIds } }).project({
+      _id: 1,
+      source: 1,
+      action: 1,
+      requested_by: 1,
+      status: 1,
+      created_at: 1,
+      started_at: 1,
+      completed_at: 1,
+      heartbeat_at: 1,
+      progress: 1,
+      error: 1,
+    }).sort({ created_at: -1 }).limit(10).toArray(),
+    database.collection(STORAGE_SNAPSHOT_COLLECTION).find({}).project({
+      source: 1,
+      bucket: 1,
+      storage_bytes: 1,
+      file_versions: 1,
+      checked_at: 1,
+    }).sort({ checked_at: -1 }).limit(20).toArray(),
+    database.collection(RESTORE_VERIFICATION_COLLECTION).findOne({}, {
+      projection: { status: 1, verified_at: 1, last_verified_at: 1, detail: 1, source: 1 },
+      sort: { verified_at: -1, last_verified_at: -1, created_at: -1 },
+    }),
   ]);
 
   const liveTargets = new Map<string, Document>();
@@ -489,10 +674,30 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
   });
 
   const activeCount = targets.filter((target) => target.state === "active").length;
+  const allExceptions = targets
+    .filter((target) => target.state === "active")
+    .flatMap((target) => buildBackupTargetExceptions(manifestDocuments, target.target_id, window))
+    .sort((left, right) => {
+      const priority = { failed: 0, running: 1, missing: 2 };
+      return priority[left.status] - priority[right.status] || right.day.localeCompare(left.day);
+    });
+  const activity = requestDocuments
+    .map((document) => backupActivityView(document, now))
+    .filter((request): request is BackupActivityEntry => request !== null);
+  const destination = storageDocuments
+    .map((document) => destinationSnapshotView(document, now))
+    .find((snapshot): snapshot is BackupDestinationStatus => snapshot !== null) ?? null;
+
   return {
-    generated_at: new Date().toISOString(),
+    generated_at: now.toISOString(),
     active_count: activeCount,
     planned_count: targets.length - activeCount,
+    worker: workerStatus(statusDocuments, activeCount, allExceptions.length, now),
+    destination,
+    policy: backupPolicy(window),
+    restore: restoreReadinessView(restoreDocument),
+    exceptions: allExceptions.slice(0, 12),
+    activity,
     targets,
   };
 }

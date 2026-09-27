@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBackupTargetCoverage, getHardwareBackupWindow } from "@/lib/hardware-backup";
+import { buildBackupTargetCoverage, buildBackupTargetExceptions, getHardwareBackupWindow } from "@/lib/hardware-backup";
 import { isBackupTargetOverview, isHardwareBackupStatus } from "@/lib/dashboardTypes";
 
 describe("hardware backup dashboard status", () => {
@@ -142,7 +142,24 @@ describe("hardware backup dashboard status", () => {
     expect(coverage.archived_documents).toBe(4);
     expect(coverage.archive_bytes).toBe(100);
     expect(coverage.latest_success_day).toBe("2026-09-20");
+    expect(coverage.lag_days).toBe(1);
     expect(coverage.latest_run_status).toBe("failed");
+
+    const exceptions = buildBackupTargetExceptions([
+      {
+        target_id: "threat_events",
+        day_start: new Date("2026-09-21T00:00:00.000Z"),
+        status: "failed",
+        error: "temporary upload failure",
+      },
+    ], "threat_events", window);
+    expect(exceptions.find((exception) => exception.day === "2026-09-21")).toMatchObject({
+      target_id: "threat_events",
+      day: "2026-09-21",
+      status: "failed",
+      detail: "temporary upload failure",
+      action_supported: false,
+    });
   });
 
   it("accepts target coverage summaries from the backup overview API", () => {
@@ -168,11 +185,39 @@ describe("hardware backup dashboard status", () => {
           archived_documents: 1_878,
           archive_bytes: 12_345,
           latest_success_day: "2026-09-21",
+          lag_days: 0,
           last_started_at: "2026-09-23T15:00:00.000Z",
           last_completed_at: "2026-09-23T15:02:00.000Z",
           latest_run_status: "success",
         },
       }],
+      worker: {
+        state: "healthy",
+        mode: "control",
+        poll_seconds: 15,
+        last_seen_at: "2026-09-23T15:00:00.000Z",
+        heartbeat_age_seconds: 10,
+        target_count: 2,
+        attention_count: 0,
+      },
+      destination: null,
+      policy: {
+        lookback_days: 30,
+        safety_days: 2,
+        eligible_days: 29,
+        schedule: "Daily systemd timer",
+        archive_format: "gzip Extended JSON Lines",
+        destination_visibility: "Private Backblaze B2",
+        sensitive_target_policy: "Threat events require explicit opt-in",
+      },
+      restore: {
+        status: "not_tested",
+        last_verified_at: null,
+        detail: "No restore rehearsal has been recorded yet.",
+        source: "Read-only restore operator path",
+      },
+      exceptions: [],
+      activity: [],
     })).toBe(true);
   });
 });

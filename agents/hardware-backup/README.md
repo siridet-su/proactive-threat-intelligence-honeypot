@@ -117,7 +117,18 @@ upload the same archive concurrently.
 
 The worker publishes enabled targets to `backup_target_status`; the dashboard
 uses that record to distinguish a target activated on the Pi from a target
-that is only supported by repository code. The dashboard source cards also
-aggregate `hardware_backup_manifests` per target and day so activation status
-is shown separately from actual archive coverage, document counts, and
-compressed bytes.
+that is only supported by repository code. In control mode, the worker
+refreshes `last_seen_at` on every control poll so the dashboard can report a
+real heartbeat; scheduled mode reports its last run rather than pretending to
+be continuously connected.
+
+The dashboard source cards aggregate `hardware_backup_manifests` per target
+and day so activation status is shown separately from actual archive coverage,
+document counts, compressed bytes, empty days, failed/missing days, and lag.
+The Backup & Retention page also shows a bounded exception preview, recent
+audited requests from `hardware_backup_requests`, B2 snapshot freshness, and
+policy details. Restore readiness is intentionally evidence-based: without a
+record in the optional `backup_restore_verifications` collection it displays
+`Not tested`; the page never infers restore success from an upload manifest.
+Only the existing hardware action endpoint can queue manual actions. Other
+targets remain review-only until a target-specific action contract is added.

@@ -86,6 +86,11 @@ export function TopologyToolbar({
 }: TopologyToolbarProps) {
   const viewMenuRef = useRef<HTMLDivElement>(null);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [wasEmptyLiveState, setWasEmptyLiveState] = useState(isEmptyLiveState);
+  if (wasEmptyLiveState !== isEmptyLiveState) {
+    setWasEmptyLiveState(isEmptyLiveState);
+    if (isEmptyLiveState) setViewMenuOpen(false);
+  }
   useEffect(() => {
     if (!viewMenuOpen) return;
     const closeViewMenu = (event: PointerEvent) => {
@@ -106,10 +111,6 @@ export function TopologyToolbar({
       document.removeEventListener("keydown", closeViewMenuOnEscape);
     };
   }, [viewMenuOpen]);
-
-  useEffect(() => {
-    if (isEmptyLiveState && viewMenuOpen) setViewMenuOpen(false);
-  }, [isEmptyLiveState, viewMenuOpen]);
 
   // Handle escape for arrange mode in toolbar so we don't have to duplicate layoutMenuOpen state
   useEffect(() => {

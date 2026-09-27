@@ -204,6 +204,9 @@ export interface HardwareBackupStatus {
 
 export type BackupTargetId = "hardware_metrics_1m" | "threat_events" | "filesystem_audit";
 export type BackupTargetState = "active" | "planned";
+export type BackupWorkerState = "healthy" | "stale" | "offline" | "scheduled" | "unknown";
+export type BackupExceptionStatus = "failed" | "running" | "missing";
+export type BackupRestoreStatus = "verified" | "failed" | "not_tested" | "unavailable";
 
 export interface BackupTargetCoverage {
   expected_days: number;
@@ -216,6 +219,7 @@ export interface BackupTargetCoverage {
   archived_documents: number;
   archive_bytes: number;
   latest_success_day: string | null;
+  lag_days: number;
   last_started_at: string | null;
   last_completed_at: string | null;
   latest_run_status: HardwareBackupDayStatus | null;
@@ -231,10 +235,63 @@ export interface BackupTargetStatus {
   coverage: BackupTargetCoverage;
 }
 
+export interface BackupWorkerStatus {
+  state: BackupWorkerState;
+  mode: "control" | "scheduled" | null;
+  poll_seconds: number | null;
+  last_seen_at: string | null;
+  heartbeat_age_seconds: number | null;
+  target_count: number;
+  attention_count: number;
+}
+
+export interface BackupDestinationStatus extends HardwareBackupStorageStatus {
+  age_seconds: number;
+}
+
+export interface BackupPolicy {
+  lookback_days: number;
+  safety_days: number;
+  eligible_days: number;
+  schedule: string;
+  archive_format: string;
+  destination_visibility: string;
+  sensitive_target_policy: string;
+}
+
+export interface BackupRestoreReadiness {
+  status: BackupRestoreStatus;
+  last_verified_at: string | null;
+  detail: string;
+  source: string;
+}
+
+export interface BackupException {
+  target_id: BackupTargetId;
+  day: string;
+  status: BackupExceptionStatus;
+  detail: string;
+  document_count: number | null;
+  archive_bytes: number | null;
+  started_at: string | null;
+  completed_at: string | null;
+  action_supported: boolean;
+}
+
+export interface BackupActivityEntry extends HardwareBackupRequestView {
+  duration_seconds: number | null;
+}
+
 export interface BackupTargetOverview {
   generated_at: string;
   active_count: number;
   planned_count: number;
+  worker: BackupWorkerStatus;
+  destination: BackupDestinationStatus | null;
+  policy: BackupPolicy;
+  restore: BackupRestoreReadiness;
+  exceptions: BackupException[];
+  activity: BackupActivityEntry[];
   targets: BackupTargetStatus[];
 }
 
@@ -300,6 +357,7 @@ function isBackupTargetCoverage(value: unknown): value is BackupTargetCoverage {
     "archive_bytes",
   ].every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
     isNullableString(value.latest_success_day) &&
+    typeof value.lag_days === "number" && Number.isFinite(value.lag_days) &&
     isNullableString(value.last_started_at) &&
     isNullableString(value.last_completed_at) &&
     (value.latest_run_status === null || value.latest_run_status === "success" || value.latest_run_status === "failed" || value.latest_run_status === "running" || value.latest_run_status === "missing");
@@ -339,10 +397,66 @@ function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {
     isBackupTargetCoverage(value.coverage);
 }
 
+function isBackupWorkerStatus(value: unknown): value is BackupWorkerStatus {
+  if (!isRecord(value)) return false;
+  return (value.state === "healthy" || value.state === "stale" || value.state === "offline" || value.state === "scheduled" || value.state === "unknown") &&
+    (value.mode === null || value.mode === "control" || value.mode === "scheduled") &&
+    (value.poll_seconds === null || (typeof value.poll_seconds === "number" && Number.isFinite(value.poll_seconds))) &&
+    isNullableString(value.last_seen_at) &&
+    (value.heartbeat_age_seconds === null || (typeof value.heartbeat_age_seconds === "number" && Number.isFinite(value.heartbeat_age_seconds))) &&
+    typeof value.target_count === "number" && Number.isFinite(value.target_count) &&
+    typeof value.attention_count === "number" && Number.isFinite(value.attention_count);
+}
+
+function isBackupDestinationStatus(value: unknown): value is BackupDestinationStatus {
+  return isHardwareBackupStorageStatus(value) && typeof (value as BackupDestinationStatus).age_seconds === "number" && Number.isFinite((value as BackupDestinationStatus).age_seconds);
+}
+
+function isBackupPolicy(value: unknown): value is BackupPolicy {
+  if (!isRecord(value)) return false;
+  return ["lookback_days", "safety_days", "eligible_days"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key])) &&
+    typeof value.schedule === "string" &&
+    typeof value.archive_format === "string" &&
+    typeof value.destination_visibility === "string" &&
+    typeof value.sensitive_target_policy === "string";
+}
+
+function isBackupRestoreReadiness(value: unknown): value is BackupRestoreReadiness {
+  if (!isRecord(value)) return false;
+  return (value.status === "verified" || value.status === "failed" || value.status === "not_tested" || value.status === "unavailable") &&
+    isNullableString(value.last_verified_at) &&
+    typeof value.detail === "string" &&
+    typeof value.source === "string";
+}
+
+function isBackupException(value: unknown): value is BackupException {
+  if (!isRecord(value)) return false;
+  return (value.target_id === "hardware_metrics_1m" || value.target_id === "threat_events" || value.target_id === "filesystem_audit") &&
+    typeof value.day === "string" &&
+    (value.status === "failed" || value.status === "running" || value.status === "missing") &&
+    typeof value.detail === "string" &&
+    isNullableNumber(value.document_count) &&
+    isNullableNumber(value.archive_bytes) &&
+    isNullableString(value.started_at) &&
+    isNullableString(value.completed_at) &&
+    typeof value.action_supported === "boolean";
+}
+
+function isBackupActivityEntry(value: unknown): value is BackupActivityEntry {
+  return isHardwareBackupRequest(value) &&
+    ((value as BackupActivityEntry).duration_seconds === null || (typeof (value as BackupActivityEntry).duration_seconds === "number" && Number.isFinite((value as BackupActivityEntry).duration_seconds)));
+}
+
 export function isBackupTargetOverview(value: unknown): value is BackupTargetOverview {
   if (!isRecord(value) || typeof value.generated_at !== "string" ||
     typeof value.active_count !== "number" || !Number.isFinite(value.active_count) ||
     typeof value.planned_count !== "number" || !Number.isFinite(value.planned_count) ||
+    !isBackupWorkerStatus(value.worker) ||
+    (value.destination !== null && !isBackupDestinationStatus(value.destination)) ||
+    !isBackupPolicy(value.policy) ||
+    !isBackupRestoreReadiness(value.restore) ||
+    !Array.isArray(value.exceptions) || !value.exceptions.every(isBackupException) ||
+    !Array.isArray(value.activity) || !value.activity.every(isBackupActivityEntry) ||
     !Array.isArray(value.targets)) {
     return false;
   }

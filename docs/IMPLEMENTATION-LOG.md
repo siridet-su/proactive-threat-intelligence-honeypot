@@ -1947,6 +1947,146 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: confirm the remaining failed-origin marker is visible while the full explanation remains readable in Forensic Studio.
 - Related ADR/runbook: no architecture decision or operating procedure changed; see [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct).
 
+### 2026-09-25 — Add backup posture and archive operations overview
+
+- Status: prepared; dashboard and heartbeat source changes are not deployed.
+- Scope and intent: make the Backup & Retention page report operational state
+  across all enabled archive targets instead of presenting only hardware
+  coverage and a hardcoded Pi connection badge.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: extended `/api/backup/targets` with control-worker
+  heartbeat state, B2 snapshot freshness, per-target lag and coverage
+  exceptions, recent audited request activity, policy metadata, and
+  evidence-based restore readiness. The dashboard now renders a backup
+  posture strip, explicit per-target archived/empty/attention/lag values,
+  exception and activity panels, destination freshness, restore readiness, and
+  policy safeguards. The control worker now refreshes `backup_target_status`
+  on each control poll so `last_seen_at` is a real heartbeat. Error text shown
+  by the overview is normalized and bounded; raw event documents and secrets
+  are not returned.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed by this work.
+- Runtime/exposure state: the new dashboard contract and control-worker
+  heartbeat are prepared in the worktree only. The currently running Pi
+  worker and deployed dashboard remain on their previous code until a reviewed
+  deployment.
+- Validation performed and outcome: the targeted backup Vitest suite passed;
+  TypeScript `tsc --noEmit` passed; targeted ESLint for changed dashboard
+  files passed; `gofmt`, `go test ./...` in `agents/hardware-backup`, and
+  `git diff --check` passed. Full dashboard lint remains blocked by the
+  pre-existing `react-hooks/set-state-in-effect` error at
+  `dashboard-v2/src/components/filesystem/TopologyToolbar.tsx:111`. The full
+  Vitest suite was also run; 69 files passed, while three filesystem component
+  tests failed in untouched topology code (`TopologyCanvas` empty state/path
+  annotations).
+- Not performed / deferred: no live MongoDB/API smoke test, authenticated
+  browser review, B2 query, Pi deployment, worker restart, or restore
+  rehearsal was performed. `backup_restore_verifications` has no assumed
+  success record; the UI intentionally reports `Not tested` when absent.
+- Risks and data handling: threat-event archives remain sensitive and are
+  still governed by the existing private-bucket and explicit opt-in policy.
+  The dashboard exposes only bounded operational metadata, not event payloads,
+  credentials, access tokens, or private keys.
+- Rollback: do not deploy this worktree; or revert the dashboard/API and
+  heartbeat source changes from the implementation commit. No host rollback
+  is required because no host was changed.
+- Follow-up: deploy the rebuilt hardware-backup control binary and dashboard
+  separately, then verify heartbeat freshness, activity/exception rendering,
+  and an approved read-only restore rehearsal before recording any restore
+  verification result.
+- Related ADR/runbook: [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md), [hardware backup worker runbook](../agents/hardware-backup/README.md), and [data ownership](DATA-OWNERSHIP.md).
+
+### 2026-09-25 — Compact backup data visualization
+
+- Status: prepared; dashboard UI refinement is not deployed.
+- Scope and intent: reduce visual density and make archive data readable at a
+  glance without removing the operational fields added in the backup overview.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: condensed the source tiles around a large coverage
+  percentage, segmented status rail, and larger archived/empty/failed/missing/
+  lag values. Removed repeated descriptions and worker text, reduced padding
+  and row height in exception/activity panels, and kept audit actor, status,
+  date, progress, and duration in compact rows. Restore readiness and policy
+  safeguards were also tightened into smaller data blocks.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed.
+- Runtime/exposure state: the compact layout is prepared in the worktree only;
+  the running dashboard remains unchanged until deployment.
+- Validation performed and outcome: targeted backup Vitest tests passed;
+  TypeScript `tsc --noEmit`, targeted ESLint for `BackupSourceMap.tsx`,
+  production build, and `git diff --check` passed.
+- Not performed / deferred: no authenticated browser screenshot review, Pi
+  deployment, or full-suite rerun was performed for this presentation-only
+  refinement.
+- Risks and data handling: presentation-only change; backup API contracts,
+  sensitive-target boundaries, and operational metadata ownership are
+  unchanged. No event payloads or secrets were added.
+- Rollback: revert the `BackupSourceMap.tsx` presentation changes; no host
+  rollback is required.
+- Follow-up: review the page at the active dashboard viewport and adjust only
+  breakpoint-specific spacing if the compact tiles still wrap poorly.
+- Related ADR/runbook: [hardware backup worker runbook](../agents/hardware-backup/README.md) and [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md).
+
+### 2026-09-25 — Remove duplicate backup coverage rail
+
+- Status: prepared; dashboard UI refinement is not deployed.
+- Scope and intent: remove the duplicate archive bars shown in each backup
+  source tile while retaining the status breakdown.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; commit/PR
+  pending at the time of this entry.
+- Repository changes: removed the standalone archived-percentage progress bar
+  and kept one segmented coverage rail for archived, empty, failed, running,
+  and missing days. Added an accessible summary label for the single rail.
+- Host/environment changes actually applied: none. No Pi binary, systemd
+  unit, MongoDB data, B2 object, or credential was changed.
+- Runtime/exposure state: the UI refinement is prepared in the worktree only;
+  no dashboard or Pi deployment was performed.
+- Validation performed and outcome: targeted backup Vitest tests passed (5/5);
+  TypeScript `tsc --noEmit`, targeted ESLint for `BackupSourceMap.tsx`, the
+  production build, and `git diff --check` also passed.
+- Not performed / deferred: no authenticated browser screenshot review, Pi
+  deployment, or restore rehearsal was performed.
+- Risks and data handling: presentation-only change; no API/data/secret
+  changes.
+- Rollback: restore the removed standalone progress-bar block; no host
+  rollback is required.
+- Follow-up: review the source tiles at the active dashboard viewport.
+- Related ADR/runbook: [hardware backup worker runbook](../agents/hardware-backup/README.md) and [retained-data backup boundaries](adr/ADR-0006-retained-data-backup-boundaries.md).
+
+### 2026-09-25 — Rework Backup & Retention information layout
+
+- Status: prepared for review; not deployed to production.
+- Scope and intent: improve the hierarchy and readability of the backup
+  dashboard while retaining the page header style used by other dashboard
+  tabs.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; changes are
+  uncommitted.
+- Repository changes: moved the hardware archive view to the primary position;
+  replaced the nested source cards with a single comparison table; consolidated
+  the worker, attention, and active-target summary into one status strip; and
+  grouped attention, recent actions, restore readiness, and policy details into
+  fewer sections. Simplified the hardware archive panel, clarified the daily
+  manifest calendar and legend, and kept Pi actions, progress, cloud storage,
+  and retention settings available.
+- Host/environment changes actually applied: none. No Pi worker, systemd unit,
+  MongoDB data, B2 object, or production dashboard was changed.
+- Runtime/exposure state: local development server at port `3100` is running
+  from this worktree and receives the edits through HMR.
+- Validation performed and outcome: `npx tsc --noEmit`, targeted ESLint for the
+  three changed dashboard files, and `git diff --check` passed. Automated tests
+  and a production build were not run.
+- Not performed / deferred: no authenticated browser visual review, Pi
+  deployment, or production dashboard deployment was performed.
+- Risks and data handling: presentation-only changes; API behavior, backup
+  scope, retention policy, and sensitive-data handling are unchanged.
+- Rollback: restore the previous page layout in `BackupSourceMap.tsx`,
+  `HardwareBackupStatus.tsx`, and the page section order; no host rollback is
+  required.
+- Follow-up: review `http://localhost:3100/backup-retention` at desktop and
+  narrow widths.
+- Related ADR/runbook: none; this change affects presentation only.
 ### 2026-09-25 — Retire Dashboard session termination and decommission the Pi agent
 
 - Status: Dashboard source changes are uncommitted and not deployed; Pi response agent is decommissioned; one Cowrie restart and tailnet ACL cleanup remain deferred.
@@ -2006,3 +2146,33 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the alias resolver, response contract update, and corresponding API/data-semantics documentation. No host rollback is required.
 - Follow-up: verify Evidence against an authenticated session whose CWD alias has a matching canonical identity event; confirm no-command and unverified-binding states remain distinct.
 - Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md#product-additions-after-the-foundation-is-correct) and [Dashboard API contract](../dashboard-v2/docs/API.md#sensitive-admin-command-evidence).
+
+### 2026-09-27 — Merge current main into artifact intelligence
+
+- Status: repository merge prepared; no deployment performed.
+- Scope and intent: bring `feat/artifact-intelligence` up to the current `origin/main` while retaining its pending backup overview work and all newer mainline changes.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; merge commit pending at the time of this entry; PR #69 remains open.
+- Repository changes: merged `origin/main` into the branch. Resolved the sole content conflict in this append-only log by retaining both the backup overview entries and the Filesystem Evidence and response-control entries. Code and other documentation merged automatically.
+- Host/environment changes actually applied: none. No service, dashboard deployment, database, backup target, or host configuration was changed.
+- Runtime/exposure state: this merge changes repository source only; deployed services retain their previously recorded state. The backup overview remains prepared in the branch and is not active on production hosts.
+- Validation performed and outcome: merge conflict markers were removed and the resolved log passed `git diff --check`. The targeted dashboard backup Vitest suite passed (5/5), and `go test ./...` passed in `agents/hardware-backup`. `npx tsc --noEmit` reported only two stale generated `.next` validator imports for the removed session-terminate route; it reported no source diagnostics. The full staged `git diff --check` reports whitespace already present in incoming mainline research files, including intentional Markdown line breaks.
+- Not performed / deferred: no production deployment, authenticated browser review, live backup restore rehearsal, or host-level validation was performed. A clean TypeScript check after regenerating `.next` types was not performed.
+- Risks and data handling: the merge preserves both histories and adds no secrets or attacker content to the log. Runtime interactions across the merged branches require the targeted checks noted above.
+- Rollback: revert the merge commit if needed; no host rollback is required for this repository-only change.
+- Follow-up: review PR #69 against the refreshed main branch and deploy the backup changes separately after approval.
+- Related ADR/runbook: no architectural decision or operating step changed as part of this merge; existing current-state documents and runbooks from both branches are retained.
+
+### 2026-09-27 — Clear the Dashboard lint gate for artifact intelligence PR
+
+- Status: repository fix prepared for PR #69; not deployed.
+- Scope and intent: clear the staging CI lint failure introduced by the inherited Filesystem Activity toolbar while preserving View menu behavior when live topology becomes empty.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; fix commit pending at the time of this entry; PR #69.
+- Repository changes: replace the toolbar effect that synchronously closes the View menu with a guarded state adjustment when the empty-live prop changes. Extend the existing toolbar test to verify the menu closes on empty state and stays closed when live data returns.
+- Host/environment changes actually applied: none. No dashboard, Pi service, database, backup target, or host configuration was changed.
+- Runtime/exposure state: the source fix is only in the PR branch; production dashboard behavior is unchanged until a separate deployment.
+- Validation performed and outcome: full Dashboard `npm run lint`, the targeted Filesystem density/minimap suite (6/6), and `git diff --check` passed after the regression assertion was added. PR CI was pending when this entry was written.
+- Not performed / deferred: no production deployment, authenticated browser review, or host-level validation was performed. The prior TypeScript check remains blocked by stale generated `.next` route imports.
+- Risks and data handling: the change affects only local toolbar state and adds no telemetry, credentials, or attacker content.
+- Rollback: revert the toolbar state adjustment and related test; no host rollback is needed.
+- Follow-up: wait for PR CI, then merge PR #69 after the required checks pass.
+- Related ADR/runbook: no architecture decision or operating procedure changed.
