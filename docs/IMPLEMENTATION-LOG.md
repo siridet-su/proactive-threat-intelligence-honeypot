@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Keep backup schedule toast movement horizontal
+
+- Status: repository Dashboard UI correction prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: correct the diagonal toast motion reported after PR #83 so it enters and exits only from the right.
+- Repository branch and commit/PR: `fix/backup-toast-horizontal-motion`; commit and PR follow this entry.
+- Repository changes: remove the 24-pixel vertical offset from the shared toast's initial and exit animation while keeping its bottom-right position, horizontal motion, fade, and reduced-motion behavior. No schedule or API logic changes.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduler and stored schedule are unaffected. The visual correction appears where the new Dashboard UI is loaded.
+- Validation performed and outcome: Dashboard TypeScript check, targeted toast lint, and `git diff --check` passed locally. No new component test was added for this animation-only coordinate correction.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, and next scheduled Pi run verification were not performed for this correction.
+- Risks and data handling: animation coordinates are presentation only; reduced-motion users still receive no movement. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: check horizontal entry and exit in an authenticated browser at desktop and narrow widths.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Refine backup schedule toast motion and controls
 
 - Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
