@@ -33,9 +33,9 @@ export function OperationToast({ kind, title, description, onDismiss, actionLabe
 
   return (
     <motion.aside
-      initial={reducedMotion ? false : { opacity: 0, x: 420, y: 24 }}
-      animate={{ opacity: 1, x: 0, y: 0 }}
-      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 420, y: 24, transition: { duration: 0.2 } }}
+      initial={reducedMotion ? false : { opacity: 0, x: 420 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={reducedMotion ? { opacity: 0 } : { opacity: 0, x: 420, transition: { duration: 0.2 } }}
       transition={reducedMotion ? { duration: 0 } : { duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
       className={`fixed bottom-4 right-4 z-[140] flex w-[calc(100vw-2rem)] max-w-sm items-start gap-3 rounded-xl border p-4 shadow-[var(--shadow-raised)] sm:bottom-5 sm:right-5 ${
         success ? "border-success-border bg-success-subtle" : info ? "border-info-border bg-info-subtle" : "border-danger-border bg-danger-subtle"
