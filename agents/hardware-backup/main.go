@@ -178,9 +178,18 @@ func backupDay(
 		query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
 		query["day_start"] = dayStart
 		query["status"] = "success"
-		err := manifests.FindOne(ctx, query, options.FindOne().SetProjection(bson.M{"status": 1})).Decode(&existing)
-		if err == nil {
-			return nil
+		err := manifests.FindOne(ctx, query, options.FindOne().SetProjection(bson.M{"status": 1, "document_count": 1})).Decode(&existing)
+		if err == nil && existing["status"] == "success" {
+			if !emptySuccessfulManifest(existing) {
+				return nil
+			}
+			hasDocuments, checkErr := targetHasDocumentsForDay(ctx, database, target, dayStart, dayEnd)
+			if checkErr != nil {
+				return fmt.Errorf("recheck empty backup %s: %w", manifestID, checkErr)
+			}
+			if !hasDocuments {
+				return nil
+			}
 		}
 		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
 			return fmt.Errorf("read backup manifest %s: %w", manifestID, err)
@@ -256,6 +265,35 @@ func backupDay(
 		uploaded.FileName,
 	)
 	return nil
+}
+
+func emptySuccessfulManifest(manifest bson.M) bool {
+	switch count := manifest["document_count"].(type) {
+	case int32:
+		return count == 0
+	case int64:
+		return count == 0
+	case int:
+		return count == 0
+	default:
+		return false
+	}
+}
+
+func targetHasDocumentsForDay(ctx context.Context, database *mongo.Database, target BackupTarget, dayStart, dayEnd time.Time) (bool, error) {
+	for _, source := range target.Sources {
+		err := database.Collection(source.Collection).FindOne(ctx,
+			archiveSourceQuery(source, dayStart, dayEnd),
+			options.FindOne().SetProjection(bson.M{"_id": 1}),
+		).Err()
+		if err == nil {
+			return true, nil
+		}
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return false, fmt.Errorf("check %s: %w", source.Collection, err)
+		}
+	}
+	return false, nil
 }
 
 func backupManifestID(bucket, targetID string, day time.Time) string {

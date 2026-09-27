@@ -44,6 +44,34 @@ func TestArchiveSourceQueryIncludesLegacyCwdTimestampFields(t *testing.T) {
 	}
 }
 
+func TestThreatEventQueryIncludesUTCStringTimestamps(t *testing.T) {
+	target, _ := backupTarget(threatEventsTargetID)
+	from := time.Date(2026, 9, 23, 0, 0, 0, 0, time.UTC)
+	to := from.Add(24 * time.Hour)
+	query := archiveSourceQuery(target.Sources[0], from, to)
+	conditions, ok := query["$or"].(bson.A)
+	if !ok || len(conditions) != 2 {
+		t.Fatalf("query = %#v, want BSON Date and UTC string ranges", query)
+	}
+	dateRange := conditions[0].(bson.M)["timestamp"].(bson.M)
+	if dateRange["$gte"] != from || dateRange["$lt"] != to {
+		t.Fatalf("BSON Date range = %#v", dateRange)
+	}
+	stringRange := conditions[1].(bson.M)["timestamp"].(bson.M)
+	start, end := stringRange["$gte"].(string), stringRange["$lt"].(string)
+	if start != "2026-09-23" || end != "2026-09-24" {
+		t.Fatalf("UTC string range = %#v", stringRange)
+	}
+	for _, timestamp := range []string{"2026-09-23T00:00:00Z", "2026-09-23T00:00:00.123456Z", "2026-09-23T23:59:59Z"} {
+		if timestamp < start || timestamp >= end {
+			t.Errorf("timestamp %q fell outside its UTC day", timestamp)
+		}
+	}
+	if timestamp := "2026-09-24T00:00:00Z"; timestamp >= start && timestamp < end {
+		t.Errorf("next-day timestamp %q entered the previous UTC day", timestamp)
+	}
+}
+
 func TestArchiveObjectNameUsesTargetPrefix(t *testing.T) {
 	target, _ := backupTarget(filesystemAuditTargetID)
 	got := archiveObjectNameForTarget(target, time.Date(2026, 9, 23, 23, 30, 0, 0, time.FixedZone("UTC+7", 7*60*60)))

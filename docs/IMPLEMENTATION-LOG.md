@@ -2221,3 +2221,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the protected previous Pi binary atomically and restart the control service if runtime behavior regresses; keep new MongoDB manifests and B2 versions for audit. A rollback to the old binary would again leave future manifests without bucket fields and may make the bucket-scoped Dashboard show later days as missing.
 - Follow-up: confirm the authenticated local Backup & Retention page reports 29/29 archived days, monitor the next timer run, and perform a separately reviewed read-only restore rehearsal before claiming recovery readiness.
 - Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-27 — Prepare canonical threat-event timestamp backup fix
+
+- Status: repository fix prepared on `fix/threat-event-backup-timestamps`; host rollout not yet applied at the time of this entry.
+- Scope and intent: correct the `threat_events` archive query, which compared BSON Date bounds against ISO 8601 UTC strings in the canonical `events.timestamp` field and therefore recorded eligible days as successful but empty.
+- Repository branch and commit/PR: `fix/threat-event-backup-timestamps`; source commit and PR pending at the time of this entry.
+- Repository changes: include indexed UTC string day bounds alongside BSON Date bounds for the event source; recheck successful zero-document manifests for source records during scheduled runs so a corrected worker can fill those days without forcing unrelated targets; add a regression test for midnight and fractional-second boundaries.
+- Host/environment changes actually applied: none for this prepared fix. The Pi still runs worker source `8302f9e`; no service, database document, B2 object, environment file, or systemd unit was changed by this repository change.
+- Runtime/exposure state: the active Pi worker still treats the event window as empty until this fix is deployed and a scheduled run completes. The private B2 sensitive-target opt-in remains enabled; other target schedules and bucket scope are unchanged.
+- Validation performed and outcome: `go test ./...` passed. Read-only MongoDB metadata checks found all 87,992 then-current event timestamps were ISO 8601 UTC strings, with 53,496 in the eligible 29-day window, while the old BSON Date query matched none. The `events.timestamp` index is present. These counts may change as live ingest continues.
+- Not performed / deferred: no live archive upload, host deployment, authenticated Dashboard check, archive download, or restore rehearsal was performed for this prepared change.
+- Risks and data handling: deploying the fix will archive existing eligible sensitive events into the already reviewed private B2 target and increase storage use. No raw event contents, credentials, or protected configuration were copied into repository files or audit output.
+- Rollback: revert this source change before deployment; if deployed, restore the previous protected Pi binary and retain any created manifests and B2 versions for audit.
+- Follow-up: deploy a clean ARM64 build, run the scheduled worker once, verify event manifest and B2 counts, and record host actions in a dated addendum.
+- Related ADR/runbook: [ADR-0006](adr/ADR-0006-retained-data-backup-boundaries.md) and [retained backup worker runbook](../agents/hardware-backup/README.md).
