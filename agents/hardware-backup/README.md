@@ -94,11 +94,20 @@ URL returned during authorization.
 
 ## Bucket rollover
 
-The prepared worker records each new manifest under a bucket, target, and UTC
+The worker records each new manifest under a bucket, target, and UTC
 day identity. Its skip, missing-day, and failed-day queries count only the
 configured `B2_BUCKET`. New storage snapshots also retain separate identities
 per bucket and target. Old manifests and snapshots stay in MongoDB; the worker
 does not copy, rewrite, or delete old B2 objects.
+
+The bucket-scoped binary built from `8302f9e` was installed on the Pi on
+2026-09-27. The control service was restarted, and one manual scheduled run
+completed for all three active targets. That run produced bucket-tagged
+manifests for the eligible 29-day Dashboard window; prior bucket-less records
+and earlier B2 file versions were retained. The old binary is held in a
+protected host rollback location. The local Dashboard read path was checked
+against MongoDB; production Dashboard deployment and a read-only restore
+rehearsal were not verified in this rollout.
 
 Before activating a new bucket, verify its private-bucket policy, scoped key,
 target prefixes, and read-only restore path. Set `B2_BUCKET` to the new bucket
@@ -117,8 +126,7 @@ setting if old bucket-less manifests should count. Keep these names aligned
 with the deployed worker; the Dashboard never receives B2 credentials.
 Verify a new-bucket manifest and storage snapshot, inspect the Backup &
 Retention coverage for that bucket, and rehearse a read-only restore before
-retiring any old bucket or access key. This repository change does not perform
-those host or cloud actions. A restore verification must record its bucket;
+retiring any old bucket or access key. A restore verification must record its bucket;
 the Dashboard does not carry an old bucket's verification into a new bucket.
 
 The systemd service and timer are in `systemd-services/`. The local temporary
