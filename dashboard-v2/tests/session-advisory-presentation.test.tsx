@@ -83,7 +83,7 @@ describe("session assessment presentation", () => {
         { provider: "otx", lookup_status: "DISABLED", freshness_state: "FRESH" },
       ] }} observableData={{}} />);
     expect(html).toContain("No provider lookup was executed");
-    expect(html).toMatch(/Provider lookups<\/dt><dd[^>]*>0<\/dd>/);
+    expect(html).toMatch(/Providers with results<\/dt><dd[^>]*>0<\/dd>/);
     expect(html).not.toContain("ti fresh");
     expect(html).not.toContain("freshness: FRESH");
     expect(html).toContain("Last lookup: Not executed");

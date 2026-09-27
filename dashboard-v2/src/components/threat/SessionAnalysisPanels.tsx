@@ -480,7 +480,7 @@ function Panel({
   result: CapabilityResult;
   children: ReactNode;
   className?: string;
-  variant?: "card" | "embedded";
+  variant?: "card" | "embedded" | "flat";
   renderEmptyContent?: boolean;
   compactUnavailable?: boolean;
 }) {
@@ -513,10 +513,11 @@ function Panel({
           };
 
   const embedded = variant === "embedded";
+  const flat = variant === "flat";
 
   return (
-    <article className={`${embedded ? "min-w-0 overflow-hidden" : "ui-panel flex min-w-0 flex-col overflow-hidden"} ${className}`}>
-      <div className={`flex flex-wrap items-start justify-between gap-3 ${embedded ? "border-b border-border pb-3" : "border-b border-border bg-surface px-4 py-3 sm:px-5"}`}>
+    <article className={`${embedded || flat ? "min-w-0" : "ui-panel flex min-w-0 flex-col overflow-hidden"} ${className}`}>
+      <div className={`flex flex-wrap items-start justify-between gap-3 ${embedded ? "border-b border-border pb-3" : flat ? "pb-2" : "border-b border-border bg-surface px-4 py-3 sm:px-5"}`}>
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-primary">
             {icon}
@@ -533,7 +534,7 @@ function Panel({
           {result.state === "unavailable" && "UNAVAILABLE"}
         </span>
       </div>
-      <div className={embedded ? "pt-4" : "p-4 sm:p-5"}>
+      <div className={embedded ? "pt-4" : flat ? "pt-1" : "p-4 sm:p-5"}>
         {result.state === "loading" ? (
           <div role="status" aria-busy="true" className={`flex items-start gap-3 rounded-lg border p-3.5 ${stateCopy.className}`}>
             {stateCopy.icon}
@@ -772,11 +773,11 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
     return grouped;
   }, new Map<string, { type: string; value: string; items: JsonRecord[] }>()).values());
   const sessionIds = new Set(records.map((item) => String(item.session_id || "").trim()).filter(Boolean));
-  const sightingIds = records.map((item) => String(item.sighting_id || "").trim()).filter(Boolean);
+  const sightingIds = new Set(records.map((item) => String(item.sighting_id || "").trim()).filter(Boolean));
   return (
     <div className="space-y-3">
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Observables", String(groups.length)], ["Sightings", sightingIds.length ? String(sightingIds.length) : String(records.length)], ["Sessions", sessionIds.size ? String(sessionIds.size) : "Not recorded"]].map(([name, value]) => <div key={name} className="px-2.5 py-2 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
+        {[["Observables", String(groups.length)], ["Sightings", sightingIds.size ? String(sightingIds.size) : "Not recorded"], ["Sessions", sessionIds.size ? String(sessionIds.size) : "Not recorded"]].map(([name, value]) => <div key={name} className="px-2.5 py-2 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
       </dl>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[660px] text-left text-xs">
@@ -784,12 +785,13 @@ function ObservableList({ items, empty = "No file or observable evidence is avai
           <tbody className="divide-y divide-border">
             {groups.map((group, index) => {
               const first = group.items[0];
+              const groupSightingIds = new Set(group.items.map((item) => String(item.sighting_id || "").trim()).filter(Boolean));
               const sortedTimes = group.items.map((item) => item.timestamp || item.first_seen).filter(hasMeaningfulValue).sort((a, b) => (timestampMillis(a) ?? 0) - (timestampMillis(b) ?? 0));
               const firstSeen = sortedTimes[0];
               const lastSeen = sortedTimes[sortedTimes.length - 1];
               return <tr key={`${index}-${group.type}-${group.value}`} className="align-top">
                 <td className="px-3 py-2.5"><span className="ui-badge text-[10px]">{group.type}</span><span className="mt-1 block max-w-[320px] break-all font-mono text-xs text-text">{group.value}</span></td>
-                <td className="px-3 py-2.5 text-text">{group.items.length}</td>
+                <td className="px-3 py-2.5 text-text">{groupSightingIds.size ? groupSightingIds.size : "Not recorded"}</td>
                 <td className="px-3 py-2.5 text-[11px] text-text-muted"><span className="block">{hasMeaningfulValue(firstSeen) ? thailandTimestamp(firstSeen) : "Not recorded"}</span>{hasMeaningfulValue(lastSeen) && lastSeen !== firstSeen && <span className="mt-0.5 block">→ {thailandTimestamp(lastSeen)}</span>}</td>
                 <td className="px-3 py-2.5 text-text-muted">{summaryValue(first.source || first.sensor_id || first.eventid, "Not recorded")}<details className="mt-1"><summary className="cursor-pointer text-[10px] font-medium text-primary">Inspect provenance</summary><div className="min-w-[260px] pt-1"><ol className="space-y-1.5">{group.items.map((observable, occurrenceIndex) => <li key={`${occurrenceIndex}-${summaryValue(observable.sighting_id, "occurrence")}`} className="rounded border border-border bg-surface-subtle p-2"><p className="break-all font-mono text-[10px] text-text">Session: {summaryValue(observable.session_id, "Not recorded")}</p><p className="mt-1 text-[10px] text-text-muted">{thailandTimestamp(observable.timestamp || observable.first_seen)} · {summaryValue(observable.source || observable.sensor_id, "Source not recorded")}</p><p className="mt-1 break-all font-mono text-[10px] text-text-subtle">Event: {summaryValue(observable.event_id || observable.eventid, "Not linked")} · Sighting: {summaryValue(observable.sighting_id, "Not recorded")}</p></li>)}</ol></div></details></td>
               </tr>;
@@ -1078,11 +1080,11 @@ function ProviderContextRows({
     if (leftOrder !== rightOrder) return (leftOrder < 0 ? order.length : leftOrder) - (rightOrder < 0 ? order.length : rightOrder);
     return providerName(left.provider).localeCompare(providerName(right.provider));
   });
-  if (groups.length === 0) return <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-text-muted">No provider status, lookup result, or linked finding was returned for this observable.</p>;
+  if (groups.length === 0) return <p className="border-l-2 border-border pl-3 text-xs text-text-muted">No provider status, lookup result, or linked finding was returned for this observable.</p>;
   return (
     <div className="space-y-3">
-      <p className="text-xs text-text-muted">Provider context is non-authoritative. Each card combines the lookup state, cached result, and any separately linked finding for that provider.</p>
-      <ol className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      <p className="text-xs text-text-muted">Provider context is non-authoritative. Each row combines lookup state, cached result, and any separately linked finding.</p>
+      <ol className="overflow-hidden rounded-lg border border-border bg-surface divide-y divide-border">
         {groups.slice(0, 12).map((group) => {
           const latestCache = latestProviderRecord(group.cache, "lookup_at");
           const latestEvidence = latestProviderRecord(group.evidence, "retrieved_at");
@@ -1109,7 +1111,7 @@ function ProviderContextRows({
           const expiresAt = (latestCacheWasQueried ? latestCache?.expires_at : undefined) || latestEvidence?.expires_at || status?.expires_at;
           const provider = group.provider;
           return (
-            <li key={provider} className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 shadow-sm">
+            <li key={provider} className="min-w-0 px-3 py-3 sm:px-4">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h4 className="text-base font-semibold text-text">{providerName(provider)}</h4>
@@ -1123,16 +1125,16 @@ function ProviderContextRows({
 
               {latestCacheWasQueried ? (
                 <>
-                  <p className="mt-3 text-sm leading-6 text-text">{providerResult(provider, normalized)}</p>
+                  <p className="mt-2 border-l-2 border-primary-border pl-3 text-xs leading-5 text-text">{providerResult(provider, normalized)}</p>
                   {provider === "otx" && pulses.length > 0 && <p className="mt-1 text-xs text-text-muted">Example pulse: {summaryValue(pulses[0].name, "Unnamed pulse").slice(0, 120)}</p>}
                 </>
               ) : latestEvidence ? (
-                <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-3">
+                <div className="mt-2 border-l-2 border-border pl-3">
                   <p className="text-xs font-semibold text-text">Finding: {readableCode(latestEvidence.finding_state || "not recorded")}</p>
                   <p className="mt-1 text-xs leading-5 text-text-muted">{summaryValue(latestEvidence.summary, "No provider finding summary stored.")}</p>
                 </div>
               ) : (
-                <div className="mt-3 rounded-lg border border-border bg-surface-subtle p-3 text-xs leading-5 text-text-muted">
+                <div className="mt-2 border-l-2 border-border pl-3 text-xs leading-5 text-text-muted">
                   {lookupWasExecuted ? `No normalized provider result is available. State: ${summaryValue(source.lookup_status || source.status, "not reported")}.` : hasMeaningfulValue(source.lookup_status || source.status) ? `No provider lookup was executed. State: ${summaryValue(source.lookup_status || source.status, "not reported")}.` : "Provider lookup state was not reported and no normalized result was returned."}
                 </div>
               )}
@@ -1197,15 +1199,16 @@ function ProviderContextRows({
 
 function AuthenticationSummary({ data }: { data: JsonRecord }) {
   const attempts = list(data.attempts).map(record);
+  const storedCounts = [data.attempt_count, data.success_count, data.failure_count].some(hasMeaningfulValue);
   const visibleUsernames = Array.from(new Set(
     attempts.map(analystAttackerUsername).filter((value): value is string => Boolean(value)),
   ));
   return (
-    <div className="space-y-3">
-      <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Attempts", countOf(data.attempt_count)], ["Succeeded", countOf(data.success_count)], ["Failed", countOf(data.failure_count)]].map(([name, value]) => <div key={name} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
-      </dl>
-      <p className="text-[11px] text-text-muted">{visibleUsernames.length ? `Observed account: ${visibleUsernames.join(", ")}.` : "Account name not retained."} Authentication records are not proof of identity.</p>
+    <div className="space-y-2.5">
+      {storedCounts && <dl className="grid grid-cols-3 divide-x divide-border border-y border-border py-1">
+        {[["Attempts", data.attempt_count], ["Succeeded", data.success_count], ["Failed", data.failure_count]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{String(name)}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{hasMeaningfulValue(value) ? countOf(value) : "Not recorded"}</dd></div>)}
+      </dl>}
+      {attempts.length > 0 && <p className="text-[11px] text-text-muted">{visibleUsernames.length ? `Observed account: ${visibleUsernames.join(", ")}.` : "Account name not retained."} Authentication records are not proof of identity.</p>}
       {attempts.length > 0 ? (
         <section className="overflow-hidden rounded-lg border border-border">
         <div className="bg-surface-subtle px-3 py-2 text-xs font-semibold text-text">Login activity · {attempts.length}</div>
@@ -1218,7 +1221,7 @@ function AuthenticationSummary({ data }: { data: JsonRecord }) {
           ))}
         </ol>
         </section>
-      ) : <p className="text-[11px] text-text-muted">No authentication attempt details were retained.</p>}
+      ) : <p className="text-[11px] text-text-muted">{storedCounts ? "No authentication attempt records are available." : "Authentication attempt details were not retained."}</p>}
       {hasMeaningfulValue(data.first_attempt_at) || hasMeaningfulValue(data.last_attempt_at) ? <p className="text-[10px] text-text-subtle">First: {thailandTimestamp(data.first_attempt_at)} · Last: {thailandTimestamp(data.last_attempt_at)}</p> : null}
     </div>
   );
@@ -1235,7 +1238,7 @@ function SourcePivotSummary({ data }: { data: JsonRecord }) {
         <span className="ui-badge text-[10px]">Recurrence context · not attribution</span>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Related sessions", countOf(counts.sessions_found)], ["Sightings examined", countOf(counts.sightings_examined)], ["Provider calls", data.provider_calls === false ? "0" : "Not reported"]].map(([name, value]) => <div key={name} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
+        {[["Related sessions", hasMeaningfulValue(counts.sessions_found) ? countOf(counts.sessions_found) : "Not recorded"], ["Sightings examined", hasMeaningfulValue(counts.sightings_examined) ? countOf(counts.sightings_examined) : "Not recorded"], ["Provider calls", data.provider_calls === false ? "No" : data.provider_calls === true ? "Yes" : "Not reported"]].map(([name, value]) => <div key={String(name)} className="min-w-0 px-2 py-2 text-center"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
       </dl>
       {sessions.length > 0 ? <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[560px] text-left text-xs">
@@ -1300,6 +1303,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   });
   const executedCache = cache.filter(providerLookupExecuted);
   const availableEvidence = evidence.filter(providerLookupExecuted);
+  const providersWithLookupResults = new Set([...executedCache, ...availableEvidence].map((item) => normalizedProviderKey(item.provider))).size;
   const providerCount = new Set([
     ...evidence.map((item) => normalizedProviderKey(item.provider)),
     ...cache.map((item) => normalizedProviderKey(item.provider)),
@@ -1311,14 +1315,21 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   ].includes(String(item.lookup_status || item.status || "").trim().toUpperCase()));
   const noLookupReasonRecorded = String(sessionData.status_reason_text || "").toLowerCase().includes("no provider lookup");
   const noLookupExecuted = executedCache.length === 0 && availableEvidence.length === 0 && (explicitNoLookupStatus || noLookupReasonRecorded);
+  const metrics: Array<readonly [string, string]> = [
+    ["Eligible observables", hasMeaningfulValue(sessionCounts.eligible_observables) ? countOf(sessionCounts.eligible_observables) : "Not recorded"],
+    ["Providers with results", String(providersWithLookupResults)],
+    ["Linked findings", String(availableEvidence.length)],
+    ["Fresh / stale", `${countOf(tiState.freshCacheCount)} / ${countOf(tiState.staleCacheCount + tiState.staleEvidenceCount)}`],
+    ["Last lookup", noLookupExecuted ? "Not executed" : tiState.state === "UNAVAILABLE" ? "Unavailable" : tiTimestampLabel(tiState.latestRetrievedAt)],
+  ];
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-text-muted">{summaryValue(observable.value, "Observable not recorded")} · provider intelligence is contextual, not attribution or behavioral proof.</p>
         <span className={`ui-badge text-[10px] ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : tiState.state === "UNAVAILABLE" ? "border-warning-border bg-warning-subtle text-warning" : ""}`}>{readableCode(tiState.state)}</span>
       </div>
-      <dl className="grid grid-cols-2 divide-x divide-y divide-border rounded-lg border border-border bg-surface-subtle sm:grid-cols-3 sm:divide-y-0 xl:grid-cols-5">
-        {[["Eligible observables", countOf(sessionCounts.eligible_observables)], ["Provider lookups", countOf(executedCache.length)], ["Linked findings", countOf(availableEvidence.length)], ["Fresh / stale", `${countOf(tiState.freshCacheCount)} / ${countOf(tiState.staleCacheCount + tiState.staleEvidenceCount)}`], ["Last lookup", noLookupExecuted ? "Not executed" : tiState.state === "UNAVAILABLE" ? "Unavailable" : tiTimestampLabel(tiState.latestRetrievedAt)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 break-words text-[11px] font-semibold text-text">{value}</dd></div>)}
+      <dl className="grid grid-cols-2 divide-x divide-y divide-border border-y border-border sm:grid-cols-3 sm:divide-y-0 xl:grid-cols-5">
+        {metrics.map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2"><dt className="text-[9px] font-semibold uppercase tracking-[0.08em] text-text-subtle">{name}</dt><dd className="mt-0.5 break-words text-[11px] font-semibold text-text">{value}</dd></div>)}
       </dl>
       {executedCache.length > 0 ? <p className="text-[10px] text-text-muted">{executedCache.length} source-IP provider lookup result{executedCache.length === 1 ? "" : "s"}. Provider intelligence is contextual—not evidence of this session’s behavior, actor identity, or response authority.</p> : noLookupExecuted ? <p className="text-[10px] text-text-muted">No provider lookup was executed for this session. Last lookup: Not executed. {summaryValue(sessionData.status_reason_text, "No provider finding is linked.")}</p> : <p className="text-[10px] text-text-muted">No source-IP cache result is stored; linked provider findings are displayed separately.</p>}
       {jobSummary.pending === true && (
@@ -1370,13 +1381,14 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const missingEvidence = list(sessionAssessment.missing_evidence).slice(0, 4);
   return (
     <div className="space-y-3">
+      <div className="border-l-2 border-primary-border pl-3">
+        <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Assessment outcome</p>
+        <p className="mt-0.5 text-sm font-semibold text-text">{hypothesisSets.length > 0 ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded` : "No threat hypothesis established"}</p>
+        <p className="mt-0.5 text-[11px] text-text-muted">Analyst interpretation only · not response authority</p>
+      </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
         {[["Hypothesis sets", String(hypothesisSets.length)], ["Canonical findings", String(canonicalCount)], ["Related TTP context", String(contextualHypotheses.length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-base font-semibold text-text">{value}</dd></div>)}
       </dl>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
-        <p className="text-xs text-text-muted">{hypothesisSets.length ? `${hypothesisSets.length} evidence-bounded assessment${hypothesisSets.length === 1 ? "" : "s"} recorded.` : "No evidence-bounded threat hypothesis was established."}</p>
-        <span className="ui-badge text-[10px]">Assessment only · not response authority</span>
-      </div>
       {hypothesisSets.length === 0 && missingEvidence.length > 0 && <details className="rounded-lg border border-border bg-surface-subtle px-3 py-2 text-xs">
         <summary className="cursor-pointer font-semibold text-text">Why no hypothesis was established · {missingEvidence.length} gate{missingEvidence.length === 1 ? "" : "s"}</summary>
         <ul className="mt-2 list-inside list-disc space-y-1 text-text-muted">{missingEvidence.map((reason, index) => <li key={`${String(reason)}-${index}`}>{hypothesisGateExplanation(reason)}</li>)}</ul>
@@ -1543,7 +1555,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <span className="ui-badge text-[10px]">{weightedReady ? "Gated weighted voting · PoC" : "Model1 order"}</span>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Model1 candidates", model1.applicable === true || recommendations.length > 0 ? String(recommendations.length) : model1.applicable === false ? "N/A" : "—"], ["Model2 binding", hasBoundAvailableModel2(data) ? model2.availability === "PARTIAL" ? "Partial" : "Exact" : "Unavailable"], ["Model2-supported", String(recommendations.filter((item) => item.model2SupportAdded).length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
+        {[["Model 1", model1.applicable === true || recommendations.length > 0 ? `${recommendations.length} candidates` : model1.applicable === false ? "Not applicable" : "Not reported"], ["Model 2", hasBoundAvailableModel2(data) ? model2.availability === "PARTIAL" ? "Partial binding" : "Exact binding" : "Unavailable"], ["Techniques compared", String(results.length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
       </dl>
       {!hasBoundAvailableModel2(data) && <p className="text-[10px] text-text-muted">No session-bound Model2 result is available; no ensemble corroboration or combined score is claimed.</p>}
       {model2OnlyPredictions.length > 0 && <p className="rounded-md border border-border bg-surface-subtle px-3 py-2 text-[11px] text-text-muted">{model2OnlyPredictions.map((item) => `Experimental Model2-only prediction for ${summaryValue(item.technique_id, "unknown technique")}`).join("; ")}: not a confirmed observed behavior, canonical finding, or response decision. Excluded from the Model1-led recommendation list.</p>}
@@ -2052,101 +2064,128 @@ export function SessionAnalysisPanels({
         );
 
   return (
-    <div className="space-y-5">
-      <section aria-label="Session evidence">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Evidence &amp; activity</p>
-          <p className="mt-1 text-xs text-text-muted">Chronology, observed access, and trusted classification for this exact session.</p>
+    <div className="space-y-8">
+      <section aria-label="Activity evidence" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">01</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Activity evidence</p>
+            <p className="mt-1 text-xs text-text-muted">Session chronology leads; authentication details are supporting evidence.</p>
+          </div>
         </div>
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <Panel eyebrow="Chronology" title="Bounded event timeline" icon={<ListTree className="h-4 w-4" aria-hidden="true" />} result={timelineResult} className="xl:col-span-8" renderEmptyContent compactUnavailable>
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+          <Panel eyebrow="Oldest → newest" title="Bounded event timeline" icon={<ListTree className="h-4 w-4" aria-hidden="true" />} result={timelineResult} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
             <TimelineList items={events} />
           </Panel>
-          <Panel eyebrow="Observed access" title="Authentication activity" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={authenticationResult} className="xl:col-span-4" renderEmptyContent compactUnavailable>
+          <Panel eyebrow="Supporting evidence" title="Authentication activity" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={authenticationResult} className="xl:col-span-4 xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
             <AuthenticationSummary data={authentication} />
           </Panel>
         </div>
       </section>
 
-      <section aria-label="Classification evidence">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Trusted observations</p>
-          <p className="mt-1 text-xs text-text-muted">See which ATT&amp;CK techniques are supported by recorded evidence. Model suggestions appear in the next section.</p>
+      <section aria-label="Trusted observations" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">02</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Trusted observations</p>
+            <p className="mt-1 text-xs text-text-muted">Evidence-backed classification is kept separate from model recommendations.</p>
+          </div>
         </div>
-        <Panel eyebrow="Observed evidence" title="Trusted observations and ATT&CK mappings" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult} renderEmptyContent compactUnavailable>
+        <Panel eyebrow="Validated evidence snapshot" title="Observed behavior and ATT&CK mapping" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={classificationResult} variant="embedded" renderEmptyContent compactUnavailable>
           <ClassificationList items={classificationEvents} trustedMappings={trustedTtps} />
         </Panel>
       </section>
 
-      <section aria-label="Model ensemble evidence">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Model comparison</p>
-          <p className="mt-1 text-xs text-text-muted">Model1 proposes TTP candidates; Model2 can add support when its session evidence passes the required checks.</p>
+      <section aria-label="Model ensemble evidence" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">03</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">TTP review workspace</p>
+            <p className="mt-1 text-xs text-text-muted">Model1 proposes candidates; exact-bound Model2 support can adjust review priority.</p>
+          </div>
         </div>
-        <Panel eyebrow="Model review workspace" title="TTP candidates and review priority" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} renderEmptyContent compactUnavailable>
+        <Panel eyebrow="Review queue" title="TTP candidates · review first to last" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} renderEmptyContent compactUnavailable>
           <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>
 
-      <section aria-label="Analyst assessment">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Analyst assessment</p>
-          <p className="mt-1 text-xs text-text-muted">Evidence-bounded interpretation, manual corroboration, and review-only advisory context.</p>
+      <section aria-label="Analyst assessment" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-primary">04</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Analyst assessment</p>
+            <p className="mt-1 text-xs text-text-muted">A conclusion workspace with hypothesis on the left and manual guidance alongside it.</p>
+          </div>
         </div>
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-            <Panel eyebrow="Evidence-bounded analysis" title="Threat hypothesis" icon={<BrainCircuit className="h-4 w-4" aria-hidden="true" />} result={get("hypothesis")} className="xl:col-span-8" renderEmptyContent compactUnavailable>
-              <HypothesisSummary data={hypothesis} />
-            </Panel>
-            <Panel eyebrow="Manual corroboration" title="Response guidance" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={get("recommendations")} className="xl:col-span-4" renderEmptyContent compactUnavailable>
-              <GuidanceSummary data={get("recommendations").data} />
-            </Panel>
-
-            <Panel eyebrow="Stored AI advisory" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} className="xl:col-span-8" renderEmptyContent compactUnavailable>
-              <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} canonicalFindingIds={list(record(detail.session_hypothesis_assessment).canonical_finding_ids)} />
-            </Panel>
-            {aiAdvisory.state === "ready" || aiAdvisory.state === "limited" ? (
-              <aside className="xl:col-span-4" aria-label="Policy gap review"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Secondary review</p><PolicyGapSummary data={aiAdvisory.data} /></aside>
-            ) : (
-              <div className="xl:col-span-4" aria-label="Policy gap review"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Secondary review</p><p className="border-l-2 border-border pl-3 text-xs text-text-muted">
-                Policy-gap analysis is unavailable because no accepted AI advisory capability is deployed for this runtime.
-              </p>
-              </div>
-            )}
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+          <Panel eyebrow="Assessment outcome" title="Threat hypothesis" icon={<BrainCircuit className="h-4 w-4" aria-hidden="true" />} result={get("hypothesis")} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
+            <HypothesisSummary data={hypothesis} />
+          </Panel>
+          <Panel eyebrow="Human-reviewed support" title="Response guidance" icon={<ShieldCheck className="h-4 w-4" aria-hidden="true" />} result={get("recommendations")} className="xl:col-span-4 xl:border-l xl:border-border xl:pl-4" variant="flat" renderEmptyContent compactUnavailable>
+            <GuidanceSummary data={get("recommendations").data} />
+          </Panel>
         </div>
       </section>
 
-      <section aria-label="Threat intelligence context">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Threat intelligence context</p>
-          <p className="mt-1 text-xs text-text-muted">Contextual provider state and exact source identity; neither establishes attribution.</p>
+      <section aria-label="AI advisory" className="space-y-2">
+        <div className="flex items-start gap-3">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">05</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">AI advisory · secondary</p>
+            <p className="mt-1 text-xs text-text-muted">Stored suggestions remain advisory and do not create findings or execute response.</p>
+          </div>
         </div>
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <Panel eyebrow="Non-authoritative context" title="External TI context" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} className="xl:col-span-7" renderEmptyContent compactUnavailable>
+        <div className="grid grid-cols-1 items-start gap-4 border-y border-border py-3 xl:grid-cols-12">
+          <Panel eyebrow="Stored selection" title="AI advisory" icon={<Bot className="h-4 w-4" aria-hidden="true" />} result={aiAdvisory} className="xl:col-span-8" variant="flat" renderEmptyContent compactUnavailable>
+            <AiAdvisorySummary data={aiAdvisory.data} guidanceData={get("recommendations").data} behavioralFindings={list(detail.behavioral_findings)} canonicalFindingIds={list(record(detail.session_hypothesis_assessment).canonical_finding_ids)} />
+          </Panel>
+          <aside className="border-l border-border pl-4 xl:col-span-4" aria-label="Policy gap review">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Policy-gap review</p>
+            {aiAdvisory.state === "ready" || aiAdvisory.state === "limited"
+              ? <PolicyGapSummary data={aiAdvisory.data} />
+              : <p className="border-l-2 border-border pl-3 text-xs text-text-muted">Unavailable: this runtime has no accepted AI advisory capability.</p>}
+          </aside>
+        </div>
+      </section>
+
+      <section aria-label="Threat intelligence context" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">06</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Threat intelligence context</p>
+            <p className="mt-1 text-xs text-text-muted">Provider data is context; source-IP recurrence is an investigation pivot, not attribution.</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+          <Panel eyebrow="Provider context" title="External threat intelligence" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={etiResult} className="xl:col-span-5" variant="flat" renderEmptyContent compactUnavailable>
             <ExternalTiSummary sessionData={sessionTi} observableData={observableTi.data} />
           </Panel>
-          <Panel eyebrow="Exact source identity" title="Source-IP pivot" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={sourcePivot} className="xl:col-span-5" renderEmptyContent compactUnavailable>
+          <Panel eyebrow="Investigation pivot" title="Source-IP recurrence" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={sourcePivot} className="xl:col-span-7" compactUnavailable>
             <SourcePivotSummary data={sourcePivot.data} />
           </Panel>
         </div>
       </section>
 
-      <section aria-label="Evidence ledger">
-        <div className="mb-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-primary">Evidence ledger</p>
-          <p className="mt-1 text-xs text-text-muted">Artifacts stay dense and inspectable while provenance and durable output remain compact.</p>
+      <section aria-label="Evidence ledger" className="space-y-3">
+        <div className="flex items-start gap-3 border-b border-border pb-2">
+          <span className="pt-0.5 font-mono text-[10px] font-semibold text-text-subtle">07</span>
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-text-subtle">Evidence ledger</p>
+            <p className="mt-1 text-xs text-text-muted">A compact registry of stored artifacts, provenance, and durable reports.</p>
+          </div>
         </div>
-        <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-12">
-          <Panel eyebrow="Artifacts" title="Files and observables" icon={<FileSearch className="h-4 w-4" aria-hidden="true" />} result={filesResult} className="xl:col-span-8" renderEmptyContent compactUnavailable>
+        <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+          <Panel eyebrow="Evidence inventory" title="Artifacts and observables" icon={<FileSearch className="h-4 w-4" aria-hidden="true" />} result={filesResult} className="xl:col-span-8" variant="embedded" renderEmptyContent compactUnavailable>
             <ObservableList items={analystObservables} />
           </Panel>
-          <div className="space-y-4 xl:col-span-4">
-            <Panel eyebrow="Traceability" title="Evidence and provenance" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={provenanceResult} renderEmptyContent compactUnavailable>
+          <aside className="divide-y divide-border xl:col-span-4">
+            <Panel eyebrow="Processing trace" title="Evidence and provenance" icon={<Fingerprint className="h-4 w-4" aria-hidden="true" />} result={provenanceResult} className="pb-4" variant="flat" renderEmptyContent compactUnavailable>
               <ProvenanceSummary value={provenance} />
             </Panel>
-            <Panel eyebrow="Durable output" title="Reports" icon={<FileText className="h-4 w-4" aria-hidden="true" />} result={get("reports")} renderEmptyContent compactUnavailable>
+            <Panel eyebrow="Durable output" title="Reports" icon={<FileText className="h-4 w-4" aria-hidden="true" />} result={get("reports")} className="pt-4" variant="flat" renderEmptyContent compactUnavailable>
               <RecordList items={reports} empty="No stored report is available." />
             </Panel>
-          </div>
+          </aside>
         </div>
       </section>
     </div>
