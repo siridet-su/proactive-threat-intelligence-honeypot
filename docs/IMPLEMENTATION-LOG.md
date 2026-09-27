@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-27 — Refine backup schedule toast motion and controls
+
+- Status: repository Dashboard UI fix prepared; local development Dashboard uses it when reloaded.
+- Scope and intent: make schedule notices enter from the lower-right edge of the viewport and keep the close or Undo control readable without squeezing its label.
+- Repository branch and commit/PR: `fix/backup-toast-layout-motion`; commit and PR follow this entry.
+- Repository changes: animate the shared toast from the lower right with reduced-motion support, give the close button a fixed square size, place Undo in the same right-side action area, and close the toast directly after Undo. Keep the three-second cancellation timer and schedule API unchanged. Extend the Undo component test to check that no canceled notice remains.
+- Host/environment changes actually applied: none. No Pi service, systemd timer, MongoDB schedule revision, B2 object, or production Dashboard deployment was changed.
+- Runtime/exposure state: the Pi scheduling configuration is unaffected by this UI fix; its last verified permanent time was 01:00 Asia/Bangkok. The Dashboard toast changes only where this repository UI code is loaded.
+- Validation performed and outcome: targeted Undo component test, TypeScript check, targeted lint, production Dashboard build, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review, live Admin schedule edit, production Dashboard deployment, and next scheduled Pi run verification were not performed for this UI fix.
+- Risks and data handling: Undo still cancels only before the schedule POST starts. The toast layout is responsive, and reduced-motion users receive no movement. No secrets or archive contents enter this change.
+- Rollback: revert this UI commit; no Pi or data rollback is required.
+- Follow-up: inspect the toast in authenticated light and dark browser sessions at desktop and narrow widths.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
 ### 2026-09-27 — Add a three-second Undo window for backup schedule saves
 
 - Status: repository Dashboard UI change prepared; local development Dashboard uses it when reloaded.
