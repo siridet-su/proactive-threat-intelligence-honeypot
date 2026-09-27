@@ -202,12 +202,21 @@ func archiveSourceQuery(source ArchiveSource, dayStart, dayEnd time.Time) bson.M
 	if len(source.TimeFields) == 0 {
 		return bson.M{}
 	}
-	if len(source.TimeFields) == 1 {
+	if len(source.TimeFields) == 1 && !source.UTCStringTimes {
 		return bson.M{source.TimeFields[0]: dateRange}
 	}
-	conditions := make(bson.A, 0, len(source.TimeFields))
+	conditions := make(bson.A, 0, len(source.TimeFields)*2)
 	for _, field := range source.TimeFields {
 		conditions = append(conditions, bson.M{field: dateRange})
+		if source.UTCStringTimes {
+			// The canonical events collection stores ISO 8601 UTC timestamps as
+			// strings, with optional fractional seconds. Date-only bounds include
+			// both forms at midnight and use the existing timestamp index.
+			conditions = append(conditions, bson.M{field: bson.M{
+				"$gte": dayStart.UTC().Format("2006-01-02"),
+				"$lt":  dayEnd.UTC().Format("2006-01-02"),
+			}})
+		}
 	}
 	return bson.M{"$or": conditions}
 }

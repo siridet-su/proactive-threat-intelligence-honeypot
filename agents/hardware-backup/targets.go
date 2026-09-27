@@ -21,6 +21,8 @@ type ArchiveSource struct {
 	Collection string
 	TimeFields []string
 	SortField  string
+	// UTCStringTimes includes canonical ISO 8601 UTC strings as well as BSON Dates.
+	UTCStringTimes bool
 }
 
 type BackupTarget struct {
@@ -45,9 +47,10 @@ var backupTargetCatalog = map[string]BackupTarget{
 		Prefix:    "threat_events",
 		Sensitive: true,
 		Sources: []ArchiveSource{{
-			Collection: "events",
-			TimeFields: []string{"timestamp"},
-			SortField:  "timestamp",
+			Collection:     "events",
+			TimeFields:     []string{"timestamp"},
+			SortField:      "timestamp",
+			UTCStringTimes: true,
 		}},
 	},
 	filesystemAuditTargetID: {
