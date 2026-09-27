@@ -28,6 +28,11 @@ and historical material inherited from the previous team.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 
+The first [Ansible Pi preparation slice](../deploy/ansible/README.md) and its
+[ARM64 VM test target](INSTALLER-VM-TEST-TARGET.md) are prepared for disposable
+VM validation. The [Thai](INSTALLATION-MANUAL-WORD-TH.md) and
+[English](INSTALLATION-MANUAL-WORD.md) manual drafts remain pre-test documents.
+
 The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the
 [web-corp runbook](../integrations/web-corp/README.md), and its

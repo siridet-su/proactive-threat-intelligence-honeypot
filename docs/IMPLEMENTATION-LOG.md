@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Prepare first Ansible slice for fresh ARM64 Pi installation
+
+- Status: repository implementation prepared; not applied to a host or activated.
+- Scope and intent: begin the accepted fresh-Pi installer with an idempotent, non-secret Ansible preparation step, reusing the prior read-only planner and ARM64 release builder.
+- Repository branch and commit/PR: `feat/ansible-pi-prepare`; commit/PR follow this entry.
+- Repository changes: import the plan-only profiles, builder, tests, and draft manuals from the unmerged installer branch; add a release verifier, Ansible playbook, inactive Go service templates, inventory example, and operator runbook. The playbook installs base packages and Redis, stops/disables Redis, stages a verified release, and leaves application units disabled. It does not touch `.env` files.
+- Host/environment changes actually applied: none. No Pi, Dashboard, or VM was changed.
+- Runtime/exposure state: existing Pi and Dashboard runtime are unchanged; no new trap port or service is active.
+- Validation performed and outcome: 22 focused Python tests, Ansible syntax check, local Markdown links, and `git diff --check` passed. The five Go modules passed tests and cross-built to a static Linux ARM64 bundle with network downloads disabled; the bundle verifier passed, and rendered systemd units passed `systemd-analyze verify` against those binaries. No clean ARM64 VM execution or hardware acceptance was performed.
+- Not performed / deferred: Cowrie/Zeek/Compose/Dashboard installation, Redis private-binding verification on a clean VM, collector log ACLs, value-redacting activation, existing-Pi migration, and production rollback tests.
+- Risks and data handling: source units contain old checkout paths, so the new templates point to the versioned bundle; their runtime permissions remain unqualified until VM tests. The bundle contains binaries and hashes only. No private env values, credentials, or attacker content were copied into the repo.
+- Rollback: restore the disposable VM snapshot for first validation; production rollback is deferred until acceptance. Revert the branch commit for repository rollback.
+- Follow-up: qualify this prepare phase on a clean ARM64 VM, pin and package remaining service artifacts, then implement separate operator-input validation and activation.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [Ansible preparation runbook](../deploy/ansible/README.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [readiness audit](INSTALLATION-READINESS-2026-09-28.md).
+
 ### 2026-09-28 — Set installer boundary for operator-managed private configuration
 
 - Status: design and documentation prepared; no installer apply mode or host deployment performed.
