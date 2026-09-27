@@ -2161,3 +2161,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the merge commit if needed; no host rollback is required for this repository-only change.
 - Follow-up: review PR #69 against the refreshed main branch and deploy the backup changes separately after approval.
 - Related ADR/runbook: no architectural decision or operating step changed as part of this merge; existing current-state documents and runbooks from both branches are retained.
+
+### 2026-09-27 — Clear the Dashboard lint gate for artifact intelligence PR
+
+- Status: repository fix prepared for PR #69; not deployed.
+- Scope and intent: clear the staging CI lint failure introduced by the inherited Filesystem Activity toolbar while preserving View menu behavior when live topology becomes empty.
+- Repository branch and commit/PR: `feat/artifact-intelligence`; fix commit pending at the time of this entry; PR #69.
+- Repository changes: replace the toolbar effect that synchronously closes the View menu with a guarded state adjustment when the empty-live prop changes. Extend the existing toolbar test to verify the menu closes on empty state and stays closed when live data returns.
+- Host/environment changes actually applied: none. No dashboard, Pi service, database, backup target, or host configuration was changed.
+- Runtime/exposure state: the source fix is only in the PR branch; production dashboard behavior is unchanged until a separate deployment.
+- Validation performed and outcome: full Dashboard `npm run lint`, the targeted Filesystem density/minimap suite (6/6), and `git diff --check` passed after the regression assertion was added. PR CI was pending when this entry was written.
+- Not performed / deferred: no production deployment, authenticated browser review, or host-level validation was performed. The prior TypeScript check remains blocked by stale generated `.next` route imports.
+- Risks and data handling: the change affects only local toolbar state and adds no telemetry, credentials, or attacker content.
+- Rollback: revert the toolbar state adjustment and related test; no host rollback is needed.
+- Follow-up: wait for PR CI, then merge PR #69 after the required checks pass.
+- Related ADR/runbook: no architecture decision or operating procedure changed.
