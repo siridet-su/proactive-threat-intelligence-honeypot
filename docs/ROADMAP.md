@@ -26,6 +26,14 @@ Dashboard-to-Pi disconnect/control path is historical, not an installation
 requirement. Existing-Pi migration is a later, separate procedure. No
 customer installer is currently declared ready to run.
 
+The first implementation slice now stages checked Linux ARM64 Go-agent
+artifacts and inactive systemd units on a disposable Ubuntu 24.04 ARM64 VM
+through [Ansible](../deploy/ansible/README.md). It does not install Cowrie,
+Zeek, the Docker decoys, or Dashboard, and has not been qualified on a VM or
+Pi. Complete their pinned releases, service access rules, operator credential
+checks, and activation sequence before calling the installer runnable for a
+fresh Pi.
+
 The accepted installer boundary is in
 [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md): prepare
 versioned dependencies, service units, and non-secret configuration; leave
