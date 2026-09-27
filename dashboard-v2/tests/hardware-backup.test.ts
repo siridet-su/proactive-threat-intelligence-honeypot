@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBackupTargetCoverage, buildBackupTargetExceptions, getHardwareBackupWindow } from "@/lib/hardware-backup";
-import { isBackupTargetOverview, isHardwareBackupStatus } from "@/lib/dashboardTypes";
+import { buildBackupTargetCoverage, buildBackupTargetExceptions, getHardwareBackupHistoryWindow, getHardwareBackupWindow } from "@/lib/hardware-backup";
+import { isBackupTargetOverview, isHardwareBackupHistory, isHardwareBackupStatus } from "@/lib/dashboardTypes";
 
 describe("hardware backup dashboard status", () => {
   it("uses the completed-day safety window", () => {
@@ -10,6 +10,32 @@ describe("hardware backup dashboard status", () => {
     expect(window.from.toISOString()).toBe("2026-08-24T00:00:00.000Z");
     expect(window.to.toISOString()).toBe("2026-09-21T00:00:00.000Z");
     expect(window.days).toBe(29);
+  });
+
+  it("pages backward in fixed, non-overlapping eligible-day windows", () => {
+    const anchor = new Date("2026-09-26T18:00:00.000Z");
+    const current = getHardwareBackupWindow(anchor);
+    const previous = getHardwareBackupHistoryWindow(1, anchor);
+    const older = getHardwareBackupHistoryWindow(2, anchor);
+
+    expect(current.from.toISOString()).toBe("2026-08-27T00:00:00.000Z");
+    expect(previous.to.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+    expect(previous.from.toISOString()).toBe("2026-07-29T00:00:00.000Z");
+    expect(older.to.toISOString()).toBe("2026-07-28T00:00:00.000Z");
+    expect(previous.days).toBe(29);
+    expect(() => getHardwareBackupHistoryWindow(37, anchor)).toThrow(RangeError);
+  });
+
+  it("accepts a bounded read-only history response", () => {
+    expect(isHardwareBackupHistory({
+      period: 1,
+      expected_window: { from: "2026-07-29T00:00:00.000Z", to: "2026-08-26T00:00:00.000Z", days: 29 },
+      days: [{
+        day: "2026-08-26", status: "success", document_count: 0, archive_bytes: 0,
+        started_at: null, completed_at: null, object_name: null, error: null,
+      }],
+      has_older: false,
+    })).toBe(true);
   });
 
   it("accepts the API shape used by the coverage panel", () => {

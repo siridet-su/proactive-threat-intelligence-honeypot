@@ -202,6 +202,13 @@ export interface HardwareBackupStatus {
   storage: HardwareBackupStorageStatus | null;
 }
 
+export interface HardwareBackupHistory {
+  period: number;
+  expected_window: { from: string; to: string; days: number };
+  days: HardwareBackupDay[];
+  has_older: boolean;
+}
+
 export type BackupTargetId = "hardware_metrics_1m" | "threat_events" | "filesystem_audit";
 export type BackupTargetState = "active" | "planned";
 export type BackupWorkerState = "healthy" | "stale" | "offline" | "scheduled" | "unknown";
@@ -384,6 +391,13 @@ export function isHardwareBackupStatus(value: unknown): value is HardwareBackupS
     value.days.every(isHardwareBackupDay) &&
     (value.request === null || isHardwareBackupRequest(value.request)) &&
     (value.storage === null || isHardwareBackupStorageStatus(value.storage));
+}
+
+export function isHardwareBackupHistory(value: unknown): value is HardwareBackupHistory {
+  if (!isRecord(value) || !Number.isInteger(value.period) || !isRecord(value.expected_window) || !Array.isArray(value.days) || typeof value.has_older !== "boolean") return false;
+  return typeof value.expected_window.from === "string" && typeof value.expected_window.to === "string" &&
+    typeof value.expected_window.days === "number" && Number.isFinite(value.expected_window.days) &&
+    value.days.every(isHardwareBackupDay);
 }
 
 function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {

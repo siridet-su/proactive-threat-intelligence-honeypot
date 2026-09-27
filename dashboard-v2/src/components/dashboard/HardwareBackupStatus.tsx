@@ -8,6 +8,8 @@ import {
   ArrowUpRight,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   CircleDashed,
   Cloud,
   Clock3,
@@ -24,7 +26,9 @@ import { RegionState } from "@/components/ui/RegionState";
 import { cn } from "@/lib/utils";
 import {
   isHardwareBackupStatus,
+  isHardwareBackupHistory,
   type HardwareBackupDay,
+  type HardwareBackupHistory,
   type HardwareBackupRequestAction,
   type HardwareBackupRequestView,
   type HardwareBackupStorageStatus,
@@ -131,7 +135,7 @@ function statePresentation(data: HardwareBackupStatusData) {
     return {
       state: "healthy" as BackupState,
       label: "Healthy",
-      description: "All expected days archived",
+      description: "All eligible days checked",
       className: "border-success-border bg-success-subtle text-success",
       Icon: CheckCircle2,
     };
@@ -154,6 +158,10 @@ export function HardwareBackupStatus() {
   const [reloadToken, setReloadToken] = useState(0);
   const [actionLoading, setActionLoading] = useState<HardwareBackupRequestAction | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [historyPeriod, setHistoryPeriod] = useState(0);
+  const [history, setHistory] = useState<HardwareBackupHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -186,6 +194,33 @@ export function HardwareBackupStatus() {
     return () => window.clearInterval(timer);
   }, [request]);
 
+  useEffect(() => {
+    if (historyPeriod === 0) return;
+    const controller = new AbortController();
+    fetch(`/api/hardware/backup/history?period=${historyPeriod}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload: unknown = await response.json();
+        if (!response.ok || !isHardwareBackupHistory(payload) || payload.period !== historyPeriod) throw new Error("Backup history is unavailable");
+        setHistory(payload);
+        setHistoryError(null);
+      })
+      .catch((reason: unknown) => {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setHistoryError(reason instanceof Error ? reason.message : "Backup history is unavailable");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistoryLoading(false);
+      });
+    return () => controller.abort();
+  }, [historyPeriod, reloadToken]);
+
+  function showHistoryPeriod(period: number) {
+    setHistoryPeriod(period);
+    setHistory(null);
+    setHistoryError(null);
+    setHistoryLoading(period > 0);
+  }
+
   const refresh = () => {
     setRefreshing(true);
     setReloadToken((current) => current + 1);
@@ -217,9 +252,6 @@ export function HardwareBackupStatus() {
   };
 
   const presentation = useMemo(() => (data ? statePresentation(data) : null), [data]);
-  const coveragePercent = data && data.summary.expected_days > 0
-    ? Math.min(100, Math.round((data.summary.successful_days / data.summary.expected_days) * 100))
-    : 0;
   const StatusIcon = presentation?.Icon ?? CircleDashed;
   const activeRequest = request?.status === "pending" || request?.status === "running";
   const actionDisabled = loading || refreshing || actionLoading !== null || activeRequest;
@@ -261,7 +293,7 @@ export function HardwareBackupStatus() {
         </div>
       </header>
 
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_19rem]">
+      <div>
         <div className="min-w-0 p-4 sm:p-5">
           {loading && !data ? (
             <BackupSkeleton />
@@ -283,16 +315,31 @@ export function HardwareBackupStatus() {
                 <ArchiveMetric label="Latest archive" value={formatDay(data.summary.latest_success_day)} detail={presentation.description} />
                 <ArchiveMetric label="Last completed" value={formatDateTime(data.summary.last_completed_at)} detail={`Window ends ${formatDay(data.expected_window.to.slice(0, 10))}`} />
               </div>
-              <CoverageMap data={data} coveragePercent={coveragePercent} />
+              <CoverageMap
+                view={historyPeriod === 0 ? data : history}
+                period={historyPeriod}
+                loading={historyLoading}
+                error={historyError}
+                hasOlder={historyPeriod === 0 || Boolean(history?.has_older)}
+                onOlder={() => showHistoryPeriod(historyPeriod + 1)}
+                onNewer={() => showHistoryPeriod(Math.max(0, historyPeriod - 1))}
+                onLatest={() => showHistoryPeriod(0)}
+                onRetry={() => {
+                  setHistoryLoading(true);
+                  setHistoryError(null);
+                  setReloadToken((current) => current + 1);
+                }}
+              />
             </div>
           ) : (
             <RegionState kind="empty" title="No backup status yet" description="The worker has not written a manifest." />
           )}
         </div>
 
-        <aside className="border-t border-border bg-surface-subtle/35 p-4 sm:p-5 xl:border-l xl:border-t-0" aria-label="Backup controls and destination">
+        <aside className="border-t border-border bg-surface-subtle/35 p-4 sm:p-5" aria-label="Backup controls and destination">
           {data ? (
-            <div className="space-y-4">
+            <div className="grid gap-3 lg:grid-cols-3">
+              <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="grid h-8 w-8 place-items-center rounded-lg border border-primary-border bg-primary-subtle text-primary"><Server className="h-4 w-4" aria-hidden="true" /></span>
@@ -341,15 +388,19 @@ export function HardwareBackupStatus() {
                 </div>
               )}
 
-              <AnimatePresence initial={false} mode="popLayout">
-                {request && <BackupRequestProgress request={request} reduceMotion={Boolean(reduceMotion)} />}
-              </AnimatePresence>
-
-              <CloudStorageSummary storage={data.storage} />
-
-              <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3 text-xs text-text-muted" aria-label="Backup schedule and retention">
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-4">
+                <h3 className="mb-3 text-sm font-semibold">Latest request</h3>
+                <AnimatePresence initial={false} mode="popLayout">
+                  {request ? <BackupRequestProgress request={request} reduceMotion={Boolean(reduceMotion)} /> : <p className="text-sm text-text-muted">No dashboard request yet.</p>}
+                </AnimatePresence>
+              </div>
+              <div className="rounded-xl border border-border bg-surface p-4">
+                <CloudStorageSummary storage={data.storage} />
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-text-muted lg:col-span-3" aria-label="Backup schedule and retention">
                 <span className="inline-flex items-center gap-1.5"><TimerReset className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Daily · Asia/Bangkok</span>
-                <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-primary" aria-hidden="true" />30-day lookback</span>
+                <span className="inline-flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 text-primary" aria-hidden="true" />29 eligible UTC days</span>
                 <span className="inline-flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />2-day safety hold</span>
               </div>
             </div>
@@ -388,12 +439,12 @@ function BackupSkeleton() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" /><h3 className="text-sm font-semibold">Daily manifest history</h3></div>
-            <p className="mt-1 text-xs text-text-muted">Last 30 days</p>
+            <p className="mt-1 text-xs text-text-muted">29 eligible days · latest two days held</p>
           </div>
           <div className="h-7 w-14 animate-pulse rounded bg-surface-hover" />
         </div>
         <div className="mt-4 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-[repeat(15,minmax(0,1fr))]">
-          {Array.from({ length: 30 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-surface-subtle" />)}
+          {Array.from({ length: 29 }, (_, index) => <div key={index} className="h-10 animate-pulse rounded-md bg-surface-subtle" />)}
         </div>
       </div>
     </div>
@@ -417,25 +468,52 @@ function PiControlSkeleton() {
   );
 }
 
-function CoverageMap({ data, coveragePercent }: { data: HardwareBackupStatusData; coveragePercent: number }) {
+function CoverageMap({ view, period, loading, error, hasOlder, onOlder, onNewer, onLatest, onRetry }: {
+  view: HardwareBackupStatusData | HardwareBackupHistory | null;
+  period: number;
+  loading: boolean;
+  error: string | null;
+  hasOlder: boolean;
+  onOlder: () => void;
+  onNewer: () => void;
+  onLatest: () => void;
+  onRetry: () => void;
+}) {
+  const days = view?.days ?? [];
+  const checked = days.filter((day) => day.status === "success").length;
+  const archived = days.filter((day) => day.status === "success" && Boolean(day.object_name)).length;
+  const empty = days.filter((day) => day.status === "success" && day.document_count === 0).length;
+  const needsAttention = days.filter((day) => day.status === "missing" || day.status === "failed" || day.status === "running").length;
+  const expected = view?.expected_window.days ?? 29;
+  const coveragePercent = expected > 0 ? Math.round((checked / expected) * 100) : 0;
   return (
-    <section aria-labelledby="backup-coverage-title">
-      <div className="flex flex-col gap-2 border-b border-border pb-3 sm:flex-row sm:items-end sm:justify-between">
+    <section className="rounded-xl border border-border p-3 sm:p-4" aria-labelledby="backup-coverage-title">
+      <div className="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />
             <h3 id="backup-coverage-title" className="text-sm font-semibold">Daily manifest history</h3>
+            <span className="ui-badge text-xs">{period === 0 ? "Latest" : `Earlier · page ${period}`}</span>
           </div>
-          <p className="mt-1 text-xs text-text-muted">{formatDay(data.expected_window.from.slice(0, 10))} – {formatDay(data.expected_window.to.slice(0, 10))} · UTC</p>
+          <p className="mt-1 text-xs text-text-muted">{view ? `${formatDay(view.expected_window.from.slice(0, 10))} – ${formatDay(view.expected_window.to.slice(0, 10))} · UTC` : "Loading eligible days…"}</p>
         </div>
-        <div className="text-left sm:text-right">
-          <span className="font-mono text-2xl font-semibold leading-none tracking-tight text-text">{coveragePercent}%</span>
-          <span className="ml-2 text-xs text-text-muted">days checked</span>
+        <div className="flex flex-wrap items-center gap-2" aria-label="Navigate backup history">
+          {period > 0 && <button type="button" onClick={onLatest} className="ui-button min-h-8 px-2.5 text-xs">Latest</button>}
+          <button type="button" onClick={onNewer} disabled={period === 0 || loading} className="ui-button min-h-8 gap-1 px-2.5 text-xs"><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />Newer</button>
+          <button type="button" onClick={onOlder} disabled={!hasOlder || loading} className="ui-button min-h-8 gap-1 px-2.5 text-xs">Older<ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
         </div>
       </div>
-
+      {loading ? <p role="status" className="py-8 text-center text-sm text-text-muted">Loading backup history…</p> : error ? (
+        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 py-6 text-sm text-danger"><span>{error}</span><button type="button" className="ui-button min-h-8 px-3 text-xs" onClick={onRetry}>Retry</button></div>
+      ) : view ? <>
+      <div className="mt-3 grid gap-2 sm:grid-cols-4">
+        <CoverageStat label="Manifest checks" value={`${checked}/${expected}`} detail={`${coveragePercent}% completed`} tone="text-text" />
+        <CoverageStat label="Archived to B2" value={String(archived)} detail="Days with an archive object" tone="text-success" />
+        <CoverageStat label="Empty" value={String(empty)} detail="Checked · no source records" tone="text-text-subtle" />
+        <CoverageStat label="No completed check" value={String(needsAttention)} detail="Missing, failed, or running" tone={needsAttention ? "text-warning" : "text-text-subtle"} />
+      </div>
       <div className="mt-3 grid grid-cols-7 gap-1.5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-[repeat(15,minmax(0,1fr))]" role="list" aria-label="Hardware backup days">
-        {data.days.map((day) => {
+        {days.map((day) => {
           const status = visualDayStatus(day);
           return (
             <button
@@ -461,15 +539,25 @@ function CoverageMap({ data, coveragePercent }: { data: HardwareBackupStatusData
           <LegendDot className="bg-warning" label="Missing" />
           <LegendDot className="bg-danger" label="Failed" />
         </div>
-        <span className="text-xs text-text-subtle">{data.summary.successful_days} of {data.summary.expected_days} days have a completed manifest</span>
+        <span className="text-xs text-text-subtle">Empty means a successful check found zero records; no B2 object was created.</span>
       </div>
+      {period > 0 && <p className="mt-2 text-xs text-text-muted">Earlier days are read-only. Gaps may predate target activation; Pi actions and the status above always use the latest eligible window.</p>}
+      </> : null}
     </section>
   );
 }
 
+function CoverageStat({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: string }) {
+  return <div className="rounded-lg border border-border bg-surface-subtle/50 px-3 py-2.5">
+    <p className="text-xs text-text-subtle">{label}</p>
+    <p className={`mt-1 font-mono text-lg font-semibold leading-none ${tone}`}>{value}</p>
+    <p className="mt-1 text-xs text-text-muted">{detail}</p>
+  </div>;
+}
+
 function CloudStorageSummary({ storage }: { storage: HardwareBackupStorageStatus | null }) {
   return (
-    <div className="border-t border-border pt-4">
+    <div>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Cloud className="h-4 w-4 text-info" aria-hidden="true" />

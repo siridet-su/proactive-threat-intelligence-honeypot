@@ -6,6 +6,7 @@ import { getBackupCoverageAnchor } from "./backupSchedule";
 import type {
   HardwareBackupDay,
   HardwareBackupDayStatus,
+  HardwareBackupHistory,
   HardwareBackupRequestAction,
   HardwareBackupRequestProgress,
   HardwareBackupRequestView,
@@ -36,6 +37,7 @@ const RESTORE_VERIFICATION_COLLECTION = "backup_restore_verifications";
 const BACKUP_CONTROL_POLL_SECONDS = 15;
 const BACKUP_HEALTHY_AFTER_SECONDS = BACKUP_CONTROL_POLL_SECONDS * 6;
 const BACKUP_STALE_AFTER_SECONDS = 30 * 60;
+export const MAX_BACKUP_HISTORY_PERIOD = 36;
 
 const BACKUP_TARGET_CATALOG = [
   { target_id: "hardware_metrics_1m", collections: ["hardware_metrics_1m"], sensitive: false },
@@ -340,6 +342,15 @@ export function getHardwareBackupWindow(now = new Date()) {
   return { from, to, days };
 }
 
+export function getHardwareBackupHistoryWindow(period: number, anchor: Date) {
+  if (!Number.isInteger(period) || period < 1 || period > MAX_BACKUP_HISTORY_PERIOD) {
+    throw new RangeError("Backup history period is out of range");
+  }
+  const current = getHardwareBackupWindow(anchor);
+  const shift = current.days * period;
+  return { from: addUtcDays(current.from, -shift), to: addUtcDays(current.to, -shift), days: current.days };
+}
+
 function manifestTargetId(document: Document): string | null {
   if (typeof document.target_id === "string" && document.target_id.trim()) return document.target_id;
   if (typeof document.collection === "string" && document.collection.trim()) return document.collection;
@@ -636,6 +647,54 @@ export async function getHardwareBackupStatus(): Promise<HardwareBackupStatus> {
     days,
     request: requestView(latestRequest),
     storage: storageSnapshotView(storageSnapshot),
+  };
+}
+
+export async function getHardwareBackupHistory(period: number): Promise<HardwareBackupHistory> {
+  const window = getHardwareBackupHistoryWindow(period, await getBackupCoverageAnchor());
+  const client = await getMongoClient();
+  const database = client.db(getMongoDatabaseName());
+  const targetStatus = await database.collection(TARGET_STATUS_COLLECTION).findOne(
+    { target_id: HARDWARE_COLLECTION },
+    { projection: { bucket: 1, enabled: 1 } },
+  );
+  const bucket = activeBackupBucket(targetStatus ? [targetStatus] : []);
+  const legacyBucket = legacyManifestBucket();
+  const scope: Document[] = [
+    { collection: HARDWARE_COLLECTION },
+    manifestBucketQuery(bucket, legacyBucket),
+  ];
+  const [documents, olderManifest] = await Promise.all([
+    database.collection(BACKUP_COLLECTION).find({ $and: [
+      ...scope,
+      { day_start: { $gte: window.from, $lte: window.to } },
+    ] }).project({
+      day_start: 1, bucket: 1, status: 1, document_count: 1, archive_bytes: 1,
+      started_at: 1, completed_at: 1, object_name: 1, error: 1,
+    }).sort({ day_start: 1 }).limit(MAX_MANIFESTS).toArray(),
+    period < MAX_BACKUP_HISTORY_PERIOD
+      ? database.collection(BACKUP_COLLECTION).findOne({ $and: [
+        ...scope,
+        { day_start: { $lt: window.from } },
+      ] }, { projection: { _id: 1 }, sort: { day_start: -1 } })
+      : Promise.resolve(null),
+  ]);
+  const manifests = new Map<string, HardwareBackupDay>();
+  for (const document of documents) {
+    const day = manifestDay(document);
+    if (day && manifestBelongsToBucket(document, bucket, legacyBucket) && (!manifests.has(day.day) || bucketName(document.bucket))) {
+      manifests.set(day.day, day);
+    }
+  }
+  const days: HardwareBackupDay[] = [];
+  for (let day = window.from; day <= window.to; day = addUtcDays(day, 1)) {
+    days.push(expectedDay(day, manifests.get(dayKey(day))));
+  }
+  return {
+    period,
+    expected_window: { from: window.from.toISOString(), to: window.to.toISOString(), days: window.days },
+    days,
+    has_older: olderManifest !== null,
   };
 }
 
