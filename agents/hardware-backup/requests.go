@@ -161,7 +161,12 @@ func processBackupRequest(
 	request backupRequest,
 	snapshots *mongo.Collection,
 ) error {
-	days, err := selectBackupRequestDays(ctx, manifests, target, cfg, request.Action)
+	schedule, err := loadBackupSchedule(ctx, database)
+	if err != nil {
+		return markBackupRequestFailed(ctx, requests, request.ID, err)
+	}
+	anchor := lastScheduledOccurrence(schedule, time.Now().UTC())
+	days, err := selectBackupRequestDays(ctx, manifests, target, cfg, request.Action, anchor)
 	if err != nil {
 		return markBackupRequestFailed(ctx, requests, request.ID, err)
 	}
@@ -202,11 +207,11 @@ func processBackupRequest(
 	return completeBackupRequest(ctx, requests, request.ID, progress, err)
 }
 
-func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, target BackupTarget, cfg Config, action string) ([]time.Time, error) {
+func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, target BackupTarget, cfg Config, action string, anchor time.Time) ([]time.Time, error) {
 	if action != requestActionRunMissing && action != requestActionRetryFailed {
 		return nil, fmt.Errorf("unsupported backup request action %q", action)
 	}
-	days := backupWindow(cfg, time.Now().UTC())
+	days := backupWindow(cfg, anchor)
 	if action == requestActionRunMissing {
 		var existing []struct {
 			DayStart time.Time `bson:"day_start"`

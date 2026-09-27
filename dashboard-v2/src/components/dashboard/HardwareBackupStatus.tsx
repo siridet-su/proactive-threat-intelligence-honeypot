@@ -498,13 +498,16 @@ function CloudStorageSummary({ storage }: { storage: HardwareBackupStorageStatus
 
 function BackupRequestProgress({ request, reduceMotion }: { request: HardwareBackupRequestView; reduceMotion: boolean }) {
   const isActive = request.status === "pending" || request.status === "running";
-  const statusClassName = request.status === "success"
+  const noEligibleDays = request.status === "success" && request.progress.total_days === 0;
+  const statusClassName = noEligibleDays
+    ? "border-border bg-surface text-text-muted"
+    : request.status === "success"
     ? "border-success-border bg-success-subtle text-success"
     : request.status === "failed"
       ? "border-danger-border bg-danger-subtle text-danger"
       : "border-info-border bg-info-subtle text-info";
   const percent = Math.min(100, Math.max(0, request.progress.percent));
-  const StatusIcon = request.status === "success" ? CheckCircle2 : request.status === "failed" ? XCircle : Clock3;
+  const StatusIcon = noEligibleDays ? CircleDashed : request.status === "success" ? CheckCircle2 : request.status === "failed" ? XCircle : Clock3;
 
   return (
     <motion.div
@@ -521,24 +524,25 @@ function BackupRequestProgress({ request, reduceMotion }: { request: HardwareBac
           <div className="flex flex-wrap items-center gap-1.5">
             <StatusIcon className="h-3.5 w-3.5 text-info" aria-hidden="true" />
             <h3 className="truncate text-sm font-semibold text-text">{actionLabel(request.action)}</h3>
-            <span className={`ui-badge text-xs ${statusClassName}`}>{requestStatusLabel(request)}</span>
+            <span className={`ui-badge text-xs ${statusClassName}`}>{noEligibleDays ? "No eligible days" : requestStatusLabel(request)}</span>
           </div>
           <p className="mt-1 text-xs text-text-subtle">{isActive ? "Progress refreshes every 5 seconds" : formatDateTime(request.completed_at ?? request.created_at)}</p>
         </div>
-        <span className="font-mono text-xl font-semibold leading-none text-text">{percent}%</span>
+        <span className="font-mono text-xl font-semibold leading-none text-text">{noEligibleDays ? "0 days" : `${percent}%`}</span>
       </div>
-      <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface" aria-label={`Backup request progress ${percent}%`}>
+      {!noEligibleDays && <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface" aria-label={`Backup request progress ${percent}%`}>
         <motion.div
           initial={{ width: 0 }}
           animate={{ width: `${percent}%` }}
           transition={{ duration: reduceMotion ? 0 : 0.5, ease: "easeOut" }}
           className={`h-full rounded-full ${request.status === "failed" ? "bg-danger" : request.status === "success" ? "bg-success" : "bg-info"}`}
         />
-      </div>
-      <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-text-subtle">
+      </div>}
+      {noEligibleDays && <p className="mt-3 text-xs text-text-muted">No archive was created. The worker found no {request.action === "run_missing" ? "missing" : "failed"} days in the current backup window.</p>}
+      {!noEligibleDays && <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-text-subtle">
         <span>{formatNumber(request.progress.completed_days)} / {formatNumber(request.progress.total_days)} days</span>
         <span>{request.progress.current_day ? formatDay(request.progress.current_day) : request.status === "success" ? "No days required" : "Waiting for Pi"}</span>
-      </div>
+      </div>}
       {request.error && <p className="mt-2 break-words text-sm leading-5 text-danger">{request.error}</p>}
     </motion.div>
   );

@@ -105,6 +105,19 @@ func dueScheduleDay(schedule backupSchedule, now time.Time) (string, bool) {
 	return day, !localNow.Before(due)
 }
 
+func lastScheduledOccurrence(schedule backupSchedule, now time.Time) time.Time {
+	localNow := now.In(bangkokLocation)
+	localDay := localNow.Format("2006-01-02")
+	hour, minute, _ := parseDailyTime(effectiveScheduleTime(schedule, localDay))
+	occurrence := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, minute, 0, 0, bangkokLocation)
+	if !occurrence.After(now) {
+		return occurrence.UTC()
+	}
+	yesterday := localNow.AddDate(0, 0, -1)
+	hour, minute, _ = parseDailyTime(effectiveScheduleTime(schedule, yesterday.Format("2006-01-02")))
+	return time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), hour, minute, 0, 0, bangkokLocation).UTC()
+}
+
 func tryClaimScheduleRun(ctx context.Context, runs *mongo.Collection, day, workerID, revision string, now time.Time) (bool, error) {
 	filter := bson.M{"_id": day, "$or": bson.A{
 		bson.M{"status": bson.M{"$exists": false}},
