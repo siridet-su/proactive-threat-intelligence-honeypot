@@ -36,6 +36,7 @@ def summarize_session_model1_ttp(
         raise ValueError("session_id is required")
     seen_commands: set[str] = set()
     support: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
+    command_rank_lists: dict[str, list[str]] = {}
     excluded = 0
     for row in classification_events if isinstance(classification_events, list) else []:
         if not isinstance(row, Mapping):
@@ -79,6 +80,21 @@ def summarize_session_model1_ttp(
                 continue
             command_key = f"event:{event_id}"
         seen_commands.add(command_key)
+        ranked_labels: list[str] = []
+        ranked_seen: set[str] = set()
+        topk = prediction.get("topk")
+        if isinstance(topk, list):
+            for ranked_item in topk[:20]:
+                if not isinstance(ranked_item, Mapping):
+                    continue
+                ranked_technique = _text(ranked_item.get("technique_id")).upper()
+                if _TECHNIQUE.fullmatch(ranked_technique):
+                    ranked_technique = ranked_technique.split(".", 1)[0]
+                    if ranked_technique not in ranked_seen:
+                        ranked_seen.add(ranked_technique)
+                        ranked_labels.append(ranked_technique)
+        if ranked_labels:
+            command_rank_lists[command_key] = ranked_labels
         raw_evidence_id = _text(row.get("evidence_id"))
         evidence_id = raw_evidence_id if _EVIDENCE_ID.fullmatch(raw_evidence_id) else ""
         raw_timestamp = _text(row.get("event_timestamp"))
@@ -96,6 +112,10 @@ def summarize_session_model1_ttp(
         "method": "distinct_command_event_count",
         "assessed_command_events": len(seen_commands),
         "excluded_classification_rows": excluded,
+        "command_rank_lists": [
+            {"command_ref": key, "ranked_techniques": value}
+            for key, value in sorted(command_rank_lists.items())[:100]
+        ],
         "techniques": [
             {
                 "technique_id": technique,

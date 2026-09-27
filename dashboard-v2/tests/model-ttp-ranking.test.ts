@@ -15,6 +15,26 @@ function fixture() {
         { technique_id: "T1105", supporting_command_events: 3, evidence_refs: [{ command_ref: "index:0", evidence_id: "a" }] },
         { technique_id: "T1110", supporting_command_events: 2, evidence_refs: [{ command_ref: "index:1", evidence_id: "b" }] },
       ],
+      rrf_recommendation: {
+        schema_version: "session_ttp_rrf_advisory.v1", session_id: sessionId,
+        method: "evidence_gated_reciprocal_rank_fusion", candidate_set_source: "MODEL1_ONLY",
+        score_semantics: "RRF_RANK_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
+        recommendation_order: ["T1105", "T1110"],
+        rows: [
+          { technique_id: "T1110", baseline_rank: 2, rrf_score: 0.0202, model2_rrf_component: 0.0041, model2_support_added: true, eligible: true, model2_decision: "PRESENT", exclusion_reason: null },
+          { technique_id: "T1105", baseline_rank: 1, rrf_score: 0.0164, model2_rrf_component: 0, model2_support_added: false, eligible: true, model2_decision: "ABSENT", exclusion_reason: null },
+        ],
+      },
+      weighted_voting_recommendation: {
+        schema_version: "session_ttp_weighted_voting_advisory.v1", session_id: sessionId,
+        method: "evidence_gated_weighted_voting", candidate_set_source: "MODEL1_ONLY",
+        score_semantics: "VOTE_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
+        recommendation_order: ["T1110", "T1105"],
+        rows: [
+          { technique_id: "T1110", baseline_rank: 2, weighted_vote_score: 1, model2_vote_component: 0.5, model2_support_added: true, eligible: true, model2_decision: "PRESENT", exclusion_reason: null },
+          { technique_id: "T1105", baseline_rank: 1, weighted_vote_score: 0.5, model2_vote_component: 0, model2_support_added: false, eligible: true, model2_decision: "ABSENT", exclusion_reason: null },
+        ],
+      },
     },
     ensemble_evidence: {
       run_id: "run-1",
@@ -32,12 +52,15 @@ function fixture() {
 }
 
 describe("session-level Model1 advisory", () => {
-  it("sorts by distinct command support, not Model2 votes", () => {
-    const ranked = rankTtpRecommendations(fixture());
-    expect(ranked.map((item) => item.techniqueId)).toEqual(["T1105", "T1110"]);
-    expect(ranked.map((item) => item.supportingCommandEvents)).toEqual([3, 2]);
-    expect(ranked.map((item) => item.model2Support)).toEqual(["does_not_support", "corroborates"]);
-    expect(ranked[0].evidenceRefs[0].commandRef).toBe("index:0");
+  it("uses the server-owned weighted-voting order without ranking by raw model scores", () => {
+    const value = fixture();
+    expect(value.session_ttp_advisory.rrf_recommendation.recommendation_order).toEqual(["T1105", "T1110"]);
+    const ranked = rankTtpRecommendations(value);
+    expect(ranked.map((item) => item.techniqueId)).toEqual(["T1110", "T1105"]);
+    expect(ranked.map((item) => item.supportingCommandEvents)).toEqual([2, 3]);
+    expect(ranked.map((item) => item.model2Support)).toEqual(["corroborates", "does_not_support"]);
+    expect(ranked[1].evidenceRefs[0].commandRef).toBe("index:0");
+    expect(ranked[0].rankingScore).toBe(1);
     expect(ranked[0]).not.toHaveProperty("score");
   });
 
@@ -45,7 +68,16 @@ describe("session-level Model1 advisory", () => {
     const value = fixture();
     value.ensemble_evidence.model2.binding.session_id = "other";
     expect(hasBoundModel2(value)).toBe(false);
-    expect(rankTtpRecommendations(value).every((item) => item.model2Support === "unavailable")).toBe(true);
+    // The UI consumes the already-gated server projection; it does not
+    // reconstruct or override the server-owned weighted vote from raw evidence.
+    expect(rankTtpRecommendations(value)[0].model2SupportAdded).toBe(true);
+  });
+
+  it("falls back to Model1 order when the weighted projection is missing or cross-session, even if RRF exists", () => {
+    const value = fixture();
+    value.session_ttp_advisory.weighted_voting_recommendation.session_id = "other";
+    expect(rankTtpRecommendations(value).map((item) => item.techniqueId)).toEqual(["T1105", "T1110"]);
+    expect(rankTtpRecommendations(value).every((item) => item.rankingScore === null && !item.model2SupportAdded)).toBe(true);
   });
 
   it("fails closed on missing or cross-session advisory, and invalid counts", () => {

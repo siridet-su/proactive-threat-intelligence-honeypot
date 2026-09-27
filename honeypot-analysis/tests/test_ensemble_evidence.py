@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+
 import pytest
 
 import production.ensemble.evidence as evidence_module
@@ -15,6 +18,45 @@ from production.ensemble.evidence import (
     normalize_model2_v5_shadow_result,
 )
 from production.utils.sensor_identity import canonical_session_id
+
+
+def test_model2_bridge_accepts_bounded_spool_lookup_over_250ms(monkeypatch, tmp_path) -> None:
+    class DelayedBridge:
+        timeout = 0.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def settimeout(self, value):
+            self.timeout = value
+
+        def connect(self, _path):
+            pass
+
+        def sendall(self, _request):
+            pass
+
+        def recv(self, _size):
+            time.sleep(0.35)
+            if self.timeout < 0.35:
+                raise TimeoutError("bounded spool lookup exceeded client deadline")
+            return (json.dumps({
+                "schema_version": "model2_v5_ensemble_bridge_response.v1",
+                "status": "AVAILABLE",
+                "result": {"session_id": "session-a"},
+            }) + "\n").encode("utf-8")
+
+    bridge = DelayedBridge()
+    monkeypatch.setattr(evidence_module.socket, "socket", lambda *_args: bridge)
+    reachable, result = evidence_module._query_model2_v5_bridge(
+        session_id="session-a", run_id="", socket_path=tmp_path / "bridge.sock",
+    )
+
+    assert reachable is True
+    assert result == {"session_id": "session-a"}
 
 
 def _model1(

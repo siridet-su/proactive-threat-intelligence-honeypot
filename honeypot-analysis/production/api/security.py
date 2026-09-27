@@ -576,17 +576,23 @@ _COMPACT_SESSION_DETAIL_CORRELATION_LIMIT = 20
 _COMPACT_SESSION_DETAIL_CLASSIFICATION_LIMIT = 100
 _COMPACT_SESSION_DETAIL_TACTIC_PATH_LIMIT = 50
 _COMPACT_SESSION_DETAIL_TEXT_LIMIT = 160
+_COMPACT_SESSION_DETAIL_GUIDANCE_TEXT_LIMIT = 2_048
 _COMPACT_SESSION_DETAIL_GUIDANCE_LIMIT = 20
 _COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT = 8
 
 
-def _compact_scalar_fields(source: Mapping[str, Any], names: Iterable[str]) -> Dict[str, Any]:
+def _compact_scalar_fields(
+    source: Mapping[str, Any],
+    names: Iterable[str],
+    *,
+    text_limit: int = _COMPACT_SESSION_DETAIL_TEXT_LIMIT,
+) -> Dict[str, Any]:
     """Pick bounded scalar metadata without forwarding free-form evidence text."""
     projected: Dict[str, Any] = {}
     for name in names:
         value = source.get(name)
         if isinstance(value, str) and value:
-            projected[name] = value[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT]
+            projected[name] = value[:text_limit]
         elif isinstance(value, bool):
             projected[name] = value
         elif isinstance(value, int):
@@ -750,7 +756,7 @@ def _bounded_guidance_text_list(value: Any) -> list[str]:
         text = item.strip()
         if not text:
             continue
-        output.append(text[:_COMPACT_SESSION_DETAIL_TEXT_LIMIT])
+        output.append(text[:_COMPACT_SESSION_DETAIL_GUIDANCE_TEXT_LIMIT])
         if len(output) >= _COMPACT_SESSION_DETAIL_GUIDANCE_LIST_LIMIT:
             break
     return output
@@ -775,6 +781,7 @@ def _compact_guidance_records(items: Any, *, kind: str) -> list[Dict[str, Any]]:
                     "evidence_status",
                     "authority",
                 ),
+                text_limit=_COMPACT_SESSION_DETAIL_GUIDANCE_TEXT_LIMIT,
             )
         else:
             projected = _compact_scalar_fields(
@@ -786,6 +793,7 @@ def _compact_guidance_records(items: Any, *, kind: str) -> list[Dict[str, Any]]:
                     "rule_id",
                     "priority",
                 ),
+                text_limit=_COMPACT_SESSION_DETAIL_GUIDANCE_TEXT_LIMIT,
             )
             for field in (
                 "requires_manual_approval",

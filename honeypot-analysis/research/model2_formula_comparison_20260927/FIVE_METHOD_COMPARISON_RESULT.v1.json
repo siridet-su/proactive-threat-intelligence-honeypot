@@ -1,0 +1,125 @@
+{
+  "warning": "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY",
+  "split": "SEALED_FINAL",
+  "paired_rows": 120,
+  "formula_contract": {
+    "weighted_voting": "0.5*I(Model1 candidate) + 0.5*I(gated Model2 PRESENT); ties retain Model1 order",
+    "gated_weighted_reciprocal_rank": "S(t)=1.0*(1/N)*sum_c I(t in Lc)/(60+r_c(t)) + 0.25*G2(t)/(60+1)",
+    "candidate_set": "MODEL1_ONLY",
+    "model2_absent_policy": "NO_SUBTRACTION",
+    "score_semantics": "RANKING_SCORE_NOT_PROBABILITY_OR_CONFIDENCE"
+  },
+  "method_metrics": {
+    "model1_only": {
+      "evaluated_positive_sessions": 64,
+      "negative_control_sessions": 56,
+      "hit_at_1": 0.1875,
+      "mrr": 0.4843749999999999,
+      "ndcg_at_5": 0.556063476364328,
+      "relevant_candidate_coverage": 0.875,
+      "negative_control_with_any_model1_candidate": 48
+    },
+    "model1_old32_weighted_voting": {
+      "evaluated_positive_sessions": 64,
+      "negative_control_sessions": 56,
+      "hit_at_1": 0.65625,
+      "mrr": 0.765625,
+      "ndcg_at_5": 0.769579270383616,
+      "relevant_candidate_coverage": 0.875,
+      "negative_control_with_any_model1_candidate": 48
+    },
+    "model1_old32_gated_weighted_reciprocal_rank": {
+      "evaluated_positive_sessions": 64,
+      "negative_control_sessions": 56,
+      "hit_at_1": 0.53125,
+      "mrr": 0.703125,
+      "ndcg_at_5": 0.7176907723633914,
+      "relevant_candidate_coverage": 0.875,
+      "negative_control_with_any_model1_candidate": 48
+    },
+    "model1_new54_weighted_voting": {
+      "evaluated_positive_sessions": 64,
+      "negative_control_sessions": 56,
+      "hit_at_1": 0.875,
+      "mrr": 0.875,
+      "ndcg_at_5": 0.8508216995478413,
+      "relevant_candidate_coverage": 0.875,
+      "negative_control_with_any_model1_candidate": 48
+    },
+    "model1_new54_gated_weighted_reciprocal_rank": {
+      "evaluated_positive_sessions": 64,
+      "negative_control_sessions": 56,
+      "hit_at_1": 0.75,
+      "mrr": 0.8125,
+      "ndcg_at_5": 0.798424888769635,
+      "relevant_candidate_coverage": 0.875,
+      "negative_control_with_any_model1_candidate": 48
+    }
+  },
+  "model2_raw_confusion": {
+    "old32": {
+      "T1105": {
+        "tp": 29,
+        "fp": 0,
+        "tn": 36,
+        "fn": 19,
+        "unavailable": 36
+      },
+      "T1046": {
+        "tp": 20,
+        "fp": 0,
+        "tn": 64,
+        "fn": 0,
+        "unavailable": 36
+      },
+      "T1110": {
+        "tp": 16,
+        "fp": 0,
+        "tn": 68,
+        "fn": 0,
+        "unavailable": 36
+      }
+    },
+    "new54": {
+      "T1105": {
+        "tp": 48,
+        "fp": 4,
+        "tn": 68,
+        "fn": 0,
+        "unavailable": 0
+      },
+      "T1046": {
+        "tp": 20,
+        "fp": 0,
+        "tn": 100,
+        "fn": 0,
+        "unavailable": 0
+      },
+      "T1110": {
+        "tp": 16,
+        "fp": 0,
+        "tn": 104,
+        "fn": 0,
+        "unavailable": 0
+      }
+    }
+  },
+  "t1110_single_success_hard_negative": {
+    "old32_raw_present": 0,
+    "new54_raw_present": 0,
+    "old32_votes": 0,
+    "new54_votes": 0,
+    "rows": 12
+  },
+  "limitations": [
+    "procedure-defined controlled synthetic labels",
+    "not real-world accuracy",
+    "same corpus file contains final labels; not independent escrow",
+    "Model1 artifact compatibility depends on its pinned sklearn runtime"
+  ],
+  "identities": {
+    "model1_package_sha256": "3bad72d688add1064aa236f3a24e9f031aa9e97a8fb449ad730e64389487c5d7",
+    "old32_artifact_file_sha256": "104d4c77a3e1536b847561abb19fc7c0d6d7dc0111cd98d1ff2d9c9d74a2ed1a",
+    "new54_artifact_file_sha256": "fb56940ba2ca90c0942813168d9f5a85cb80a58da5c62e2dd7e343da5f71d5fa"
+  }
+}

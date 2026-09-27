@@ -52,11 +52,7 @@ def advisory_presentation(
             value for value in item.get("finding_ids") or []
             if isinstance(value, str) and value in allowed
         }
-        if (
-            template_id == "summarize_selected_findings"
-            and "canonical finding" in text.lower()
-            and (not ids or ids - canonical)
-        ):
+        if template_id == "summarize_selected_findings":
             if not ids:
                 text = (
                     "AI finding selection could not be verified against the current "

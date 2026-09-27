@@ -41,6 +41,7 @@ from production.api.security import (
 from production.classification.classification_evaluation import classification_metrics
 from production.ensemble.evidence import build_ensemble_from_session_payload
 from production.ensemble.session_ttp_advisory import summarize_session_model1_ttp
+from production.ensemble.rrf_advisory import with_rrf_advisory
 from production.enrichment.external_ti_session import (
     OBSERVABLE_TI_SCHEMA,
     SESSION_TI_SCHEMA,
@@ -2717,6 +2718,60 @@ DASHBOARD_SESSION_DETAIL_TABLE_LIMITS = {
 }
 
 
+def _current_enrichment_status(
+    storage: Any,
+    session_id: str,
+    stored_status: Any,
+    *,
+    config: MonitorConfig,
+) -> Dict[str, Any]:
+    """Project queue completion at read time without rewriting the session.
+
+    A closed session records the enqueue result before asynchronous enrichment
+    finishes.  That immutable snapshot may therefore remain ``queued`` even
+    after every job is terminal.  The session TI projection is the current,
+    read-only authority for queue state and never performs provider I/O.
+    """
+
+    stored = copy.deepcopy(stored_status) if isinstance(stored_status, dict) else {}
+    try:
+        projection = build_session_ti_projection(
+            storage,
+            session_id,
+            config=config.production_config,
+        )
+    except Exception:
+        return stored
+    if not isinstance(projection, dict) or projection.get("ok") is not True:
+        return stored
+    summary = projection.get("enrichment_job_summary")
+    summary = summary if isinstance(summary, dict) else {}
+    pending = summary.get("pending")
+    total = summary.get("total")
+    status_counts = summary.get("status_counts")
+    if not isinstance(pending, bool) or not isinstance(total, int):
+        return stored
+    current = copy.deepcopy(stored)
+    previous = str(current.get("status") or "").strip()
+    if pending:
+        current["status"] = "queued"
+    elif total > 0:
+        current["status"] = "completed"
+    elif previous == "queued":
+        current["status"] = "no_eligible_observable"
+    current.update({
+        "source": "current_session_ti_projection",
+        "jobs_total": total,
+        "jobs_pending": pending,
+        "job_status_counts": status_counts if isinstance(status_counts, dict) else {},
+        "read_only_projection": True,
+        "updated_at": str(projection.get("timestamp") or current.get("updated_at") or ""),
+    })
+    if previous and previous != current.get("status"):
+        current["stored_status"] = previous
+    return current
+
+
 def _fail_closed_session_guidance(
     session_id: str,
     guidance: Any,
@@ -2972,6 +3027,16 @@ def load_dashboard_session_detail(
         if projected_duration is not None:
             overview["recorded_duration"] = overview.get("duration") or ""
             overview["duration"] = projected_duration
+    model1_advisory = summarize_session_model1_ttp(
+        payload.get("classification_events"), session_id=clean_session_id,
+    )
+    session_ttp_advisory = with_rrf_advisory(
+        model1_advisory,
+        ensemble_evidence,
+        session_id=clean_session_id,
+        session_ended=overview["is_ended"],
+        latest_event_at=_latest_iso_timestamp(event_timestamps),
+    )
     report_summary = _report_summary_with_current_ai(
         config, storage, clean_session_id, report_payload, {},
     )
@@ -2992,9 +3057,7 @@ def load_dashboard_session_detail(
         "commands": payload.get("commands") or [],
         "authentication_activity": authentication_activity,
         "classification_events": payload.get("classification_events") or [],
-        "session_ttp_advisory": summarize_session_model1_ttp(
-            payload.get("classification_events"), session_id=clean_session_id
-        ),
+        "session_ttp_advisory": session_ttp_advisory,
         "observed_tactic_path": payload.get("observed_tactic_path") or build_observed_tactic_path(payload),
         "observed_trusted_ttps": payload.get("observed_trusted_ttps") or [],
         "correlated_ttp_hypotheses": payload.get("correlated_ttp_hypotheses") or payload.get("session_ttp_correlations") or [],
@@ -3012,7 +3075,12 @@ def load_dashboard_session_detail(
         "tactics": payload.get("tactics") or [],
         "ttps": payload.get("ttps") or [],
         "ttp_command_map": payload.get("ttp_command_map") or {},
-        "enrichment_status": payload.get("enrichment_status") or {},
+        "enrichment_status": _current_enrichment_status(
+            storage,
+            clean_session_id,
+            payload.get("enrichment_status"),
+            config=config,
+        ),
         "ensemble_evidence": ensemble_evidence,
         "next_distinct_prediction": next_distinct_projection,
         "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
@@ -3446,7 +3514,7 @@ def load_session_report_pdf(
 
     This endpoint is deliberately read-only. It uses the canonical stored
     report and session payload together with already-materialized external-TI,
-    AI-advisory, and exact-session Next Distinct projections, renders into a
+    AI-advisory, exact-session Model2/RRF, and Next Distinct projections, renders into a
     temporary directory, and never invokes a provider/model or writes MongoDB
     or the persistent report directory.
     A report must already exist; the endpoint never invents an assessment for
@@ -3571,12 +3639,48 @@ def load_session_report_pdf(
             )
         except Exception:
             prediction_snapshot = None
+        try:
+            live_ensemble = build_ensemble_from_session_payload(
+                session_payload,
+                computed_at=utc_now(),
+            )
+            ensemble_projection = _select_session_ensemble(
+                clean_session_id,
+                live_ensemble,
+                session_payload.get("ensemble_evidence"),
+            )
+        except Exception:
+            ensemble_projection = _select_session_ensemble(
+                clean_session_id,
+                session_payload.get("ensemble_evidence"),
+            )
+        event_timestamps = [
+            _text(_event_payload(row).get("timestamp") or row.get("timestamp"))
+            for row in event_rows
+        ]
+        event_timestamps = [value for value in event_timestamps if value]
+        model1_advisory = summarize_session_model1_ttp(
+            session_payload.get("classification_events"),
+            session_id=clean_session_id,
+        )
+        session_ttp_advisory = with_rrf_advisory(
+            model1_advisory,
+            ensemble_projection,
+            session_id=clean_session_id,
+            session_ended=bool(
+                session_payload.get("is_ended")
+                or str(session_payload.get("status") or "").lower() in {"closed", "ended"}
+            ),
+            latest_event_at=_latest_iso_timestamp(event_timestamps),
+        )
         return render_pdf_report_bytes(
             report_payload,
             session_payload,
             external_ti_projection=external_ti_projection,
             ai_advisory_projection=ai_advisory_projection,
             prediction_snapshot=prediction_snapshot,
+            ensemble_projection=ensemble_projection,
+            session_ttp_advisory_projection=session_ttp_advisory,
         ), {}
     except Exception as exc:
         return None, {
@@ -3740,6 +3844,21 @@ def load_session_detail(
         configured_policy_path=config.response_guidance_policy_path,
     )
     primary_response_guidance = historical_response_guidance or current_policy_reevaluation
+    full_event_timestamps = [
+        _text(_event_payload(row).get("timestamp") or row.get("timestamp"))
+        for row in event_rows
+    ]
+    full_overview = _session_overview(selected)
+    model1_advisory = summarize_session_model1_ttp(
+        payload.get("classification_events"), session_id=session_id,
+    )
+    session_ttp_advisory = with_rrf_advisory(
+        model1_advisory,
+        ensemble_evidence,
+        session_id=session_id,
+        session_ended=bool(payload.get("is_ended") or session_rows[0].get("ended")),
+        latest_event_at=_latest_iso_timestamp(full_event_timestamps),
+    )
     report_summary = _report_summary_with_current_ai(
         config, storage, session_id, report_payload, artifact_payload,
     )
@@ -3747,7 +3866,7 @@ def load_session_detail(
         "ok": True,
         "timestamp": utc_now(),
         "session_id": session_id,
-        "overview": _session_overview(selected),
+        "overview": full_overview,
         "source_geo": selected.get("geo") or (_extract_geo(payload) if selected.get("src_ip_is_public") else {}),
         "source_geo_context": selected.get("source_geo_context") or selected.get("geo_context") or {},
         "observables": [{"type": t, "value": v} for t, v in _session_observables(payload, session_id)],
@@ -3766,9 +3885,15 @@ def load_session_detail(
         "tactics": payload.get("tactics") or [],
         "ttps": payload.get("ttps") or [],
         "ttp_command_map": payload.get("ttp_command_map") or {},
-        "enrichment_status": payload.get("enrichment_status") or {},
+        "enrichment_status": _current_enrichment_status(
+            storage,
+            session_id,
+            payload.get("enrichment_status"),
+            config=config,
+        ),
         "credential_metadata": payload.get("credential_metadata") or {},
         "ensemble_evidence": ensemble_evidence,
+        "session_ttp_advisory": session_ttp_advisory,
         "prediction_snapshots": [_row_with_payload(row) for row in prediction_rows],
         "latest_prediction_snapshot": latest_prediction,
         "session_payload": payload,

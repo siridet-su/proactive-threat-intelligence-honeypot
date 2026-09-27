@@ -1,0 +1,93 @@
+{
+  "warning": "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY",
+  "dataset_type": "CONTROLLED_SYNTHETIC_POC",
+  "state": "GENERATED_SYNTHETIC_ONLY_NOT_REAL_SESSION_DATA",
+  "seed": 20260926,
+  "repetitions_per_family": 4,
+  "feature_schema_id": "model2_unified_session_research.v1",
+  "feature_schema_sha256": "28cc1a43e59259c5939dacdb889cdbe4e13fbdaa71b197264e27907a071d13c1",
+  "split_manifest_sha256": "beadf2d8278f1e8d3a3818bcf838e7ded3c63a09ec606e1d75deb6ccdaed53dd",
+  "rows_total": 360,
+  "families_total": 90,
+  "split_rows": {
+    "FIT": 120,
+    "SELECTION": 120,
+    "SEALED_FINAL": 120
+  },
+  "split_families": {
+    "FIT": 30,
+    "SELECTION": 30,
+    "SEALED_FINAL": 30
+  },
+  "fit_selection_validation": {
+    "valid": true,
+    "rows": 240,
+    "procedure_families": 60,
+    "duplicate_groups": 60,
+    "unique_source_episodes": 240,
+    "split_rows": {
+      "FIT": 120,
+      "SELECTION": 120
+    },
+    "label_support": {
+      "T1105": {
+        "negative": 144,
+        "positive": 96
+      },
+      "T1046": {
+        "negative": 200,
+        "positive": 40
+      },
+      "T1110": {
+        "negative": 208,
+        "positive": 32
+      }
+    },
+    "split_label_support": {
+      "FIT": {
+        "T1105": {
+          "negative": 72,
+          "positive": 48
+        },
+        "T1046": {
+          "negative": 100,
+          "positive": 20
+        },
+        "T1110": {
+          "negative": 104,
+          "positive": 16
+        }
+      },
+      "SELECTION": {
+        "T1105": {
+          "negative": 72,
+          "positive": 48
+        },
+        "T1046": {
+          "negative": 100,
+          "positive": 20
+        },
+        "T1110": {
+          "negative": 104,
+          "positive": 16
+        }
+      }
+    },
+    "t1105_valid_nontransfer_hard_negative_rows": 144,
+    "t1105_benign_content_transfer_positive_rows": 8,
+    "dataset_content_sha256": "c08df9380b48ee78290400c0d56bc9eaead93709664027738ece3e33438dbf98"
+  },
+  "labels_are_procedure_defined_not_model_generated": true,
+  "human_adjudication_performed": false,
+  "final_partition_labels_in_same_synthetic_file": true,
+  "external_final_label_escrow": false,
+  "t1105_semantics": "SESSION_BOUND_TRANSFER_ACTIVITY",
+  "benign_content_transfer_label": "T1105_POSITIVE",
+  "http_log_used": false,
+  "fit_selection_content_sha256": "c08df9380b48ee78290400c0d56bc9eaead93709664027738ece3e33438dbf98",
+  "full_dataset_content_sha256": "f0756dbfeb80624672375a32e32b30b8b1a9d4330975b882a01707799fa0955b",
+  "serialized_dataset_sha256": "b650a44e5f69a12c287282fcb3da82944f29e000e88cc4924b3a65d56158e7c0",
+  "t1105_nontransfer_hard_negative_rows": 216,
+  "t1105_benign_content_transfer_positive_rows": 12,
+  "production_ready": false
+}
