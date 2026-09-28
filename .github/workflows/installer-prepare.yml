@@ -4,8 +4,17 @@ on:
   pull_request:
     paths:
       - "deploy/ansible/**"
+      - "deploy/decoy-honeypot/**"
       - "deploy/profiles/**"
+      - "integrations/deception-core/**"
+      - "integrations/cowrie/**"
+      - "integrations/web-corp/**"
       - "scripts/build_sensor_release.py"
+      - "scripts/build_cowrie_source.py"
+      - "scripts/bootstrap_sensor_build.sh"
+      - "scripts/check_pi_env.py"
+      - "scripts/check_pi_runtime.py"
+      - "scripts/install_pi_sensor.py"
       - "scripts/pti_install.py"
       - "scripts/verify_sensor_release.py"
       - "tests/installer/**"
@@ -15,8 +24,17 @@ on:
       - main
     paths:
       - "deploy/ansible/**"
+      - "deploy/decoy-honeypot/**"
       - "deploy/profiles/**"
+      - "integrations/deception-core/**"
+      - "integrations/cowrie/**"
+      - "integrations/web-corp/**"
       - "scripts/build_sensor_release.py"
+      - "scripts/build_cowrie_source.py"
+      - "scripts/bootstrap_sensor_build.sh"
+      - "scripts/check_pi_env.py"
+      - "scripts/check_pi_runtime.py"
+      - "scripts/install_pi_sensor.py"
       - "scripts/pti_install.py"
       - "scripts/verify_sensor_release.py"
       - "tests/installer/**"
@@ -26,6 +44,25 @@ permissions:
   contents: read
 
 jobs:
+  cowrie-source:
+    name: Pinned Cowrie patch and reproducible archive
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out project source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Fetch the exact upstream Cowrie revision
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/cowrie/cowrie.git /tmp/pti-cowrie
+          git -C /tmp/pti-cowrie checkout --detach 575146bc6b24d70082527d66cd805d9bae0e0db4
+
+      - name: Verify patch application and archive reproducibility
+        run: |
+          git -C /tmp/pti-cowrie apply --check "$GITHUB_WORKSPACE/integrations/cowrie/patches/0001-authoritative-cwd-telemetry.patch"
+          python3 scripts/build_cowrie_source.py --checkout /tmp/pti-cowrie --output /tmp/pti-cowrie-one.tar.gz
+          python3 scripts/build_cowrie_source.py --checkout /tmp/pti-cowrie --output /tmp/pti-cowrie-two.tar.gz
+          cmp /tmp/pti-cowrie-one.tar.gz /tmp/pti-cowrie-two.tar.gz
+
   offline-checks:
     name: Offline installer contract checks
     runs-on: ubuntu-24.04
@@ -43,6 +80,9 @@ jobs:
 
       - name: Run installer unit tests and validate JSON profiles
         run: |
+          bash -n scripts/bootstrap_sensor_build.sh
+          bash scripts/bootstrap_sensor_build.sh --check
+          python -m py_compile scripts/build_cowrie_source.py scripts/check_pi_env.py scripts/check_pi_runtime.py scripts/install_pi_sensor.py
           python -m unittest discover -s tests/installer -p 'test_*.py' -q
           python -m json.tool deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json >/dev/null
           python -m json.tool deploy/profiles/pi-sensor-arm64.json >/dev/null
@@ -52,3 +92,25 @@ jobs:
         run: |
           printf '[pi_sensors]\nlocalhost ansible_connection=local\n' > /tmp/pti-installer-ci-inventory.ini
           ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/prepare-pi.yml
+          ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/audit-prepared-pi.yml
+          ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/stage-pi-env-examples.yml
+          ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/activate-pi-go.yml
+          ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/prepare-zeek.yml
+          ansible-playbook --syntax-check -i /tmp/pti-installer-ci-inventory.ini deploy/ansible/prepare-cowrie.yml
+
+      - name: Check tracked active decoy source without starting services
+        env:
+          POSTGRES_PASSWORD: validation-only
+        run: |
+          docker compose -f deploy/decoy-honeypot/compose.yaml config --quiet
+          python - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+
+          source = Path('integrations/deception-core')
+          for path in source.rglob('*.py'):
+              ast.parse(path.read_text())
+          for path in source.rglob('*.json'):
+              json.loads(path.read_text())
+          PY

@@ -1,0 +1,197 @@
+---
+# Stage the exact patched Cowrie source and Python dependencies. No listener.
+- name: Prepare Cowrie source without activation
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_cowrie_archive: ''
+    pti_cowrie_sha256: ''
+    pti_cowrie_home: /home/cowrie
+    pti_cowrie_source: /home/cowrie/cowrie
+    pti_cowrie_marker: /var/lib/pti-installer/cowrie-source
+  pre_tasks:
+    - name: Require selected prepared ARM64 target and approved source archive
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_cowrie_archive is match('^/')
+          - pti_cowrie_sha256 is match('^[0-9a-f]{64}$')
+
+    - name: Verify reviewed Cowrie archive before host mutation
+      ansible.builtin.stat:
+        path: "{{ pti_cowrie_archive }}"
+        checksum_algorithm: sha256
+      register: pti_cowrie_local_archive
+      delegate_to: localhost
+      become: false
+
+    - name: Require the approved local archive digest
+      ansible.builtin.assert:
+        that:
+          - pti_cowrie_local_archive.stat.isreg | default(false)
+          - not (pti_cowrie_local_archive.stat.islnk | default(false))
+          - pti_cowrie_local_archive.stat.checksum == pti_cowrie_sha256
+
+    - name: Inspect completed Pi preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_cowrie_prepare_marker
+
+    - name: Require root-owned completed Pi preparation marker
+      ansible.builtin.assert:
+        that:
+          - pti_cowrie_prepare_marker.stat.isreg | default(false)
+          - not (pti_cowrie_prepare_marker.stat.islnk | default(false))
+          - pti_cowrie_prepare_marker.stat.uid == 0
+          - pti_cowrie_prepare_marker.stat.mode == '0644'
+
+    - name: Read Pi preparation marker
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_cowrie_prepare_marker_file
+
+    - name: Require completed Pi preparation
+      ansible.builtin.assert:
+        that:
+          - (pti_cowrie_prepare_marker_file.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_cowrie_prepare_marker_file.content | b64decode | from_json).state == 'prepared'
+
+    - name: Inspect existing Cowrie source and marker
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ pti_cowrie_source }}"
+        - "{{ pti_cowrie_marker }}"
+      register: pti_cowrie_existing
+
+    - name: Reject unmarked or linked Cowrie source
+      ansible.builtin.assert:
+        that:
+          - not (pti_cowrie_existing.results[0].stat.islnk | default(false))
+          - not (pti_cowrie_existing.results[1].stat.islnk | default(false))
+          - not pti_cowrie_existing.results[0].stat.exists or pti_cowrie_existing.results[1].stat.exists
+
+    - name: Read existing Cowrie marker when present
+      ansible.builtin.slurp:
+        src: "{{ pti_cowrie_marker }}"
+      register: pti_cowrie_marker_file
+      when: pti_cowrie_existing.results[1].stat.exists
+
+    - name: Require same approved Cowrie source on retry
+      ansible.builtin.assert:
+        that:
+          - pti_cowrie_existing.results[1].stat.isreg
+          - pti_cowrie_existing.results[1].stat.uid == 0
+          - pti_cowrie_existing.results[1].stat.mode == '0644'
+          - (pti_cowrie_marker_file.content | b64decode | from_json).schema == 'pti.cowrie-source.v1'
+          - (pti_cowrie_marker_file.content | b64decode | from_json).sha256 == pti_cowrie_sha256
+          - (pti_cowrie_marker_file.content | b64decode | from_json).state in ['preparing', 'prepared']
+          - (pti_cowrie_marker_file.content | b64decode | from_json).state != 'prepared' or pti_cowrie_existing.results[0].stat.exists
+        fail_msg: Existing Cowrie source belongs to another or unverified release.
+      when: pti_cowrie_existing.results[1].stat.exists
+
+    - name: Refuse to stage over a running Cowrie process
+      ansible.builtin.command: pgrep -f '[c]owrie.*twistd'
+      register: pti_cowrie_processes
+      failed_when: pti_cowrie_processes.rc not in [0, 1]
+      changed_when: false
+
+    - name: Require Cowrie stopped during source preparation
+      ansible.builtin.assert:
+        that: pti_cowrie_processes.rc == 1
+
+  tasks:
+    - name: Create dedicated non-login Cowrie account
+      ansible.builtin.user:
+        name: cowrie
+        home: "{{ pti_cowrie_home }}"
+        shell: /usr/sbin/nologin
+        create_home: true
+        system: true
+
+    - name: Mark resumable Cowrie preparation before writing source files
+      ansible.builtin.copy:
+        dest: "{{ pti_cowrie_marker }}"
+        content: "{{ {'schema': 'pti.cowrie-source.v1', 'base_revision': '575146bc6b24d70082527d66cd805d9bae0e0db4', 'sha256': pti_cowrie_sha256, 'state': 'preparing'} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+      when: not pti_cowrie_existing.results[1].stat.exists
+
+    - name: Copy approved Cowrie archive to protected installer staging
+      ansible.builtin.copy:
+        src: "{{ pti_cowrie_archive }}"
+        dest: "/var/lib/pti-installer/cowrie-{{ pti_cowrie_sha256 }}.tar.gz"
+        owner: root
+        group: root
+        mode: '0640'
+
+    - name: Extract the reviewed source on first run only
+      ansible.builtin.unarchive:
+        src: "/var/lib/pti-installer/cowrie-{{ pti_cowrie_sha256 }}.tar.gz"
+        dest: "{{ pti_cowrie_home }}"
+        remote_src: true
+        owner: cowrie
+        group: cowrie
+      when: not pti_cowrie_existing.results[1].stat.exists or (pti_cowrie_marker_file.content | b64decode | from_json).state == 'preparing'
+
+    - name: Install Cowrie's pinned direct Python dependencies in a private venv
+      ansible.builtin.pip:
+        requirements: "{{ pti_cowrie_source }}/requirements.txt"
+        virtualenv: "{{ pti_cowrie_home }}/venv"
+        virtualenv_command: python3 -m venv
+        extra_args: --no-cache-dir
+      when: not pti_cowrie_existing.results[1].stat.exists or (pti_cowrie_marker_file.content | b64decode | from_json).state == 'preparing'
+
+    - name: Install pinned Cowrie build backend in the venv
+      ansible.builtin.pip:
+        name: setuptools==80.9.0
+        virtualenv: "{{ pti_cowrie_home }}/venv"
+        extra_args: --no-cache-dir
+      when: not pti_cowrie_existing.results[1].stat.exists or (pti_cowrie_marker_file.content | b64decode | from_json).state == 'preparing'
+
+    - name: Install patched Cowrie source without fetching dependencies again
+      ansible.builtin.pip:
+        name: "{{ pti_cowrie_source }}"
+        virtualenv: "{{ pti_cowrie_home }}/venv"
+        extra_args: --no-deps --no-build-isolation --no-cache-dir
+      when: not pti_cowrie_existing.results[1].stat.exists or (pti_cowrie_marker_file.content | b64decode | from_json).state == 'preparing'
+
+    - name: Verify the two patched source files have their reviewed hashes
+      ansible.builtin.stat:
+        path: "{{ pti_cowrie_source }}/{{ item.path }}"
+        checksum_algorithm: sha256
+      loop:
+        - { path: 'src/cowrie/commands/fs.py', sha256: '7a9890b7391099e441ad4ed128ba5e01b09ec057aca097b34cc2ccdde6508441' }
+        - { path: 'src/cowrie/shell/honeypot.py', sha256: '0e1d152cd8d01ef3d97a81d4ee9f652f6c2d747afd853f1ce9185724ebc207fa' }
+      register: pti_cowrie_patched_files
+
+    - name: Require the reviewed Cowrie patch on the target
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.checksum == item.item.sha256
+      loop: "{{ pti_cowrie_patched_files.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+
+    - name: Verify installed Python dependency compatibility
+      ansible.builtin.command: "{{ pti_cowrie_home }}/venv/bin/python -m pip check"
+      changed_when: false
+
+    - name: Record approved source identity after successful staging
+      ansible.builtin.copy:
+        dest: "{{ pti_cowrie_marker }}"
+        content: "{{ {'schema': 'pti.cowrie-source.v1', 'base_revision': '575146bc6b24d70082527d66cd805d9bae0e0db4', 'sha256': pti_cowrie_sha256, 'state': 'prepared'} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Report staged Cowrie source without enabling a listener
+      ansible.builtin.debug:
+        msg: "Cowrie source {{ pti_cowrie_sha256 }} and venv staged; no cowrie.service or public listener was created."

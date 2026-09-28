@@ -1,0 +1,48 @@
+{
+  "schema_version": "2",
+  "_purpose": "ตารางลวงสำหรับ psql Part 1 (2026-08-26) — แทนที่ psql_decoy_schema.json เดิมทั้งหมด (6 ตารางเดิม + schema `decoy` เดิม ถูกลบทิ้งแล้วตามมติผู้ใช้ 2026-08-26 'ไม่น่าจะไปใช้แล้ว') ตารางในไฟล์นี้ generate ตอน login สำเร็จจริง (synchronous/blocking) ไม่ใช่ background pre-fetch แบบเดิม — INSERT ลง Postgres จริง (schema ชื่อเดิม `decoy` — reuse ชื่อ ไม่ใช่ schema ใหม่ เพราะของเก่าถูกลบแล้วไม่มีอะไรให้ชนอีก)",
+  "_created": "2026-08-26",
+  "_decision_rationale": "top-10 command research (ดู docs/worklogs/work_log_2026-08-26.md) ระบุว่า SELECT/\\dt เป็นพฤติกรรมสำรวจ DB หลักของ attacker — ชื่อทุกตัวเช็คแล้วไม่ชนกับ db_schema.json/KNOWN_TABLES (psql.py) — ไม่มี tier/content_type แบบของเดิม เพราะ generate ตอน login (ก่อนมีคำสั่งไหนเลย) ยังไม่รู้ tier/action ของ session (มาจากพฤติกรรมที่ยังไม่เกิดขึ้น) — Part 2 จะจัดการเรื่องปรับตาม action/phase ทีหลัง",
+  "db_schema": {
+    "schema_name": "decoy",
+    "note": "reuse ชื่อ schema เดิมใน database odoo_production (ของเก่า 6 ตารางถูก DROP SCHEMA CASCADE ทิ้งแล้ว ก่อน deploy ไฟล์นี้ — ดู docs/reports/pi_part1_realdb_cleanup_2026-08-26.md) — ไม่ใช่ database แยก"
+  },
+  "content_policy_legend": {
+    "generated_realdb": "เนื้อหา AI แต่งตอน login จริง แล้ว INSERT ลง Postgres จริง"
+  },
+  "uniqueness_legend": {
+    "session": "แถวข้อมูลต้อง generate ใหม่ทุก session แล้วลบทิ้งตอนจบ session (ตามมติ 'อยู่แค่ session เดียว') — กรองด้วยคอลัมน์ภายใน session_id เสมอตอน query (กันข้อมูลรั่วข้าม session ถ้ามี attacker 2 คนเข้าพร้อมกัน)"
+  },
+  "decoy_tables": [
+    {
+      "table_name": "db_access_audit",
+      "maps_to_department": "IT",
+      "sensitivity": "high",
+      "content_policy": "generated_realdb",
+      "uniqueness": "session",
+      "identity_fields": ["ip", "username", "login_time"],
+      "content_allows_sql": true,
+      "content_allows_sql_note": "เพิ่ม 2026-08-27 (QC fix) — เดิม prefetch_worker.py มี boilerplate 'no SQL' ตายตัวทุกตาราง ขัดกับ style_hint ข้างล่างที่สั่งว่า query_text ต้องเป็น SQL จริง ต้องมี field นี้เพื่อให้โค้ดเปิดทาง SQL ให้ตารางนี้ตารางเดียว (ดู core/prefetch_worker.py::_decoy_row_prompt allow_sql param)",
+      "style_hint": "ตาราง audit log การเข้าถึง DB — แถวส่วนใหญ่เป็นประวัติเก่าที่ AI แต่งขึ้น (คนละวันกับ login_time ปัจจุบัน แต่ต้องเป็นวันที่ในอดีตเท่านั้น ห้ามเป็นอนาคตเทียบกับ login_time เด็ดขาด) ปนกับ 1 แถวที่ตรงกับ session นี้จริง (accessed_by/source_ip/access_time = identity ของ attacker คนปัจจุบัน) — เป็นจุดเดียวที่ตั้งใจฝัง identity ตรงๆ แบบไม่ปิดบัง เพราะ narrative ของตาราง audit log ทำให้สมเหตุสมผลที่จะมี IP/เวลาจริงอยู่ในนั้น ต่างจากไฟล์อื่นที่ต้อง subtle — คอลัมน์ query_text ต้องเป็น SQL statement จริงเท่านั้น (เช่น 'SELECT * FROM res_partner WHERE id=42;', 'UPDATE hr_employee SET ...') ห้ามเป็นประโยคภาษาอังกฤษบรรยาย/หัวข้อประชุมเด็ดขาด (เจอบั๊กจริง 2026-08-27: โมเดลเคยตอบเป็น 'Discuss innovative applications of AI.' ซึ่งผิดโดยสิ้นเชิง)",
+      "columns": ["id", "accessed_by", "source_ip", "access_time", "query_text"],
+      "internal_columns": ["session_id"],
+      "internal_columns_note": "ไม่โชว์ให้ attacker เห็นผ่าน SELECT * (psql.py ต้อง exclude ออกจากรายการคอลัมน์ที่พิมพ์) ใช้แค่ filter WHERE session_id=... ตอน query",
+      "row_count_hint": "~20 (ประวัติเก่า) + 1 (session ปัจจุบัน)",
+      "note": "top-10 target #10 (SELECT/\\dt exploration) — ออกแบบให้เป็นจุดที่ identity ของ attacker โผล่แบบธรรมชาติที่สุดในระบบทั้งหมด"
+    },
+    {
+      "table_name": "payroll_export",
+      "maps_to_department": "Finance",
+      "sensitivity": "critical",
+      "content_policy": "generated_realdb",
+      "uniqueness": "session",
+      "identity_fields": [],
+      "style_hint": "รายการจ่ายเงินเดือนพนักงาน export จาก HR — ตัวเลขสมจริง ชื่อพนักงานควรสอดคล้องกับ hr_employee ตัวจริงถ้าเป็นไปได้ (Somchai/Wanida/Anan/Preecha ตามที่ seed ไว้จริงใน hr_employee) แต่ไม่บังคับ — คอลัมน์ bank_account_masked ต้องเป็นรูปแบบเลขบัญชีธนาคารที่ถูก mask บางส่วนเท่านั้น (เช่น 'XXX-X-12345-X', '***-4521', 'KBANK ...4521') ห้ามเป็นชื่อพนักงานซ้ำ/ค่าว่าง/ข้อความอื่นใดที่ไม่ใช่รูปแบบเลขบัญชีเด็ดขาด (เจอบั๊กจริง 2026-08-27: โมเดลเคยเอาค่าเดียวกับ employee_name มาใส่ในคอลัมน์นี้ทุกแถว)",
+      "columns": ["id", "employee_name", "net_pay", "pay_date", "bank_account_masked"],
+      "internal_columns": ["session_id"],
+      "internal_columns_note": "ไม่โชว์ให้ attacker เห็นผ่าน SELECT * (psql.py ต้อง exclude ออกจากรายการคอลัมน์ที่พิมพ์) ใช้แค่ filter WHERE session_id=... ตอน query",
+      "row_count_hint": "~10",
+      "note": "top-10 target #10 (SELECT exploration) — juicy bait คู่กับ db_access_audit ไม่มี identity ของ attacker (คนละบทบาทกัน)"
+    }
+  ]
+}

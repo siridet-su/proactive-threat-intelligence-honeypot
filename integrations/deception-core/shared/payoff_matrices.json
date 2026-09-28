@@ -1,0 +1,296 @@
+{
+  "bot_reconnaissance": {
+    "mix": {
+      "lure": 0.449,
+      "deceive": 0.2245,
+      "delay": 0.3265
+    },
+    "attacker_mix": {
+      "port_scan": 0.303,
+      "banner_grab": 0.3142,
+      "leave": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_weaponization": {
+    "mix": {
+      "lure": 0.3901,
+      "deceive": 0.2614,
+      "delay": 0.3486
+    },
+    "attacker_mix": {
+      "test_exploit": 0.303,
+      "fetch_exploit_kit": 0.3142,
+      "leave": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_delivery": {
+    "mix": {
+      "lure": 0.3406,
+      "deceive": 0.2981,
+      "delay": 0.3613
+    },
+    "attacker_mix": {
+      "send_payload": 0.303,
+      "brute_force_ssh": 0.3142,
+      "leave": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_exploitation": {
+    "mix": {
+      "lure": 0.2983,
+      "deceive": 0.3356,
+      "delay": 0.3661
+    },
+    "attacker_mix": {
+      "brute_force": 0.303,
+      "exploit_tool": 0.3142,
+      "retreat": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_installation": {
+    "mix": {
+      "lure": 0.2611,
+      "deceive": 0.3751,
+      "delay": 0.3638
+    },
+    "attacker_mix": {
+      "install_tool": 0.303,
+      "modify_crontab": 0.3142,
+      "abort": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_command_and_control": {
+    "mix": {
+      "lure": 0.2272,
+      "deceive": 0.4181,
+      "delay": 0.3547
+    },
+    "attacker_mix": {
+      "connect_c2": 0.303,
+      "reverse_shell": 0.3142,
+      "go_quiet": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "bot_actions_on_objectives": {
+    "mix": {
+      "lure": 0.196,
+      "deceive": 0.4655,
+      "delay": 0.3385
+    },
+    "attacker_mix": {
+      "bulk_download": 0.303,
+      "compress_send": 0.3142,
+      "wipe_leave": 0.3828
+    },
+    "expected_payoff": 1.0223,
+    "num_equilibria": 1
+  },
+  "apt_reconnaissance": {
+    "mix": {
+      "lure": 0.449,
+      "deceive": 0.2245,
+      "delay": 0.3265
+    },
+    "attacker_mix": {
+      "slow_recon": 0.3509,
+      "banner_grab": 0.3745,
+      "leave": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_weaponization": {
+    "mix": {
+      "lure": 0.3901,
+      "deceive": 0.2614,
+      "delay": 0.3486
+    },
+    "attacker_mix": {
+      "custom_payload_test": 0.3509,
+      "obfuscation_probe": 0.3745,
+      "abort": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_delivery": {
+    "mix": {
+      "lure": 0.3406,
+      "deceive": 0.2981,
+      "delay": 0.3613
+    },
+    "attacker_mix": {
+      "spear_phish": 0.3509,
+      "send_payload": 0.3745,
+      "abort": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_exploitation": {
+    "mix": {
+      "lure": 0.2983,
+      "deceive": 0.3356,
+      "delay": 0.3661
+    },
+    "attacker_mix": {
+      "exploit_vuln": 0.3509,
+      "priv_escalation": 0.3745,
+      "retreat": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_installation": {
+    "mix": {
+      "lure": 0.2611,
+      "deceive": 0.3751,
+      "delay": 0.3638
+    },
+    "attacker_mix": {
+      "install_rat": 0.3509,
+      "create_backdoor": 0.3745,
+      "abort": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_command_and_control": {
+    "mix": {
+      "lure": 0.2272,
+      "deceive": 0.4181,
+      "delay": 0.3547
+    },
+    "attacker_mix": {
+      "dns_tunnel": 0.3509,
+      "c2_beacon": 0.3745,
+      "go_quiet": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "apt_actions_on_objectives": {
+    "mix": {
+      "lure": 0.196,
+      "deceive": 0.4655,
+      "delay": 0.3385
+    },
+    "attacker_mix": {
+      "bulk_download": 0.3509,
+      "encrypt_send": 0.3745,
+      "leave": 0.2746
+    },
+    "expected_payoff": 1.0473,
+    "num_equilibria": 1
+  },
+  "sk_reconnaissance": {
+    "mix": {
+      "lure": 0.449,
+      "deceive": 0.2245,
+      "delay": 0.3265
+    },
+    "attacker_mix": {
+      "port_scan": 0.2738,
+      "dir_bruteforce": 0.3696,
+      "leave": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_weaponization": {
+    "mix": {
+      "lure": 0.3901,
+      "deceive": 0.2614,
+      "delay": 0.3486
+    },
+    "attacker_mix": {
+      "download_exploit_kit": 0.2738,
+      "modify_public_poc": 0.3696,
+      "leave": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_delivery": {
+    "mix": {
+      "lure": 0.3406,
+      "deceive": 0.2981,
+      "delay": 0.3613
+    },
+    "attacker_mix": {
+      "upload_exploit": 0.2738,
+      "phishing_link": 0.3696,
+      "leave": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_exploitation": {
+    "mix": {
+      "lure": 0.2983,
+      "deceive": 0.3356,
+      "delay": 0.3661
+    },
+    "attacker_mix": {
+      "run_metasploit": 0.2738,
+      "sql_injection": 0.3696,
+      "retreat": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_installation": {
+    "mix": {
+      "lure": 0.2611,
+      "deceive": 0.3751,
+      "delay": 0.3638
+    },
+    "attacker_mix": {
+      "upload_shell": 0.2738,
+      "create_user": 0.3696,
+      "abort": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_command_and_control": {
+    "mix": {
+      "lure": 0.2272,
+      "deceive": 0.4181,
+      "delay": 0.3547
+    },
+    "attacker_mix": {
+      "reverse_shell_listener": 0.2738,
+      "telegram_bot_c2": 0.3696,
+      "go_quiet": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  },
+  "sk_actions_on_objectives": {
+    "mix": {
+      "lure": 0.196,
+      "deceive": 0.4655,
+      "delay": 0.3385
+    },
+    "attacker_mix": {
+      "zip_download": 0.2738,
+      "paste_dump": 0.3696,
+      "leave": 0.3566
+    },
+    "expected_payoff": 1.0808,
+    "num_equilibria": 1
+  }
+}

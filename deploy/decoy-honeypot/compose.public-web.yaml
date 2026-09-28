@@ -1,0 +1,30 @@
+# Opt-in private HTTP backend for the public VPS HTTPS edge.
+# Use with compose.yaml after setting the Pi WireGuard IP and VPS tunnel peer.
+services:
+  web-corp-wg:
+    image: decoy-honeypot-web-corp
+    profiles: [public-web]
+    restart: unless-stopped
+    depends_on:
+      - deception-core
+    environment:
+      WEB_LOGIN_SPOOL_DIR: /var/spool/web-corp-login/pending
+      WEB_LOGIN_SPOOL_MAX_BYTES: "67108864"
+      WEB_TRUSTED_PROXY_CIDRS: "${WEB_CORP_PROXY_PEER_IP:?Set the reviewed VPS WireGuard peer IP}/32"
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --no-access-log
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "${WEB_CORP_PROXY_PEER_IP:?Set the reviewed VPS WireGuard peer IP}"
+    volumes:
+      - /var/lib/decoy-honeypot/web-login-spool:/var/spool/web-corp-login:rw
+    ports:
+      - "${WEB_CORP_WG_BIND_IP:?Set the reviewed Pi WireGuard IP}:80:8080"
+    networks:
+      - internal

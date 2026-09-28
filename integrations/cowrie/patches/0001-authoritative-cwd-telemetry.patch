@@ -1,18 +1,18 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Honeypot Pipeline <noreply@example.invalid>
-Date: Wed, 9 Sep 2026 00:00:00 +0700
+Date: Mon, 28 Sep 2026 00:00:00 +0700
 Subject: [PATCH] Emit authoritative virtual CWD telemetry
 
 Base: Cowrie 575146bc6b24d70082527d66cd805d9bae0e0db4
 
 diff --git a/src/cowrie/commands/fs.py b/src/cowrie/commands/fs.py
-index d615b29..4622e2d 100644
+index d615b294..4622e2dc 100644
 --- a/src/cowrie/commands/fs.py
 +++ b/src/cowrie/commands/fs.py
 @@ -261,7 +261,18 @@ class Command_cd(HoneyPotCommand):
      cd command
      """
-
+ 
 +    def log_cwd(self, before: str, action: str) -> None:
 +        log.msg(
 +            eventid="cowrie.session.cwd",
@@ -44,18 +44,18 @@ index d615b29..4622e2d 100644
              return
          self.protocol.cwd = newpath
 +        self.log_cwd(before, "changed")
-
-
+ 
+ 
  commands["cd"] = Command_cd
 diff --git a/src/cowrie/shell/honeypot.py b/src/cowrie/shell/honeypot.py
-index 1c71b5b..8b8eb44 100644
+index 1c71b5bb..b2757268 100644
 --- a/src/cowrie/shell/honeypot.py
 +++ b/src/cowrie/shell/honeypot.py
-@@ -31,6 +31,13 @@ class HoneyPotShell:
-     def __init__(self, protocol: HoneyPotTransport) -> None:
-         self.protocol = protocol
-         self.cmdpending: list[str] = []
-+        if getattr(self, "interactive", True):
+@@ -34,10 +34,25 @@ class HoneyPotShell:
+         self.lexer: shlex.shlex | None = None
+ 
+         # this is the first prompt after starting
++        if self.interactive:
 +            log.msg(
 +                eventid="cowrie.session.cwd",
 +                cwd_before="",
@@ -65,10 +65,7 @@ index 1c71b5b..8b8eb44 100644
 +                format="CWD %(cwd_action)s: %(cwd_after)s",
 +            )
          self.showPrompt()
-
-@@ -37,7 +44,13 @@ class HoneyPotShell:
-         self.showPrompt()
-
+ 
      def lineReceived(self, line: str) -> None:
 -        log.msg(eventid="cowrie.command.input", input=line, format="CMD: %(input)s")
 +        log.msg(

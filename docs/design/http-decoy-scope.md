@@ -1,7 +1,7 @@
 ---
 title: HTTP(S) decoy current scope and future work
 status: current
-last_verified: 2026-09-25
+last_verified: 2026-09-28
 ---
 
 # HTTP(S) decoy: current scope and future work
@@ -11,11 +11,12 @@ last_verified: 2026-09-25
 The active HTTP decoy is `web-corp`, an Odoo-style ERP login persona. Its
 current objective is to record login submissions—especially brute-force and
 SQL-injection-shaped input—without authenticating anyone or forwarding values
-to Odoo/PostgreSQL. On the Pi, it is exposed only on ZeroTier IP
-`10.58.33.42:80`, which maps to app port `8080` inside the container. Port
-`8080` is not separately published on the host and must not be opened. The
-direct-TLS Pi service on port `443` is stopped; publicly trusted HTTPS on a VPS
-is future deployment work. Odoo is stopped and is not part of the login path.
+to Odoo/PostgreSQL. On the Pi, one container is exposed on ZeroTier TCP 80;
+a second is bound only to the Pi WireGuard address on TCP 80. Both map to app
+port 8080 inside their containers, which is not separately host-published.
+The Droplet serves public HTTPS 443 and reaches the second container over
+WireGuard. The direct-TLS Pi service on port 443 remains stopped. Odoo is
+stopped and is not part of the login path.
 
 The fake login page is already deception: it presents a plausible login
 surface, records submissions, and always rejects them. “Post-login deception”
@@ -28,8 +29,8 @@ Odoo or execute attacker-supplied SQL.
 
 | Capability | Current behavior | Boundary / limitation |
 | --- | --- | --- |
-| HTTP persona | The Odoo-style ERP login page and compatibility routes are served on ZeroTier `:80` → container `:8080`. Bait paths still receive their configured static response or 404. | Only login POSTs generate application telemetry. GET/HEAD, scans, unrelated POSTs, and 404s are not recorded; Uvicorn access logging is disabled. |
-| HTTPS | The direct Pi HTTPS container on ZeroTier `:443` is stopped. Publicly trusted HTTPS via a VPS IP and private WireGuard backend is documented as a target. | The self-signed Pi certificate is not a current listener. The VPS target is not deployed; see the [public-VPS HTTPS runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md). |
+| HTTP persona | The Odoo-style ERP login page and compatibility routes are served on ZeroTier `:80` and privately on Pi WireGuard `:80`. Bait paths still receive their configured static response or 404. | Only login POSTs generate application telemetry. GET/HEAD, scans, unrelated POSTs, and 404s are not recorded by the app; Uvicorn access logging is disabled. Zeek records allowed network flows. |
+| HTTPS | The Droplet serves a publicly trusted public-IP certificate on `:443` and proxies over WireGuard. HTTP `:80` serves ACME challenges and redirects. | The direct Pi HTTPS container stays stopped. Renewal dry-run and synthetic end-to-end telemetry passed; an actual renewal has not yet occurred. See the [public-VPS HTTPS runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md). |
 | Login collection | Each login form submission records a bounded event with UTC timestamp, request ID, source IP, scheme, method/path/query, selected headers (including User-Agent), and submitted login form fields. | Sensitive submitted values, including the password, are retained in the restricted raw spool/Redis/Mongo path as documented in the [login telemetry design](web-login-telemetry.md). Cookies and Authorization headers are not collected. |
 | Delivery and storage | The active HTTP app writes login attempts to the restricted host spool; the collector publishes to `raw:web-login` and the processor persists to MongoDB `honeypot_db.events`; `event:canonical` omits credential-bearing fields. | Web-corp no longer calls Deception Core. The GCP dashboard has a read-only `/http-activity` view/API for login and retained historical page events. Its production Mongo projection and unauthenticated API boundary were checked on 2026-09-25, but an authenticated browser render was not exercised. |
 | Brute-force evidence | Attempts include time, source IP, and submitted login value, so an analyst can query and count repeated attempts. | No rate threshold, automated brute-force finding, alert, slowdown, or lockout is active. Capturing attempts is not the same as detecting or responding to brute force. |
@@ -55,11 +56,8 @@ instructions are maintained in the [web-corp login telemetry design](web-login-t
   it observational and never execute submitted expressions.
 - Decide whether to collect page views, bait-path scans, or other non-login
   HTTP activity. They are intentionally not part of the current telemetry.
-- Plan a publicly trusted HTTPS edge on a public VPS IP, with the Pi web-corp
-  backend reachable only over WireGuard. Public-IP certificates are available
-  but short-lived, so automated renewal, proxy-header trust, and an end-to-end
-  telemetry check are required. The Pi's direct-TLS service is currently
-  stopped; see the
+- Monitor the short-lived public-IP certificate renewal, proxy reload, and
+  public traffic volume; see the
   [public-VPS HTTPS runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
 - Decide separately whether OpenCanary has a distinct role or should remain
   staged; do not treat it as part of the active web-corp flow until an adapter
@@ -75,7 +73,7 @@ needs its own review, validation, and implementation-log entry.
 ## Current flow at a glance
 
 ```text
-HTTP login POST -> web-corp -> restricted spool -> Go collector
+HTTPS login POST -> Droplet TLS edge -> WireGuard -> web-corp -> restricted spool -> Go collector
                  -> Redis raw:web-login -> processor -> MongoDB honeypot_db.events
                  -> Redis event:canonical (password omitted)
                  -> read-only GCP dashboard /http-activity

@@ -1,14 +1,20 @@
 # คู่มือติดตั้งระบบ Honeypot: เตรียมพื้นฐานเครื่อง Pi
 
 > อัปเดต 28 กันยายน 2026: มี [Ansible prepare ระยะแรก](../deploy/ansible/README.md)
-> สำหรับ VM ARM64 แล้ว แต่ยังไม่ใช่ installer ระบบทั้งหมดและยังไม่ผ่านการทดสอบบน
-> Pi ใหม่ ขั้นนี้ไม่สร้างหรือแก้ `.env`; ผู้ดูแลเพิ่ม credential เองตาม
-> [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md)
+> สำหรับ VM ARM64 แล้ว ทดสอบการเตรียมเครื่อง การหยุดเมื่อ `.env` ยังว่าง และ
+> การรันซ้ำโดยไม่เขียนทับไฟล์บน Azure ARM64 VM แล้วตาม
+> [บันทึกผลทดสอบ](validation/2026-09-28-azure-arm64-installer-first-run.md)
+> แต่ยังไม่ใช่ installer ระบบทั้งหมดและยังไม่ผ่านการทดสอบบน Pi ใหม่
+> ขั้นนี้สร้าง `.env` โครงเปล่าเฉพาะเมื่อยังไม่มี และไม่เขียนทับไฟล์เดิม
+> ผู้ดูแลเติม credential เองตาม [ADR-0011](adr/ADR-0011-installer-private-env-skeletons.md)
+> มี playbook แยกสำหรับ stage Zeek และ Cowrie source บน VM แล้วตาม
+> [ผลทดสอบ dependency](validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md)
+> โดยยังไม่เปิด Cowrie, Zeek หรือ Go services สำหรับใช้งานจริง
 
 - **สถานะเอกสาร:** ฉบับร่างสำหรับทดสอบบน VM ยังไม่รับรองสำหรับติดตั้งบนเครื่องใช้งานจริง
 - **เป้าหมาย:** Ubuntu Server 24.04 LTS, ARM64 (`aarch64`)
 - **ขอบเขต:** ระบบปฏิบัติการ เครื่องมือพื้นฐาน และการตรวจสอบก่อนติดตั้งบริการ Honeypot
-- **ปรับปรุงล่าสุด:** 25 กันยายน 2026
+- **ปรับปรุงล่าสุด:** 28 กันยายน 2026
 
 ## 1. วัตถุประสงค์
 
@@ -18,9 +24,9 @@
 
 ดำเนินการเฉพาะการตรวจ Ubuntu, สถาปัตยกรรมระบบ, systemd, เวลา, พื้นที่จัดเก็บ และแพ็กเกจพื้นฐานที่อาจจำเป็น
 
-ระยะนี้ยังไม่ติดตั้ง Cowrie, Zeek, Docker/Compose, Redis, MongoDB, PostgreSQL/Deception Core, Web-corp, OpenCanary หรือ legacy sensor-forwarder และยังไม่เปลี่ยน firewall, SSH, service account หรือ ACL
+ช่วงตรวจ baseline นี้ยังไม่ติดตั้ง Cowrie, Zeek, Docker/Compose, Redis, MongoDB, PostgreSQL/Deception Core, Web-corp, OpenCanary หรือ legacy sensor-forwarder และยังไม่เปลี่ยน firewall, SSH, service account หรือ ACL หลังบันทึก baseline และ snapshot แล้ว สามารถทดลอง Ansible prepare ระยะแรกซึ่งติดตั้ง Redis แต่ปล่อยไว้ในสถานะหยุดตามหัวข้อ 4.5
 
-ไม่ติดตั้ง Go toolchain บน Pi; ให้สร้าง Go agents บนเครื่องสำหรับ build แล้วนำ binary ที่ตรวจสอบแล้วไปใช้ในระยะถัดไป
+ไม่ติดตั้ง Go toolchain บน Pi; ให้สร้าง Go agents บนเครื่องสำหรับ build แล้วนำ binary ที่ตรวจสอบแล้วไปใช้ในระยะถัดไป เครื่อง build ที่ต่ออินเทอร์เน็ตได้ใช้ `bash scripts/bootstrap_sensor_build.sh --check` เพื่อตรวจสิ่งที่ขาด แล้วใช้ `bash scripts/bootstrap_sensor_build.sh --release-id r1 --output-root /tmp/pti-releases` เพื่อเตรียมเครื่องมือ ดาวน์โหลด Go และ dependencies และสร้าง release ตาม [Ansible runbook](../deploy/ansible/README.md) สคริปต์ขอ `sudo` เฉพาะเมื่อต้องติดตั้งแพ็กเกจพื้นฐานบน Ubuntu 24.04 และไม่ติดตั้งบริการบน Pi
 
 ## 3. ข้อกำหนด VM
 
@@ -121,6 +127,12 @@ ip route
 
 บันทึกบริการที่ทำงานผิดพลาด พอร์ตที่เปิดรอรับการเชื่อมต่อ เวลาไม่ตรง หรือพื้นที่ disk/inode ต่ำที่ยังอธิบายไม่ได้ ห้ามเปลี่ยน SSH หรือ firewall เพียงเพื่อให้ผลตรวจตรงตามคาด และต้องคงช่องทางกู้คืนผ่าน console ไว้
 
+### 4.5 ทดลองเตรียม Go agents บน VM หลัง snapshot
+
+จัด inventory ที่มี VM เพียงเครื่องเดียวและ vars ที่ไม่มี secret ตาม [Ansible preparation runbook](../deploy/ansible/README.md) โดยตรวจ version และแหล่งแพ็กเกจจาก VM ก่อน แล้วใช้ `python3 scripts/install_pi_sensor.py --inventory /path/to/inventory.ini --vars /path/to/install-vars.json` จากเครื่อง build/control สคริปต์สร้าง bundle ARM64 เมื่อยังไม่มี และหยุดให้ตรวจ manifest SHA-256 ก่อนยืนยันใน vars เมื่อรันซ้ำจะเตรียมและตรวจ release ที่ติดตั้ง หากค่าจำเป็นใน env ยังว่าง หรือ Cowrie/Zeek ยังไม่ทำงาน จะหยุดโดยไม่เปิด Go units หลังผู้ดูแลเติมค่าใน `.env` ที่สคริปต์สร้างให้และเตรียม dependencies แล้วจึงรันคำสั่งเดิมอีกครั้ง ขั้นเตรียมและหยุดที่ env ว่างผ่านการทดสอบบน VM แล้ว แต่ activation ยังไม่ผ่าน และยังไม่ใช่คำสั่งสำหรับ Pi ที่ใช้งานอยู่
+
+ขั้นนี้ยังไม่เปิด Cowrie, Zeek, Docker decoys หรือ trap ports สคริปต์วาง `.env.example` และ `.env` โครงเปล่าบน VM เฉพาะเมื่อไม่มีไฟล์นั้น ผู้ดูแลเติมค่าใน `.env` จริงด้วย `sudoedit` แล้วรันคำสั่งเดิม หากต้องทดลองรันซ้ำหรือข้อผิดพลาดระหว่าง prepare ให้ใช้ snapshot สะอาดและ release ID เดิมตาม runbook; ห้ามนำ playbook นี้ไปรันบน Pi ปัจจุบัน
+
 ## 5. งานที่ต้องทดสอบหรืออนุมัติแยก
 
 - **ZeroTier:** ยังไม่ติดตั้งระหว่าง clean baseline ให้เลือกวิธีติดตั้งหลังตรวจ VM แล้วเท่านั้น หากทดสอบ ให้ใช้ test network แยกและให้ผู้ดูแล join/authorize เอง ห้ามบันทึก network ID, node identity หรือ credential ใน Git
@@ -139,4 +151,4 @@ ip route
 
 บันทึกวันทดสอบ, VM snapshot, revision ของ repository, OS/architecture, package version/origin, ผล preflight, service/listener ที่พบ, ปัญหาและวิธีแก้ โดยไม่บันทึก token, credential, node identity, raw event หรือข้อมูลเครือข่ายที่ไม่จำเป็น
 
-**สถานะสุดท้าย:** คู่มือนี้เป็นฉบับร่างก่อนทดสอบ ต้องปรับให้ตรงกับผลจริงบน VM ก่อนนำไปใช้กับ Raspberry Pi
+**สถานะสุดท้าย:** คู่มือนี้เป็นฉบับร่างที่ผ่านการทดสอบ VM เฉพาะขั้นเตรียมและหยุดที่ `.env` ว่าง ยังต้องทดสอบ activation และบริการส่วนที่เหลือก่อนนำไปใช้กับ Raspberry Pi

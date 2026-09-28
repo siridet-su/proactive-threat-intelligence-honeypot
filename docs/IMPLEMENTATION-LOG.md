@@ -113,6 +113,260 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: push to staging, verify T1005/T1078 names, and confirm recently closed Cowrie rows show calculated dwell time when canonical `end_time` is present.
 - Related ADR/runbook: unified Threat Intelligence session directory and Model1 advisory presentation.
 
+### 2026-09-28 — Activate public Web-corp HTTPS through the Droplet
+
+- Status: active on the existing Droplet and Pi; repository source and runbooks updated.
+- Scope and intent: expose the fake ERP login with trusted public-IP HTTPS while keeping the Pi HTTP backend private, retaining the existing ZeroTier test listener and Cowrie TCP 22 forward, and limiting Zeek to decoy traffic.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: add the opt-in WireGuard Web-corp Compose override, Nginx/Certbot edge templates and units, Zeek `wg0` worker and endpoint filter, collector WireGuard destination mapping and test, ADR-0014, validation evidence, and current-state/runbook updates.
+- Host/environment changes actually applied: on the Pi, added a host-local Compose override and separate WireGuard Web-corp container using the existing built image, deployed the reviewed Zeek config/helper and collector ARM64 binary, and added private collector interface settings. Protected backups of previous Zeek, collector, and override files remain on the host. The original ZeroTier container and dirty local Web-corp source were not overwritten. On the Droplet, installed Nginx and current Certbot, opened host-firewall TCP 80/443 while retaining existing SSH/WireGuard rules, issued staging and production IP certificates, installed the HTTPS proxy, and enabled renewal and expiry-check timers. Root-only pre-edge firewall and Nginx backups remain on the host.
+- Runtime/exposure state: public TCP 22 still forwards to Cowrie; public TCP 23 remains closed. Public TCP 80 serves ACME HTTP-01 and redirects to HTTPS; TCP 443 serves Web-corp through WireGuard to the Pi. The Pi's direct HTTPS container remains stopped. Zeek's local cluster has `wlan0`, ZeroTier, and `wg0` workers; collector and processor are active.
+- Validation performed and outcome: external trusted HTTPS GET returned 200 and HTTP redirected 308; ACME staging/production issuance and `certbot renew --dry-run` passed. A synthetic rejected login persisted with external source and HTTPS/443 metadata. The first login showed a proxy trust mismatch; after correcting the trust peer, a second test passed. Forged forwarding headers on the direct ZeroTier container were ignored. Bounded `wg0` packet capture and Zeek conn/http logs matched the public GET, and MongoDB contained four recent Zeek `wg0` conn/http records. Go tests and synthetic BPF tests passed. The expiry-check service returned success.
+- Not performed / deferred: an actual certificate renewal, external expiry notification, authenticated browser review, sustained public traffic/packet-loss measurement, long-term storage growth, Pi repo checkout sync, and clean-host install acceptance.
+- Risks and data handling: the certificate is short lived; local timer failure is not an off-host alert. Public exposure may increase credential-sensitive login records. No certificate private key, secret, raw login value, protected backup content, or host-private interface address was committed.
+- Rollback: close public TCP 80/443 or disable the Nginx site first; restore protected Droplet firewall/Nginx backups if needed. Stop only the Pi WireGuard Web-corp container and restore protected Zeek/collector copies if reverting telemetry. Preserve the original ZeroTier listener, Cowrie forward, and collected records.
+- Follow-up: connect expiry failure to an off-host alert receiver, observe a real renewal and proxy reload, and measure Zeek/storage volume after representative traffic.
+- Related ADR/runbook: [ADR-0014](adr/ADR-0014-public-web-corp-ip-https-edge.md), [public edge runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md), [edge assets](../deploy/public-web-edge/README.md), and [validation evidence](validation/2026-09-28-public-web-corp-edge.md).
+
+### 2026-09-28 — Restrict Pi Zeek packets to active decoy endpoints
+
+- Status: active on the existing Pi; repository source and operations documentation updated.
+- Scope and intent: exclude development and management traffic from Zeek capture while keeping current Cowrie and Web-corp decoy observations.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add a host-address-aware BPF policy renderer and Zeek systemd start/reload drop-in, ADR-0013, validation evidence, and current-state/runbook updates. The tracked node list remains `wlan0` plus ZeroTier.
+- Host/environment changes actually applied: on `pi-t`, backed up the prior Zeek site policy in a root-only host location, installed the renderer and systemd drop-in, replaced the broad local filter with a generated-policy load, checked Zeek, restarted it, and tested a subsequent reload. No firewall, VPN, Cowrie, Web-corp, collector, or processor configuration was changed.
+- Runtime/exposure state: Zeek's five local cluster nodes are running. Its filter accepts bidirectional Cowrie TCP 22/23 to the Pi on `wlan0` and ZeroTier and Web-corp TCP 80 to the Pi on ZeroTier. Tailscale is not captured. Cowrie, ZeroTier, collector, and processor remain active.
+- Validation performed and outcome: verified live listeners for Cowrie 22/23 and Web-corp 80, with FTP 21 and direct HTTPS 443 absent; the generated BPF compiled with `tcpdump -d`, and a synthetic eight-packet pcap admitted three decoy packets while excluding five development/management cases. `zeekctl check`, systemd restart, systemd reload, and node status passed. Bounded no-payload connections from a ZeroTier peer to 22/23/80 produced only those three destination ports in the new `conn.log`; an equivalent connection to admin 2222 did not appear. All four TCP connects succeeded. Zeek, collector, and processor stayed active. See the linked evidence note.
+- Not performed / deferred: a live `wlan0` decoy-flow test, sustained packet-loss/CPU measurements, post-change MongoDB volume comparison, and a real interface-address-renewal test. This Zeek version did not emit a usable `packet_filter.log` entry during the bounded check.
+- Risks and data handling: a changed interface address while Zeek is running requires a service restart or reload. A newly enabled decoy port requires a reviewed filter update. The generated policy and protected backup remain on the Pi; no private interface address, secret, or raw event was copied into Git.
+- Rollback: restore the protected prior `local.zeek` from `/var/backups/honeypot/zeek/`, remove the decoy filter drop-in and generated policy, reload systemd, then restart Zeek and verify node/collector health.
+- Follow-up: compare Zeek event volume and resource use after a representative interval and update the filter when a stopped decoy becomes active.
+- Related ADR/runbook: [ADR-0013](adr/ADR-0013-zeek-decoy-endpoint-filter.md), [existing-Pi Zeek runbook](../zeek/README.md), and [validation evidence](validation/2026-09-28-zeek-decoy-endpoint-filter.md).
+
+### 2026-09-28 — Limit existing Pi Zeek capture to wlan0 and ZeroTier
+
+- Status: active on existing Pi; Dashboard label correction prepared in repository only.
+- Scope and intent: keep primary-uplink and local-test ZeroTier observation, remove only the Tailscale capture worker, and correct the Dashboard's description of `wlan0`.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: remove `worker-tailscale0` from tracked `zeek/node.cfg`, update the `wlan0` hardware-card caption, add ADR-0012 and the existing-Pi Zeek runbook, and update current-state docs.
+- Host/environment changes actually applied: on `pi-t`, saved the prior node configuration in a root-only protected host backup, stopped Zeek with its old node list, installed the two-worker configuration, checked it, and started Zeek. A first attempt to switch to standalone mode failed `zeekctl check` with a telemetry-port error on the Pi's Zeek version; the original cluster configuration was restored and all original workers restarted before the reviewed two-worker cutover. No VPN, Cowrie, collector, processor, or Dashboard host configuration was changed.
+- Runtime/exposure state: Zeek's logger, manager, proxy, `worker-wlan0`, and `worker-zerotier0` are running; no Tailscale Zeek worker remains. Tailscale and ZeroTier connectivity and Cowrie continue unchanged. Collector and processor services are active. The Dashboard source label is not deployed by this change.
+- Validation performed and outcome: `zeekctl check` passed for all five configured nodes; `zeekctl status` and process arguments showed the two intended worker interfaces and no stale Tailscale worker. `logs/current` still resolves to the logger spool, `conn.log` had a fresh modification time, collector and processor were active, and the collector journal had no warning since cutover. Targeted ESLint and TypeScript typecheck passed for the Dashboard source.
+- Not performed / deferred: live packet-level attribution, post-cutover MongoDB volume comparison, and production Dashboard deployment.
+- Risks and data handling: ZeroTier produced most measured overlay Zeek documents, so retaining it preserves most prior event volume. The protected host backup and any packet/event contents were not copied into Git.
+- Rollback: restore the protected Pi node configuration from `/var/backups/honeypot/zeek/`, then restart `zeek.service` and verify status. Restore the prior UI source in Git if needed.
+- Follow-up: measure retained Zeek volume after a representative interval and review ZeroTier capture only if its observation value or cost changes.
+- Related ADR/runbook: [ADR-0012](adr/ADR-0012-zeek-primary-uplink-capture.md) and [existing-Pi Zeek runbook](../zeek/README.md).
+
+### 2026-09-28 — Track Zeek process health through systemd PID
+
+- Status: unit refinement tested on disposable Azure ARM64 VM; service inactive afterward.
+- Scope and intent: make the staged Zeek service state reflect its running process rather than a completed ZeekControl command.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: change the staged `zeek.service` to `Type=forking` with Zeek's PID file, pre-start configuration check, and failure restart policy; update the staging runbook and VM evidence.
+- Host/environment changes actually applied: reapplied only the Zeek staging playbook on the Azure VM, which updated its disabled unit; started and stopped the unit for a bounded check. No production host changed.
+- Runtime/exposure state: final VM `zeek.service` inactive/disabled; no Zeek listener. During the bounded check, Broker listened only on loopback.
+- Validation performed and outcome: systemd reported `active`, a nonzero Zeek main PID, and a loopback-only Broker listener while running; after stop it reported `inactive` and main PID 0.
+- Not performed / deferred: a forced Zeek crash/restart test and ongoing telemetry health monitoring; Cowrie/Go activation remains deferred.
+- Risks and data handling: no credentials or attacker data were used. This service unit has not been qualified on a production capture interface.
+- Rollback: restore the prior staged unit or discard the disposable VM; no active production service changed.
+- Follow-up: include process-state and restart tests in the full sensor acceptance run.
+- Related ADR/runbook: [Ansible staging runbook](../deploy/ansible/README.md) and [VM evidence](validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
+
+### 2026-09-28 — Stage pinned Zeek and patched Cowrie source on ARM64 VM
+
+- Status: dependency staging tested on disposable Azure ARM64 VM; Cowrie and Zeek inactive; full installation not complete.
+- Scope and intent: make Zeek and the project's Cowrie CWD patch reproducible on a clean sensor without exposing a honeypot listener or changing the production Pi.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `prepare-zeek.yml` with a pinned official package source, loopback Broker binding, disabled metrics, and an inactive unit; regenerate the previously malformed Cowrie CWD patch against its stated upstream commit; add a deterministic Cowrie archive builder and `prepare-cowrie.yml` for source/venv staging; extend CI syntax checks, runbooks, roadmap, and validation evidence.
+- Host/environment changes actually applied: on the disposable VM, install Zeek/ZeekControl `1:8.0.10-0`, stage the standalone loopback-capture configuration and systemd unit, and stage patched Cowrie source plus Python venv and a non-login `cowrie` account. The first Cowrie playbook execution stopped during venv preparation; the staged archive and patched files were hash verified, a `preparing` marker was recorded, and the corrected playbook completed. No production host was changed.
+- Runtime/exposure state: final VM state has `zeek.service` inactive/disabled, no `cowrie.service`, and no Cowrie, Broker, or metrics listener. The initial manual ZeekControl smoke start briefly exposed Broker and metrics listeners on all interfaces; Zeek was stopped, configured for loopback Broker and no metrics, then restarted for a bounded smoke and stopped again. Management SSH remained available.
+- Validation performed and outcome: ZeekControl `check`, systemd start/stop and `ss -lntp` checks passed after binding correction; Zeek playbook repeat reported `changed=0`. The regenerated patch passed `git apply --check` on the exact Cowrie commit; patched Python files compiled; two source archive builds had identical SHA-256. Cowrie staging completed with `pip check` and patched-file SHA-256 checks; the final repeat reported `changed=0`. Local Ansible syntax checks passed.
+- Not performed / deferred: fresh-host sanitized Cowrie output integration, Cowrie service/listener, full Python transitive hash lock, collector/processor telemetry, real capture interface, Docker decoys, Go activation, production Pi deployment, Dashboard deployment, and full end-to-end testing.
+- Risks and data handling: Cowrie's staged source must not be started before sanitized output and private log controls are installed. The source archive and VM contained no operator credentials. The first Zeek smoke exposure was bounded but was an error; final configuration binds the control socket to loopback. No raw attacker data, private keys, env contents, or tokens were copied into the repository.
+- Rollback: stop `zeek.service` if started, then delete the disposable VM and associated test resources after evidence retention. Neither playbook is an existing-Pi migration path.
+- Follow-up: build a fresh-install Cowrie sanitized-output/service path, lock Python dependency closure, qualify a reviewed capture interface, then integrate prerequisites into the one-command installer and test Go activation on a fresh VM.
+- Related ADR/runbook: [Ansible staging runbook](../deploy/ansible/README.md), [Cowrie CWD integration](../integrations/cowrie/README.md), and [VM evidence](validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
+
+### 2026-09-28 — Align current installer roadmap with partial VM acceptance
+
+- Status: documentation current-state correction; no deployment.
+- Scope and intent: remove a stale roadmap claim that the first Go-agent slice had not been tested on a VM.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: update the roadmap and Thai installation draft to distinguish the passed prepare/blank-env retry from untested activation and full-stack installation.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: Azure VM remains prepared with inactive Go/Redis units; production Pi and Dashboard unchanged.
+- Validation performed and outcome: cross-checked the dated VM evidence and current Ansible runbook; no runtime test was required for this documentation correction.
+- Not performed / deferred: Cowrie, Zeek, decoy, Dashboard, activation, and production-Pi qualification.
+- Risks and data handling: no private configuration or endpoint was added to documentation.
+- Rollback: revert this documentation correction if contradicted by later evidence.
+- Follow-up: maintain current-state documents as the next installer phases are accepted.
+- Related ADR/runbook: [VM evidence](validation/2026-09-28-azure-arm64-installer-first-run.md) and [Ansible preparation runbook](../deploy/ansible/README.md).
+
+### 2026-09-28 — ARM64 startup check for strict backup window parsing
+
+- Status: nonproduction VM check passed; installed release unchanged.
+- Scope and intent: confirm the updated hardware-backup binary rejects explicit invalid backup-window values on ARM64 before external connections.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: include a boundary test for maximum integer safety days and compare lookback directly to safety to avoid addition overflow. No service configuration was changed.
+- Host/environment changes actually applied: copied a standalone, locally cross-built ARM64 test binary into the Azure VM's `/tmp` and executed it twice with invalid non-secret values. Did not replace the installed release or touch private env files.
+- Runtime/exposure state: installed Redis and hardware-backup-control units remained inactive; no MongoDB or B2 connection was attempted by the test binary.
+- Validation performed and outcome: `go test ./...` for hardware-backup and `git diff --check` passed after the boundary fix. On the VM, `BACKUP_LOOKBACK_DAYS=abc` and `BACKUP_SAFETY_DAYS=-1` each produced an error naming the key and exited with status 1.
+- Not performed / deferred: reviewed release build, installer upgrade, successful activation, full backup execution, and production Pi rollout.
+- Risks and data handling: only synthetic invalid values were used. The test binary remains temporary and is not an installed service.
+- Rollback: no running service or installed release changed; discard the temporary test binary with the disposable VM.
+- Follow-up: include this code in a new reviewed release after the remaining installer dependencies are qualified.
+- Related ADR/runbook: [hardware-backup runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-28 — Reject explicitly invalid backup window settings
+
+- Status: repository change prepared; not deployed to the Azure VM or production Pi.
+- Scope and intent: keep the existing 30-day lookback and 2-day safety defaults when the variables are absent, but make explicit operator input fail visibly when invalid.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: parse `BACKUP_LOOKBACK_DAYS` and `BACKUP_SAFETY_DAYS` with presence-aware validation; reject empty, malformed, negative/out-of-range, or zero lookback values with the variable name. Keep the existing lookback-greater-than-safety check. Add focused config tests and update the hardware-backup runbook.
+- Host/environment changes actually applied: none for this change. The already prepared Azure VM still has the earlier ARM64 binary; the production Pi was not changed.
+- Runtime/exposure state: unchanged. This validation takes effect only after a new reviewed hardware-backup release is built and installed.
+- Validation performed and outcome: focused Go tests and formatting checks pending at the time of this record; final result to be recorded in an addendum if different.
+- Not performed / deferred: rebuilding and deploying the worker, VM activation, production rollout, and end-to-end backup execution.
+- Risks and data handling: an explicitly present but invalid value now prevents worker startup instead of falling back silently; omitted values remain backward compatible. No credential values were read or stored.
+- Rollback: revert this parser change and release a reviewed prior binary; no host rollback was needed.
+- Follow-up: include the parser in the next reviewed ARM64 release and verify the startup error path on a nonproduction VM before Pi rollout.
+- Related ADR/runbook: [hardware-backup runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-28 — Validation addendum for backup window parser
+
+- Status: local validation passed; host deployment still deferred.
+- Scope and intent: complete the pending validation recorded in the preceding entry.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: none beyond the preceding parser, tests, and runbook change.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: unchanged; the Azure VM and production Pi still run earlier binaries.
+- Validation performed and outcome: `gofmt` completed, `go test ./...` passed in `agents/hardware-backup`, and `git diff --check` passed.
+- Not performed / deferred: VM startup check with the rebuilt binary, Cowrie/Zeek prerequisites, and production deployment.
+- Risks and data handling: test credentials were synthetic literals in local unit tests; no private host env was read.
+- Rollback: no host rollback required.
+- Follow-up: build and review a new release before testing this behavior on the VM.
+- Related ADR/runbook: [hardware-backup runbook](../agents/hardware-backup/README.md).
+
+### 2026-09-28 — Exercise resumable Pi installer on a fresh Azure ARM64 VM
+
+- Status: first prepare and blank-configuration gate passed on a disposable VM; full sensor installation remains partial.
+- Scope and intent: test the new one-command path against a real Ubuntu 24.04 ARM64 guest before adding Cowrie, Zeek, and decoy installation.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: record the VM acceptance result in the validation note, VM target, and Ansible runbook. Installer behavior was not changed by this entry.
+- Host/environment changes actually applied: on the Azure test VM, refreshed the Ubuntu apt index, installed the four reviewed package versions and their dependencies, copied the approved five-binary ARM64 release, installed five inactive systemd units, created the dedicated agent account and directories, and staged five `.env.example` files plus five blank actual `.env` files. A read-only Redis checker was also copied under the VM's `/tmp` for an independent check. The developer workstation and existing production Pi were not changed by the playbook.
+- Runtime/exposure state: Redis and all five Go units remained inactive and disabled. The VM remained reachable by administrator SSH; no project listener, Cowrie, Zeek, decoy, or Dashboard service was started.
+- Validation performed and outcome: verified Ubuntu 24.04/aarch64, 2 vCPU, approximately 4 GiB RAM and a 30 GiB root filesystem; approved manifest and installed binary/package audit passed. First wrapper run paused at missing env values as expected. The second run reused the prepared release, staging reported `changed=0`, all five private-file SHA-256 hashes and root-owned `0600` modes stayed the same, and activation again stopped before starting units. Independent Redis loopback/protected-mode config check and `systemd-analyze verify` for all five units passed without starting them. Local Ansible needed execution outside the tool sandbox because its local RPC server could not start there; SSH bypassed an unrelated unsafe local SSH config include with `-F /dev/null`.
+- Not performed / deferred: clean snapshot was not verified; symlink/interrupted-run/rollback cases, completed operator configuration, Cowrie/Zeek dependency installation, Go activation, telemetry, backup restore, and existing-Pi migration remain untested.
+- Risks and data handling: no real credential values were placed on the VM or in the repository. The Azure VM has a public SSH management address, unlike the isolated generic VM target; the address and private key are omitted from repository records. The observed root disk is 30 GiB, below the target document's 32 GiB sizing suggestion; this pass exercised only the Go preparation slice.
+- Rollback: delete the disposable Azure test VM and its associated disk/network resources after evidence is retained, or restore a verified clean snapshot if one is created. No production rollback is involved.
+- Follow-up: qualify the remaining failure and activation cases on this VM or a fresh snapshot, then implement and test Cowrie, Zeek, decoy, and Dashboard installers separately.
+- Related ADR/runbook: [Ansible preparation runbook](../deploy/ansible/README.md), [VM target](INSTALLER-VM-TEST-TARGET.md), and [validation evidence](validation/2026-09-28-azure-arm64-installer-first-run.md).
+
+### 2026-09-28 — Create missing private Pi env skeletons during staging
+
+- Status: repository change prepared; not applied to a Pi or VM.
+- Scope and intent: let the single Pi installer place both examples and editable actual env files so the operator only has to fill values and rerun.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: extend the staging playbook to inspect each actual env path and create the five files from non-secret examples only when absent, with `root:root` ownership and mode `0600`. Reject symlinks and non-regular existing paths; skip existing regular files without reading or replacing content. Update wrapper output, examples, runbook, Thai manual, and ADR-0011; link ADR-0009's amended file-creation clause.
+- Host/environment changes actually applied: none. No Pi/VM sudo, file creation, or service activation was performed.
+- Runtime/exposure state: existing Pi and Dashboard runtime unchanged. Blank files alone do not pass the value gate, so Go services stay inactive until operator completion and dependency validation.
+- Validation performed and outcome: Ansible syntax, installer unit tests, Python compilation, and `git diff --check` passed locally; first-run and retry behavior on a VM remain untested.
+- Not performed / deferred: clean ARM64 VM creation, owner/mode and no-clobber acceptance, operator value entry, activation, and existing-Pi migration.
+- Risks and data handling: staged actual files contain only blank credential fields and non-secret defaults. The installer never copies live credentials into the repository or logs. Existing operator files are not read or overwritten by staging.
+- Rollback: on a disposable VM, restore the snapshot. On any host, remove only untouched blank skeletons after confirming they have no operator values; completed private files remain operator-owned.
+- Follow-up: test missing-file creation, blank-value pause, filled-file retry, existing-file preservation, and symlink rejection on the disposable ARM64 VM.
+- Related ADR/runbook: [ADR-0011](adr/ADR-0011-installer-private-env-skeletons.md), [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), and [Ansible preparation runbook](../deploy/ansible/README.md).
+
+### 2026-09-28 — Stage blank Pi env examples beside private target paths
+
+- Status: repository change prepared; not run on a Pi or VM.
+- Scope and intent: make the single Pi command place its own non-secret examples on the target so the operator can copy, fill, and retry without locating templates in the controller checkout.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `stage-pi-env-examples.yml` after release audit and before activation; it verifies the approved preparation marker, checks target path safety, and copies five blank examples to `/etc/honeypot-agent.env.example` and `/etc/honeypot/*.env.example` as root-owned mode `0600` without overwriting existing examples. Run all four playbooks in one Ansible invocation so interactive sudo authentication is requested once; provide an explicit passwordless-sudo option. Update the wrapper message, CI syntax check, and operator runbook.
+- Host/environment changes actually applied: none for this change. No target playbook or sudo operation was executed.
+- Runtime/exposure state: existing Pi and Dashboard runtime unchanged. The actual `.env` paths are not written by this step and the prepared units remain inactive until the separate activation gate passes.
+- Validation performed and outcome: Ansible syntax check, installer unit suite, Python compilation, and `git diff --check` passed locally; no live-host staging test was performed.
+- Not performed / deferred: VM execution, example-to-private copy/edit, credential and dependency validation, activation, and existing-Pi migration.
+- Risks and data handling: blank examples have no private values and are restricted to root. Existing private files are untouched. A user could mistakenly edit an example with real credentials; the runbook directs editing only a private copy.
+- Rollback: remove only the staged `.example` files after confirming they contain no operator edits; no host rollback was required during this repository change.
+- Follow-up: verify first-run staging, missing-env pause, and unchanged-file retry on a clean ARM64 VM.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) and [Ansible preparation runbook](../deploy/ansible/README.md).
+
+### 2026-09-28 — Add resumable Pi Go-slice installation entry point
+
+- Status: repository implementation prepared; not run on a Pi or VM.
+- Scope and intent: provide one command that builds a missing reviewed Go release, prepares the Pi once, waits for operator env files and prerequisites, and activates only the five Go units and local Redis when gates pass.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `install_pi_sensor.py`, a Redis loopback config checker, and `activate-pi-go.yml`; make `prepare-pi.yml` exit without mutation for a matching completed marker; allow the read-only audit to inspect an active prepared release; update CI and the Ansible runbook. A first local build pauses for approval of its manifest digest, and retries use the same release ID and digest.
+- Host/environment changes actually applied: none for this change. No Pi or VM playbook was executed.
+- Runtime/exposure state: existing Pi and Dashboard runtime unchanged. The new activation playbook is not active anywhere.
+- Validation performed and outcome: Python compilation, 33 installer unit tests, all three Ansible playbook syntax checks, and `git diff --check` passed locally; no live-host behavior was tested.
+- Not performed / deferred: clean ARM64 VM prepare, missing-env retry, Cowrie/Zeek install, Redis binding acceptance, credential/connectivity validation, activation, and existing-Pi migration.
+- Risks and data handling: the wrapper accepts one inventory host and reviewed non-secret vars only. It never uploads private env values. Activation validates local file shape and service state but cannot establish Mongo/B2 credential validity, telemetry delivery, or backup restore readiness. Failure after a unit starts triggers rollback of units that were inactive before that attempt.
+- Rollback: remove the entry point and activation files. For a VM attempt, restore its snapshot; production rollback remains unqualified.
+- Follow-up: run the full pause/upload/rerun path on a disposable ARM64 VM, then add accepted Cowrie/Zeek/decoy installation and deeper connectivity checks before production use.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) and [Ansible preparation runbook](../deploy/ansible/README.md).
+
+### 2026-09-28 — Prepare operator-uploaded Pi environment examples and checks
+
+- Status: repository change prepared; not uploaded to or activated on a Pi or VM.
+- Scope and intent: let the operator fill separate private env files for the five prepared Go services, then check their paths and required names before activation.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add blank env examples for the shared agent, processor, TI worker, hardware agent, and backup worker; add a read-only checker for regular files, root ownership, mode `0600`, syntax, duplicate names, and per-service required nonempty keys; document private upload and checking in the Ansible runbook; include the checker in installer CI. No credential values or existing Pi env files were copied.
+- Host/environment changes actually applied: none for this change. No Pi or VM file was uploaded or modified.
+- Runtime/exposure state: existing Pi and Dashboard services unchanged; the prepared playbook still leaves new units stopped and disabled.
+- Validation performed and outcome: the full installer unit suite passed (28 tests, including three focused checker tests); Python compilation, checker CLI help, and `git diff --check` passed locally. No live host file was inspected.
+- Not performed / deferred: operator upload, live Pi permission check, credential/connectivity validation, Cowrie/Zeek/decoy installation, VM activation, and existing-Pi migration.
+- Risks and data handling: templates contain blank credential fields and no private values. The checker reads private files but prints only key names and diagnostic categories; passing its checks does not establish service readiness.
+- Rollback: remove the templates/checker and documentation changes; no host rollback is needed.
+- Follow-up: test the upload and validation flow on the disposable ARM64 VM, then add dependency and connectivity gates plus explicit service activation.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) and [Ansible preparation runbook](../deploy/ansible/README.md).
+
+### 2026-09-28 — Add online build-host bootstrap for Go agent releases
+
+- Status: repository change prepared; not applied to a Pi, VM, or Dashboard host.
+- Scope and intent: let a developer or operator prepare a Linux build host from a fresh checkout and produce the existing five-agent ARM64 bundle with one script.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `bootstrap_sensor_build.sh` with a read-only `--check`, conditional Ubuntu 24.04 apt installation through `sudo`, an official Go 1.26.3 download pinned by SHA-256 for Linux amd64/arm64, per-module download and verification, and handoff to the offline release builder. Update the build/runbook instructions and CI syntax/check invocation. The script does not install runtime services, Redis diagnostics, or Pi packages.
+- Host/environment changes actually applied: on the development build host, the pinned Go archive was downloaded and extracted under `/tmp/pti-bootstrap-e2e-data`, public modules were fetched into the user's Go module cache, and a release was written under `/tmp/pti-bootstrap-e2e-releases`. No apt or sudo action occurred. Nothing was applied to the Pi, VM, or Dashboard host.
+- Runtime/exposure state: existing Pi and Dashboard runtime unchanged; no new service or listener was enabled.
+- Validation performed and outcome: shell syntax and read-only bootstrap check passed; 25 installer unit tests passed; the online bootstrap fetched and SHA-256-verified official Go 1.26.3, downloaded and verified all five modules, passed their Go tests, and built all five ARM64 binaries without build-time downloads. The independent release verifier accepted the generated bundle and its reviewed manifest SHA-256; `git diff --check` passed. This was a repeatable-path test on an existing development host, not a fresh-OS acceptance run.
+- Not performed / deferred: online bootstrap execution on a fresh build host with missing base packages and sudo; clean ARM64 VM preparation, installation, and runtime activation.
+- Risks and data handling: the toolchain and module downloads require trusted HTTPS access; the pinned Go archive hash and Go module sum verification detect changed artifacts. The bootstrap does not accept or write runtime credentials. Ubuntu apt package versions depend on the configured apt sources and are separate from the Pi's reviewed package pins.
+- Rollback: remove the bootstrap script and docs/CI references. A user who ran it can remove its user-level Go toolchain and release directory; Ubuntu packages must be reviewed before removal.
+- Follow-up: exercise the full online bootstrap from a clean Linux build host, then use the resulting approved release for the disposable ARM64 VM acceptance run.
+- Related ADR/runbook: [Ansible preparation runbook](../deploy/ansible/README.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
+
+### 2026-09-28 — Prepare read-only VM acceptance audit for first Pi installation slice
+
+- Status: repository change prepared; not applied to a VM, Pi, or Dashboard host.
+- Scope and intent: give the operator a repeatable post-prepare acceptance check while a clean Ubuntu 24.04 ARM64 VM is being arranged.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `audit-prepared-pi.yml` to verify the release marker, approved manifest and five binary hashes, exact package versions, and stopped/disabled Redis and Go units without reading private env files. Include the audit and tracked decoy-source syntax checks in installer CI; update the Ansible and Thai VM runbooks.
+- Host/environment changes actually applied: none. A temporary five-agent Linux ARM64 release was built under `/tmp` on the development machine; no service was installed or started.
+- Runtime/exposure state: existing Pi and Dashboard runtime unchanged. The VM is not yet available.
+- Validation performed and outcome: all five Go module tests and ARM64 builds passed; release manifest and binary hashes verified. Twenty-five installer tests, both Ansible playbook syntax checks, Compose config validation, and CI YAML parsing passed locally. A read-only localhost audit execution was attempted but the sandbox's Ansible local RPC server could not start; no target task ran. The Core and Web-corp images built on the x86-64 development host, and each imported inside an isolated container without network or published ports.
+- Not performed / deferred: execution of prepare/audit on a clean ARM64 VM, ARM64 container image build, Cowrie/Zeek/decoy installation, private-input validation, and activation.
+- Risks and data handling: syntax and local build success do not establish host behavior. The temporary bundle has no runtime configuration; approved release identity must be recorded separately before use. No private values or attacker records entered the test artifact.
+- Rollback: revert repository changes; no host rollback is needed. Restore the clean VM snapshot for future apply/retry tests.
+- Follow-up: when the VM is ready, run baseline inventory, snapshot, prepare, audit, same-release retry, and audit again; then resolve any observed package, unit, or permission differences before extending the installer.
+- Related ADR/runbook: [Ansible preparation runbook](../deploy/ansible/README.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
+
+### 2026-09-28 — Track active decoy Compose and Deception Core build source
+
+- Status: repository source prepared; not installed or activated on a host.
+- Scope and intent: make the active PostgreSQL, Deception Core, and Web-corp HTTP stack reviewable from one repository checkout for the fresh-Pi installer.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add `deploy/decoy-honeypot/compose.yaml` with repository-local build contexts and a stable project name; import only the active Deception Core Docker build inputs and synthetic schemas; remove its hard-coded PostgreSQL password fallback, replace a copied overlay address in source/schema examples with a documentation address, and correct Dockerfile multi-source `COPY` destinations; add ADR-0010 and update current-state and service runbooks. Odoo, FTP, SMTP, direct Pi HTTPS, private env files, runtime volumes, backups, and event logs were not imported.
+- Host/environment changes actually applied: none. The Pi's external Compose file, running containers, volumes, and private configuration were not changed.
+- Runtime/exposure state: unchanged; the tracked Compose source is not the active Pi deployment.
+- Validation performed and outcome: `docker compose config` with a disposable validation-only password passed; the project name, three service names, and default loopback bindings were checked, and omitting the operator password failed as required. Python compilation/syntax checks, JSON parsing, changed-document links, and `git diff --check` passed. After correcting the Dockerfile, both Core and Web-corp images built on the x86-64 development host and imported in isolated, network-disabled containers; Core was given temporary `/data` storage for its startup import. The imported file list and credential fallback were reviewed; no private config file or runtime data was copied.
+- Not performed / deferred: ARM64 Docker image build, clean ARM64 VM acceptance, image digest pinning, existing-Pi migration, operator-input validation, and activation.
+- Risks and data handling: the imported Core code and synthetic schemas still need build and behavior acceptance. The PostgreSQL image uses a major-version tag, so a pinned release digest is required before production installation. `POSTGRES_PASSWORD` remains operator-managed outside Git.
+- Rollback: remove this repository change; no host rollback is needed because no host was modified.
+- Follow-up: build and test the Core image on a disposable ARM64 VM, validate host paths and private inputs, then plan a separate Pi cutover.
+- Related ADR/runbook: [ADR-0010](adr/ADR-0010-track-active-decoy-compose.md), [decoy Compose runbook](../deploy/decoy-honeypot/README.md), and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
 ### 2026-09-28 — Show SSH attacker category in the unified session directory
 
 - Status: repository Dashboard change prepared; staging deployment pending verification after push.

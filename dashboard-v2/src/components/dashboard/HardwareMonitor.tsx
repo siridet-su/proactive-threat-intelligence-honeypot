@@ -365,7 +365,7 @@ export function HardwareMonitor() {
             <MetricCard index={1} icon={MemoryStick} label="Memory pressure" value={formatPercent(memoryPercent(latest))} detail={`${formatBytes(memoryUsedBytes(latest))} used · ${formatBytes(latest?.mem_available_bytes)} free`} delta={formatDelta(memoryPercent(latest), memoryPercent(previous))} tone={pressureTone(memoryPercent(latest))} reduceMotion={Boolean(shouldReduceMotion)} />
             <MetricCard index={2} icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} detail={`${formatBytes(diskUsedBytes(latest))} used · ${formatBytes(latest?.disk_free_bytes)} free`} delta={formatDelta(latest?.disk_percent, previous?.disk_percent)} tone={pressureTone(latest?.disk_percent)} reduceMotion={Boolean(shouldReduceMotion)} />
             <MetricCard index={3} icon={Thermometer} label="Temperature" value={formatTemperature(latest?.temperature)} detail="Thermal probe" delta={formatDelta(latest?.temperature, previous?.temperature)} tone={temperatureTone(latest?.temperature)} reduceMotion={Boolean(shouldReduceMotion)} />
-            <MetricCard index={4} icon={Wifi} label="wlan0 throughput" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} unit="RX / TX Mbps" detail="Virtual network interface" delta={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps`} tone="neutral" reduceMotion={Boolean(shouldReduceMotion)} />
+            <MetricCard index={4} icon={Wifi} label="wlan0 throughput" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} unit="RX / TX Mbps" detail="Primary uplink interface" delta={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps`} tone="neutral" reduceMotion={Boolean(shouldReduceMotion)} />
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(230px,0.65fr)] lg:grid-rows-2">
@@ -465,7 +465,7 @@ const METRIC_SKELETON_SPECS = [
     label: "wlan0 throughput",
     placeholder: "—.—— / —.——",
     unit: "RX / TX Mbps",
-    detail: "Virtual interface",
+    detail: "Primary uplink interface",
     delta: "Awaiting telemetry",
   },
 ];

@@ -37,6 +37,8 @@ type AppConfig struct {
 	ZtInterface         string
 	ZeroTierIP          string
 	ZeroTierIface       string
+	WireGuardIP         string
+	WireGuardIface      string
 	AllowedCIDRs        []*net.IPNet
 	AllowedPorts        map[int]bool
 	ReadFromStart       bool
@@ -114,13 +116,15 @@ func loadConfig() AppConfig {
 		RedisPassword: getenv("REDIS_PASSWORD", ""),
 		RedisDB:       redisDB,
 
-		SensorName:    getenv("SENSOR_NAME", "ubuntu-pi-server"),
-		LanIP:         getenv("SENSOR_LAN_IP", "192.168.1.8"),
-		LanInterface:  getenv("SENSOR_LAN_IFACE", "wlan0"),
-		ZtIP:          getenv("SENSOR_ZT_IP", "10.123.100.42"),
-		ZtInterface:   getenv("SENSOR_ZT_IFACE", "tailscale0"),
-		ZeroTierIP:    getenv("SENSOR_ZEROTIER_IP", ""),
-		ZeroTierIface: getenv("SENSOR_ZEROTIER_IFACE", ""),
+		SensorName:     getenv("SENSOR_NAME", "ubuntu-pi-server"),
+		LanIP:          getenv("SENSOR_LAN_IP", "192.168.1.8"),
+		LanInterface:   getenv("SENSOR_LAN_IFACE", "wlan0"),
+		ZtIP:           getenv("SENSOR_ZT_IP", "10.123.100.42"),
+		ZtInterface:    getenv("SENSOR_ZT_IFACE", "tailscale0"),
+		ZeroTierIP:     getenv("SENSOR_ZEROTIER_IP", ""),
+		ZeroTierIface:  getenv("SENSOR_ZEROTIER_IFACE", ""),
+		WireGuardIP:    getenv("SENSOR_WG_IP", ""),
+		WireGuardIface: getenv("SENSOR_WG_IFACE", ""),
 
 		AllowedCIDRs:  parseCIDRs(getenv("ALLOW_CIDRS", "192.168.1.0/24,10.123.100.0/24")),
 		AllowedPorts:  parsePorts(getenv("ALLOW_RESP_PORTS", "22,23,80,443,21,445")),
@@ -560,8 +564,8 @@ func shouldKeepZeek(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
 		return false, EventMeta{}
 	}
 
-	// รับเฉพาะ inbound service ที่ปลายทางคือ Pi ผ่าน LAN หรือ ZeroTier
-	if respH != cfg.LanIP && respH != cfg.ZtIP && respH != cfg.ZeroTierIP {
+	// Keep only inbound services addressed to a configured Pi interface.
+	if respH != cfg.LanIP && respH != cfg.ZtIP && respH != cfg.ZeroTierIP && respH != cfg.WireGuardIP {
 		return false, EventMeta{}
 	}
 
@@ -578,6 +582,8 @@ func shouldKeepZeek(cfg AppConfig, payload map[string]any) (bool, EventMeta) {
 		iface = cfg.ZtInterface
 	case cfg.ZeroTierIP:
 		iface = cfg.ZeroTierIface
+	case cfg.WireGuardIP:
+		iface = cfg.WireGuardIface
 	}
 
 	if iface == "" {
