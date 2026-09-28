@@ -1488,13 +1488,18 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const followOnAssessment = record(sessionAssessment.follow_on_hypothesis);
   const reports = list(data.reports);
   const canonicalCount = list(sessionAssessment.canonical_finding_ids).length;
+  const assessmentOutcome = hypothesisSets.length > 0
+    ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded`
+    : canonicalCount > 0
+      ? `${canonicalCount} canonical behavioral finding${canonicalCount === 1 ? "" : "s"} established`
+      : "No threat hypothesis or canonical finding established";
   const relationshipCount = Number(sessionGraph.relationship_edges || 0);
   const missingEvidence = list(sessionAssessment.missing_evidence).slice(0, 4);
   return (
     <div className="space-y-3">
       <div className="border-l-2 border-primary-border pl-3">
         <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Assessment outcome</p>
-        <p className="mt-0.5 text-sm font-semibold text-text">{hypothesisSets.length > 0 ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded` : "No threat hypothesis established"}</p>
+        <p className="mt-0.5 text-sm font-semibold text-text">{assessmentOutcome}</p>
         <p className="mt-0.5 text-[11px] text-text-muted">Analyst interpretation only · not response authority</p>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">

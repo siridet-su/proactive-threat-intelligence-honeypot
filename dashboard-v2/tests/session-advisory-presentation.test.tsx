@@ -259,6 +259,18 @@ describe("session assessment presentation", () => {
     expect(html).toContain("not proof that its effect succeeded");
   });
 
+  it("presents a canonical behavioral finding as the assessment outcome when no hypothesis set exists", () => {
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: [], correlated_ttp_hypotheses: [],
+      session_hypothesis_assessment: {
+        canonical_finding_ids: ["finding-transfer-1"],
+        missing_evidence: [],
+      },
+    }} />);
+    expect(html).toContain("1 canonical behavioral finding established");
+    expect(html).not.toContain("No threat hypothesis established");
+  });
+
   it("explains exactly which Model2 head makes a bound result partial", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-1", ensemble_evidence: { session_id: "session-1", run_id: "run-1",

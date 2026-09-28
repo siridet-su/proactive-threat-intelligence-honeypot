@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Correct canonical-finding assessment outcome after end-to-end rehearsal
+
+- Status: repository Dashboard correction prepared; staging deployment pending push and CI/CD verification.
+- Scope and intent: ensure Session Analysis reports a recorded canonical behavioral finding as the primary assessment outcome when no evidence-bounded hypothesis set exists, instead of presenting the valid finding as if no assessment outcome were available.
+- Repository branch and commit/PR: `staging-release`, based on deployed staging commit `17c49610`; correction commit follows this entry.
+- Repository changes: derive the assessment-outcome heading from bounded hypothesis sets first, then canonical finding count, and add regression coverage for a transfer finding without a hypothesis set. No hypothesis gate, finding authority, recommendation formula, model, API contract, or backend behavior was changed.
+- Host/environment changes actually applied: none. No service, worker, database row, model, or configuration was changed manually.
+- Runtime/exposure state: not deployed at the time of this entry.
+- Validation performed and outcome: a public-path Cowrie rehearsal produced a closed session with rule classifications, Model1 candidates, an exact-bound partial Model2 result, a gated weighted-voting recommendation, one canonical transfer finding, manual-only response guidance, an accepted schema-valid AI advisory, protocol-valid PDF bytes, and policy-governed TI provider states. Targeted UI tests and build validation follow this entry.
+- Not performed / deferred: no external-TI provider lookup was forced because operator-owned test infrastructure is excluded by source-IP governance. The PDF byte structure and MIME type were checked, but PDF text extraction was unavailable on the runtime host.
+- Risks and data handling: no credential, raw payload, source address, cookie, token, or artifact hash is recorded here. The rehearsal used a harmless static asset and did not execute the transferred file.
+- Rollback: revert this Dashboard presentation correction; no backend, model, database, or policy rollback is required.
+- Follow-up: push staging, verify CI/CD release identity, and visually confirm that the rehearsal session shows the canonical-finding outcome and calculated dwell time.
+- Related ADR/runbook: bounded hypothesis assessment, canonical behavioral findings, gated weighted-voting recommendation, and unified Session Analysis.
+
 ### 2026-09-28 — Restore Model1 ATT&CK names and SSH dwell time
 
 - Status: repository Dashboard correction prepared; staging deployment pending push and CI/CD verification.
