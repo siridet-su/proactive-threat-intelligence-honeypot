@@ -52,7 +52,7 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 - Status: repository Dashboard change prepared; staging deployment pending verification after push.
 - Scope and intent: replace generic SSH command-activity text in the unified session directory with the attacker category already returned by the Dashboard API, while preserving HTTP request activity.
-- Repository branch and commit/PR: `staging-release`, based on `087a022be852843f103e120a366fcfe795b46daa`; new commit pending.
+- Repository branch and commit/PR: `staging-release`; Dashboard change commit `f1395dbd`, followed by merge of current `origin/main` at `f824ff575`.
 - Repository changes: project the existing SSH `classification` value into the directory row and render APT, Bot, Script Kiddie, or Unclassified as a compact tag on desktop and mobile. Unknown values fail closed to Unclassified. HTTP activity remains unchanged. Update the focused directory test and an outdated advisory-copy assertion; no API, schema, backend, or classification behavior changes.
 - Host/environment changes actually applied: none.
 - Runtime/exposure state: not deployed at the time of this entry. The category remains an existing classification/projection and must not be interpreted as verified actor attribution.
