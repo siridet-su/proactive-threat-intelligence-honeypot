@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
+
+from production.ensemble import model2_result_bridge as bridge
 from production.ensemble.evidence import (
     MODEL2_BACKEND_POC_ARTIFACT_SHA256, MODEL2_BACKEND_POC_PROJECTION_SHA256,
     MODEL2_BACKEND_POC_VERSION, MODEL2_V5_ARTIFACT_SHA256,
-    MODEL2_V5_FEATURE_CONTRACT_SHA256,
+    MODEL2_V5_FEATURE_CONTRACT_SHA256, MODEL2_UNIFIED54_ARTIFACT_SHA256,
+    MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256, MODEL2_UNIFIED54_VERSION,
 )
-from production.ensemble.model2_result_bridge import BINDING_SHA256, _valid_result
+from production.ensemble.model2_result_bridge import (
+    BINDING_SHA256, _ResultIndex, _find_result, _valid_result,
+)
 
 
 def _result() -> dict:
@@ -58,3 +64,64 @@ def test_poc_result_cannot_claim_an_old_artifact() -> None:
                    "input_projection_contract_sha256": MODEL2_BACKEND_POC_PROJECTION_SHA256,
                    "source_feature_contract_sha256": MODEL2_V5_FEATURE_CONTRACT_SHA256})
     assert not _valid_result(result, session_id="session-a", run_id="run-a")
+
+
+def test_unified54_accepts_exact_supported_capture_contracts_only() -> None:
+    result = _result()
+    result.update({
+        "schema_version": "model2_unified_54f_experimental_shadow_result.v1",
+        "model_version": MODEL2_UNIFIED54_VERSION,
+        "model_artifact_sha256": MODEL2_UNIFIED54_ARTIFACT_SHA256,
+        "feature_contract_sha256": MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256,
+        "source_feature_contract_sha256": MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256,
+        "quality_status": "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY",
+        "independent_binary_heads": True,
+        "feature_count": 54,
+        "source_feature_count": 54,
+    })
+    for contract in (
+        "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+        "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2",
+    ):
+        result["capture_selection"] = contract
+        assert _valid_result(result, session_id="session-a", run_id="run-a")
+    result["capture_selection"] = "FILE_DOWNLOAD_SELECTED_FLOW"
+    assert not _valid_result(result, session_id="session-a", run_id="run-a")
+
+
+def test_result_index_keeps_exact_session_and_detects_changes(tmp_path) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    first = root / "first.json"
+    second = root / "second.json"
+    first.write_text(json.dumps(_result()), encoding="utf-8")
+    other = _result()
+    other.update({"session_id": "session-b", "run_id": "run-b"})
+    second.write_text(json.dumps(other), encoding="utf-8")
+    index = _ResultIndex(root)
+    assert _find_result(root, session_id="session-a", run_id="run-a", index=index)[0] == "AVAILABLE"
+    assert index.paths_for("session-a") == [first]
+    assert index.paths_for("session-b") == [second]
+    second.write_text(json.dumps(_result()), encoding="utf-8")
+    assert _find_result(root, session_id="session-a", run_id="run-a", index=index)[0] == "UNAVAILABLE"
+    second.unlink()
+    assert _find_result(root, session_id="session-a", run_id="run-a", index=index)[0] == "AVAILABLE"
+
+
+def test_result_index_rejects_symlinked_result(tmp_path) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(_result()), encoding="utf-8")
+    (root / "alias.json").symlink_to(outside)
+    index = _ResultIndex(root)
+    assert _find_result(root, session_id="session-a", run_id="run-a", index=index)[0] == "UNAVAILABLE"
+
+
+def test_result_index_keeps_a_hard_file_count_bound(tmp_path, monkeypatch) -> None:
+    root = tmp_path / "results"
+    root.mkdir()
+    (root / "first.json").write_text(json.dumps(_result()), encoding="utf-8")
+    (root / "second.json").write_text(json.dumps(_result()), encoding="utf-8")
+    monkeypatch.setattr(bridge, "MAX_RESULT_FILES", 1)
+    assert _find_result(root, session_id="session-a", run_id="run-a")[0] == "UNAVAILABLE"

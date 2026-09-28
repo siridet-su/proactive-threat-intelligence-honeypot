@@ -9,6 +9,7 @@ import os
 import socket
 import stat
 import sys
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -30,7 +31,10 @@ MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.
 BINDING_SHA256 = "2aa0cfebe1298943517610c3e62e0c9a38651ea93b65747dc69250d814b26c7b"
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESULT_BYTES = 128 * 1024
-MAX_RESULT_FILES = 4096
+# The receiver directory is append-only and can legitimately outgrow the old
+# 4,096-file per-request scan bound.  Keep a hard upper bound, but index exact
+# session identities in memory so normal lookups do not reread every result.
+MAX_RESULT_FILES = 65_536
 
 
 def _clean(value: Any) -> str:
@@ -99,17 +103,95 @@ def _valid_result(value: Any, *, session_id: str, run_id: str) -> bool:
     return normalized.get("available") is True
 
 
-def _find_result(root: Path, *, session_id: str, run_id: str) -> tuple[str, dict[str, Any] | None]:
+class _ResultIndex:
+    """Bounded exact-session index for the append-only result directory."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self._files: dict[str, tuple[tuple[int, int, int], str]] = {}
+        self._by_session: dict[str, set[str]] = defaultdict(set)
+
+    def _remove(self, name: str) -> None:
+        previous = self._files.pop(name, None)
+        if previous is None:
+            return
+        session_id = previous[1]
+        names = self._by_session.get(session_id)
+        if names is None:
+            return
+        names.discard(name)
+        if not names:
+            self._by_session.pop(session_id, None)
+
+    @staticmethod
+    def _read_session_id(path: Path, info: os.stat_result) -> str:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_RESULT_BYTES:
+            return ""
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError, TypeError):
+            return ""
+        return _clean(value.get("session_id")) if isinstance(value, Mapping) else ""
+
+    def refresh(self) -> bool:
+        if not self.root.is_dir() or self.root.is_symlink():
+            return False
+        try:
+            entries = [
+                entry
+                for entry in os.scandir(self.root)
+                if entry.name.endswith(".json")
+            ]
+        except OSError:
+            return False
+        if len(entries) > MAX_RESULT_FILES:
+            return False
+
+        seen: set[str] = set()
+        for entry in entries:
+            name = entry.name
+            seen.add(name)
+            try:
+                if entry.is_symlink():
+                    self._remove(name)
+                    continue
+                info = entry.stat(follow_symlinks=False)
+            except OSError:
+                self._remove(name)
+                continue
+            signature = (int(info.st_ino), int(info.st_mtime_ns), int(info.st_size))
+            previous = self._files.get(name)
+            if previous is not None and previous[0] == signature:
+                continue
+            self._remove(name)
+            session_id = self._read_session_id(Path(entry.path), info)
+            if not session_id:
+                continue
+            self._files[name] = (signature, session_id)
+            self._by_session[session_id].add(name)
+
+        for name in set(self._files).difference(seen):
+            self._remove(name)
+        return True
+
+    def paths_for(self, session_id: str) -> list[Path]:
+        return [self.root / name for name in sorted(self._by_session.get(session_id, set()))]
+
+
+def _find_result(
+    root: Path,
+    *,
+    session_id: str,
+    run_id: str,
+    index: _ResultIndex | None = None,
+) -> tuple[str, dict[str, Any] | None]:
     if not root.is_dir() or root.is_symlink():
         return "UNAVAILABLE", None
-    try:
-        paths = sorted(root.glob("*.json"))
-    except OSError:
-        return "UNAVAILABLE", None
-    if len(paths) > MAX_RESULT_FILES:
+    selected_index = index or _ResultIndex(root)
+    if selected_index.root != root or not selected_index.refresh():
         return "UNAVAILABLE", None
     matches: list[dict[str, Any]] = []
-    for path in paths:
+    for path in selected_index.paths_for(session_id):
         try:
             info = path.lstat()
             if not path.is_file() or path.is_symlink() or info.st_size > MAX_RESULT_BYTES:
@@ -130,7 +212,7 @@ def _find_result(root: Path, *, session_id: str, run_id: str) -> tuple[str, dict
     return "AVAILABLE", value
 
 
-def _handle(line: bytes, root: Path) -> bytes:
+def _handle(line: bytes, root: Path, *, index: _ResultIndex | None = None) -> bytes:
     if len(line) > MAX_REQUEST_BYTES:
         return _response("UNAVAILABLE", reason="request_bound_exceeded")
     try:
@@ -147,7 +229,12 @@ def _handle(line: bytes, root: Path) -> bytes:
     run_id = _clean(request.get("run_id"))
     if not session_id:
         return _response("UNAVAILABLE", reason="session_id_missing")
-    status, result = _find_result(root, session_id=session_id, run_id=run_id)
+    status, result = _find_result(
+        root,
+        session_id=session_id,
+        run_id=run_id,
+        index=index,
+    )
     return _response(status, result=result, reason="no_unique_valid_result" if result is None else "")
 
 
@@ -158,6 +245,7 @@ def serve(root: Path, socket_path: Path) -> None:
         if not stat.S_ISSOCK(info.st_mode):
             raise RuntimeError("bridge socket path is not a socket")
         socket_path.unlink()
+    result_index = _ResultIndex(root)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
         server.bind(str(socket_path))
         os.chmod(socket_path, 0o660)
@@ -175,7 +263,11 @@ def serve(root: Path, socket_path: Path) -> None:
                         data.extend(chunk)
                         if b"\n" in chunk:
                             break
-                    response = _handle(bytes(data).split(b"\n", 1)[0], root)
+                    response = _handle(
+                        bytes(data).split(b"\n", 1)[0],
+                        root,
+                        index=result_index,
+                    )
                 except OSError:
                     response = _response("UNAVAILABLE", reason="connection_error")
                 try:

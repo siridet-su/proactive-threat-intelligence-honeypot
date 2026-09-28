@@ -37,6 +37,10 @@ MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.
 MODEL2_UNIFIED54_ARTIFACT_SHA256 = "fb56940ba2ca90c0942813168d9f5a85cb80a58da5c62e2dd7e343da5f71d5fa"
 MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256 = "28cc1a43e59259c5939dacdb889cdbe4e13fbdaa71b197264e27907a071d13c1"
 MODEL2_UNIFIED54_VERSION = "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260927_V3"
+MODEL2_UNIFIED54_CAPTURE_CONTRACTS = frozenset({
+    "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+    "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2",
+})
 
 
 def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
@@ -47,7 +51,7 @@ def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
         if (actual != MODEL2_UNIFIED54_ARTIFACT_SHA256
                 or value.get("quality_status") != "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY"
                 or value.get("source_feature_contract_sha256") != MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256
-                or value.get("capture_selection") != "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"):
+                or value.get("capture_selection") not in MODEL2_UNIFIED54_CAPTURE_CONTRACTS):
             raise EnsembleContractError("unified 54F Model2 identity/capture mismatch")
         return MODEL2_UNIFIED54_ARTIFACT_SHA256
     if version == MODEL2_BACKEND_POC_VERSION:
@@ -70,9 +74,8 @@ def expected_feature_contract_sha256(value: Mapping[str, Any]) -> str:
 
 MODEL2_V5_RESULT_ROOT = Path("/var/lib/model2-v7/results")
 MODEL2_V5_BRIDGE_SOCKET = Path("/run/model2-v7-ensemble/bridge.sock")
-# The bridge validates one exact result by scanning its bounded spool. In the
-# deployed spool this regularly takes 215-250 ms, so a 250 ms client deadline
-# intermittently converts valid evidence into a Model1-only fallback.
+# The bridge validates one exact result through a bounded session index. Keep
+# this deadline above ordinary spool refresh latency to avoid false fallbacks.
 MODEL2_V5_BRIDGE_TIMEOUT_SECONDS = 3.0
 SHARED_TECHNIQUES = ("T1105", "T1046", "T1110")
 # Model2/ensemble presentation is intentionally parent-technique only.  A

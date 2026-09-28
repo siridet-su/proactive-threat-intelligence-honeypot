@@ -2263,7 +2263,11 @@ def build_response_guidance_v3(
                         "references": deepcopy(action.get("references") or []),
                         "provenance": {"rule": deepcopy(rule.get("provenance") or {}), "action": deepcopy(action.get("provenance") or {})},
                     }
-                    if _clean(rule.get("semantic_family")):
+                    # Path-bounded actions carry their own typed-fact trace.
+                    # A semantic-family trace is valid only for selections
+                    # made by the older family matcher; attaching an empty
+                    # trace makes the entire guidance projection unavailable.
+                    if _clean(rule.get("semantic_family")) and not bounded:
                         semantic_family = _clean(rule.get("semantic_family"))
                         selected_action.update({
                             "semantic_family": semantic_family,
