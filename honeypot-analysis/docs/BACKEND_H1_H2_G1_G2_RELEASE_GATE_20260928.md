@@ -24,3 +24,7 @@ Status: **NOT RELEASED**. The operator requires the complete test suite to pass 
 4. Only then switch the GCP release pointer, restart affected units, verify health and report/API/PDF parity, and run one bounded authorized session through the real Pi route. Confirm that H1/H2 remain hypotheses and G1/G2 remain manual guidance with no automatic execution.
 
 The existing out-of-manifest active-host state is not a substitute for a new verified release. No production activation is claimed by this record.
+
+## 2026-09-28 current-runtime test addendum
+
+The project owner selected alignment with the current runtime, not restoration of unsupported V6/AI-v2/next-behavior APIs. ADR-0010 records the boundary. Thirteen non-collecting historical modules are preserved in the research archive; 15 historical assertions remain in the active test files as individually documented strict expected failures. Current-policy tests were corrected for Atlas Flex's 5-GB capacity, managed systemd units, S1's private artifact boundary, and packaged service imports. **`pytest tests -q` exits successfully: 2,140 passed, 77 skipped, 15 strict expected failures, zero failures/collection errors.** Historical expected failures are not evidence of those experiments working. The immutable release, host, model identity, and live report/API/PDF gates remain pending.

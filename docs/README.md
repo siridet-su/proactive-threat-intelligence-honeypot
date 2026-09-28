@@ -24,6 +24,8 @@ and historical material inherited from the previous team.
    Dashboard-controlled daily backup schedule and Pi execution boundary.
    [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) defines
    what the installer prepares and what the operator provisions before activation.
+   [ADR-0010](adr/ADR-0010-current-backend-release-test-boundary.md) defines
+   the current backend release-test boundary and historical contract-test handling.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.

@@ -10,6 +10,7 @@ import pytest
 from production.storage.canonical_event import CanonicalEventRecord
 from production.storage.backend import SQLiteStorage
 from production.storage.mongodb_epoch import (
+    ATLAS_FLEX_CAPACITY_BYTES,
     RUNTIME_ROLE_ID,
     SCHEMA_MANIFEST_ID,
     MongoCapacityGuard,
@@ -384,7 +385,9 @@ class _Mongo:
 
 @pytest.mark.parametrize("percent,state", [(59, "normal"), (60, "warning"), (75, "high"), (85, "fail_safe")])
 def test_capacity_thresholds_are_exact(percent, state):
-    total = 512 * 1024 * 1024
+    # The active Atlas Flex policy is 5 GB; the former 512-MiB fixture no
+    # longer reaches any configured threshold.
+    total = ATLAS_FLEX_CAPACITY_BYTES
     guard = MongoCapacityGuard(_Mongo(math.ceil(total * percent / 100), 0))
     assert guard.status()["state"] == state
     if state == "fail_safe":

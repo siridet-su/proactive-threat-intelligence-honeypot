@@ -24,6 +24,14 @@ overlay, or edit a release after manifest creation. The archive excludes
 bytecode, caches, temporary files, databases/WAL/SHM, logs, spools, generated
 reports, host artifacts, and mutable runtime state.
 
+For the current backend test boundary, a complete `pytest tests -q` run must
+have no collection errors, failures, or unexpected passes. Report ordinary
+passes, skips, and strict historical expected failures separately; the latter
+are not evidence that an experimental contract works. See
+[`ADR-0010`](../../docs/adr/ADR-0010-current-backend-release-test-boundary.md)
+and the preserved historical test inventory. This does not waive model-bundle,
+release-manifest, API/PDF, or Pi-route checks below.
+
 Effective CISA, Sigma, and MITRE feed caches are separately managed mutable,
 non-authoritative inputs and are verified through
 `runtime_feed_provenance.v1` after refresh, not included in the immutable

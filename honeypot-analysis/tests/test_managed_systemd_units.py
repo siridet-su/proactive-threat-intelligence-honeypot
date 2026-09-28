@@ -168,7 +168,15 @@ def test_gcp_managed_inventory_matches_repository_templates() -> None:
         if path.suffix in {".service", ".timer"}
         and path.name != "honeypot-sensor-forwarder.service"
     }
-    assert templates == expected
+    # Repository templates also include explicitly separate research/inactive
+    # units; they must not silently enter the GCP backend managed allowlist.
+    assert expected.issubset(templates)
+    assert templates - expected == {
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
+        "honeypot-mongo-retention.service",
+        "honeypot-mongo-retention.timer",
+    }
 
 
 def test_obsolete_unit_reconciler_is_exact_and_does_not_reenable_on_restore() -> None:

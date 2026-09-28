@@ -2834,3 +2834,25 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Risks and data handling: no secrets, provider calls, real attacker payloads, or protected endpoints were copied into the candidate. The spool index retains exact-session matching and a hard file-count bound; H1/H2 are hypothesis-only and G1/G2 remain manual review actions.
 - Rollback: no host rollback is required because production was not changed. The candidate changes can be reverted on the isolated branch if full validation finds a conflict.
 - Follow-up: resolve and rerun the complete test gate, build a clean immutable release with all three ensemble changes included and a verified manifest, then deploy with rollback readiness and real-session report/API/PDF smoke.
+
+### 2026-09-28 — Rebaseline backend release tests to the current runtime
+
+- Status: repository candidate only; host activation pending. The project owner chose alignment with current runtime instead of restoring experimental APIs removed from the production path.
+- Scope and intent: make the full backend suite collect and test the active v4/response-v3/AI/Model2 paths without changing frozen research labels or adding no-op compatibility APIs.
+- Repository changes: preserve 13 non-collecting Final-F V6, AI-v2 and next-behavior modules in a documented research archive; retain 15 historical assertions inside otherwise useful active test modules as strict, individually explained expected failures. Fix current test assumptions for Atlas Flex's 5-GB capacity, managed versus inactive/research systemd templates, S1's private artifact location, and import smoke of packaged service entrypoints. Add ADR-0010 and clarify the release runbook's pass/skip/expected-failure reporting.
+- Host/environment changes actually applied: none. No GCP release pointer, service, database, policy or model was changed.
+- Runtime/exposure state: the prior GCP backend release remains active; H1/H2/G1/G2 are not deployed. This change only redefines which historical assertions constitute current release evidence.
+- Validation performed and outcome: focused Mongo threshold 4/4, managed-unit/security template 3/3, current model-alignment 6/6, packaged entrypoint import 1/1, and mixed historical-contract modules 54 passed/15 strict expected failures. A complete post-rebaseline `pytest tests -q` run is in progress; its result must be recorded before deployment.
+- Not performed / deferred: immutable release build, manifest verification for a new candidate, GCP rollout, real Pi session, authenticated page, and PDF/API parity.
+- Risks and data handling: historical xfails remain visible and fail on unexpected pass; archived tests remain available as research artifacts. No secrets, model bytes, or attacker payloads were added. Full-suite success alone does not prove private model identities or field behavior.
+- Rollback: no host rollback is needed; repository change can be reverted while retaining the research archive.
+- Follow-up: finish full suite, review any unexpected failures or passes, then create and verify a new immutable release containing the reconciled ensemble source and approved H1/H2/G1/G2 changes before host activation.
+- Related ADR/runbook: [ADR-0010](adr/ADR-0010-current-backend-release-test-boundary.md), [backend deployment and recovery](../honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md).
+
+### 2026-09-28 — Validation addendum for current backend release test boundary
+
+- Status: repository validation gate completed; host activation still pending.
+- Validation performed and outcome: `pytest tests -q --tb=line` exited 0 with 2,140 passed, 77 skipped, and 15 strict expected failures; no collection errors, ordinary failures, or unexpected passes. The expected failures are explicitly historical and remain visible, not claims of successful feature behavior.
+- Host/environment changes actually applied: none. GCP still runs the prior backend release; no service, release pointer, policy, model, MongoDB record, provider call, or Pi path was changed by this test run.
+- Not performed / deferred: clean-commit source package and manifest build, private-model identity verification, rollback-bound activation, live session, authenticated API/UI/PDF consistency checks.
+- Follow-up: verify the immutable candidate and rollback path, then perform a bounded backend deployment and post-deploy smoke. Do not equate the successful test exit code with a successful production rollout.

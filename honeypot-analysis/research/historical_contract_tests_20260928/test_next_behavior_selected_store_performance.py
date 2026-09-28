@@ -1,5 +1,7 @@
 """Equivalence and bounded-work tests for selected-store reconciliation."""
 
+# Historical contract test; see README.md in this directory.
+
 from __future__ import annotations
 
 import gzip

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Historical contract test; see README.md in this directory.
+
 from tests.test_next_trusted_group_target import _group, _session
 
 from production.reproduction.next_behavior.group_target_support import (

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Historical Final-F contract test; see README.md in this directory.
+
 import asyncio
 import sys
 import types

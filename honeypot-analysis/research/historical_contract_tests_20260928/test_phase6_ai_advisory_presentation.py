@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Historical contract test; see README.md in this directory.
+
 from production.api.monitor_web import MonitorConfig, load_ai_advisory_detail
 from production.ai_advisory.provider import AIProviderResponse
 from production.ai_advisory.contracts import sha256_json

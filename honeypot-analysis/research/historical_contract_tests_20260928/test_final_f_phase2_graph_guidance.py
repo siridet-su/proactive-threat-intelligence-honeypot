@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# Historical contract test; see README.md in this directory.
+
 import copy
 import hashlib
 import inspect
