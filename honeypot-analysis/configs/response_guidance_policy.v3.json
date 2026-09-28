@@ -1,8 +1,8 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.7.0",
-  "updated_at": "2026-09-16",
+  "version": "3.8.0",
+  "updated_at": "2026-09-28",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
   "automatic_execution": false,
@@ -165,6 +165,22 @@
     "correlate-observed-execution-attempt": {
       "supports": ["manual correlation of an observed execution-attempt event"],
       "does_not_support": ["proof of execution success", "compromise, persistence, or automatic execution"]
+    },
+    "review-same-path-file-change": {
+      "supports": ["manual review of reported successful file-write or permission-change commands grouped by one resolved path"],
+      "does_not_support": ["proof of a real-host change", "automatic file modification or response"]
+    },
+    "review-observed-file-change": {
+      "supports": ["human-led file audit and change-record corroboration"],
+      "does_not_support": ["proof of compromise or intent", "automatic action"]
+    },
+    "review-same-path-execution-delete": {
+      "supports": ["manual review of a supported same-path execution-attempt then deletion-command sequence"],
+      "does_not_support": ["proof of cleanup intent", "proof of real-host execution or deletion"]
+    },
+    "review-observed-file-lifecycle": {
+      "supports": ["human-led process and file audit corroboration"],
+      "does_not_support": ["automatic containment", "proof that a file was executed or deleted on a real host"]
     }
   },
   "finding_rules": [
@@ -520,6 +536,97 @@
           }
         }
       ]
+    },
+    {
+      "rule_id": "review-same-path-file-change",
+      "semantic_family": "filesystem",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {
+        "activated_semantic_families": ["filesystem"],
+        "any_operation_types": ["file_write", "permission_modify"],
+        "required_outcome_statuses": ["reported_success"],
+        "resolved_path_group": true
+      },
+      "provenance": {
+        "method": "project_owner_approved_bounded_guidance",
+        "basis": ["G1 text approved on 2026-09-28", "One linkable resolved path and reported successful Cowrie facts are required"],
+        "author": "project-policy-maintainer",
+        "reviewer": "project-owner-approved-text",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-09-28",
+        "last_reviewed": "2026-09-28",
+        "review_expires_at": "2027-09-28",
+        "version": "3.8.0"
+      },
+      "actions": [{
+        "action_id": "review-observed-file-change",
+        "priority": 18,
+        "action": "Review authorized file audit, file permissions, and approved change records for the observed path and session time window.",
+        "rationale": "Cowrie reported a file write or permission change on a resolved path; effects on a real host are not established.",
+        "source_type": "trusted_control_guidance",
+        "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true,
+        "safe_to_auto_execute": false,
+        "execution_integration": "not_implemented",
+        "provenance": {
+          "method": "project_owner_approved_bounded_guidance",
+          "basis": ["G1 review only; no host action", "Path-scoped fact grouping prevents duplicate actions"],
+          "author": "project-policy-maintainer",
+          "reviewer": "project-owner-approved-text",
+          "reviewed": true,
+          "generated": false,
+          "created": "2026-09-28",
+          "last_reviewed": "2026-09-28",
+          "review_expires_at": "2027-09-28",
+          "version": "3.8.0"
+        }
+      }]
+    },
+    {
+      "rule_id": "review-same-path-execution-delete",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {
+        "same_path_operation_sequence": ["execution_attempt", "file_delete"],
+        "required_outcome_statuses": ["reported_success"]
+      },
+      "provenance": {
+        "method": "project_owner_approved_bounded_guidance",
+        "basis": ["G2 text approved on 2026-09-28", "Supported same-path chronological relationship is required"],
+        "author": "project-policy-maintainer",
+        "reviewer": "project-owner-approved-text",
+        "reviewed": true,
+        "generated": false,
+        "created": "2026-09-28",
+        "last_reviewed": "2026-09-28",
+        "review_expires_at": "2027-09-28",
+        "version": "3.8.0"
+      },
+      "actions": [{
+        "action_id": "review-observed-file-lifecycle",
+        "priority": 19,
+        "action": "Review authorized process and file audit with approved change records for the same path and time window.",
+        "rationale": "Cowrie observed a supported execution-attempt then deletion-command sequence on one path; cleanup intent and real-host effects are not established.",
+        "source_type": "trusted_control_guidance",
+        "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true,
+        "safe_to_auto_execute": false,
+        "execution_integration": "not_implemented",
+        "provenance": {
+          "method": "project_owner_approved_bounded_guidance",
+          "basis": ["G2 review only; no host action", "Canonical same-path relationship and chronology are mandatory"],
+          "author": "project-policy-maintainer",
+          "reviewer": "project-owner-approved-text",
+          "reviewed": true,
+          "generated": false,
+          "created": "2026-09-28",
+          "last_reviewed": "2026-09-28",
+          "review_expires_at": "2027-09-28",
+          "version": "3.8.0"
+        }
+      }]
     }
   ]
 }

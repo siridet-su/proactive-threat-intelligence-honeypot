@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-09-23-observed-attempt-hypothesis-v1",
+  "version": "2026-09-28-bounded-file-and-transfer-hypotheses-v1",
   "reference_manifest": {
     "path": "configs/trusted_reference_manifest.v1.json",
     "sha256": "788543ecef24c0d7a9a2adff869076eac9c788908f7a4669d328d462b1df3e0f"
@@ -22,11 +22,13 @@
       "Attempt-only typed HTTP(S) command transfer decision",
       "Exact-entity typed connected-chain and bounded incomplete-chain review",
       "Phase 4B hypothesis derive/render versus select/authorize boundary",
-      "Observed command-input versus confirmed outcome boundary for incomplete same-path hypotheses"
+      "Observed command-input versus confirmed outcome boundary for incomplete same-path hypotheses",
+      "Project-owner approval of bounded H1/H2 wording on 2026-09-28",
+      "Offline typed-chain negative-control replay for H1/H2"
     ],
     "reviewed": true,
     "reviewer": "project developer",
-    "last_reviewed": "2026-09-23",
+    "last_reviewed": "2026-09-28",
     "review_status": "approved for scoped Cowrie SSH analysis",
     "reference_scope": {
       "supports": [
@@ -42,7 +44,7 @@
       {
         "artifact_id": "threat-hypothesis-runtime",
         "path": "production/reporting/threat_hypothesis.py",
-        "sha256": "a7bfbdc7be2b38cb0d2c652e29e90f96cf7795946127682293262a085230fefc",
+        "sha256": "4da2da33bf0af640e8e40ffb7e05e5ef0edb4926c235b7f15784088970b1db5d",
         "purpose": "hypothesis derivation, evidence references, limitations, and authority boundary",
         "supports": [
           "the executable derive/render behavior bound to the reviewed policy"
@@ -78,7 +80,7 @@
       {
         "artifact_id": "behavior-policy-validator-runtime",
         "path": "production/policies/threat_hypothesis_behavior_policy.py",
-        "sha256": "28e86537418b5df9679fa82e06ea922b285c47bf488de7475da27bc759e4c80f",
+        "sha256": "4f8646c8c591bc2fedc7dda1b0577dd266cf85858b02532819732ee35eb1a7cf",
         "purpose": "fail-closed validation of the reviewed observed-attempt hypothesis rule",
         "supports": [
           "typed rule shape and scoped authority validation"
@@ -102,7 +104,7 @@
       {
         "artifact_id": "threat-hypothesis-policy-tests",
         "path": "tests/test_threat_hypothesis_behavior_policy.py",
-        "sha256": "bbc4f3d807bb106ac44662ce865f22571940eae3812c5bb7b2510016ca51611f",
+        "sha256": "1fbc0d062525712bf42826df0ae6ee541c9fdb02dc72c9b30cc944872ed66d99",
         "purpose": "trusted policy validation and fail-closed regression coverage",
         "supports": [
           "repeatable policy and containment checks"
@@ -367,6 +369,42 @@
             "path_identity_not_shared",
             "prior_attempt_reported_failed"
           ]
+        },
+        {
+          "rule_id": "typed-file-preparation-without-execution",
+          "required_operation_types": ["file_write", "permission_modify", "execution_attempt"],
+          "minimum_incomplete_operation_count": 2,
+          "required_transition_types": ["same_path_transition"],
+          "same_entity_required": true,
+          "hypothesis_only": true,
+          "claim_type": "possible_file_preparation",
+          "text": "A file write and permission change were observed on the same path; later execution is not established.",
+          "evidence_status": "partially_supported",
+          "limitations": ["Cowrie-reported command success does not prove a real-host file change or intent."],
+          "incomplete_claim_type": "possible_file_preparation",
+          "incomplete_text": "A file write and permission change were observed on the same resolved path, but no supported execution attempt was observed for that path.",
+          "missing_evidence_text": "A supported execution-attempt observation for the same resolved path is missing.",
+          "alternative_text": "The sequence may be ordinary file maintenance or may have stopped here.",
+          "falsifier_codes": ["execution_observed_elsewhere_for_same_path", "path_identity_not_shared", "prior_attempt_reported_failed"]
+        },
+        {
+          "rule_id": "typed-unconfirmed-transfer-execution",
+          "required_operation_types": ["transfer_attempt", "execution_attempt"],
+          "minimum_incomplete_operation_count": 1,
+          "required_transition_types": ["same_path_transition"],
+          "same_entity_required": true,
+          "hypothesis_only": true,
+          "hypothesis_when_complete": true,
+          "suppress_when_direct_transfer_observed": true,
+          "claim_type": "possible_use_after_unconfirmed_transfer",
+          "text": "A remote-content request and an execution attempt referenced the same path; receipt of bytes is not established.",
+          "evidence_status": "partially_supported",
+          "limitations": ["No direct transfer observation binds received bytes to the executed path.", "Cowrie commands do not prove real-host effects or intent."],
+          "incomplete_claim_type": "possible_use_after_unconfirmed_transfer",
+          "incomplete_text": "A remote-content request was followed by an execution attempt for the same resolved path, but receipt of bytes was not confirmed.",
+          "missing_evidence_text": "No bound direct Cowrie transfer event confirms bytes or a hash for the executed path.",
+          "alternative_text": "The fetch may have failed and the execution attempt may refer to a pre-existing file.",
+          "falsifier_codes": ["direct_transfer_observed", "path_identity_not_shared", "prior_attempt_reported_failed"]
         }
       ],
       "independent": {

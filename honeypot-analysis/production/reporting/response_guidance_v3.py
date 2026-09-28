@@ -2020,9 +2020,17 @@ def build_response_guidance_v3(
     def match_rule(
         rule: Dict[str, Any],
     ) -> Tuple[bool, List[Dict[str, Any]], List[str]]:
+        # These newer predicates require the v4 canonical graph's path and
+        # chronological relationship proof. Never degrade them into a broad
+        # v3 semantic-family match.
+        condition = rule.get("applies_when") or {}
+        if any(key in condition for key in (
+            "any_operation_types", "resolved_path_group",
+            "same_path_operation_sequence",
+        )):
+            return False, [], []
         semantic_family = _clean(rule.get("semantic_family"))
         if semantic_family:
-            condition = rule.get("applies_when") or {}
             matches = list(
                 (semantic_selections.get(semantic_family) or {}).get("matches")
                 or []
@@ -2089,6 +2097,84 @@ def build_response_guidance_v3(
             return bool(matches and refs), trace, refs
         return _condition_match(rule.get("applies_when"), facts)
 
+    def bounded_path_action_groups(rule: Dict[str, Any]) -> List[Tuple[List[str], List[Dict[str, Any]], str]]:
+        """Match the two reviewed path rules from validated typed evidence only."""
+        condition = rule.get("applies_when") or {}
+        if not semantic_selections or not isinstance(typed_semantic_fact_set, dict):
+            return []
+        if condition.get("resolved_path_group") is True:
+            allowed = set(condition.get("any_operation_types") or [])
+            grouped: Dict[str, Set[str]] = {}
+            for fact in typed_semantic_fact_set.get("facts") or []:
+                if not isinstance(fact, dict) or fact.get("abstention_reasons"):
+                    continue
+                outcome = fact.get("outcome") or {}
+                if outcome.get("status") != "reported_success" or outcome.get("scope") != "fragment":
+                    continue
+                if not any(
+                    op.get("operation_type") in allowed
+                    and op.get("effect_status") == "reported_completed"
+                    for op in fact.get("operations") or []
+                ):
+                    continue
+                refs = {
+                    _clean(item.get("evidence_ref"))
+                    for item in fact.get("evidence_references") or []
+                    if isinstance(item, dict)
+                    and item.get("reference_type") in {"source_observation", "direct_cowrie_event"}
+                    and _clean(item.get("evidence_ref"))
+                }
+                if not refs:
+                    continue
+                for role in ("created_paths", "modified_paths", "destination_paths"):
+                    for entity in (fact.get("entities") or {}).get(role) or []:
+                        if (entity.get("entity_type") == "path"
+                            and entity.get("linkable") is True
+                            and entity.get("uncertain") is False
+                            and _clean(entity.get("entity_id"))):
+                            grouped.setdefault(_clean(entity["entity_id"]), set()).update(refs)
+            return [
+                (sorted(refs), [{
+                    "predicate": "resolved_path_fact_group",
+                    "expected": sorted(allowed), "matched": [entity_ref],
+                    "result": True, "evidence_refs": sorted(refs),
+                }], entity_ref)
+                for entity_ref, refs in sorted(grouped.items()) if refs
+            ]
+        if condition.get("same_path_operation_sequence") == ["execution_attempt", "file_delete"]:
+            from production.reporting.typed_semantic_chain_selection import select_typed_semantic_chains
+            try:
+                selected = select_typed_semantic_chains(typed_semantic_fact_set, [{
+                    "rule_id": "guidance-execution-delete-same-path",
+                    "required_operation_types": ["execution_attempt", "file_delete"],
+                    "minimum_incomplete_operation_count": 1,
+                    "required_transition_types": ["same_path_transition"],
+                    "same_entity_required": True,
+                }])
+            except ValueError:
+                return []
+            grouped: Dict[str, Dict[str, Set[str]]] = {}
+            for match in selected.get("matches") or []:
+                if (match.get("status") != "complete"
+                    or match.get("chronology_quality") != "timestamp_supported"
+                    or not _clean(match.get("entity_ref"))):
+                    continue
+                entity_ref = _clean(match["entity_ref"])
+                group = grouped.setdefault(entity_ref, {"evidence": set(), "relationships": set()})
+                group["evidence"].update(_texts(match.get("supporting_evidence_refs") or []))
+                group["relationships"].update(_texts(match.get("required_relationship_refs") or []))
+            return [
+                (sorted(group["evidence"]), [{
+                    "predicate": "supported_same_path_execution_delete_sequence",
+                    "expected": ["execution_attempt", "file_delete"],
+                    "matched": sorted(group["relationships"]),
+                    "result": True, "evidence_refs": sorted(group["evidence"]),
+                }], entity_ref)
+                for entity_ref, group in sorted(grouped.items())
+                if group["evidence"] and group["relationships"]
+            ]
+        return []
+
     findings: List[Dict[str, Any]] = []
     actions: List[Dict[str, Any]] = []
     if status == "available":
@@ -2136,48 +2222,56 @@ def build_response_guidance_v3(
                 continue
             if _clean(rule.get("rule_id")) in blocked_rules:
                 continue
-            matched, trace, refs = match_rule(rule)
-            if not matched or not refs:
-                continue
-            for action in rule.get("actions") or []:
-                if not isinstance(action, dict):
-                    continue
-                selected_action = {
-                    "action_id": _clean(action.get("action_id")),
-                    "rule_id": _clean(rule.get("rule_id")),
-                    "description": _safe_template(action.get("action"), context_values),
-                    "rationale": _safe_template(action.get("rationale"), context_values),
-                    "policy_order": action.get("priority"),
-                    "evidence_scope": [CANONICAL_EVIDENCE_SCOPE],
-                    "evidence_refs": refs,
-                    "matched_predicates": deepcopy(trace),
-                    "preconditions": [
-                        "Verify each cited Cowrie observation and its visibility limitation.",
-                        "Confirm the target system is owned or explicitly authorized before any external change.",
-                        "Obtain human approval before performing any external-system action.",
-                    ],
-                    "verification_steps": [
-                        "Record the authorized system and the evidence used for the review.",
-                        "Record the observed result without treating absence of evidence as proof of safety.",
-                    ],
-                    "rollback_guidance": "This system performs no action. Define and approve target-specific rollback before an authorized external change.",
-                    "requires_manual_approval": True,
-                    "safe_to_auto_execute": False,
-                    "execution_integration": "not_implemented",
-                    "references": deepcopy(action.get("references") or []),
-                    "provenance": {"rule": deepcopy(rule.get("provenance") or {}), "action": deepcopy(action.get("provenance") or {})},
-                }
-                if _clean(rule.get("semantic_family")):
-                    semantic_family = _clean(
-                        rule.get("semantic_family")
-                    )
-                    selected_action.update({
-                        "semantic_family": semantic_family,
-                        "semantic_trace": deepcopy(
-                            semantic_traces.get(semantic_family) or {}
+            condition = rule.get("applies_when") or {}
+            bounded = any(key in condition for key in (
+                "any_operation_types", "resolved_path_group", "same_path_operation_sequence"
+            ))
+            if bounded:
+                groups = bounded_path_action_groups(rule)
+            else:
+                matched, trace, refs = match_rule(rule)
+                groups = [(refs, trace, "")] if matched and refs else []
+            for refs, trace, group_key in groups:
+                for action in rule.get("actions") or []:
+                    if not isinstance(action, dict):
+                        continue
+                    selected_action = {
+                        "action_id": (
+                            stable_id(_clean(action.get("action_id")), group_key)
+                            if group_key else _clean(action.get("action_id"))
                         ),
-                    })
-                actions.append(selected_action)
+                        "rule_id": _clean(rule.get("rule_id")),
+                        "description": _safe_template(action.get("action"), context_values),
+                        "rationale": _safe_template(action.get("rationale"), context_values),
+                        "policy_order": action.get("priority"),
+                        "evidence_scope": [CANONICAL_EVIDENCE_SCOPE],
+                        "evidence_refs": refs,
+                        "matched_predicates": deepcopy(trace),
+                        "preconditions": [
+                            "Verify each cited Cowrie observation and its visibility limitation.",
+                            "Confirm the target system is owned or explicitly authorized before any external change.",
+                            "Obtain human approval before performing any external-system action.",
+                        ],
+                        "verification_steps": [
+                            "Record the authorized system and the evidence used for the review.",
+                            "Record the observed result without treating absence of evidence as proof of safety.",
+                        ],
+                        "rollback_guidance": "This system performs no action. Define and approve target-specific rollback before an authorized external change.",
+                        "requires_manual_approval": True,
+                        "safe_to_auto_execute": False,
+                        "execution_integration": "not_implemented",
+                        "references": deepcopy(action.get("references") or []),
+                        "provenance": {"rule": deepcopy(rule.get("provenance") or {}), "action": deepcopy(action.get("provenance") or {})},
+                    }
+                    if _clean(rule.get("semantic_family")):
+                        semantic_family = _clean(rule.get("semantic_family"))
+                        selected_action.update({
+                            "semantic_family": semantic_family,
+                            "semantic_trace": deepcopy(
+                                semantic_traces.get(semantic_family) or {}
+                            ),
+                        })
+                    actions.append(selected_action)
     findings.sort(key=lambda item: (-SEVERITY_ORDER.get(item["severity"], 0), item["rule_id"], item["finding_id"]))
     actions.sort(key=lambda item: (int(item.get("policy_order") or 9999), item["action_id"], item["rule_id"]))
     strongest = findings[0] if findings else None

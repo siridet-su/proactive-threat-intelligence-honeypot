@@ -42,8 +42,11 @@ ALLOWED_CONDITION_KEYS = {
     "required_evidence_classes",
     "required_outcome_statuses",
     "required_effect_statuses",
+    "any_operation_types",
+    "resolved_path_group",
+    "same_path_operation_sequence",
 }
-LIST_CONDITION_KEYS = ALLOWED_CONDITION_KEYS - {"min_command_count"}
+LIST_CONDITION_KEYS = ALLOWED_CONDITION_KEYS - {"min_command_count", "resolved_path_group"}
 OBSERVED_CONDITION_KEYS = frozenset(ALLOWED_CONDITION_KEYS)
 ALLOWED_BEHAVIOR_FLAGS = {"has_commands", "has_cowrie_transfer_event"}
 ACTIVATED_SEMANTIC_FAMILIES = {
@@ -166,6 +169,27 @@ def _validate_condition(condition: Any, path: str, errors: List[str]) -> None:
         values = condition.get(key)
         if not isinstance(values, list) or not values or not all(_nonempty_text(value) for value in values):
             errors.append(f"{path}: applies_when.{key} must be a non-empty list of text")
+    if "resolved_path_group" in condition and condition["resolved_path_group"] is not True:
+        errors.append(f"{path}: applies_when.resolved_path_group must be true")
+    if "same_path_operation_sequence" in condition:
+        sequence = condition["same_path_operation_sequence"]
+        if sequence != ["execution_attempt", "file_delete"]:
+            errors.append(f"{path}: only execution_attempt → file_delete is supported")
+        if "resolved_path_group" in condition:
+            errors.append(f"{path}: chain and fact grouping cannot be combined")
+    if "resolved_path_group" in condition and not condition.get("any_operation_types"):
+        errors.append(f"{path}: path grouping requires any_operation_types")
+    if "resolved_path_group" in condition and (
+        set(condition.get("any_operation_types") or []) - {"file_write", "permission_modify"}
+        or condition.get("required_outcome_statuses") != ["reported_success"]
+        or condition.get("activated_semantic_families") != ["filesystem"]
+    ):
+        errors.append(f"{path}: path grouping requires successful filesystem write/permission evidence")
+    if "same_path_operation_sequence" in condition and (
+        condition.get("required_outcome_statuses") != ["reported_success"]
+        or "activated_semantic_families" in condition
+    ):
+        errors.append(f"{path}: sequence requires successful observed facts without a single-family shortcut")
     for family in _as_list(
         condition.get("activated_semantic_families")
     ):

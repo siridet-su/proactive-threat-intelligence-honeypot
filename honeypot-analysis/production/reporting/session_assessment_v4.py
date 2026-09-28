@@ -680,15 +680,17 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
                 ],
             },
             {
-                "statement": (
+                "statement": _clean(claim.get("alternative_text")) or (
                     "No linked follow-on execution is observable in this evidence snapshot; "
                     "the activity may have failed, stopped, or continued outside Cowrie visibility."
                 ),
                 "status": "active",
                 "supporting_evidence_refs": [],
-                "falsification_conditions": [
-                    "A linked execution observation in the same evidence scope disconfirms this alternative."
-                ],
+                "falsification_conditions": (
+                    ["A bound direct transfer event or proof of a pre-existing file changes this alternative."]
+                    if _clean(claim.get("alternative_text")) else
+                    ["A linked execution observation in the same evidence scope disconfirms this alternative."]
+                ),
             },
         ]
         hypotheses = []
@@ -704,7 +706,11 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
         set_content = {"chain_id": chain_id, "hypothesis_ids": [item["hypothesis_id"] for item in hypotheses]}
         output.append({
             "hypothesis_set_id": stable_id("hypothesis_set", set_content),
-            "question": "What explains the incomplete artifact-related behavior visible in this session?",
+            "question": (
+                "What explains this bounded artifact-related sequence?"
+                if _clean(claim.get("alternative_text")) else
+                "What explains the incomplete artifact-related behavior visible in this session?"
+            ),
             "scope": "bounded_cowrie_observable_behavior",
             "relationship_refs": [chain_id] if chain_id else [],
             "alternatives_are_exhaustive": False,

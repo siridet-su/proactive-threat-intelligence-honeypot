@@ -664,6 +664,10 @@ def build_supported_assessment(
         definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
         if not _clean(match.get("chain_id")) or not definition:
             continue
+        # A complete command sequence can still lack the independent evidence
+        # required for a finding (for example, an unconfirmed transfer).
+        if definition.get("hypothesis_only") is True:
+            continue
         claim = _claim(
             _clean(definition.get("claim_type")),
             _clean(definition.get("text")),
@@ -1159,16 +1163,53 @@ def build_follow_on_hypothesis(
     }
     typed_incomplete = []
     invalid_selector_provenance = False
+    baseline_entities = {
+        _clean(match.get("entity_ref"))
+        for match in typed_chain_selection.get("matches") or []
+        if isinstance(match, dict)
+        and not (typed_rules.get(_clean(match.get("rule_id"))) or {}).get("hypothesis_only")
+        and _clean(match.get("entity_ref"))
+    }
+    direct_transfer_present = any(
+        any(operation.get("operation_type") == "transfer_observed"
+            for operation in fact.get("operations") or [])
+        for fact in (typed_semantic_fact_set or {}).get("facts") or []
+        if isinstance(fact, dict)
+    )
     for match in typed_chain_selection.get("matches") or []:
-        if not isinstance(match, dict) or match.get("status") != "incomplete":
+        if not isinstance(match, dict):
             continue
+        definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
+        eligible_status = (
+            match.get("status") == "incomplete"
+            and definition.get("hypothesis_when_complete") is not True
+        ) or (
+            match.get("status") == "complete"
+            and definition.get("hypothesis_only") is True
+            and definition.get("hypothesis_when_complete") is True
+        )
+        if not eligible_status:
+            continue
+        if definition.get("hypothesis_only") is True:
+            if (match.get("chronology_quality") != "timestamp_supported"
+                or _clean(match.get("entity_ref")) in baseline_entities
+                or (definition.get("suppress_when_direct_transfer_observed") is True
+                    and direct_transfer_present)):
+                continue
         if validate_typed_chain_selection_provenance(
-            typed_chain_selection, match, expected_status="incomplete"
+            typed_chain_selection, match, expected_status=match["status"]
         ):
             invalid_selector_provenance = True
             continue
         canonical_chain = _canonical_chain_for_typed_match(observed, match)
-        definition = typed_rules.get(_clean(match.get("rule_id"))) or {}
+        if not canonical_chain and definition.get("hypothesis_only") is True:
+            canonical_chain = next((
+                item for item in (canonical_semantic_graph or {}).get("chain_nodes") or []
+                if isinstance(item, dict)
+                and _clean(item.get("chain_id")) == _clean(match.get("chain_id"))
+                and set(_texts(match.get("fact_refs") or [])) == set(_texts(item.get("fact_refs") or []))
+                and _clean(item.get("status")) in {"supported", "partial", "complete", "incomplete"}
+            ), {})
         if canonical_chain and definition and graph_refs_ok(
             match.get("supporting_evidence_refs") or []
         ):
@@ -1205,6 +1246,9 @@ def build_follow_on_hypothesis(
                 "chronology_basis": _clean(match.get("chronology_basis")),
                 "hypothesis_authority": deepcopy(hypothesis_authority),
             })
+            if definition.get("hypothesis_only") is True:
+                claim["behavior_policy_rule_id"] = _clean(definition.get("rule_id"))
+                claim["alternative_text"] = _clean(definition.get("alternative_text"))
             claims.append(claim)
             gaps.append({
                 "text": _clean(definition.get("missing_evidence_text")),
