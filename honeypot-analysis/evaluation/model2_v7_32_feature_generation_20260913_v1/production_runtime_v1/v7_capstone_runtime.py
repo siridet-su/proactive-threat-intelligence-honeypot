@@ -37,6 +37,10 @@ from v7_common import (  # noqa: E402
     write_raw_pcap,
 )
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA  # noqa: E402
+from v7_direct_ingress import (  # noqa: E402
+    DIRECT_PI_INGRESS, PROXY_INGRESS, ingress_profile, select_direct_packets,
+    validate_direct_metadata,
+)
 from v7_transfer_binding import transfer_tuple_allowed  # noqa: E402
 from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples, unbound_sensor_context_present  # noqa: E402
 from model2_backend_poc_runtime import load_backend_poc, infer_backend_poc  # noqa: E402
@@ -343,6 +347,37 @@ class Coordinator(v6.Coordinator):
             raise V7BoundaryError("offline_flow_order_or_tuple_mismatch")
         return dict(response)
 
+    def _receive_direct_ingress_pcap(
+        self, connection: socket.socket, body: Mapping[str, Any], output: pathlib.Path,
+        *, original: Mapping[str, Any], low: float, high: float,
+    ) -> dict[str, Any]:
+        metadata = validate_direct_metadata(body.get("direct_ingress_pcap"))
+        connection.settimeout(30.0)
+        connection.sendall(b"DIRECT_PCAP_V7\n" + canonical(metadata) + b"\n")
+        remaining = metadata["bytes"]
+        payload = bytearray()
+        while remaining:
+            chunk = connection.recv(min(1024 * 1024, remaining))
+            if not chunk:
+                raise V7BoundaryError("direct_ingress_pcap_incomplete")
+            payload.extend(chunk)
+            remaining -= len(chunk)
+        if sha256_bytes(bytes(payload)) != metadata["sha256"]:
+            raise V7BoundaryError("direct_ingress_pcap_sha256_mismatch")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(payload)
+        packets = read_pcap(output)
+        selected = select_direct_packets(packets, original, low, high)
+        if len(selected) != len(packets):
+            raise V7BoundaryError("direct_ingress_pcap_contains_unbound_packets")
+        return {
+            "path": str(output),
+            "sha256": metadata["sha256"],
+            "bytes": metadata["bytes"],
+            "packet_count": len(packets),
+            "run_id": "",
+        }
+
     def _complete(self, message_id: str, body: Mapping[str, Any], connection: socket.socket | None) -> dict[str, Any]:
         session_id = str(body.get("session_id") or "")
         run_id = ""
@@ -362,9 +397,13 @@ class Coordinator(v6.Coordinator):
                 raise V7BoundaryError("session_lifecycle_invalid")
             original = exact_tuple(body.get("original_tuple"), "original_tuple")
             connect_tuple = exact_tuple({"src_ip": connects[0].src_ip, "src_port": connects[0].src_port, "dst_ip": connects[0].dst_ip, "dst_port": connects[0].dst_port}, "connect_tuple")
-            if not tuple_equal(original, connect_tuple) or original["dst_ip"] != CAPSTONE_PUBLIC_IP or original["dst_port"] != 2222:
+            profile = ingress_profile(original)
+            declared_profile = body.get("ingress_profile")
+            if declared_profile is None and profile == PROXY_INGRESS:
+                declared_profile = PROXY_INGRESS
+            if not tuple_equal(original, connect_tuple) or declared_profile != profile:
                 raise V7BoundaryError("original_frontend_binding_invalid")
-            seed = {"contract": BINDING_SHA256, "session_id": session_id, "original_tuple": original, "connect_timestamp": connects[0].timestamp.isoformat()}
+            seed = {"contract": BINDING_SHA256, "ingress_profile": profile, "session_id": session_id, "original_tuple": original, "connect_timestamp": connects[0].timestamp.isoformat()}
             digest = sha256_bytes(canonical(seed))
             run_id, measurement_id, episode_id = "v7-" + digest[:32], "measurement-" + digest[:32], "episode-" + digest[:32]
             connect_epoch, close_epoch = connects[0].timestamp.timestamp(), closes[0].timestamp.timestamp()
@@ -376,13 +415,34 @@ class Coordinator(v6.Coordinator):
             episode_tuples = self._episode_tuples(
                 body.get("episode_packet_tuples"), body.get("episode_capture_contract")
             )
-            sensor_tuples, unbound_sensor_context = self._sensor_tuples(
-                original["src_ip"], connect_epoch - 1.0, close_epoch + 1.0,
-                session_id=session_id, run_id=run_id,
-                measurement_id=measurement_id, episode_id=episode_id,
-            )
             pcap_path = self.root / "pcap" / f"{run_id}.capstone.pcap"
-            pcap_meta, base = self._capstone_exact(output=pcap_path, original=original, connect_ts=connects[0].timestamp.timestamp(), close_ts=closes[0].timestamp.timestamp(), sensor_tuples=sensor_tuples, run_id=run_id)
+            if profile == PROXY_INGRESS:
+                sensor_tuples, unbound_sensor_context = self._sensor_tuples(
+                    original["src_ip"], connect_epoch - 1.0, close_epoch + 1.0,
+                    session_id=session_id, run_id=run_id,
+                    measurement_id=measurement_id, episode_id=episode_id,
+                )
+                pcap_meta, base = self._capstone_exact(
+                    output=pcap_path, original=original,
+                    connect_ts=connects[0].timestamp.timestamp(),
+                    close_ts=closes[0].timestamp.timestamp(),
+                    sensor_tuples=sensor_tuples, run_id=run_id,
+                )
+            elif profile == DIRECT_PI_INGRESS:
+                sensor_tuples, unbound_sensor_context = [], False
+                pcap_meta = self._receive_direct_ingress_pcap(
+                    connection, body, pcap_path, original=original,
+                    low=connect_epoch - 5.0, high=close_epoch + 5.0,
+                )
+                pcap_meta["run_id"] = run_id
+                base = {
+                    "backend": original,
+                    "backend_start_ts": connect_epoch,
+                    "proxy_v1_line": None,
+                    "front_start_ts": connect_epoch,
+                }
+            else:  # pragma: no cover - ingress_profile is fail-closed.
+                raise V7BoundaryError("ingress_profile_invalid")
             offline = self._offline(
                 connection, pcap_path, backend=base["backend"],
                 sensor_tuples=sensor_tuples, episode_tuples=episode_tuples,
@@ -402,16 +462,33 @@ class Coordinator(v6.Coordinator):
             window_start, window_end = min([*event_epochs, *flow_starts]), max([*event_epochs, *flow_ends])
             if window_end <= window_start or window_end - window_start > 60.0:
                 raise V7BoundaryError("episode_window_invalid")
-            pcap_evidence.update({"source": "capstone_frontend_backend_sensor_plus_pi_episode_window_packet_set", "capture_interface": "ens4+ztxoocdlsi+wlan0", "capstone_component_sha256": pcap_meta["sha256"], "capture_selection": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1", "drop_count": 0})
+            pcap_evidence.update({
+                "source": (
+                    "capstone_frontend_backend_sensor_plus_pi_episode_window_packet_set"
+                    if profile == PROXY_INGRESS
+                    else "direct_pi_ingress_plus_pi_episode_window_packet_set"
+                ),
+                "capture_interface": (
+                    "ens4+ztxoocdlsi+wlan0" if profile == PROXY_INGRESS else "pi:any"
+                ),
+                "capstone_component_sha256": pcap_meta["sha256"],
+                "capture_selection": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+                "drop_count": 0,
+            })
             zeek_evidence.update({"source": "pi_offline_zeek_exact_retained_pcap"})
             cowrie_binding = {
                 "session_id": session_id, "original_tuple": original, "frontend_tuple": original,
                 "backend_tuple": base["backend"], "proxy_v1_line": base["proxy_v1_line"],
+                "ingress_profile": profile,
             }
             flow_uids = [item["uid"] for item in flows]
             episode = {
                 "model_version": MODEL_VERSION, "measurement_unit": "PRODUCTION_ATTACK_EPISODE",
-                "measurement_boundary": "PUBLIC_COWRIE_CAPSTONE_SENSOR_PLUS_BOUND_PI_TRANSFER",
+                "measurement_boundary": (
+                    "PUBLIC_COWRIE_CAPSTONE_SENSOR_PLUS_BOUND_PI_TRANSFER"
+                    if profile == PROXY_INGRESS
+                    else "DIRECT_PI_SSH_PLUS_BOUND_PI_EPISODE_POC"
+                ),
                 "episode_id": episode_id, "measurement_id": measurement_id, "run_id": run_id,
                 "window_start_utc": utc(window_start), "window_end_utc": utc(window_end),
                 "cowrie_observation_complete": True, "cowrie_events": events_raw,
@@ -421,22 +498,23 @@ class Coordinator(v6.Coordinator):
                 "t1046_observation": t1046_observation,
                 "network_flows": flows, "network_flow_binding": {"flow_uids": flow_uids},
             }
-            row = materialize_episode(episode)
-            for key in ("measurement_boundary", "measurement_evidence", "t1046_observation", "cowrie_binding", "network_flows", "network_flow_binding"):
-                row[key] = episode[key]
-            row["session_id"] = session_id
-            if row.get("measurement_validity") != "VALID" or row.get("feature_count") != 32:
-                raise V7BoundaryError("feature_materialization_unavailable:" + str(row.get("adapter_invalid_reason") or row.get("evidence", {}).get("invalid_reason")))
-            row.update({
-                "source_id": run_id,
-                "ground_truth_events": events_raw,
-                "prediction_invoked": False,
-                "model_predictions_invoked": False,
-                "collection_only": True,
-                "measurement_contract_sha256": BINDING_SHA256,
-            })
-            if self.collection_enabled:
-                self._write_collection_row(run_id, row)
+            if profile == PROXY_INGRESS:
+                row = materialize_episode(episode)
+                for key in ("measurement_boundary", "measurement_evidence", "t1046_observation", "cowrie_binding", "network_flows", "network_flow_binding"):
+                    row[key] = episode[key]
+                row["session_id"] = session_id
+                if row.get("measurement_validity") != "VALID" or row.get("feature_count") != 32:
+                    raise V7BoundaryError("feature_materialization_unavailable:" + str(row.get("adapter_invalid_reason") or row.get("evidence", {}).get("invalid_reason")))
+                row.update({
+                    "source_id": run_id,
+                    "ground_truth_events": events_raw,
+                    "prediction_invoked": False,
+                    "model_predictions_invoked": False,
+                    "collection_only": True,
+                    "measurement_contract_sha256": BINDING_SHA256,
+                })
+                if self.collection_enabled:
+                    self._write_collection_row(run_id, row)
             if self.shadow_enabled:
                 if self.model is None or self.unified54_model is None:
                     raise V7BoundaryError("shadow_model_not_loaded")
@@ -531,8 +609,13 @@ class Coordinator(v6.Coordinator):
                 "source_binding": "PASS", "session_binding": "PASS", "run_id_binding": "PASS",
                 "feature_count": 54,
                 "source_feature_count": 54, "zero_fill": False,
+                "legacy_32f_feature_materialization": (
+                    "PASS" if profile == PROXY_INGRESS else "NOT_APPLICABLE_DIRECT_PI"
+                ),
                 "source_ip_only_binding": False, "cross_session_contamination": "NO",
-                "proxy_v1_delivery": "PASS", "capture_sha256": pcap_evidence["sha256"],
+                "proxy_v1_delivery": "PASS" if profile == PROXY_INGRESS else "NOT_APPLICABLE_DIRECT_PI",
+                "ingress_profile": profile,
+                "capture_sha256": pcap_evidence["sha256"],
                 "selected_flow_uids": flow_uids, "sensor_flow_count": len(sensor_tuples),
                 "t1046_observation": t1046_observation,
                 "transfer_flow_count": len(episode_tuples),

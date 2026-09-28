@@ -25,7 +25,13 @@ for candidate in (
         sys.path.insert(0, str(candidate))
 
 import v6_pi_observer as v6  # noqa: E402
-from v7_common import V7BoundaryError, canonical, read_rings, sanitize_flow  # noqa: E402
+from v7_common import (  # noqa: E402
+    V7BoundaryError, canonical, read_rings, sanitize_flow, write_raw_pcap,
+)
+from v7_direct_ingress import (  # noqa: E402
+    DIRECT_PI_INGRESS, PROXY_INGRESS, direct_pcap_id, ingress_profile,
+    select_direct_packets, validate_direct_metadata,
+)
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA, run as run_offline  # noqa: E402
 from v7_transfer_binding import (  # noqa: E402
     request_digest,
@@ -232,6 +238,20 @@ class Observer(v6.Observer):
         packets = read_rings(self.transfer_rings, low, high)
         return select_episode_tuples(packets, low, high)
 
+    def _direct_ingress_pcap(
+        self, session_id: str, original: Mapping[str, Any], events: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        low = min(v6.parse_timestamp(item["timestamp"]).timestamp() for item in events) - 5.0
+        high = max(v6.parse_timestamp(item["timestamp"]).timestamp() for item in events) + 5.0
+        packets = read_rings(self.transfer_rings, low, high)
+        selected = select_direct_packets(packets, original, low, high)
+        event_hashes = [v6.digest(item) for item in events]
+        identifier = direct_pcap_id(session_id, original, event_hashes)
+        path = self.retain_dir / f"direct-{identifier}.pcap"
+        metadata = write_raw_pcap(path, selected)
+        result = {"id": identifier, "sha256": metadata["sha256"], "bytes": metadata["bytes"]}
+        return validate_direct_metadata(result)
+
     def _complete_session(self, session_id: str, events: list[dict[str, Any]]) -> None:
         try:
             connects = [item for item in events if item.get("eventid") == "cowrie.session.connect"]
@@ -250,15 +270,31 @@ class Observer(v6.Observer):
                 body["failure_reason"] = "session_lifecycle_not_unique"
             else:
                 original = v6.event_tuple(connects[0])
-                if original is None or original["dst_ip"] != v6.FRONTEND_HOST or original["dst_port"] != v6.FRONTEND_PORT:
-                    body["failure_reason"] = "session_destination_not_production_frontend"
+                profile = ""
+                if original is None:
+                    body["failure_reason"] = "session_connect_tuple_missing"
                 else:
+                    try:
+                        profile = ingress_profile(original)
+                    except V7BoundaryError as exc:
+                        body["failure_reason"] = str(exc)
+                if original is not None and profile:
                     body["original_tuple"] = original
-                    body["zeek_flows"] = self._flow_candidates(connects[0], closes[0])
+                    body["ingress_profile"] = profile
+                    body["zeek_flows"] = (
+                        self._flow_candidates(connects[0], closes[0])
+                        if profile == PROXY_INGRESS else []
+                    )
                     body["transfer_packet_tuples"] = self._transfer_packet_tuples(events)
                     body["episode_packet_tuples"] = self._episode_packet_tuples(events)
-                    body["completion_status"] = "READY" if body["zeek_flows"] else "INCOMPLETE"
-                    if not body["zeek_flows"]:
+                    if profile == DIRECT_PI_INGRESS:
+                        body["direct_ingress_pcap"] = self._direct_ingress_pcap(
+                            session_id, original, events
+                        )
+                    body["completion_status"] = "READY" if (
+                        body["zeek_flows"] or profile == DIRECT_PI_INGRESS
+                    ) else "INCOMPLETE"
+                    if profile == PROXY_INGRESS and not body["zeek_flows"]:
                         body["failure_reason"] = "exact_backend_zeek_flow_not_observed"
             self._enqueue("session_complete", body)
             with self.lock:
@@ -294,8 +330,23 @@ class Observer(v6.Observer):
                 reader = connection.makefile("rb")
                 try:
                     response = self._readline(reader, 256)
-                    if response == b"OFFLINE_ZEEK_V7\n":
+                    while response in {b"DIRECT_PCAP_V7\n", b"OFFLINE_ZEEK_V7\n"}:
                         request = json.loads(self._readline(reader, 64 * 1024))
+                        if response == b"DIRECT_PCAP_V7\n":
+                            metadata = validate_direct_metadata(request)
+                            body = envelope.get("body") if isinstance(envelope, dict) else None
+                            expected = validate_direct_metadata(
+                                body.get("direct_ingress_pcap") if isinstance(body, dict) else None
+                            )
+                            if metadata != expected:
+                                raise v6.ObserverError("direct_ingress_pcap_request_mismatch")
+                            direct_path = self.retain_dir / f"direct-{metadata['id']}.pcap"
+                            direct_payload = direct_path.read_bytes()
+                            if len(direct_payload) != metadata["bytes"]:
+                                raise v6.ObserverError("direct_ingress_pcap_size_mismatch")
+                            connection.sendall(direct_payload)
+                            response = self._readline(reader, 256)
+                            continue
                         if not isinstance(request, dict) or request.get("schema_version") != OFFLINE_SCHEMA:
                             raise v6.ObserverError("offline_request_invalid")
                         size = int(request.get("capstone_pcap_bytes", 0))
@@ -318,6 +369,10 @@ class Observer(v6.Observer):
                 finally:
                     reader.close()
             if response.decode("ascii", "replace").strip() == f"ACK {message_id}":
+                body = envelope.get("body") if isinstance(envelope, dict) else None
+                if isinstance(body, dict) and body.get("ingress_profile") == DIRECT_PI_INGRESS:
+                    metadata = validate_direct_metadata(body.get("direct_ingress_pcap"))
+                    (self.retain_dir / f"direct-{metadata['id']}.pcap").unlink(missing_ok=True)
                 path.unlink(missing_ok=True)
         except (OSError, ValueError, TypeError, json.JSONDecodeError, v6.ObserverError):
             return
