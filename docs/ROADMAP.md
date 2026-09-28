@@ -26,20 +26,33 @@ Dashboard-to-Pi disconnect/control path is historical, not an installation
 requirement. Existing-Pi migration is a later, separate procedure. No
 customer installer is currently declared ready to run.
 
-The first implementation slice now stages checked Linux ARM64 Go-agent
-artifacts and inactive systemd units on a disposable Ubuntu 24.04 ARM64 VM
-through [Ansible](../deploy/ansible/README.md). It does not install Cowrie,
-Zeek, the Docker decoys, or Dashboard, and has not been qualified on a VM or
-Pi. Complete their pinned releases, service access rules, operator credential
-checks, and activation sequence before calling the installer runnable for a
-fresh Pi.
+The first implementation slice stages checked Linux ARM64 Go-agent artifacts,
+inactive systemd units, and blank private env skeletons through
+[Ansible](../deploy/ansible/README.md). On a disposable Ubuntu 24.04 ARM64 VM,
+the first prepare, missing-env pause, and unchanged-file retry passed; see the
+[VM evidence](validation/2026-09-28-azure-arm64-installer-first-run.md). It does
+not invoke the separate Cowrie-source and Zeek staging playbooks, or install
+the Docker decoys or Dashboard. Zeek packages and patched Cowrie source/venv
+were staged on the disposable VM without active services; see the
+[dependency evidence](validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
+Activation has not been qualified on a VM or Pi. Complete Cowrie's fresh-host
+sanitized output boundary, service access rules, operator credential checks,
+and activation sequence before
+calling the installer runnable for a fresh Pi.
+
+The active PostgreSQL, Deception Core, and Web-corp HTTP
+[Compose source](../deploy/decoy-honeypot/README.md) and Core build inputs are
+now tracked. This removes the sibling-folder source dependency for a future
+fresh install, but the first Ansible slice does not consume or activate them.
+The current Pi still uses its existing external Compose file.
 
 The accepted installer boundary is in
-[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md): prepare
-versioned dependencies, service units, and non-secret configuration; leave
-application services stopped while the operator supplies private `.env` files
-and credentials; validate and activate in a separate step. The installer must
-not generate or copy credentials.
+[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) and
+[ADR-0011](adr/ADR-0011-installer-private-env-skeletons.md): prepare versioned
+dependencies, service units, non-secret configuration, and missing blank
+private `.env` skeletons; leave application services stopped while the operator
+fills private values; validate and activate in a separate step. The installer
+must not generate or copy credentials.
 
 ## Phase 0 — Establish project truth
 

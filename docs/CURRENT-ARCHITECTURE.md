@@ -41,6 +41,11 @@ The legacy sensor forwarder remains active as an inherited parallel path. It
 must not be expanded as part of new features. Its retirement or migration is a
 separate, verified change once the Go pipeline and cloud receiver have parity.
 
+The active decoy stack now has a tracked [Compose source](../deploy/decoy-honeypot/README.md)
+and Deception Core build context in this repository. The existing Pi still
+runs its earlier external Compose file; this repository change did not rebuild
+or restart those containers.
+
 ## Runtime posture at last verification
 
 | Component | State | Notes |

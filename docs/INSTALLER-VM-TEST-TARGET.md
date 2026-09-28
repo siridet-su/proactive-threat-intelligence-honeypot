@@ -1,7 +1,7 @@
 ---
 title: Installer VM Test Target — Ubuntu Server 24.04 ARM64
-status: operator-preparing-test-target
-last_verified: 2026-09-25
+status: partial-acceptance-on-disposable-arm64-vm
+last_verified: 2026-09-28
 ---
 
 # Installer VM Test Target
@@ -28,7 +28,7 @@ The current phase covers:
 3. The ZeroTier ARM64 client/package and service/interface behavior, without joining a production network.
 4. Proposed service identities, protected configuration paths, release layout, journald behavior, and read-only log access requirements.
 
-The five current Go-agent artifacts are cross-built as statically linked Linux ARM64 binaries; the Pi does not need the Go compiler/runtime. Keep Go and its module cache on a controlled build host. The project's Cowrie patch is based on a pinned 2.6.1-derived deployment, so test that exact revision; current Cowrie documentation lists Python 3.10+ and a virtualenv prerequisite but does not replace testing the pinned revision. [Cowrie installation requirements](https://cowrie.readthedocs.io/_/downloads/en/latest/pdf/)
+The five current Go-agent artifacts are cross-built as statically linked Linux ARM64 binaries; the Pi does not need the Go compiler/runtime. Prepare Go and its module cache on a controlled build host with [the online bootstrap script](../deploy/ansible/README.md) before running the offline release builder. The project's Cowrie patch is based on a pinned 2.6.1-derived deployment, so test that exact revision; current Cowrie documentation lists Python 3.10+ and a virtualenv prerequisite but does not replace testing the pinned revision. [Cowrie installation requirements](https://cowrie.readthedocs.io/_/downloads/en/latest/pdf/)
 
 Database and web work is deferred: Redis, MongoDB, PostgreSQL/Deception Core, Docker Compose, and Web-corp are not installed in this phase. Cowrie and Zeek services themselves are also deferred until the host foundation is accepted; only their base runtime/package questions are recorded here.
 
@@ -71,3 +71,27 @@ For the detailed pre-test steps and explicit host-foundation acceptance criteria
 ## 5. Later acceptance boundary
 
 The VM can validate Ubuntu packages, systemd units, filesystem permissions, ZeroTier client behavior, and ARM64 executables. It does not reproduce Raspberry Pi hardware sensors, physical NIC names, RF/network behavior, thermal readings, or real Pi performance. Those require a separate acceptance run on the selected Pi model after the VM phase passes.
+
+## 6. Go-agent preparation acceptance after the clean snapshot
+
+After the baseline is recorded and snapshot is available, use the
+[Ansible preparation runbook](../deploy/ansible/README.md) from a controller
+that can reach the VM over SSH and has the reviewed ARM64 release bundle.
+Prepare with exact package versions selected from the VM's approved apt
+sources, then run `audit-prepared-pi.yml` with the same inventory and vars.
+The audit must pass before the prepared state is accepted; Redis and all five
+Go units must still be stopped and disabled. Re-run the same release and audit
+to check resumability. Keep the VM console and snapshot for recovery, and do
+not use production credentials or expose honeypot listeners during this test.
+
+### First Azure ARM64 VM result — 2026-09-28
+
+The [recorded VM run](validation/2026-09-28-azure-arm64-installer-first-run.md)
+passed the reviewed-release prepare and audit, created blank private env
+skeletons, and paused at the missing-value gate. A same-release retry made no
+host changes in the staging play, preserved all five private-file hashes, and
+left Redis and five Go units inactive and disabled. This is partial acceptance
+of the Go preparation slice, not activation or full installer qualification.
+The Azure guest had a 30 GiB root filesystem and a public SSH management
+endpoint; a clean snapshot was not verified. The 32 GiB allocation and isolated
+network above remain the preferred target for later full-stack tests.

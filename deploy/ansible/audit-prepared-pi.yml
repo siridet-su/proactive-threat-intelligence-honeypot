@@ -1,0 +1,171 @@
+---
+# Read-only acceptance audit for the first fresh ARM64 Pi preparation slice.
+- name: Audit prepared PTI sensor agents without activation
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_release_id: ""
+    pti_manifest_sha256: ""
+    pti_release_root: /opt/pti/sensor/releases
+    pti_package_versions: {}
+    pti_require_inactive: true
+    pti_expected_units:
+      - honeypot-collector.service
+      - honeypot-processor.service
+      - honeypot-ti-worker.service
+      - honeypot-hardware.service
+      - honeypot-hardware-backup-control.service
+    pti_expected_packages:
+      - ca-certificates
+      - python3
+      - python3-venv
+      - redis-server
+    pti_expected_binaries:
+      - bin/pti-collector
+      - bin/pti-processor
+      - bin/pti-ti-worker
+      - bin/pti-hardware-agent
+      - bin/pti-hardware-backup
+
+  tasks:
+    - name: Require the selected target and approved release identity
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - pti_manifest_sha256 is match('^[0-9a-f]{64}$')
+          - pti_package_versions is mapping
+          - (pti_package_versions.keys() | list | sort) == (pti_expected_packages | sort)
+
+    - name: Inspect non-secret preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_marker_stat
+
+    - name: Require a root-owned regular preparation marker
+      ansible.builtin.assert:
+        that:
+          - pti_marker_stat.stat.isreg | default(false)
+          - not (pti_marker_stat.stat.islnk | default(false))
+          - pti_marker_stat.stat.uid == 0
+          - pti_marker_stat.stat.mode == '0644'
+
+    - name: Read non-secret preparation marker
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_marker_file
+
+    - name: Require completed marker for this approved release
+      ansible.builtin.assert:
+        that:
+          - (pti_marker_file.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_marker_file.content | b64decode | from_json).release_id == pti_release_id
+          - (pti_marker_file.content | b64decode | from_json).manifest_sha256 == pti_manifest_sha256
+          - (pti_marker_file.content | b64decode | from_json).state == 'prepared'
+
+    - name: Inspect installed release manifest
+      ansible.builtin.stat:
+        path: "{{ pti_release_root }}/{{ pti_release_id }}/manifest.json"
+        checksum_algorithm: sha256
+      register: pti_manifest_stat
+
+    - name: Require the approved manifest on the target
+      ansible.builtin.assert:
+        that:
+          - pti_manifest_stat.stat.isreg | default(false)
+          - not (pti_manifest_stat.stat.islnk | default(false))
+          - pti_manifest_stat.stat.uid == 0
+          - pti_manifest_stat.stat.checksum == pti_manifest_sha256
+
+    - name: Read approved non-secret manifest
+      ansible.builtin.slurp:
+        src: "{{ pti_release_root }}/{{ pti_release_id }}/manifest.json"
+      register: pti_manifest_file
+
+    - name: Parse approved manifest
+      ansible.builtin.set_fact:
+        pti_manifest: "{{ pti_manifest_file.content | b64decode | from_json }}"
+
+    - name: Require the complete static ARM64 agent set
+      ansible.builtin.assert:
+        that:
+          - pti_manifest.schema_version == 'pti.sensor-release.v1'
+          - pti_manifest.release_id == pti_release_id
+          - "pti_manifest.target == {'goos': 'linux', 'goarch': 'arm64', 'cgo_enabled': false}"
+          - pti_manifest.runtime_configuration_included == false
+          - (pti_manifest.modules | map(attribute='binary') | list | sort) == (pti_expected_binaries | sort)
+
+    - name: Inspect each installed binary
+      ansible.builtin.stat:
+        path: "{{ pti_release_root }}/{{ pti_release_id }}/{{ item.binary }}"
+        checksum_algorithm: sha256
+      loop: "{{ pti_manifest.modules }}"
+      loop_control:
+        label: "{{ item.id }}"
+      register: pti_binary_stats
+
+    - name: Require root-owned binaries matching the approved manifest
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.uid == 0
+          - item.stat.executable
+          - item.stat.checksum == item.item.sha256
+      loop: "{{ pti_binary_stats.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: Read installed package versions
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Require exact approved package versions
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.packages
+          - pti_package_versions[item] in (ansible_facts.packages[item] | map(attribute='version') | list)
+      loop: "{{ pti_expected_packages }}"
+
+    - name: Inspect installed Go service units
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ item }}"
+      loop: "{{ pti_expected_units }}"
+      register: pti_unit_stats
+
+    - name: Require root-owned regular Go service units
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg | default(false)
+          - not (item.stat.islnk | default(false))
+          - item.stat.uid == 0
+          - item.stat.mode == '0644'
+      loop: "{{ pti_unit_stats.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read service states
+      ansible.builtin.service_facts:
+
+    - name: Require Go units and Redis to remain stopped and disabled
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.services
+          - ansible_facts.services[item].state == 'stopped'
+          - ansible_facts.services[item].status == 'disabled'
+      loop: "{{ pti_expected_units + ['redis-server.service'] }}"
+      when: pti_require_inactive | bool
+
+    - name: Require Go units and Redis to exist when an active release is audited
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.services
+      loop: "{{ pti_expected_units + ['redis-server.service'] }}"
+      when: not (pti_require_inactive | bool)
+
+    - name: Report prepared state without private configuration
+      ansible.builtin.debug:
+        msg: "Prepared release {{ pti_release_id }} passed the read-only host audit; inactive required={{ pti_require_inactive | bool }}."

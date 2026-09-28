@@ -1,0 +1,136 @@
+---
+# Fresh Ubuntu 24.04 ARM64 sensor only. Stage Zeek without enabling capture.
+- name: Prepare pinned Zeek sensor without activation
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_zeek_version: '1:8.0.10-0'
+    pti_zeek_interface: ''
+    pti_zeek_repository: 'https://download.opensuse.org/repositories/security:/zeek/xUbuntu_24.04/'
+    pti_zeek_key_sha256: b67ae73b8543af4195c930b52a07c208611253fdc519873adcf1190ffcfc1377
+  pre_tasks:
+    - name: Require prepared Ubuntu ARM64 sensor and explicit capture interface
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_zeek_interface is match('^[A-Za-z0-9_.:-]{1,32}$')
+          - pti_zeek_interface in ansible_facts['interfaces']
+          - pti_zeek_version is match('^[0-9]+:[0-9][A-Za-z0-9.+:~_-]*$')
+        fail_msg: Specify one prepared Ubuntu 24.04 ARM64 host, an existing capture interface, and a reviewed Zeek version.
+
+    - name: Check Pi preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_zeek_prepare_marker
+
+    - name: Require the completed root-owned Pi preparation marker
+      ansible.builtin.assert:
+        that:
+          - pti_zeek_prepare_marker.stat.isreg | default(false)
+          - not (pti_zeek_prepare_marker.stat.islnk | default(false))
+          - pti_zeek_prepare_marker.stat.uid == 0
+          - pti_zeek_prepare_marker.stat.mode == '0644'
+
+    - name: Read non-secret Pi preparation marker
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_zeek_prepare_marker_file
+
+    - name: Require completed Pi preparation
+      ansible.builtin.assert:
+        that:
+          - (pti_zeek_prepare_marker_file.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_zeek_prepare_marker_file.content | b64decode | from_json).state == 'prepared'
+
+    - name: Check Zeek process state before changing configuration
+      ansible.builtin.command: pgrep -x zeek
+      register: pti_zeek_processes
+      failed_when: pti_zeek_processes.rc not in [0, 1]
+      changed_when: false
+
+    - name: Refuse to reconfigure a running Zeek sensor
+      ansible.builtin.assert:
+        that: pti_zeek_processes.rc == 1
+        fail_msg: Stop the existing Zeek process through its owning service before reconfiguring it.
+
+  tasks:
+    - name: Download official Zeek repository signing key with pinned digest
+      ansible.builtin.get_url:
+        url: "{{ pti_zeek_repository }}Release.key"
+        dest: /usr/share/keyrings/pti-zeek-ubuntu2404.asc
+        owner: root
+        group: root
+        mode: '0644'
+        checksum: "sha256:{{ pti_zeek_key_sha256 }}"
+
+    - name: Add the official Zeek repository scoped to its signing key
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/pti-zeek.list
+        content: "deb [signed-by=/usr/share/keyrings/pti-zeek-ubuntu2404.asc] {{ pti_zeek_repository }} /\n"
+        owner: root
+        group: root
+        mode: '0644'
+      register: pti_zeek_source
+
+    - name: Install exact Zeek and ZeekControl versions without starting services
+      ansible.builtin.apt:
+        name:
+          - "zeek-8.0-core={{ pti_zeek_version }}"
+          - "zeekctl-8.0={{ pti_zeek_version }}"
+        state: present
+        update_cache: "{{ pti_zeek_source.changed }}"
+        install_recommends: false
+        policy_rc_d: 101
+
+    - name: Configure one standalone capture interface
+      ansible.builtin.template:
+        src: templates/zeek-node.cfg.j2
+        dest: /opt/zeek/etc/node.cfg
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Disable Zeek's Prometheus listener
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/etc/zeekctl.cfg
+        regexp: '^MetricsPort\s*='
+        line: 'MetricsPort = 0'
+
+    - name: Bind Zeek Broker control listener to loopback
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/etc/zeekctl.cfg
+        regexp: '^Env_Vars\s*='
+        line: 'Env_Vars = ZEEK_DEFAULT_LISTEN_ADDRESS=127.0.0.1'
+
+    - name: Stage disabled Zeek systemd unit
+      ansible.builtin.copy:
+        src: files/zeek.service
+        dest: /etc/systemd/system/zeek.service
+        owner: root
+        group: root
+        mode: '0644'
+      register: pti_zeek_unit
+
+    - name: Reload systemd for the staged unit
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: pti_zeek_unit.changed
+
+    - name: Keep Zeek disabled and inactive until an explicit activation check
+      ansible.builtin.systemd_service:
+        name: zeek.service
+        state: stopped
+        enabled: false
+
+    - name: Validate Zeek configuration without starting capture
+      ansible.builtin.command: /opt/zeek/bin/zeekctl check
+      register: pti_zeek_check
+      changed_when: false
+
+    - name: Report staged version and interface
+      ansible.builtin.debug:
+        msg: "Zeek {{ pti_zeek_version }} staged on {{ pti_zeek_interface }}; zeek.service remains disabled and stopped."

@@ -12,6 +12,16 @@ v2.6.1-derived deployment). Apply it to a clean, version-pinned Cowrie staging
 checkout first. A dirty or independently patched checkout requires a new patch
 review and the same contract tests before deployment.
 
+For a clean Ubuntu 24.04 ARM64 staging host, use
+[`build_cowrie_source.py`](../../scripts/build_cowrie_source.py) from the exact
+clean checkout and the separate
+[`prepare-cowrie.yml`](../../deploy/ansible/prepare-cowrie.yml) playbook. The
+builder applies this patch, creates a reproducible source archive, and prints
+the patch and archive SHA-256 values. The playbook verifies the approved
+archive, stages source and a Python venv, and leaves Cowrie without a service
+or listener. It does not install the sanitized JSON writer, configure its
+privacy boundary, or qualify Cowrie for activation.
+
 ## Event contract
 
 `cowrie.command.input` adds the authoritative CWD immediately before command

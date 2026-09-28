@@ -3,6 +3,11 @@
 - Status: Accepted
 - Date: 2026-09-28
 
+> File creation policy amended by [ADR-0011](ADR-0011-installer-private-env-skeletons.md):
+> the installer may create blank, owner-only `.env` skeletons when absent.
+> The decision below records the original boundary; credential values remain
+> operator-managed and existing files remain protected.
+
 ## Context
 
 The first installation target is a fresh Ubuntu 24.04 ARM64 Raspberry Pi. The

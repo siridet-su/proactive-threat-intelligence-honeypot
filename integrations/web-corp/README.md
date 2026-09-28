@@ -8,10 +8,11 @@ executes SQL.
 ## Source and deployment boundary
 
 - This directory is the canonical source and standalone Docker build context.
-- The deployment Compose file remains at the sibling
-  `../../decoy-honeypot/docker-compose.yml` and points its `web-corp` build at
-  `../proactive-threat-intelligence-honeypot/integrations/web-corp` relative to
-  that Compose file.
+- The prepared fresh-install Compose source is tracked at
+  [`deploy/decoy-honeypot/compose.yaml`](../../deploy/decoy-honeypot/compose.yaml)
+  and builds `web-corp` from this directory. The existing Pi still runs the
+  external `/home/cpe27/decoy-honeypot/docker-compose.yml` until a separate
+  cutover; commands for that running project below retain its current path.
 - There is no bind mount from the source tree into the running container.
   Editing files here does not change runtime behavior; a controlled image
   rebuild and service recreation are required.
@@ -19,8 +20,8 @@ executes SQL.
   port `8080`. Port `8080` is internal to the container and is not separately
   published on the Pi; do not open it on the host firewall. The direct-TLS app
   container formerly bound to `10.58.33.42:443` is stopped on the Pi. Both
-  service definitions remain in the sibling Compose file, outside this repo;
-  a full-stack `docker compose up` can restart stopped services.
+  historical service definitions remain in the Pi's external Compose file;
+  a full-stack `docker compose up` against that old file can restart stopped services.
 - The stopped Pi TLS certificate/key files are retained outside Git at
   `/var/lib/decoy-honeypot/web-corp-tls/{tls.crt,tls.key}`. The
   self-signed certificate SAN is `IP:10.58.33.42`, expires 2027-09-24, and is
@@ -142,8 +143,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s integrations/web-corp/tests -v
 ```
 
-For a future app update, validate the external Compose file and rebuild/recreate
-only the active HTTP service from this repository:
+For an update to the currently running Pi project, validate its external
+Compose file and rebuild/recreate only the active HTTP service from this
+repository. The tracked fresh-install Compose file has not replaced that
+running project:
 
 ```sh
 docker compose -f ../decoy-honeypot/docker-compose.yml config --quiet
@@ -183,7 +186,7 @@ future reviewed deployment. Follow-up work:
 independently verify a MongoDB record and test from an authorized second
 ZeroTier peer; implement the public-VPS HTTPS target only after its network,
 certificate-renewal, proxy-header, and data-path gates are reviewed; migrate
-the sibling Compose file into this repository; verify Atlas role/backup expiry
+complete a reviewed cutover to the tracked Compose file; verify Atlas role/backup expiry
 for credential-bearing documents; test the authenticated dashboard view with
 synthetic login events; and decide whether to add a rate-based brute-force
 detector.

@@ -122,6 +122,12 @@ Optional environment includes `MONGO_DATABASE`, `BACKUP_TARGETS`, the legacy
 region metadata; the worker uses the Backblaze Native API and follows the API
 URL returned during authorization.
 
+When `BACKUP_LOOKBACK_DAYS` or `BACKUP_SAFETY_DAYS` is absent, the worker uses
+the 30-day and 2-day defaults. If either variable is present, it must contain
+a valid integer: lookback must be positive and safety must be nonnegative.
+An empty, malformed, or out-of-range value fails startup with the variable
+name instead of silently using a default. Lookback must exceed safety.
+
 ## Bucket rollover
 
 The worker records each new manifest under a bucket, target, and UTC

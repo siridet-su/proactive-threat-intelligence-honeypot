@@ -121,6 +121,12 @@
         fail_msg: Existing preparation marker is invalid or belongs to another release.
       when: pti_prepare_marker.stat.exists
 
+    - name: Keep an already prepared release untouched on retry
+      ansible.builtin.meta: end_play
+      when:
+        - pti_prepare_marker.stat.exists
+        - (pti_prior_marker_file.content | b64decode | from_json).state == 'prepared'
+
     - name: Detect existing release path
       ansible.builtin.stat:
         path: "{{ pti_release_root }}/{{ pti_release_id }}"
@@ -204,6 +210,9 @@
     - name: Detect existing private agent configuration
       ansible.builtin.stat:
         path: /etc/honeypot-agent.env
+        get_checksum: false
+        get_mime: false
+        get_attributes: false
       register: pti_private_agent_env
 
     - name: Refuse a host with existing private agent configuration
