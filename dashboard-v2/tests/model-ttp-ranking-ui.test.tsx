@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("Model1 + Model2 advisory panel", () => {
-  it("shows weighted voting as the primary order without claiming confidence", () => {
+  it("shows one recommended TTP and the other candidates without a visible priority order", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-a",
       session_ttp_advisory: {
@@ -43,10 +43,14 @@ describe("Model1 + Model2 advisory panel", () => {
     }} />);
     expect(html).toContain("3 of 5 assessed command events");
     expect(html).toContain("Command refs: index:0");
-    expect(html).toContain("Model1 only");
-    expect(html).toContain("Weighted vote score");
+    expect(html.match(/>Recommend<\/span>/g)).toHaveLength(1);
+    expect(html).toContain("TTP candidates");
+    expect(html).toContain("T1110");
+    expect(html).not.toContain("TTP review order");
+    expect(html).not.toContain("Review first");
+    expect(html).not.toContain("Weighted vote score");
     expect(html).toContain("0.5*I(Model1 candidate)");
-    expect(html).toContain("selected for this PoC review order");
+    expect(html).toContain("Formula used for the PoC recommendation");
     expect(html).toContain("field accuracy and superiority are not established");
     expect(html).not.toContain("RRF rank score");
     expect(html).not.toContain("priority score");
