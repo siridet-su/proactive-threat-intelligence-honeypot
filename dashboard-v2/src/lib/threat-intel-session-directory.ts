@@ -2,7 +2,7 @@ import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 import type { WebHttpSession } from "@/lib/web-http-intel";
 
 export type SessionProtocolFilter = "all" | "ssh" | "http";
-export type SessionAttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
+export type SessionAttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie" | "Unknown";
 export type SessionAttackerType = Exclude<SessionAttackerTypeFilter, "All"> | "Unclassified";
 
 /** Values accepted by the existing threat-directory backend. */
@@ -13,14 +13,15 @@ export const SESSION_ATTACKER_TYPE_OPTIONS: ReadonlyArray<{
   { value: "APT", label: "APT" },
   { value: "Bot", label: "Bot" },
   { value: "ScriptKiddie", label: "Script Kiddie" },
+  { value: "Unknown", label: "Unknown" },
 ];
 
-/** Attacker classification belongs only to the SSH directory/API query. */
+/** Attacker classification filter applies to directory API query across all or SSH protocols. */
 export function attackerTypeQueryValue(
   protocol: SessionProtocolFilter,
   attackerType: SessionAttackerTypeFilter,
 ): Exclude<SessionAttackerTypeFilter, "All"> | null {
-  return protocol === "ssh" && attackerType !== "All" ? attackerType : null;
+  return protocol !== "http" && attackerType !== "All" ? attackerType : null;
 }
 
 export type SessionDirectoryRow = {
@@ -75,6 +76,12 @@ function sshDwellTime(session: DashboardThreatEvent, status: "Active" | "Closed"
   }
   if (typeof session.duration === "number" && Number.isFinite(session.duration) && session.duration >= 0) {
     return secondsLabel(Math.round(session.duration));
+  }
+  if (typeof session.duration === "string" && session.duration !== "Closed" && session.duration !== "Unknown" && session.duration.trim() !== "") {
+    if (!Number.isNaN(Number(session.duration))) {
+      return secondsLabel(Math.round(Number(session.duration)));
+    }
+    return session.duration;
   }
   return "Not recorded";
 }
@@ -132,7 +139,7 @@ function httpRow(session: WebHttpSession & { id: string }): SessionDirectoryRow 
     id: session.id,
     href: `/threat-intel/http/${encodeURIComponent(session.id)}`,
     protocol: "HTTP",
-    attackerType: null,
+    attackerType: "Unknown",
     sensor: "web-corp",
     origin,
     originDetail,
@@ -146,7 +153,7 @@ function httpRow(session: WebHttpSession & { id: string }): SessionDirectoryRow 
     searchText: [
       session.id,
       ...session.sourceIps,
-      "http web-corp",
+      "http web-corp unknown",
       ...session.events.flatMap((event) => [event.method, event.path, ...event.signals]),
     ].join(" ").toLowerCase(),
   };
@@ -154,7 +161,7 @@ function httpRow(session: WebHttpSession & { id: string }): SessionDirectoryRow 
 
 export function normalizeAttackerType(value: unknown): SessionAttackerType {
   if (value === "APT" || value === "Bot" || value === "ScriptKiddie") return value;
-  return "Unclassified";
+  return "Unknown";
 }
 
 export function buildSessionDirectoryRows(
@@ -162,6 +169,7 @@ export function buildSessionDirectoryRows(
   httpSessions: readonly WebHttpSession[],
   protocol: SessionProtocolFilter,
   search = "",
+  attackerType: SessionAttackerTypeFilter = "All",
 ): SessionDirectoryRow[] {
   const normalizedSearch = search.trim().toLowerCase();
   const rows: SessionDirectoryRow[] = [];
@@ -174,6 +182,81 @@ export function buildSessionDirectoryRows(
   }
 
   return rows
-    .filter((row) => !normalizedSearch || row.searchText.includes(normalizedSearch))
+    .filter((row) => {
+      if (attackerType !== "All" && row.attackerType !== attackerType) {
+        return false;
+      }
+      return !normalizedSearch || row.searchText.includes(normalizedSearch);
+    })
     .sort((a, b) => b.sortTimestamp - a.sortTimestamp || a.key.localeCompare(b.key));
+}
+
+export interface SessionDirectoryPagination {
+  totalSessions: number;
+  totalPages: number;
+  page: number;
+  pageSize: number;
+  httpOffset: number;
+  httpLimit: number;
+  sshOffset: number;
+  sshLimit: number;
+}
+
+export function calculateDirectoryPagination(
+  sshTotal: number,
+  httpTotal: number,
+  protocol: SessionProtocolFilter,
+  pageSize: number,
+  currentPage: number,
+): SessionDirectoryPagination {
+  const safePageSize = Math.max(1, pageSize);
+  const effectiveSshTotal = protocol === "http" ? 0 : Math.max(0, sshTotal);
+  const effectiveHttpTotal = protocol === "ssh" ? 0 : Math.max(0, httpTotal);
+  const totalSessions = effectiveSshTotal + effectiveHttpTotal;
+  const totalPages = Math.max(1, Math.ceil(totalSessions / safePageSize));
+  const page = Math.min(Math.max(1, currentPage), totalPages);
+
+  const startIndex = (page - 1) * safePageSize;
+  const endIndex = page * safePageSize;
+
+  let httpOffset = 0;
+  let httpLimit = 0;
+  let sshOffset = 0;
+  let sshLimit = 0;
+
+  if (protocol === "http") {
+    httpOffset = startIndex;
+    httpLimit = Math.max(0, Math.min(safePageSize, effectiveHttpTotal - startIndex));
+    sshOffset = 0;
+    sshLimit = 0;
+  } else if (protocol === "ssh") {
+    httpOffset = 0;
+    httpLimit = 0;
+    sshOffset = startIndex;
+    sshLimit = Math.max(0, Math.min(safePageSize, effectiveSshTotal - startIndex));
+  } else {
+    // "all" protocol:
+    if (startIndex < effectiveHttpTotal) {
+      httpOffset = startIndex;
+      httpLimit = Math.min(endIndex, effectiveHttpTotal) - startIndex;
+      sshOffset = 0;
+      sshLimit = Math.max(0, safePageSize - httpLimit);
+    } else {
+      httpOffset = 0;
+      httpLimit = 0;
+      sshOffset = startIndex - effectiveHttpTotal;
+      sshLimit = Math.max(0, safePageSize);
+    }
+  }
+
+  return {
+    totalSessions,
+    totalPages,
+    page,
+    pageSize: safePageSize,
+    httpOffset,
+    httpLimit,
+    sshOffset,
+    sshLimit,
+  };
 }

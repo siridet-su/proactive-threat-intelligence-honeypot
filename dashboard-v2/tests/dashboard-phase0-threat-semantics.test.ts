@@ -74,6 +74,38 @@ describe("Phase 0.1A threat and lifecycle semantic baseline", () => {
     });
   });
 
+  it("computes dwell time when duration or end_time is present in payload_json", async () => {
+    const fixture = sessionFixture({
+      session_id: "phase0-dwell-payload",
+      payload_json: JSON.stringify({
+        duration: 37.5,
+        end_time: "2020-01-02T03:04:42.500Z",
+        start_time: "2020-01-02T03:04:05.000Z",
+        is_ended: true,
+      }),
+    });
+    const [threat] = await normalizedDirectory([fixture]);
+
+    expect(threat.duration).toBe("38s");
+    expect(threat.end_time).toBe("2020-01-02T03:04:42.500Z");
+    expect(threat.session_status).toBe("closed");
+    expect(threat.classification).toBe("Unknown");
+  });
+
+  it("computes dwell time from start_time and end_time difference", async () => {
+    const fixture = sessionFixture({
+      session_id: "phase0-dwell-diff",
+      start_time: "2020-01-02T03:00:00.000Z",
+      end_time: "2020-01-02T03:02:15.000Z",
+      is_ended: true,
+    });
+    const [threat] = await normalizedDirectory([fixture]);
+
+    expect(threat.duration).toBe("135s");
+    expect(threat.end_time).toBe("2020-01-02T03:02:15.000Z");
+    expect(threat.session_status).toBe("closed");
+  });
+
   it("uses explicit lifecycle evidence rather than recency for active and closed state", async () => {
     const [active, closed] = await normalizedDirectory([
       explicitlyActiveSession,
@@ -102,7 +134,7 @@ describe("Phase 0.1A threat and lifecycle semantic baseline", () => {
     });
   });
 
-  it.fails("D-01: severity alone must not create actor classifications", async () => {
+  it("D-01: severity alone must not create actor classifications", async () => {
     const threats = await normalizedDirectory(["Critical", "High", "Medium", "Low"].map((severity) => sessionFixture({
       session_id: "phase0-d01-severity-only",
       src_ip: "203.0.113.200",

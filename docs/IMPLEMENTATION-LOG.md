@@ -48,6 +48,59 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Include HTTP sessions in Threat Intelligence Console rows per page and pagination
+
+- Status: repository Dashboard change prepared; not applied to a host or activated.
+- Scope and intent: ensure that the "Rows per page" selector and pagination controls on the Threat Intelligence Console (`threat-intel/page.tsx`) accurately include HTTP sessions across All, SSH, and HTTP views, preventing HTTP sessions from overflowing the page size limit or being excluded from page counts.
+- Repository branch and commit/PR: `edit-dashboard` working tree; commit/PR pending.
+- Repository changes:
+  - In `dashboard-v2/src/lib/threat-intel-session-directory.ts`: implement `calculateDirectoryPagination` to compute unified total sessions, total pages, page clamping, HTTP slice boundaries (`httpOffset`, `httpLimit`), and SSH slice boundaries (`sshOffset`, `sshLimit`) based on the active protocol filter (`all`, `ssh`, `http`) and page size.
+  - In `dashboard-v2/src/lib/threat-server.ts`: add `offset` and `limit` support to `ThreatDirectoryFilters` and `normalizeDirectoryFilters`; update `getThreatDirectory` to skip `offset` and take `limit` when provided, returning an empty session slice without extra queries when `limit === 0`.
+  - In `dashboard-v2/src/app/api/threats/directory/route.ts`: parse `offset` and `limit` query parameters and pass to `getThreatDirectory`.
+  - In `dashboard-v2/src/app/(main)/threat-intel/page.tsx`: use `calculateDirectoryPagination` to derive unified pagination metrics; slice HTTP sessions per page and combine them with fetched SSH sessions so the displayed rows never exceed the selected `pageSize`; enable pagination footer and "Rows per page" dropdown across All, SSH, and HTTP tabs whenever total sessions > 0; safely clamp active page during pagination calculation.
+  - In `dashboard-v2/tests/threat-intel-session-directory.test.ts`: add unit tests covering `calculateDirectoryPagination` across all protocol views, page boundary transitions, and rows per page compliance.
+- Host/environment changes actually applied: none. Only local tests, type checks, and linting were run.
+- Runtime/exposure state: existing deployed host remains unchanged.
+- Validation performed and outcome: `npx vitest run tests/threat-intel-session-directory.test.ts tests/dashboard-phase0-threat-semantics.test.ts tests/dashboardTypes.test.ts tests/threat-intel-map-view.test.ts tests/artifact-server.test.ts` passed (40 passed, 1 expected fail); `npx tsc --noEmit` passed with 0 errors; `npm run lint` passed with 0 warnings/errors.
+- Not performed / deferred: deployment to production host.
+- Risks and data handling: presentation and pagination boundary correction only; no secrets or raw payloads involved.
+- Rollback: discard working directory changes with `git restore`.
+- Follow-up: none.
+- Related ADR/runbook: unified Threat Intelligence session directory implementation.
+
+### 2026-09-28 — Unify honeypot interaction session directory across SSH and HTTP protocols
+
+- Status: repository Dashboard change prepared; not applied to a host or activated.
+- Scope and intent: unify the presentation and discovery of honeypot interactions across SSH and HTTP protocols in the Threat Intelligence Console (`threat-intel/page.tsx`), providing cohesive attacker type filtering, unified pagination indicators, multi-protocol CSV exports, and combined activity/attacker type column rendering.
+- Repository branch and commit/PR: `edit-dashboard` working tree; commit/PR pending.
+- Repository changes:
+  - In `dashboard-v2/src/lib/threat-intel-session-directory.ts`: allow `attackerTypeQueryValue` to apply to the unified `all` tab; classify HTTP session rows with `attackerType: "Unknown"`; update `buildSessionDirectoryRows` to accept `attackerType` filter and filter rows accordingly.
+  - In `dashboard-v2/src/app/(main)/threat-intel/page.tsx`: show the Attacker Type dropdown on both `All` and `SSH` protocol tabs; enable CSV export on both `All` and `SSH` views; update pagination text to show total sessions with HTTP interaction counts ("Page X of Y (N sessions) · includes M HTTP interactions") and change label to "Rows per page"; update column 5 to display `AttackerTypeBadge` alongside HTTP activity for a cohesive layout in desktop and mobile cards.
+  - In `dashboard-v2/tests/threat-intel-session-directory.test.ts`: add unit tests verifying `attackerTypeQueryValue` for `all` tab and attacker type filtering for both SSH and HTTP sessions.
+- Host/environment changes actually applied: none. Only local tests, type checks, and linting were run.
+- Runtime/exposure state: existing deployed host remains unchanged.
+- Validation performed and outcome: `npx vitest run tests/threat-intel-session-directory.test.ts` passed (6 passed); `npx tsc --noEmit` passed with 0 errors; `npm run lint` passed with 0 warnings/errors.
+- Not performed / deferred: deployment to production host.
+- Risks and data handling: no secrets or sensitive data involved.
+- Rollback: discard working directory changes with `git restore`.
+- Follow-up: none.
+- Related ADR/runbook: N/A.
+
+### 2026-09-28 — Default Threat Intel attacker type to Unknown and populate session dwell time
+
+- Status: repository Dashboard change prepared; not applied to a host or activated.
+- Scope and intent: default unclassified/missing attacker types to "Unknown" rather than "ScriptKiddie" on the Threat Intelligence Console and directory API, and extract dwell time from canonical session payload data and timestamps.
+- Repository branch and commit/PR: `edit-dashboard` working tree; commit/PR pending.
+- Repository changes: in `dashboard-v2/src/lib/threat-server.ts`, default `injectAttackerType` and `normalizeThreat` classification to `Unknown` instead of `ScriptKiddie` when no decision exists in `honeypot_db.deception_decisions`; allow `Unknown` in directory attacker filter and invert filter criteria to exclude known actors; extract `end_time` and `duration` from canonical `payload_json` or compute duration in seconds from terminal timestamps. In `dashboard-v2/src/lib/threat-intel-session-directory.ts`, add `Unknown` to `SESSION_ATTACKER_TYPE_OPTIONS`, default `normalizeAttackerType` to `Unknown`, and support numeric duration strings in `sshDwellTime`. In `threat-intel/page.tsx`, update `AttackerTypeBadge` fallback to `Unknown`. Update unit test suites and add regression tests.
+- Host/environment changes actually applied: none. Only local tests and build checks were run.
+- Runtime/exposure state: existing Pi and production Dashboard services remain unchanged.
+- Validation performed and outcome: `npx vitest run tests/threat-intel-session-directory.test.ts tests/dashboard-phase0-threat-semantics.test.ts tests/dashboardTypes.test.ts` passed (23 passed, 1 expected fail); `npx tsc --noEmit` and `npm run lint` passed with 0 errors.
+- Not performed / deferred: production deployment, live MongoDB Atlas query against live honeypot traffic.
+- Risks and data handling: displaying "Unknown" ensures unassessed sessions are not falsely labeled as ScriptKiddie. No secrets or attacker payloads are recorded.
+- Rollback: revert the working tree changes.
+- Follow-up: push to origin branch and verify in staging environment.
+- Related ADR/runbook: unified Threat Intelligence session directory implementation.
+
 ### 2026-09-28 — Activate public Web-corp HTTPS through the Droplet
 
 - Status: active on the existing Droplet and Pi; repository source and runbooks updated.
