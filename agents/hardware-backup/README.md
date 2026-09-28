@@ -105,6 +105,11 @@ configured target prefix. Because a B2 application key has one `namePrefix`,
 several target prefixes require either a reviewed bucket-scoped key or separate
 worker/key deployments. The restore operator uses a separate read-only key
 with `readFiles`; the upload worker does not receive `deleteFiles`.
+On a fresh Pi, the installer leaves this worker stopped and disabled until the
+new owner provides a key for their own bucket and explicitly reruns with
+`--enable-backup`. The existing Pi's running backup is unchanged. A key that
+only reads the historical bucket must never be placed in the worker env; see
+the [B2 handoff](../../docs/B2-ARCHIVE-HANDOFF.md).
 
 ## Required environment
 

@@ -100,13 +100,23 @@ def check_services(root: Path, services: list[str], *, require_owner: bool = Tru
     return errors
 
 
+def selected_services(service: str, *, without_backup: bool = False) -> list[str]:
+    services = list(FILES) if service == "all" else [service]
+    if without_backup:
+        services.remove("hardware-backup")
+    return services
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service", choices=[*FILES, "all"], default="all")
     parser.add_argument("--profile", choices=["existing", "fresh-wifi"], default="existing")
+    parser.add_argument("--without-backup", action="store_true", help="validate the fresh Pi core services while backup remains disabled")
     parser.add_argument("--etc-root", type=Path, default=Path("/etc"))
     args = parser.parse_args()
-    services = list(FILES) if args.service == "all" else [args.service]
+    if args.without_backup and (args.profile != "fresh-wifi" or args.service != "all"):
+        parser.error("--without-backup requires --service all --profile fresh-wifi")
+    services = selected_services(args.service, without_backup=args.without_backup)
     errors = check_services(args.etc_root, services, profile=args.profile)
     if errors:
         for error in errors:

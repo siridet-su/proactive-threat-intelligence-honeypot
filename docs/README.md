@@ -44,6 +44,7 @@ and historical material inherited from the previous team.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
 12. [Legacy forwarder purpose](LEGACY-SENSOR-FORWARDER.md) — why the existing Pi still sends a separate Cowrie stream to GCP.
 13. [MongoDB developer handoff](MONGODB-DEV-HANDOFF.md) — scoped read access or sanitized data without reusing owner credentials.
+14. [B2 archive handoff](B2-ARCHIVE-HANDOFF.md) — new-owner backup opt-in and read-only access to historical objects.
 
 The first [Ansible Pi preparation slice](../deploy/ansible/README.md) has
 [partial ARM64 VM validation](validation/2026-09-28-azure-arm64-installer-first-run.md)

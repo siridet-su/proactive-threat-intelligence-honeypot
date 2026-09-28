@@ -16,6 +16,30 @@ spec.loader.exec_module(check_pi_env)
 
 
 class CheckPiEnvTests(unittest.TestCase):
+    def test_fresh_core_selection_keeps_backup_file_out_of_gate(self) -> None:
+        self.assertNotIn("hardware-backup", check_pi_env.selected_services("all", without_backup=True))
+        self.assertIn("hardware-backup", check_pi_env.selected_services("all"))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shared = root / "honeypot-agent.env"
+            shared_keys = {"REDIS_ADDR", "REDIS_DB"}
+            for service in check_pi_env.selected_services("all", without_backup=True):
+                shared_keys |= check_pi_env.SERVICE_SHARED_KEYS[service]
+            shared_keys -= {"SENSOR_ZT_IP", "SENSOR_ZT_IFACE"}
+            shared.write_text("".join(f"{key}=synthetic\n" for key in sorted(shared_keys)))
+            shared.chmod(0o600)
+            private = root / "honeypot"
+            private.mkdir()
+            for name in ("processor.env", "ti-worker.env"):
+                path = private / name
+                path.write_text("# operator-specific optional values\n")
+                path.chmod(0o600)
+            hardware = private / "hardware.env"
+            hardware.write_text("NETWORK_INTERFACES=wlan0\nNETWORK_PRIMARY_INTERFACE=wlan0\n")
+            hardware.chmod(0o600)
+            self.assertEqual(check_pi_env.check_services(root, check_pi_env.selected_services("all", without_backup=True), require_owner=False, profile="fresh-wifi"), [])
+            self.assertTrue(any("backup.env" in item for item in check_pi_env.check_services(root, check_pi_env.selected_services("all"), require_owner=False, profile="fresh-wifi")))
+
     def test_missing_values_and_private_values_are_never_reported(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

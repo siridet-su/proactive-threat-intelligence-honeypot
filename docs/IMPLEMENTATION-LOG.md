@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Keep fresh-host B2 backup disabled until owner opt-in
+
+- Status: repository change prepared; not applied to a host.
+- Scope and intent: allow the fresh Pi core to run without a B2 credential while preventing writes to the existing owner's archive. Keep any successor access to historical objects read-only and separate from a new backup destination.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: add an explicit backup opt-in to the fresh installer; keep the fresh backup control unit stopped and disabled by default; exclude backup env from the fresh core gate; retain the existing-Pi five-unit default; update the fresh runbook, ADR, current state, blank env notes, tests, and B2 handoff guidance.
+- Host/environment changes actually applied: none. The disposable VM was queried through read-only env gates; its files and services were not changed. Existing Pi, B2 account, bucket, application keys, and Dashboard were not changed.
+- Runtime/exposure state: the existing Pi backup runtime remains as previously recorded unless changed separately. A future fresh install will activate four core Go units and leave its backup control unit inactive until the operator provides their own destination key and reruns with `--enable-backup`.
+- Validation performed and outcome: targeted env-selection tests (10 unittest cases and 3 fresh-installer pytest cases), Python compilation, and Ansible syntax checks passed. The VM env gate with backup disabled reported only missing core MongoDB settings; with backup enabled it also required the backup worker's MongoDB setting. No B2 API call or archive write was made.
+- Not performed / deferred: live new-Pi activation, actual B2 upload and restore with owner-managed credentials, historical read-only key creation, and any change to the existing Pi backup service.
+- Risks and data handling: the fresh host has no remote archive until opt-in succeeds. A read-only historical key can still disclose object contents. No B2 key, object, private endpoint, or archive content was copied into Git.
+- Rollback: revert the repository change before deploying it; on a fresh test host, keep the backup unit stopped and disabled while reviewing its env and destination.
+- Follow-up: validate the owner's new destination with a bounded upload and restore after they supply credentials; separately decide whether to issue a bucket/prefix-scoped historical read-only key.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh install runbook](../deploy/ansible/README.md), and [B2 handoff](B2-ARCHIVE-HANDOFF.md).
+
 ### 2026-09-28 — Prepare fresh Pi local decoys and bounded ARM64 activation
 
 - Status: repository implementation prepared; bounded service activation tested and then stopped on a disposable ARM64 VM. Existing Pi and Droplet remain unchanged.

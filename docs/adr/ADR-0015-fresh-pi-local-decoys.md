@@ -37,7 +37,11 @@ Go activation gate could not complete on a clean host.
   consumers are reviewed and a separate retirement is approved.
 - Stage blank private env files without replacing operator values. No sensor
   or decoy service starts until required private values pass the local shape
-  checks. A same-release retry resumes installation.
+  checks. A same-release retry resumes installation. A fresh host activates
+  the four core Go units while the B2 backup control unit stays stopped and
+  disabled. Backup is an explicit `--enable-backup` action after the operator
+  adds their own destination bucket and write-capable key. Historical archive
+  read access is a separate credential that is never used by the Pi worker.
 
 ## Consequences
 
@@ -52,6 +56,8 @@ Go activation gate could not complete on a clean host.
   listeners and Zeek's effective filter after that change.
 - The Go collector needs read access to Cowrie and Zeek logs; its dedicated
   user joins those service groups. It does not receive their write ownership.
+- The fresh host can collect data before B2 is configured, but those days are
+  not remotely archived until the operator enables and verifies backup.
 - The current Pi's ZeroTier/WireGuard/public-Web-corp decisions in ADR-0012
   through ADR-0014 remain historical and active for that host until a separate
   cutover. This ADR governs only clean-host installation.

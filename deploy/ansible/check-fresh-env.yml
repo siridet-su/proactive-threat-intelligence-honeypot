@@ -3,9 +3,11 @@
   hosts: pi_sensors
   become: true
   gather_facts: false
+  vars:
+    pti_enable_backup: false
   tasks:
     - name: Check required Go configuration names and file safety
-      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile fresh-wifi"
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile fresh-wifi {{ '' if pti_enable_backup | bool else '--without-backup' }}"
       changed_when: false
 
     - name: Check decoy credential and localhost binding without showing values

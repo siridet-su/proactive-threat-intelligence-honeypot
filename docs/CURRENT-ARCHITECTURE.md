@@ -57,6 +57,9 @@ with a narrow port filter, and Web-corp/Core/PostgreSQL bind to loopback. The
 disposable ARM64 VM verified these services with loopback test ports and
 synthetic private input. It did not validate Go/Atlas/B2 end to end, and it
 does not change the current Pi or public Droplet.
+The clean-host installer leaves its B2 backup control unit stopped and
+disabled by default. The owner must provide their own write-capable bucket
+key and explicitly enable backup; historical object read access is separate.
 
 ## Runtime posture at last verification
 

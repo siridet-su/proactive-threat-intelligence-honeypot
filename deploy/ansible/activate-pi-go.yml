@@ -9,12 +9,14 @@
     pti_release_id: ""
     pti_manifest_sha256: ""
     pti_env_profile: existing
-    pti_units:
+    pti_enable_backup: true
+    pti_core_units:
       - honeypot-collector.service
       - honeypot-processor.service
       - honeypot-ti-worker.service
       - honeypot-hardware.service
-      - honeypot-hardware-backup-control.service
+    pti_backup_unit: honeypot-hardware-backup-control.service
+    pti_units: "{{ pti_core_units + ([pti_backup_unit] if pti_enable_backup | bool else []) }}"
   pre_tasks:
     - name: Require one supported ARM64 target and explicit release identity
       ansible.builtin.assert:
@@ -25,6 +27,7 @@
           - ansible_facts['architecture'] in ['aarch64', 'arm64']
           - pti_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
           - pti_manifest_sha256 is match('^[0-9a-f]{64}$')
+          - pti_enable_backup | bool or pti_env_profile == 'fresh-wifi'
         fail_msg: Activation requires one reviewed Ubuntu 24.04 ARM64 Pi and an approved release.
 
     - name: Inspect installed preparation marker
@@ -54,7 +57,7 @@
           - (pti_marker_file.content | b64decode | from_json).manifest_sha256 == pti_manifest_sha256
 
     - name: Check operator-uploaded env paths and required names without printing values
-      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile {{ pti_env_profile }}"
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile {{ pti_env_profile }} {{ '' if pti_enable_backup | bool else '--without-backup' }}"
       changed_when: false
 
     - name: Check Redis binds only to loopback before starting it
@@ -79,13 +82,20 @@
         that:
           - item in ansible_facts.services
         fail_msg: A prepared service is missing; rerun preparation for the same release.
-      loop: "{{ pti_units + ['redis-server.service'] }}"
+      loop: "{{ pti_units + [pti_backup_unit, 'redis-server.service'] }}"
 
     - name: Keep initial service states for rollback of this attempt
       ansible.builtin.set_fact:
         pti_initial_services: "{{ ansible_facts.services }}"
 
   tasks:
+    - name: Keep fresh backup worker stopped until operator enables own B2 destination
+      ansible.builtin.systemd_service:
+        name: "{{ pti_backup_unit }}"
+        state: stopped
+        enabled: false
+      when: not pti_enable_backup | bool
+
     - name: Start the approved Go slice
       block:
         - name: Start local Redis

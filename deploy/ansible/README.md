@@ -52,9 +52,21 @@ service while required secrets or settings are missing. Fill the actual files
 on the Pi with `sudoedit` or an approved private upload, then run the **same
 command**. It starts Cowrie with its manifest-bound sanitizer, Zeek with a
 generated TCP 22/23 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
-`127.0.0.1`, Redis, and the five Go services. It never installs the legacy GCP
+`127.0.0.1`, Redis, and the four core Go services. The B2 backup control unit
+stays stopped and disabled. It never installs the legacy GCP
 sensor forwarder or the public Web-corp Compose override. Existing Pi behavior
 is separate; see [ADR-0015](../../docs/adr/ADR-0015-fresh-pi-local-decoys.md).
+
+Backup is a separate opt-in. When the owner has supplied a write-capable B2
+application key and a bucket **they control** in `/etc/honeypot/backup.env`,
+rerun the same installer with `--enable-backup`. The env gate then requires
+the B2 values and the activation starts the backup control unit. The key check
+validates file shape and presence; a later end-to-end run must verify actual
+upload permission and target scope. A read-only key for historical objects
+belongs in the developer's separate private restore environment, never in
+`backup.env`. Running the fresh installer without `--enable-backup` again
+will stop and disable the fresh backup unit. See the
+[B2 handoff](../../docs/B2-ARCHIVE-HANDOFF.md).
 
 Cowrie refuses port 22/23 if real SSH or another process still listens there.
 Zeek refuses an interface without exactly one IPv4 address. If the Wi-Fi

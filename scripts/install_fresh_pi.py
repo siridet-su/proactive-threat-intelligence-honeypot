@@ -99,6 +99,7 @@ def main() -> int:
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--vars", type=Path, required=True)
     parser.add_argument("--passwordless-sudo", action="store_true")
+    parser.add_argument("--enable-backup", action="store_true", help="activate B2 backup only after the operator supplies their own write-capable destination key")
     args = parser.parse_args()
     try:
         release_id, release_path, digest = load_vars(args.vars)
@@ -107,7 +108,8 @@ def main() -> int:
         if not ensure_release(release_id, release_path, digest):
             return 2
         base = ["ansible-playbook", "-i", str(args.inventory), "-e", f"@{args.vars}",
-                "-e", "pti_require_inactive=false", "-e", "pti_env_profile=fresh-wifi"]
+                "-e", "pti_require_inactive=false", "-e", "pti_env_profile=fresh-wifi",
+                "-e", f"pti_enable_backup={'true' if args.enable_backup else 'false'}"]
         if not args.passwordless_sudo:
             base.append("--ask-become-pass")
         play(base, "prepare-pi.yml", "audit-prepared-pi.yml", "stage-pi-env-examples.yml")
@@ -124,7 +126,8 @@ def main() -> int:
             print("PAUSED: fill the staged private /etc/honeypot-agent.env and /etc/honeypot/*.env files, then rerun this same command. No credential value was read by the controller.", file=sys.stderr)
             return 2
         play(base, "activate-zeek.yml", "activate-cowrie.yml", "activate-decoy.yml", "activate-pi-go.yml")
-        print("ACTIVE: fresh Pi stack passed immediate service and localhost checks; verify telemetry end to end.")
+        backup_state = "enabled by operator request" if args.enable_backup else "disabled pending the operator's own B2 key"
+        print(f"ACTIVE: fresh Pi core passed immediate service and localhost checks; B2 backup {backup_state}. Verify telemetry end to end.")
         return 0
     except InstallError as exc:
         print(f"error: {exc}", file=sys.stderr)
