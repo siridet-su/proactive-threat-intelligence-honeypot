@@ -3300,3 +3300,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: restore the prior Cowrie log-directory mode and remove the Zeek JSON policy load on the disposable VM if needed; no production rollback applies.
 - Follow-up: pull the fix to the VM, rerun the same installer, and verify one bounded Cowrie/Zeek event traverses the collector and processor.
 - Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [VM validation](validation/2026-09-29-azure-arm64-fresh-installer.md).
+
+### 2026-09-29 — Complete bounded fresh-stack VM acceptance
+
+- Status: the full fresh installer and bounded telemetry paths are active on the disposable Azure ARM64 VM; physical Pi and B2 acceptance remain open.
+- Scope and intent: retest the credentialed fresh installer after hardware interval, Web-corp spool, Cowrie log, and Zeek JSON fixes.
+- Repository branch and commit/PR: `main` at `2341488` for the tested installer; this addendum records its observed VM result.
+- Repository changes: add the final VM activation evidence and update the fresh runbook's qualification status. No new runtime code change in this addendum.
+- Host/environment changes actually applied: pulled `2341488` to the reimaged VM, reran the same installer with the same reviewed release and private values already entered by the operator, and sent bounded localhost Web-corp and Cowrie test traffic. Synthetic canonical records were written to the operator-configured MongoDB destination. Existing Pi and Droplet services were not changed.
+- Runtime/exposure state: Cowrie, Zeek, Redis, four core Go units, Docker, PostgreSQL, Deception Core, and Web-corp were active on the VM. Web-corp/Core/PostgreSQL/Redis and Cowrie's test ports were loopback-bound. Administrator SSH stayed on TCP 22. B2 backup control remained inactive and disabled.
+- Validation performed and outcome: installer returned `ACTIVE`; Web-corp HTTP returned 200; a synthetic login drained from the private spool through Redis and had one matching canonical MongoDB event. A bounded Cowrie SSH banner exchange produced collector/Zeek JSON events; Redis held Cowrie and Zeek connection records, and count-only MongoDB queries found VM-sensor canonical events from both sources. The last five-minute Go journal check had no permission-denied, invalid-JSON, or MongoDB error messages.
+- Not performed / deferred: reboot persistence, physical `wlan0` traffic capture, public exposure, Dashboard authentication, non-synthetic traffic, B2 upload/restore, and a broad data-retention audit.
+- Risks and data handling: the synthetic records remain in the operator-configured MongoDB destination. The host is a loopback-capture VM and does not prove physical Pi behavior. Neither credentials nor event payloads were printed or copied into Git.
+- Rollback: stop the disposable VM or its fresh project services if the rehearsal is no longer needed; no production service rollback applies. Synthetic records in MongoDB require a separate reviewed cleanup if desired.
+- Follow-up: accept the same release on physical Pi `wlan0`, verify reboot/capture/listener behavior, and separately provision and test a new B2 write destination before backup opt-in.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [activation evidence](validation/2026-09-29-azure-arm64-fresh-activation.md).

@@ -36,6 +36,7 @@ approval remains an explicit operational decision.
 
 ## Evidence notes
 
+- [Reimaged Azure ARM64 fresh activation — 2026-09-29](2026-09-29-azure-arm64-fresh-activation.md): full wrapper activation, synthetic Web-corp/Cowrie/Zeek event delivery, MongoDB counts, and remaining physical Pi/B2 limits.
 - [Reimaged Azure ARM64 fresh installer — 2026-09-29](2026-09-29-azure-arm64-fresh-installer.md): full-stack preparation, Ansible compatibility fixes, private env pause, and repeat run without active services.
 - [Azure ARM64 installer first run — 2026-09-28](2026-09-28-azure-arm64-installer-first-run.md): reviewed Go release preparation, private env skeletons, missing-value pause, and unchanged-file retry on a disposable VM.
 - [Session guidance projection closeout — 2026-09-27](2026-09-27-session-guidance-projection-closeout.md): production API text-completeness check, bounded policy projection, and the remaining Model2 API discrepancy.

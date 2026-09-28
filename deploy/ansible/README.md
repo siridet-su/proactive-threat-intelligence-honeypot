@@ -1,8 +1,9 @@
 # Fresh Pi installation and staged components
 
-Status: **Cowrie, narrow Zeek, and localhost decoys passed bounded activation
-on a disposable Ubuntu 24.04 ARM64 VM; a full clean-Pi/Atlas/B2 run remains
-unqualified**. The earlier `install_pi_sensor.py` handles the Go-only slice.
+Status: **The full fresh wrapper and synthetic Cowrie, Zeek, Web-corp, Redis,
+and MongoDB paths passed on a disposable Ubuntu 24.04 ARM64 VM; physical Pi,
+Dashboard, and B2 acceptance remain unqualified**. The earlier
+`install_pi_sensor.py` handles the Go-only slice.
 The new `install_fresh_pi.py` coordinates the full Pi service stack from one
 command and pauses until the operator fills private credentials. Dashboard is
 a separate source-based developer process.
@@ -127,11 +128,13 @@ the script installs lockfile dependencies when missing and runs `npm run dev`
 bound to `127.0.0.1`. No Dashboard image is built by this flow. Live Atlas
 handoff uses [separate scoped access](../../docs/MONGODB-DEV-HANDOFF.md).
 
-The [VM evidence](../../docs/validation/2026-09-28-azure-arm64-fresh-activation.md)
-covers immediate service/listener checks and a synthetic Cowrie/Zeek port
-test. It does not prove the full Go → Redis → Atlas pipeline,
-real B2 backup, Dashboard authentication, Wi-Fi DHCP behavior, or clean-Pi
-network exposure. Keep those as acceptance gates before production use.
+The [reimaged VM activation evidence](../../docs/validation/2026-09-29-azure-arm64-fresh-activation.md)
+covers the full fresh wrapper and bounded synthetic event delivery to the
+operator-configured MongoDB destination. The earlier
+[VM evidence](../../docs/validation/2026-09-28-azure-arm64-fresh-activation.md)
+covers isolated activation checks. Neither proves real B2 backup, Dashboard
+authentication, Wi-Fi DHCP behavior, or clean-Pi network exposure. Keep those
+as acceptance gates before production use.
 
 ## One command to resume the current Pi slice
 
