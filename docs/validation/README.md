@@ -1,5 +1,7 @@
 # Validation evidence
 
+- [2026-09-28 Azure ARM64 decoy staging](2026-09-28-azure-arm64-decoy-staging.md) — Docker/Compose packages and a reviewed source bundle staged inactive; same-bundle retry changed nothing.
+
 - [2026-09-28 public Web-corp edge](2026-09-28-public-web-corp-edge.md) — trusted IP HTTPS, private WireGuard backend, synthetic login metadata, Zeek `wg0` ingestion, and renewal dry-run.
 
 - [2026-09-28 Azure ARM64 Cowrie/Zeek staging](2026-09-28-azure-arm64-cowrie-zeek-staging.md) — pinned dependency staging, loopback listener correction, interrupted-run recovery, and inactive final state.

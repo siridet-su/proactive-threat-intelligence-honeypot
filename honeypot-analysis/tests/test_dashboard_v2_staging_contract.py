@@ -84,7 +84,10 @@ def test_staging_artifact_contains_only_non_secret_identity_fields() -> None:
     assert "git_tree_sha" in package_script
     assert "package_lock_sha256" in package_script
     assert "artifact_sha256" in package_script
-    assert "DASHBOARD_V2_ACCESS_KEY=<generate-with-bootstrap-script>" in env_example
+    assert "MONGODB_URI=" in env_example
+    assert "PTI_ADMIN_PASSWORD=" in env_example
+    assert "AUTH_SESSION_SECRET=" in env_example
+    assert "DASHBOARD_V2_ACCESS_KEY" not in env_example
     assert "MONGO_URI" not in package_script
     assert "CLOUDFLARE_API_TOKEN" not in package_script
     assert package_script.index("await mkdir(outputRoot") < package_script.index("await runArchive")

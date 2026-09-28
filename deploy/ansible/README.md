@@ -48,8 +48,51 @@ rerun after fixing the cause.
 The Go activation check verifies file shape and immediate process state. It
 does not prove Mongo/B2 credentials, telemetry delivery, scheduled backup
 execution, or recovery. The clean VM acceptance run must check those before
-production use. Cowrie and Zeek now have separate **staging** playbooks below;
-Docker decoys and Dashboard still need installers.
+production use. Cowrie, Zeek, and Docker decoys have separate **staging**
+playbooks below; decoy activation and Dashboard installation remain pending.
+
+## Stage Docker decoy source on the ARM64 test sensor
+
+The separate `prepare-decoy.yml` playbook installs reviewed exact Ubuntu
+`docker.io` and `docker-compose-v2` versions, copies a SHA-256-approved Git
+source bundle, installs `/etc/honeypot/decoy.env.example`, and creates
+`/etc/honeypot/decoy.env` from that blank template only if absent. It also
+creates the Web-corp login spool with root-only directory permissions before
+Docker can create a broad default bind-mount directory. Docker,
+its socket, and containerd are left stopped and disabled. Images are not built
+and no container or listener is started. It requires a prepared Pi marker and
+refuses a running Docker host or an unmarked source release.
+
+On the controller, commit reviewed source first and build the bundle. Record
+the reported commit and digest outside Git. On the target, review exact
+package versions with `apt-cache policy docker.io docker-compose-v2`. Supply
+the bundle path, digest, commit, and versions as non-secret Ansible variables:
+
+```sh
+python3 scripts/build_decoy_bundle.py --output /path/to/decoy-source.tar.gz
+ansible-playbook -i /path/to/private-inventory.ini \
+  deploy/ansible/prepare-decoy.yml \
+  -e @/path/to/reviewed-decoy-vars.json
+```
+
+The JSON keys are `pti_decoy_archive`, `pti_decoy_sha256`,
+`pti_decoy_commit`, `pti_docker_version`, and `pti_compose_version`.
+No credential belongs in this vars file. The playbook checks the approved
+bundle hash and validates both Compose files with synthetic placeholder
+values, without reading the operator env. A same-bundle retry is idempotent;
+a different bundle requires a reviewed release transition. On the disposable
+Ubuntu 24.04 ARM64 VM, the first staging run passed and the repeat reported
+`changed=0`; see [evidence](../../docs/validation/2026-09-28-azure-arm64-decoy-staging.md).
+An additional disposable VM check built both application images and started
+the three-service Compose stack briefly on loopback with synthetic input;
+it was fully stopped and its test volumes removed. This is evidence for
+ARM64 build and basic startup, not an activation step in the playbook.
+
+This stage does not build images, prove image base digests, activate Docker,
+validate private credentials, or install the Dashboard. The one-command Go
+wrapper does not invoke this playbook yet; it still requires Cowrie and Zeek
+to be staged separately. Leave public trap ports closed until later
+activation and synthetic acceptance checks pass.
 
 ## Stage Zeek and Cowrie on a prepared test sensor
 

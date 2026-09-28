@@ -22,6 +22,8 @@ CURL="/usr/bin/curl"
 SHA256SUM="/usr/bin/sha256sum"
 PYTHON="/usr/bin/python3"
 SS="/usr/bin/ss"
+ENV_CHECK="$RELEASE_ROOT/bin/check-runtime-env"
+ENV_FILE="/etc/honeypot/services/dashboard-v2-staging.env"
 
 die() {
   printf 'staging deployment rejected: %s\n' "$1" >&2
@@ -38,6 +40,7 @@ usage() {
 
 (( EUID == 0 )) || die 'this wrapper must run through the root-only sudo rule'
 [[ -x "$SYSTEMCTL" && -x "$TAR" && -x "$CURL" && -x "$SHA256SUM" && -x "$PYTHON" && -x "$SS" ]] || die 'required host tools are unavailable'
+[[ -x "$ENV_CHECK" ]] || die 'staging runtime env checker is unavailable; rerun bootstrap'
 
 artifact=""
 artifact_sha=""
@@ -73,6 +76,7 @@ lock_sha="${lock_sha,,}"
 [[ "$(stat -c '%U:%G %a' "$RELEASE_ROOT")" == 'root:root 755' ]] || die 'staging release root ownership/mode is unsafe'
 [[ "$(stat -c '%U:%G %a' "$RELEASES")" == 'root:root 755' ]] || die 'staging releases ownership/mode is unsafe'
 [[ "$(stat -c '%U:%G %a' "$INCOMING")" == "root:$DEPLOY_GROUP 730" ]] || die 'staging incoming ownership/mode is unsafe'
+"$ENV_CHECK" "$ENV_FILE" || die 'staging runtime env is incomplete; fill the protected file before deployment'
 
 actual_sha="$($SHA256SUM "$artifact" | awk '{print $1}')"
 [[ "$actual_sha" == "$artifact_sha" ]] || die 'artifact SHA-256 does not match the CI manifest'

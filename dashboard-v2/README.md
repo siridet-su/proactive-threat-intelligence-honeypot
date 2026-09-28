@@ -14,15 +14,17 @@ npm run dev
 The BFF defaults to `http://127.0.0.1:8090`, the existing `monitor_web` service. Configure these server-only variables before use:
 
 ```text
-DASHBOARD_API_ORIGIN=http://127.0.0.1:8090
-DASHBOARD_API_READ_TOKEN=<monitor read token, never a NEXT_PUBLIC variable>
-DASHBOARD_V2_OPERATOR_ID=<deployment operator id>
-DASHBOARD_V2_ACCESS_KEY=<deployment dashboard access key>
-DASHBOARD_V2_SESSION_SECRET=<deployment session secret>
+DASHBOARD_MONITOR_BASE_URL=http://127.0.0.1:8090
+DASHBOARD_MONITOR_READ_TOKEN=<optional monitor read token, never a NEXT_PUBLIC variable>
+PTI_ADMIN_PASSWORD=<deployment Admin password>
+AUTH_SESSION_SECRET=<random server-only value, at least 32 characters>
 MONGODB_URI=<server-only MongoDB connection string>
 ```
 
-The app fails closed when dashboard authentication is not configured.
+The production login endpoint requires MongoDB, the configured Admin password,
+and the session secret. The staging deployment wrapper checks these required
+env names before switching releases; the installer does not supply their
+values.
 Filesystem Activity is read-only: it provides Route Replay and Evidence views
 and has no session-termination UI or API. No Pi response-agent URL or credential
 is required. MongoDB credentials remain server-only and are never exposed

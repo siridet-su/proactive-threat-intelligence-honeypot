@@ -1,6 +1,16 @@
 # Dashboard v2 API
 
-Status: source-backed contract for the current `dashboard-v2` tree, audited 2026-09-01.
+Status: historical 2026-09-01 API audit. Authentication and several route
+descriptions below predate the current explicit-route implementation. For the
+current install contract, use the [Dashboard README](../README.md) and the
+source under `src/app/api/`; this document needs a full route-by-route refresh.
+
+2026-09-28 auth addendum: the current login route is
+`POST /api/auth/login`, backed by MongoDB `MONGODB_URI`, Admin credential
+`PTI_ADMIN_PASSWORD`, and `AUTH_SESSION_SECRET`. It uses the `pti_session`
+cookie. The staging installer now checks these names before release switch.
+The older `DASHBOARD_V2_*` and `/api/auth` auth descriptions below are retained
+as historical audit text, not current operating instructions.
 
 This document describes the browser-visible contract. The generic catch-all implements 34 authenticated `GET` mappings plus `POST` and `DELETE` on `/api/auth`; dedicated hardware and sensitive Admin routes are separate handlers.
 

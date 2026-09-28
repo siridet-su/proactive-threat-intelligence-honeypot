@@ -47,6 +47,10 @@ were also tested on that VM; see the
 Its [VM test target](INSTALLER-VM-TEST-TARGET.md)
 and the [Thai](INSTALLATION-MANUAL-WORD-TH.md) and
 [English](INSTALLATION-MANUAL-WORD.md) manual drafts remain incomplete.
+The [Docker decoy staging slice](../deploy/ansible/README.md) also passed on
+the disposable ARM64 VM; a separate image build and loopback smoke run were
+cleaned up afterward. See
+its [evidence](validation/2026-09-28-azure-arm64-decoy-staging.md).
 
 The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the

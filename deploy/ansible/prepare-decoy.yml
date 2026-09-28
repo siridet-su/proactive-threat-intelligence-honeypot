@@ -1,0 +1,229 @@
+---
+# Fresh Ubuntu 24.04 ARM64 sensor only. Stage Docker and reviewed decoy source.
+# No image build, container, listener, or credential is activated here.
+- name: Prepare Docker decoy stack without activation
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_decoy_archive: ''
+    pti_decoy_sha256: ''
+    pti_decoy_commit: ''
+    pti_docker_version: ''
+    pti_compose_version: ''
+    pti_decoy_release_root: /opt/pti/decoy/releases
+    pti_decoy_marker: /var/lib/pti-installer/decoy-source
+  pre_tasks:
+    - name: Require reviewed Ubuntu ARM64 target and release inputs
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_decoy_archive is match('^/')
+          - pti_decoy_sha256 is match('^[0-9a-f]{64}$')
+          - pti_decoy_commit is match('^[0-9a-f]{40}$')
+          - pti_docker_version is match('^[0-9][A-Za-z0-9.+:~_-]*$')
+          - pti_compose_version is match('^[0-9][A-Za-z0-9.+:~_-]*$')
+
+    - name: Check approved decoy bundle on the controller
+      ansible.builtin.stat:
+        path: "{{ pti_decoy_archive }}"
+        checksum_algorithm: sha256
+      register: pti_local_decoy_bundle
+      delegate_to: localhost
+      become: false
+
+    - name: Require the approved bundle digest
+      ansible.builtin.assert:
+        that:
+          - pti_local_decoy_bundle.stat.isreg | default(false)
+          - not (pti_local_decoy_bundle.stat.islnk | default(false))
+          - pti_local_decoy_bundle.stat.checksum == pti_decoy_sha256
+
+    - name: Check Pi preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_decoy_prepare_marker
+
+    - name: Require completed Pi preparation
+      ansible.builtin.assert:
+        that:
+          - pti_decoy_prepare_marker.stat.isreg | default(false)
+          - not (pti_decoy_prepare_marker.stat.islnk | default(false))
+          - pti_decoy_prepare_marker.stat.uid == 0
+          - pti_decoy_prepare_marker.stat.mode == '0644'
+
+    - name: Read non-secret preparation marker
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_decoy_prepare_marker_data
+
+    - name: Require prepared state
+      ansible.builtin.assert:
+        that:
+          - (pti_decoy_prepare_marker_data.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_decoy_prepare_marker_data.content | b64decode | from_json).state == 'prepared'
+
+    - name: Check Docker and containerd service state
+      ansible.builtin.service_facts:
+
+    - name: Refuse to alter a running container host
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services.get('docker.service', {}).get('state', 'stopped') != 'running'
+          - ansible_facts.services.get('docker.socket', {}).get('state', 'stopped') != 'running'
+          - ansible_facts.services.get('containerd.service', {}).get('state', 'stopped') != 'running'
+
+    - name: Check existing decoy release and marker
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - "{{ pti_decoy_release_root }}/{{ pti_decoy_commit }}"
+        - "{{ pti_decoy_marker }}"
+        - /etc/honeypot/decoy.env
+      register: pti_decoy_existing
+
+    - name: Refuse unmarked release and linked private env
+      ansible.builtin.assert:
+        that:
+          - not (pti_decoy_existing.results[0].stat.islnk | default(false))
+          - not (pti_decoy_existing.results[1].stat.islnk | default(false))
+          - not (pti_decoy_existing.results[2].stat.islnk | default(false))
+          - not pti_decoy_existing.results[0].stat.exists or pti_decoy_existing.results[1].stat.exists
+          - not pti_decoy_existing.results[2].stat.exists or (pti_decoy_existing.results[2].stat.isreg and pti_decoy_existing.results[2].stat.uid == 0 and pti_decoy_existing.results[2].stat.mode == '0600')
+
+    - name: Read existing decoy marker
+      ansible.builtin.slurp:
+        src: "{{ pti_decoy_marker }}"
+      register: pti_decoy_marker_data
+      when: pti_decoy_existing.results[1].stat.exists
+
+    - name: Require same source on retry
+      ansible.builtin.assert:
+        that:
+          - pti_decoy_existing.results[1].stat.isreg
+          - pti_decoy_existing.results[1].stat.uid == 0
+          - pti_decoy_existing.results[1].stat.mode == '0644'
+          - (pti_decoy_marker_data.content | b64decode | from_json).schema == 'pti.decoy-source.v1'
+          - (pti_decoy_marker_data.content | b64decode | from_json).commit == pti_decoy_commit
+          - (pti_decoy_marker_data.content | b64decode | from_json).sha256 == pti_decoy_sha256
+          - (pti_decoy_marker_data.content | b64decode | from_json).state in ['preparing', 'prepared']
+          - (pti_decoy_marker_data.content | b64decode | from_json).state != 'prepared' or (pti_decoy_existing.results[0].stat.isdir | default(false))
+        fail_msg: Existing decoy source is unverified or belongs to a different bundle.
+      when: pti_decoy_existing.results[1].stat.exists
+
+  tasks:
+    - name: Install exact Ubuntu Docker and Compose packages without starting services
+      ansible.builtin.apt:
+        name:
+          - "docker.io={{ pti_docker_version }}"
+          - "docker-compose-v2={{ pti_compose_version }}"
+        state: present
+        install_recommends: false
+        policy_rc_d: 101
+
+    - name: Leave container runtime stopped and disabled
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop:
+        - docker.service
+        - docker.socket
+        - containerd.service
+
+    - name: Create root-owned release directory
+      ansible.builtin.file:
+        path: "{{ pti_decoy_release_root }}/{{ pti_decoy_commit }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Mark resumable decoy preparation
+      ansible.builtin.copy:
+        dest: "{{ pti_decoy_marker }}"
+        content: "{{ {'schema': 'pti.decoy-source.v1', 'commit': pti_decoy_commit, 'sha256': pti_decoy_sha256, 'state': 'preparing'} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+      when: not pti_decoy_existing.results[1].stat.exists
+
+    - name: Copy reviewed decoy source archive
+      ansible.builtin.copy:
+        src: "{{ pti_decoy_archive }}"
+        dest: "/var/lib/pti-installer/decoy-{{ pti_decoy_sha256 }}.tar.gz"
+        owner: root
+        group: root
+        mode: '0640'
+
+    - name: Extract reviewed decoy source
+      ansible.builtin.unarchive:
+        src: "/var/lib/pti-installer/decoy-{{ pti_decoy_sha256 }}.tar.gz"
+        dest: "{{ pti_decoy_release_root }}/{{ pti_decoy_commit }}"
+        remote_src: true
+        owner: root
+        group: root
+      when: not pti_decoy_existing.results[1].stat.exists or (pti_decoy_marker_data.content | b64decode | from_json).state == 'preparing'
+
+    - name: Install current decoy env example
+      ansible.builtin.copy:
+        src: env-examples/decoy.env.example
+        dest: /etc/honeypot/decoy.env.example
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Create restricted Web-corp spool before Docker can auto-create it
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0700'
+      loop:
+        - /var/lib/decoy-honeypot
+        - /var/lib/decoy-honeypot/web-login-spool
+
+    - name: Create blank operator env only when absent
+      ansible.builtin.copy:
+        src: env-examples/decoy.env.example
+        dest: /etc/honeypot/decoy.env
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+
+    - name: Validate Compose source without Docker daemon or private env
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/docker
+          - compose
+          - -f
+          - "{{ pti_decoy_release_root }}/{{ pti_decoy_commit }}/deploy/decoy-honeypot/compose.yaml"
+          - -f
+          - "{{ pti_decoy_release_root }}/{{ pti_decoy_commit }}/deploy/decoy-honeypot/compose.public-web.yaml"
+          - --profile
+          - public-web
+          - config
+          - --quiet
+      environment:
+        POSTGRES_PASSWORD: validation-only
+        WEB_CORP_BIND_IP: 127.0.0.1
+        WEB_CORP_WG_BIND_IP: 192.0.2.2
+        WEB_CORP_PROXY_PEER_IP: 192.0.2.1
+      changed_when: false
+
+    - name: Mark decoy source prepared
+      ansible.builtin.copy:
+        dest: "{{ pti_decoy_marker }}"
+        content: "{{ {'schema': 'pti.decoy-source.v1', 'commit': pti_decoy_commit, 'sha256': pti_decoy_sha256, 'state': 'prepared'} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Report intentional pause before image build or activation
+      ansible.builtin.debug:
+        msg: Docker/Compose and reviewed decoy source staged; runtime is stopped, images are not built, and operator env needs values.
