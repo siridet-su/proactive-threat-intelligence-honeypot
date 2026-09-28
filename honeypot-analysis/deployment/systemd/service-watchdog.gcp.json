@@ -1,0 +1,34 @@
+{
+  "schema_version": "honeypot.service_watchdog.v1",
+  "node_id": "gcp",
+  "maintenance_file": "/run/honeypot-maintenance.lock",
+  "defaults": {
+    "failure_threshold": 3,
+    "max_restarts": 3,
+    "restart_window_seconds": 900,
+    "probe_timeout_seconds": 3,
+    "recovery_wait_seconds": 2
+  },
+  "targets": [
+    {"kind": "systemd", "name": "honeypot-ingest-api"},
+    {"kind": "systemd", "name": "honeypot-session-worker"},
+    {"kind": "systemd", "name": "honeypot-analysis-worker"},
+    {"kind": "systemd", "name": "honeypot-enrichment-worker"},
+    {"kind": "systemd", "name": "honeypot-threat-hunt-worker"},
+    {"kind": "systemd", "name": "honeypot-next-distinct-shadow"},
+    {"kind": "systemd", "name": "honeypot-next-distinct-shadow-feeder"},
+    {"kind": "systemd", "name": "model2-v7-receiver"},
+    {"kind": "systemd", "name": "model2-v7-ensemble-bridge"},
+    {
+      "kind": "systemd",
+      "name": "honeypot-monitor-web",
+      "probe": {"type": "http", "url": "http://127.0.0.1:8090/health/live"}
+    },
+    {"kind": "systemd", "name": "honeypot-dashboard-api"},
+    {
+      "kind": "systemd",
+      "name": "honeypot-dashboard-v2-staging",
+      "probe": {"type": "http", "url": "http://127.0.0.1:8081/health/live"}
+    }
+  ]
+}

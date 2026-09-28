@@ -1,0 +1,26 @@
+{
+  "schema_version": "honeypot.service_watchdog.v1",
+  "node_id": "pi",
+  "maintenance_file": "/run/honeypot-maintenance.lock",
+  "defaults": {
+    "failure_threshold": 3,
+    "max_restarts": 3,
+    "restart_window_seconds": 900,
+    "probe_timeout_seconds": 3,
+    "recovery_wait_seconds": 2
+  },
+  "targets": [
+    {"kind": "systemd", "name": "cowrie", "probe": {"type": "tcp", "host": "127.0.0.1", "port": 22}},
+    {"kind": "systemd", "name": "honeypot-collector"},
+    {"kind": "systemd", "name": "honeypot-processor"},
+    {"kind": "systemd", "name": "honeypot-sensor-forwarder"},
+    {"kind": "systemd", "name": "honeypot-ti-worker"},
+    {"kind": "systemd", "name": "honeypot-hardware"},
+    {"kind": "systemd", "name": "zeek"},
+    {"kind": "systemd", "name": "redis-server", "probe": {"type": "tcp", "host": "127.0.0.1", "port": 6379}},
+    {"kind": "systemd", "name": "model2-v7-pi-observer"},
+    {"kind": "systemd", "name": "model2-v7-pi-capture-transfer"},
+    {"kind": "systemd", "name": "model2-v7-pi-observer-egress"},
+    {"kind": "docker", "name": "decoy-honeypot-web-corp-1", "probe": {"type": "tcp", "host": "10.58.33.42", "port": 80}}
+  ]
+}

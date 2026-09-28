@@ -1,0 +1,14 @@
+[Unit]
+Description=Run PTI-Honeypot service recovery watchdog every 30 seconds
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30s
+AccuracySec=5s
+RandomizedDelaySec=3s
+Persistent=true
+Unit=honeypot-service-watchdog.service
+
+[Install]
+WantedBy=timers.target
+
