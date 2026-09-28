@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Refine Live empty radar and motion controls
+
+- Status: repository UI change prepared on a staging-based branch; deployment not verified.
+- Scope and intent: make the Live empty radar easier to read, state what the empty snapshot means, and give operators control over its continuous sweep.
+- Repository branch and commit/PR: `feature/live-radar-design-20260928` from `origin/staging` at `b0b1d6b`; commit pending at entry time.
+- Repository changes: replace full-canvas diagonals, crosshairs, corner rays, and pulse wave with two faint rings, four short edge ticks, a small center marker, and a slower contained sweep; add a Pause/Resume sweep control, distinct connecting/live/reconnecting copy, actual snapshot receipt age, and a short populated-map reveal. Update the `FS-030` current-state target and note that it supersedes the older `FS-024` visual recipe.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB data, or credential changed in this repository step.
+- Runtime/exposure state: the hosted screenshot predates this visual change. The new radar remains inactive until a Dashboard containing this revision deploys.
+- Validation performed and outcome: source review confirmed that Pause stops the canvas animation while retaining its current sweep angle, reduced motion omits the sweep, and receipt age is shown only after a snapshot exists. `git diff --check` passed.
+- Not performed / deferred: automated tests, interactive visual review at multiple viewport sizes, staging deployment confirmation, and production deployment.
+- Risks and data handling: the radar is decorative and does not show detected attacker positions. Receipt age is a snapshot timing cue, not an attacker activity timestamp. No raw telemetry or secret was added to this record.
+- Rollback: revert this UI commit; no host data rollback is required.
+- Follow-up: inspect empty, connecting, stale, and populated Live states after deployment, including Pause and reduced motion.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Live topology canvas](../dashboard-v2/src/components/filesystem/TopologyCanvas.tsx).
+
 ### 2026-09-28 — Separate Live topology loading from empty radar standby
 
 - Status: repository correction prepared on a staging-based branch; deployment not verified.

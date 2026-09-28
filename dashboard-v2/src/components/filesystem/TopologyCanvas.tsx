@@ -11,6 +11,8 @@ import {
   HardDrive,
   LoaderCircle,
   Move,
+  Pause,
+  Play,
   RotateCcw,
   Route,
   ScanLine,
@@ -82,9 +84,8 @@ import { getLayoutStorageKeys } from "./layoutPersistence";
 import { TopologyCanvasHeader } from "./TopologyCanvasHeader";
 
 const TOPOLOGY_TRANSITION: Transition = { duration: 0.55, ease: [0.22, 1, 0.36, 1] };
-// Fixed SVG viewBox units; this does not represent physical distance or filesystem scale.
+// Decorative data attribute only; this does not represent physical distance or filesystem scale.
 const LIVE_RADAR_CANVAS_SIZE = 1000;
-const LIVE_RADAR_WAVE_OVERSCAN_PX = 16;
 
 function sameElementBounds(
   left: Record<string, GraphElementBounds>,
@@ -105,11 +106,10 @@ function sameElementBounds(
   });
 }
 
-type LiveTopologyStandbyMode = "listening" | "reconnecting";
-type RadarPoint = { x: number; y: number };
+type LiveTopologyStandbyMode = "connecting" | "listening" | "reconnecting";
 
-const LIVE_RADAR_SWEEP_DURATION_MS = 9_000;
-const LIVE_RADAR_TRAIL_ANGLE = (48 * Math.PI) / 180;
+const LIVE_RADAR_SWEEP_DURATION_MS = 12_000;
+const LIVE_RADAR_TRAIL_ANGLE = (28 * Math.PI) / 180;
 const LIVE_RADAR_FULL_TURN = Math.PI * 2;
 type RadarRgb = { red: number; green: number; blue: number };
 
@@ -147,34 +147,6 @@ function radarRgba({ red, green, blue }: RadarRgb, opacity: number) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
-function normalizeRadarAngle(angle: number) {
-  return ((angle % LIVE_RADAR_FULL_TURN) + LIVE_RADAR_FULL_TURN) % LIVE_RADAR_FULL_TURN;
-}
-
-/** Angle is clockwise from 12 o'clock, matching the radar's sweep direction. */
-function radarPointAtCanvasEdge(width: number, height: number, angle: number): RadarPoint {
-  const centerX = width / 2;
-  const centerY = height / 2;
-  const directionX = Math.sin(angle);
-  const directionY = -Math.cos(angle);
-  const distanceToVerticalEdge = directionX > 0
-    ? (width - centerX) / directionX
-    : directionX < 0
-      ? -centerX / directionX
-      : Number.POSITIVE_INFINITY;
-  const distanceToHorizontalEdge = directionY > 0
-    ? (height - centerY) / directionY
-    : directionY < 0
-      ? -centerY / directionY
-      : Number.POSITIVE_INFINITY;
-  const distance = Math.min(distanceToVerticalEdge, distanceToHorizontalEdge);
-
-  return {
-    x: centerX + directionX * distance,
-    y: centerY + directionY * distance,
-  };
-}
-
 function drawLiveRadarSweep(
   context: CanvasRenderingContext2D,
   width: number,
@@ -184,120 +156,37 @@ function drawLiveRadarSweep(
 ) {
   const centerX = width / 2;
   const centerY = height / 2;
-  const trailingAngle = angle - LIVE_RADAR_TRAIL_ANGLE;
-  const beamEnd = radarPointAtCanvasEdge(width, height, angle);
-  const trailEnd = radarPointAtCanvasEdge(width, height, trailingAngle);
-  const corners: RadarPoint[] = [
-    { x: 0, y: 0 },
-    { x: width, y: 0 },
-    { x: width, y: height },
-    { x: 0, y: height },
-  ];
-  const cornersAlongTrail = corners
-    .map((corner) => {
-      const cornerAngle = normalizeRadarAngle(Math.atan2(corner.x - centerX, centerY - corner.y));
-      return {
-        ...corner,
-        angleBehindBeam: normalizeRadarAngle(angle - cornerAngle),
-      };
-    })
-    .filter(({ angleBehindBeam }) => angleBehindBeam > 1e-6 && angleBehindBeam < LIVE_RADAR_TRAIL_ANGLE - 1e-6)
-    .sort((left, right) => left.angleBehindBeam - right.angleBehindBeam);
+  const radius = Math.min(width, height) * 0.38;
+  const beamAngle = angle - Math.PI / 2;
 
   context.clearRect(0, 0, width, height);
   context.beginPath();
   context.moveTo(centerX, centerY);
-  context.lineTo(beamEnd.x, beamEnd.y);
-  for (const corner of cornersAlongTrail) {
-    context.lineTo(corner.x, corner.y);
-  }
-  context.lineTo(trailEnd.x, trailEnd.y);
+  context.arc(centerX, centerY, radius, beamAngle - LIVE_RADAR_TRAIL_ANGLE, beamAngle);
   context.closePath();
-
-  const conicStop = LIVE_RADAR_TRAIL_ANGLE / LIVE_RADAR_FULL_TURN;
-  const usesConicGradient = typeof context.createConicGradient === "function";
-  const trailGradient = usesConicGradient
-    ? context.createConicGradient(trailingAngle - Math.PI / 2, centerX, centerY)
-    : context.createLinearGradient(trailEnd.x, trailEnd.y, beamEnd.x, beamEnd.y);
-  const finalStop = usesConicGradient ? conicStop : 1;
-  const trailStops = [
-    { progress: 0, opacity: 0 },
-    { progress: 0.16, opacity: 0.004 },
-    { progress: 0.38, opacity: 0.015 },
-    { progress: 0.58, opacity: 0.04 },
-    { progress: 0.76, opacity: 0.14 },
-    { progress: 0.9, opacity: 0.3 },
-    { progress: 1, opacity: 0.48 },
-  ];
-  for (const stop of trailStops) {
-    trailGradient.addColorStop(finalStop * stop.progress, radarRgba(accent, stop.opacity));
-  }
-
-  // Keep the trailing energy wave inside its sector without the broad, blurred bloom.
-  context.save();
-  context.clip();
-  context.fillStyle = trailGradient;
+  context.fillStyle = radarRgba(accent, 0.055);
   context.fill();
-  context.restore();
 
   context.beginPath();
   context.moveTo(centerX, centerY);
-  context.lineTo(beamEnd.x, beamEnd.y);
-
-  context.save();
-  context.shadowColor = radarRgba(accent, 0.42);
-  context.shadowBlur = 9;
-  context.strokeStyle = radarRgba(accent, 0.9);
-  context.lineWidth = 1.5;
-  context.lineCap = "butt";
+  context.lineTo(centerX + radius * Math.cos(beamAngle), centerY + radius * Math.sin(beamAngle));
+  context.strokeStyle = radarRgba(accent, 0.38);
+  context.lineWidth = 1;
   context.stroke();
-  context.restore();
 }
 
 function LiveRadarOverlay({
   showGrid = true,
   reducedMotion = false,
+  paused = false,
 }: {
   showGrid?: boolean;
   reducedMotion?: boolean;
+  paused?: boolean;
 }) {
   const radarOverlayRef = useRef<HTMLDivElement>(null);
-  const radarWaveSvgRef = useRef<SVGSVGElement>(null);
   const radarSweepCanvasRef = useRef<HTMLCanvasElement>(null);
-
-  useLayoutEffect(() => {
-    const overlay = radarOverlayRef.current;
-    if (!overlay) return;
-
-    const updateCornerAngles = () => {
-      const { width, height } = overlay.getBoundingClientRect();
-      if (width <= 0 || height <= 0) return;
-
-      // Match the ray from each rectangular canvas corner to its center.
-      const inwardAngle = (Math.atan2(height, width) * 180) / Math.PI;
-      overlay.style.setProperty("--pti-radar-corner-angle-positive", `${inwardAngle}deg`);
-      overlay.style.setProperty("--pti-radar-corner-angle-negative", `${-inwardAngle}deg`);
-
-      // Keep SVG user units aligned with CSS pixels so this remains a true
-      // circle on rectangular canvases, then overscan the farthest corner.
-      const waveSvg = radarWaveSvgRef.current;
-      const wave = waveSvg?.querySelector<SVGCircleElement>(".pti-live-radar-wave");
-      if (waveSvg && wave) {
-        waveSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-        wave.setAttribute("cx", String(width / 2));
-        wave.setAttribute("cy", String(height / 2));
-        wave.setAttribute(
-          "r",
-          String(Math.hypot(width / 2, height / 2) + LIVE_RADAR_WAVE_OVERSCAN_PX),
-        );
-      }
-    };
-
-    updateCornerAngles();
-    const observer = new ResizeObserver(updateCornerAngles);
-    observer.observe(overlay);
-    return () => observer.disconnect();
-  }, [reducedMotion]);
+  const sweepElapsedRef = useRef(0);
 
   useEffect(() => {
     if (reducedMotion) return;
@@ -310,12 +199,18 @@ function LiveRadarOverlay({
     let width = 0;
     let height = 0;
     let animationFrame = 0;
-    let animationStartedAt: number | null = null;
+    let previousFrameAt: number | null = null;
     let lastDrawnAt = 0;
     let accent = readRadarAccent(context, overlay);
+    const drawCurrentFrame = () => {
+      if (width <= 0 || height <= 0) return;
+      const angle = (sweepElapsedRef.current / LIVE_RADAR_SWEEP_DURATION_MS) * LIVE_RADAR_FULL_TURN;
+      drawLiveRadarSweep(context, width, height, angle, accent);
+    };
 
     const refreshAccent = () => {
       accent = readRadarAccent(context, overlay);
+      drawCurrentFrame();
     };
 
     const resizeCanvas = () => {
@@ -332,6 +227,7 @@ function LiveRadarOverlay({
         canvas.height = pixelHeight;
       }
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      drawCurrentFrame();
     };
 
     resizeCanvas();
@@ -345,24 +241,25 @@ function LiveRadarOverlay({
     window.addEventListener("resize", resizeCanvas);
 
     const animate = (timestamp: number) => {
-      if (animationStartedAt === null) animationStartedAt = timestamp;
+      if (previousFrameAt !== null) {
+        sweepElapsedRef.current = (sweepElapsedRef.current + timestamp - previousFrameAt) % LIVE_RADAR_SWEEP_DURATION_MS;
+      }
+      previousFrameAt = timestamp;
       if (timestamp - lastDrawnAt >= 1000 / 30 && width > 0 && height > 0) {
-        const elapsed = (timestamp - animationStartedAt) % LIVE_RADAR_SWEEP_DURATION_MS;
-        const angle = (elapsed / LIVE_RADAR_SWEEP_DURATION_MS) * LIVE_RADAR_FULL_TURN;
-        drawLiveRadarSweep(context, width, height, angle, accent);
+        drawCurrentFrame();
         lastDrawnAt = timestamp;
       }
       animationFrame = window.requestAnimationFrame(animate);
     };
 
-    animationFrame = window.requestAnimationFrame(animate);
+    if (!paused) animationFrame = window.requestAnimationFrame(animate);
     return () => {
       observer.disconnect();
       themeObserver.disconnect();
       window.removeEventListener("resize", resizeCanvas);
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [reducedMotion]);
+  }, [paused, reducedMotion]);
 
   return (
     <div
@@ -373,38 +270,8 @@ function LiveRadarOverlay({
       aria-hidden="true"
     >
       {showGrid && <div className="pti-live-radar-grid absolute inset-0" />}
-      <svg
-        className="pti-live-radar-diagonals absolute inset-0 h-full w-full"
-        viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
-        preserveAspectRatio="none"
-        aria-hidden="true"
-      >
-        <path
-          className="pti-live-radar-diagonal"
-          d={`M0 0L${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}M${LIVE_RADAR_CANVAS_SIZE} 0L0 ${LIVE_RADAR_CANVAS_SIZE}`}
-        />
-      </svg>
-      <div className="pti-live-radar-crosshair absolute inset-0" />
-      {!reducedMotion && (
-        <svg
-          ref={radarWaveSvgRef}
-          className="absolute inset-0 h-full w-full"
-          viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
-          preserveAspectRatio="none"
-        >
-          <g className="pti-live-radar-wave-shell">
-            <circle
-              className="pti-live-radar-wave"
-              cx={LIVE_RADAR_CANVAS_SIZE / 2}
-              cy={LIVE_RADAR_CANVAS_SIZE / 2}
-              r={
-                Math.hypot(LIVE_RADAR_CANVAS_SIZE / 2, LIVE_RADAR_CANVAS_SIZE / 2) +
-                LIVE_RADAR_WAVE_OVERSCAN_PX
-              }
-            />
-          </g>
-        </svg>
-      )}
+      <span className="pti-live-radar-ring is-inner" />
+      <span className="pti-live-radar-ring is-outer" />
 
       {!reducedMotion && (
         <canvas
@@ -418,10 +285,6 @@ function LiveRadarOverlay({
       <span className="pti-live-radar-edge-tick is-right" />
       <span className="pti-live-radar-edge-tick is-bottom" />
       <span className="pti-live-radar-edge-tick is-left" />
-      <span className="pti-live-radar-corner-tick is-top-left" />
-      <span className="pti-live-radar-corner-tick is-top-right" />
-      <span className="pti-live-radar-corner-tick is-bottom-right" />
-      <span className="pti-live-radar-corner-tick is-bottom-left" />
     </div>
   );
 }
@@ -442,56 +305,90 @@ function LiveTopologyLoading() {
 
 function LiveTopologyStandby({
   mode,
+  snapshotAgeMs,
+  isSweepPaused,
+  onToggleSweep,
   onReconnect,
   reducedMotion,
 }: {
   mode: LiveTopologyStandbyMode;
+  snapshotAgeMs: number;
+  isSweepPaused: boolean;
+  onToggleSweep: () => void;
   onReconnect?: () => void;
   reducedMotion: boolean;
 }) {
   const isReconnecting = mode === "reconnecting";
-  const title = isReconnecting ? "Reconnecting to live activity" : null;
-  const status = isReconnecting ? "Showing the last available topology" : null;
+  const title = isReconnecting ? "Live connection interrupted" : "No active sessions";
+  const status = mode === "connecting"
+    ? "Connecting to the live stream"
+    : isReconnecting
+      ? "Showing the last received snapshot"
+      : "Listening for Cowrie activity";
 
   return (
     <section
       className="pti-live-radar pti-live-radar-standby relative isolate flex min-h-[25rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-border px-5 py-10 sm:px-8"
       aria-label="Live honeypot activity"
     >
-      <LiveRadarOverlay reducedMotion={reducedMotion} />
+      <LiveRadarOverlay reducedMotion={reducedMotion} paused={isSweepPaused} />
       <div
-        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full`}
+        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full`}
         aria-hidden="true"
       />
-
-      {(title || (isReconnecting && onReconnect)) && (
-        <div className="pti-live-radar-status absolute left-1/2 top-1/2 z-10 flex w-full max-w-lg -translate-x-1/2 flex-col items-center px-6 pt-14 text-center sm:px-8">
-          {title && (
-            <div role="status" aria-live="polite">
-              <h3 className="text-lg font-semibold text-text">{title}</h3>
-              {status && (
-                <p className={`pti-live-radar-status-line is-${mode} mt-2 flex items-center justify-center gap-2 text-sm`}>
-                  <span className="pti-listening-status-dot h-2 w-2 rounded-full" aria-hidden="true" />
-                  {status}
-                </p>
-              )}
-            </div>
-          )}
-
-          {isReconnecting && onReconnect && (
-            <div className="mt-5 flex flex-wrap justify-center gap-2">
-              <button
-                type="button"
-                onClick={onReconnect}
-                className="pti-live-radar-action is-warning rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
-              >
-                Reconnect stream
-              </button>
-            </div>
-          )}
+      <LiveRadarMotionControl
+        paused={isSweepPaused}
+        onToggle={onToggleSweep}
+        reducedMotion={reducedMotion}
+      />
+      <div className="pti-live-radar-status absolute left-1/2 top-[calc(50%+2.5rem)] z-10 w-[min(21rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border/70 bg-surface/90 px-5 py-4 text-center shadow-sm backdrop-blur-sm">
+        <div role="status" aria-live="polite">
+          <h3 className="text-base font-semibold text-text">{title}</h3>
+          <p className="mt-1 text-xs text-text-muted">
+            {isReconnecting
+              ? "The last snapshot had no active sessions."
+              : "Observed directory paths appear here when activity arrives."}
+          </p>
+          <p className={`pti-live-radar-status-line is-${mode} mt-3 flex items-center justify-center gap-2 text-xs font-medium`}>
+            <span className="pti-listening-status-dot h-1.5 w-1.5 rounded-full" aria-hidden="true" />
+            {status}
+          </p>
         </div>
-      )}
+        <p className="mt-2 text-xs text-text-subtle">Snapshot received {formatUpdateAge(snapshotAgeMs)}</p>
+        {isReconnecting && onReconnect && (
+          <button
+            type="button"
+            onClick={onReconnect}
+            className="pti-live-radar-action is-warning mt-3 rounded-lg border px-3 py-2 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          >
+            Reconnect stream
+          </button>
+        )}
+      </div>
     </section>
+  );
+}
+
+function LiveRadarMotionControl({
+  paused,
+  onToggle,
+  reducedMotion,
+}: {
+  paused: boolean;
+  onToggle: () => void;
+  reducedMotion: boolean;
+}) {
+  if (reducedMotion) return null;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="absolute right-4 top-4 z-30 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-border bg-surface/90 px-2.5 py-1.5 text-xs font-medium text-text-muted shadow-sm transition-colors hover:bg-surface hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      aria-label={paused ? "Resume radar sweep" : "Pause radar sweep"}
+    >
+      {paused ? <Play className="h-3.5 w-3.5" aria-hidden="true" /> : <Pause className="h-3.5 w-3.5" aria-hidden="true" />}
+      <span>{paused ? "Resume sweep" : "Pause sweep"}</span>
+    </button>
   );
 }
 
@@ -607,6 +504,7 @@ export function TopologyCanvas({
   const showLiveRadarStandby = !isAuditMode && snapshot?.sessions.length === 0;
   const activeHopCanvasSemantics = deriveActiveHopCanvasSemantics(activeHop);
   const reducedMotion = useReducedMotion();
+  const [isRadarPaused, setIsRadarPaused] = useState(false);
   const [internalIsTopologyExpanded, setInternalIsTopologyExpanded] = useState(false);
   const isTopologyExpanded = controlledIsExpanded !== undefined ? controlledIsExpanded : internalIsTopologyExpanded;
   const isControlledExpansion = onToggleExpand !== undefined;
@@ -1243,7 +1141,10 @@ export function TopologyCanvas({
           )}
           {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
             <LiveTopologyStandby
-              mode={streamState === "stale" ? "reconnecting" : "listening"}
+              mode={streamState === "stale" ? "reconnecting" : streamState === "connecting" ? "connecting" : "listening"}
+              snapshotAgeMs={freshnessState.snapshotReceiptAgeMs}
+              isSweepPaused={isRadarPaused}
+              onToggleSweep={() => setIsRadarPaused((paused) => !paused)}
               onReconnect={onReconnect}
               reducedMotion={Boolean(reducedMotion)}
             />
@@ -1263,9 +1164,9 @@ export function TopologyCanvas({
         <>
           <div
             className={
-              isStandaloneExpanded
+              `${isStandaloneExpanded
                 ? "grid min-h-0 flex-1 lg:grid-cols-[minmax(0,1fr)_20rem]"
-                : "flex min-h-0 flex-1 flex-col"
+                : "flex min-h-0 flex-1 flex-col"} ${isAuditMode ? "" : "pti-live-topology-enter"}`
             }
           >
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1294,9 +1195,17 @@ export function TopologyCanvas({
                     aria-hidden="true"
                   />
                 ) : showLiveRadarStandby ? (
-                  <LiveRadarOverlay showGrid={showGrid} reducedMotion={Boolean(reducedMotion)} />
+                  <LiveRadarOverlay showGrid={showGrid} reducedMotion={Boolean(reducedMotion)} paused={isRadarPaused} />
                 ) : (
                   showGrid && <div className="pti-live-radar-grid pointer-events-none absolute inset-0" aria-hidden="true" />
+                )}
+
+                {showLiveRadarStandby && (
+                  <LiveRadarMotionControl
+                    paused={isRadarPaused}
+                    onToggle={() => setIsRadarPaused((paused) => !paused)}
+                    reducedMotion={Boolean(reducedMotion)}
+                  />
                 )}
 
                 <AnimatePresence initial={false}>
