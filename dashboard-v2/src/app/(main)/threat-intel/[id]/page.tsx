@@ -222,17 +222,17 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
   
   const stateClass =
     view.label === "PREDICTION"
-      ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+      ? "text-success bg-success-subtle border-success-border"
       : view.label === "STALE"
-      ? "text-orange-600 bg-orange-50 border-orange-200"
+      ? "text-warning bg-warning-subtle border-warning-border"
       : view.label === "UNAVAILABLE"
-      ? "text-rose-600 bg-rose-50 border-rose-200"
-      : "text-slate-500 bg-slate-100 border-slate-200";
+      ? "text-danger bg-danger-subtle border-danger-border"
+      : "text-text-muted bg-surface-subtle border-border";
 
   return (
-    <article className="bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden h-full">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
-        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-800">
+    <article className="bg-surface border border-border rounded-xl shadow-xs flex flex-col overflow-hidden h-full">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
+        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-text">
           <Activity className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
           Priority Context — Forecast &amp; Advisory
         </div>
@@ -242,59 +242,59 @@ function PriorityNextTactic({ result, detail }: { result: NextDistinctResult; de
       </div>
       
       <div className="flex flex-col p-6 space-y-6 flex-1">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">
+        <div className="rounded-lg border border-border bg-surface-subtle p-4">
+          <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3">
             <span>Tactic chain</span>
-            <span className="font-mono text-[9px] bg-white border border-slate-200 px-1.5 py-0.5 rounded">{ended ? "SESSION ENDED" : "OBSERVED → NEXT"}</span>
+            <span className="font-mono text-[9px] bg-surface border border-border text-text-muted px-1.5 py-0.5 rounded">{ended ? "SESSION ENDED" : "OBSERVED → NEXT"}</span>
           </div>
           {tacticChain.length > 0 ? (
             <ol aria-label="Observed tactic chain and next tactic" className="flex flex-wrap items-center gap-2">
               {tacticChain.map((step, index) => (
                 <li key={`${index}-${step.kind}-${step.tactic}`} className="flex items-center gap-1.5 text-[11px]">
-                  {index > 0 && <span className="text-slate-400" aria-hidden="true">→</span>}
+                  {index > 0 && <span className="text-text-subtle" aria-hidden="true">→</span>}
                   <span className={cn(
-                    "rounded bg-white border px-2 py-1 font-bold shadow-sm",
-                    step.kind === "observed" ? "border-slate-200 text-slate-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    "rounded border px-2 py-1 font-bold shadow-xs",
+                    step.kind === "observed" ? "border-border bg-surface text-text" : "border-success-border bg-success-subtle text-success"
                   )}>
                     {step.tactic}
-                    <span className="ml-1.5 text-[9px] font-normal uppercase tracking-widest text-slate-400">({step.kind})</span>
+                    <span className="ml-1.5 text-[9px] font-normal uppercase tracking-widest text-text-subtle">({step.kind})</span>
                   </span>
                 </li>
               ))}
             </ol>
           ) : (
-            <p className="text-[11px] text-slate-400 font-mono italic">WAITING_FOR_EVIDENCE</p>
+            <p className="text-[11px] text-text-subtle font-mono italic">WAITING_FOR_EVIDENCE</p>
           )}
-          {tacticChain.length > 0 && !hasForecast && <p className="mt-2 text-[10px] text-slate-500">Observed chain only; no valid next-tactic prediction is stored.</p>}
-          {hasForecast && observedPath.length === 0 && <p className="mt-2 text-[10px] text-slate-500">No trusted preceding tactic is recorded; the final node is advisory only.</p>}
+          {tacticChain.length > 0 && !hasForecast && <p className="mt-2 text-[10px] text-text-muted">Observed chain only; no valid next-tactic prediction is stored.</p>}
+          {hasForecast && observedPath.length === 0 && <p className="mt-2 text-[10px] text-text-muted">No trusted preceding tactic is recorded; the final node is advisory only.</p>}
         </div>
 
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-text-muted">
               {view.historical ? "Last Recorded Next Tactic" : "Predicted Next Tactic"}
             </span>
-            {view.historical && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-orange-50 text-orange-600 border border-orange-200">Historical</span>}
+            {view.historical && <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-warning-subtle text-warning border border-warning-border">Historical</span>}
           </div>
-          <p className="text-2xl font-bold tracking-tight text-slate-800 sm:text-3xl">{view.tactic}</p>
-          <p className="mt-3 text-xs leading-relaxed text-slate-500 border-l-2 border-orange-400 pl-3">
+          <p className="text-2xl font-bold tracking-tight text-text sm:text-3xl">{view.tactic}</p>
+          <p className="mt-3 text-xs leading-relaxed text-text-muted border-l-2 border-primary pl-3">
             {view.context}
           </p>
         </div>
 
-        <div className="border-t border-slate-100 pt-4">
+        <div className="border-t border-border pt-4">
           <dl className="grid grid-cols-3 gap-4 text-[11px]">
             <div>
-              <dt className="text-slate-400 font-bold uppercase tracking-wider mb-1">Status</dt>
-              <dd className="font-bold text-slate-700">{view.label}</dd>
+              <dt className="text-text-subtle font-bold uppercase tracking-wider mb-1">Status</dt>
+              <dd className="font-bold text-text">{view.label}</dd>
             </div>
             <div>
-              <dt className="text-slate-400 font-bold uppercase tracking-wider mb-1">Model Source</dt>
-              <dd className="font-mono text-slate-600 truncate">{view.source}</dd>
+              <dt className="text-text-subtle font-bold uppercase tracking-wider mb-1">Model Source</dt>
+              <dd className="font-mono text-text-muted truncate">{view.source}</dd>
             </div>
             <div>
-              <dt className="text-slate-400 font-bold uppercase tracking-wider mb-1">Updated</dt>
-              <dd className="font-mono text-slate-500 truncate">{view.updatedAt}</dd>
+              <dt className="text-text-subtle font-bold uppercase tracking-wider mb-1">Updated</dt>
+              <dd className="font-mono text-text-muted truncate">{view.updatedAt}</dd>
             </div>
           </dl>
         </div>
@@ -332,19 +332,19 @@ function SourceLocationPanel({
     : "No coordinates stored";
 
   return (
-    <article className="bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden h-full">
-      <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-800">
+    <article className="bg-surface border border-border rounded-xl shadow-xs flex flex-col overflow-hidden h-full">
+      <div className="flex items-center justify-between border-b border-border px-6 py-4">
+        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-text">
           <MapPin className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
           Origin Geography
         </div>
-        <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+        <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-surface-subtle text-text-muted border border-border">
           {resolutionLabel}
         </span>
       </div>
       <div className="flex flex-1 flex-col p-6">
         <div
-          className="relative h-44 w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+          className="relative h-44 w-full overflow-hidden rounded-lg border border-border bg-surface-subtle"
           aria-label="Compact source location map"
         >
           {hasCoordinates ? (
@@ -359,8 +359,8 @@ function SourceLocationPanel({
                     <Geography
                       key={geo.rsmKey}
                       geography={geo}
-                      fill="#E2E8F0"
-                      stroke="#CBD5E1"
+                      fill="var(--map-land)"
+                      stroke="var(--border)"
                       strokeWidth={0.5}
                       className="outline-none"
                     />
@@ -370,25 +370,25 @@ function SourceLocationPanel({
               <Marker coordinates={[lon, lat]}>
                 <title>{`Source location: ${locationLabel}`}</title>
                 <circle r={8} fill="#F97316" opacity={0.3} className="animate-ping" />
-                <circle r={5} fill="#F97316" stroke="#FFFFFF" strokeWidth={2} />
+                <circle r={5} fill="#F97316" stroke="var(--surface)" strokeWidth={2} />
               </Marker>
             </ComposableMap>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 p-4 text-center">
-              <MapPin className="h-6 w-6 text-slate-300" aria-hidden="true" />
-              <p className="text-xs font-bold text-slate-600">Coordinates Unavailable</p>
-              <p className="text-[10px] text-slate-400">{resolutionLabel}</p>
+              <MapPin className="h-6 w-6 text-text-subtle" aria-hidden="true" />
+              <p className="text-xs font-bold text-text-muted">Coordinates Unavailable</p>
+              <p className="text-[10px] text-text-subtle">{resolutionLabel}</p>
             </div>
           )}
         </div>
-        <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-slate-100 pt-4 text-[11px]">
+        <dl className="mt-5 grid grid-cols-2 gap-4 border-t border-border pt-4 text-[11px]">
           <div>
-            <dt className="text-slate-400 font-bold uppercase tracking-wider mb-1">Attacker IP</dt>
-            <dd className="font-mono font-bold text-orange-600 truncate">{originIp}</dd>
+            <dt className="text-text-subtle font-bold uppercase tracking-wider mb-1">Attacker IP</dt>
+            <dd className="font-mono font-bold text-primary truncate">{originIp}</dd>
           </div>
           <div>
-            <dt className="text-slate-400 font-bold uppercase tracking-wider mb-1">Location</dt>
-            <dd className="font-bold text-slate-700 truncate">{locationLabel}</dd>
+            <dt className="text-text-subtle font-bold uppercase tracking-wider mb-1">Location</dt>
+            <dd className="font-bold text-text truncate">{locationLabel}</dd>
           </div>
         </dl>
       </div>
@@ -500,29 +500,29 @@ function LureDetailModal({ lure, onClose }: { lure: DeceptionLure | null; onClos
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      className="pti-modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 backdrop-blur-sm"
       role="presentation"
     >
       <div
         ref={dialogRef}
         data-open="true"
-        className="pti-modal-panel max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl"
+        className="pti-modal-panel max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-surface shadow-xl"
         role="dialog"
         aria-modal="true"
         aria-labelledby="lure-detail-title"
         tabIndex={-1}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-100 bg-slate-50 px-6 py-4">
+        <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle px-6 py-4">
           <div className="min-w-0">
-            <h3 id="lure-detail-title" className="truncate text-sm font-bold text-slate-800">
+            <h3 id="lure-detail-title" className="truncate text-sm font-bold text-text">
               {lure.target}
             </h3>
-            <p className="mt-1 text-[10px] text-slate-500 font-mono uppercase">Served to attacker at {lure.at}</p>
+            <p className="mt-1 text-[10px] text-text-muted font-mono uppercase">Served to attacker at {lure.at}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded bg-white border border-slate-200 p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+            className="rounded bg-surface border border-border p-1 text-text-muted hover:text-text hover:bg-surface-subtle transition-colors"
             aria-label="Close lure detail"
             data-autofocus
           >
@@ -530,7 +530,7 @@ function LureDetailModal({ lure, onClose }: { lure: DeceptionLure | null; onClos
           </button>
         </header>
         <div className="p-6">
-          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-slate-200 bg-slate-50 p-4 font-mono text-[11px] text-slate-700 leading-relaxed">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-surface-subtle p-4 font-mono text-[11px] text-text leading-relaxed">
             {lure.content}
           </pre>
         </div>
@@ -576,9 +576,9 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
   const servedLures = data ? data.lures.filter((lure) => !servedContentType || lure.content_type === servedContentType) : [];
 
   return (
-    <article className="bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
-        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-800">
+    <article className="bg-surface border border-border rounded-xl shadow-xs flex flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
+        <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-text">
           <Ghost className="h-4 w-4 text-orange-500" aria-hidden="true" />
           Active Deception Engine
         </div>
@@ -586,9 +586,9 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
           <span
             className={cn(
               "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border",
-              data.attacker_type === "APT" ? "bg-rose-50 text-rose-600 border-rose-200" :
-              data.attacker_type === "Bot" ? "bg-slate-100 text-slate-500 border-slate-200" :
-              "bg-orange-50 text-orange-600 border-orange-200"
+              data.attacker_type === "APT" ? "bg-danger-subtle text-danger border-danger-border" :
+              data.attacker_type === "Bot" ? "bg-surface-subtle text-text-muted border-border" :
+              "bg-warning-subtle text-warning border-warning-border"
             )}
           >
             {data.attacker_type}
@@ -606,71 +606,71 @@ function DeceptionPanel({ result }: { result: DeceptionResult }) {
         )}
         {state === "ready" && data && (
           <div className="space-y-6">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-100 pb-4">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-[11px] font-bold text-text-muted uppercase tracking-widest border-b border-border pb-4">
               <span className="flex items-center gap-2">
                 <Activity className="h-3.5 w-3.5 text-blue-500" />
-                Phase: <span className="text-slate-800">{data.phase}</span>
+                Phase: <span className="text-text">{data.phase}</span>
               </span>
               <span className="flex items-center gap-2">
-                <Terminal className="h-3.5 w-3.5 text-slate-400" />
-                Commands: <span className="font-mono text-slate-700">{data.command_count}</span>
+                <Terminal className="h-3.5 w-3.5 text-text-subtle" />
+                Commands: <span className="font-mono text-text">{data.command_count}</span>
               </span>
             </div>
 
             <div className="grid items-start gap-6 sm:grid-cols-2">
-              <div className="border border-slate-200 rounded-xl bg-slate-50 p-4 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-1.5">
+              <div className="border border-border rounded-xl bg-surface-subtle p-4 shadow-xs">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3 flex items-center gap-1.5">
                   <Terminal className="h-3.5 w-3.5" />
                   System Decisions ({data.actions.length})
                 </p>
                 {data.actions.length > 0 ? (
-                  <ol className="ui-scroll-region max-h-52 divide-y divide-slate-200/50 overflow-y-auto pr-2">
+                  <ol className="ui-scroll-region max-h-52 divide-y divide-border overflow-y-auto pr-2">
                     {data.actions.map((action, index) => (
                       <li key={`${index}-${action.at}`} className="py-2.5 text-xs">
                         <div className="flex items-start justify-between gap-2 mb-1">
-                          <span className="font-bold text-slate-700">{phaseLabel(action.phase)}</span>
-                          <span className="font-mono text-slate-400 text-[10px]">{action.at.slice(11, 19)}</span>
+                          <span className="font-bold text-text">{phaseLabel(action.phase)}</span>
+                          <span className="font-mono text-text-subtle text-[10px]">{action.at.slice(11, 19)}</span>
                         </div>
-                        <p className="text-slate-500">{actionLabel(action.action)}</p>
+                        <p className="text-text-muted">{actionLabel(action.action)}</p>
                       </li>
                     ))}
                   </ol>
                 ) : (
-                  <p className="text-[11px] text-slate-400 font-mono p-2 bg-white rounded text-center border border-dashed border-slate-200">No decisions recorded.</p>
+                  <p className="text-[11px] text-text-subtle font-mono p-2 bg-surface rounded text-center border border-dashed border-border">No decisions recorded.</p>
                 )}
               </div>
 
-              <div className="border border-slate-200 rounded-xl bg-slate-50 p-4 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3 flex items-center gap-1.5">
+              <div className="border border-border rounded-xl bg-surface-subtle p-4 shadow-xs">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted mb-3 flex items-center gap-1.5">
                   <Ghost className="h-3.5 w-3.5" />
                   Decoy content prepared for this attacker ({servedLures.length})
                 </p>
                 {servedLures.length > 0 ? (
-                  <ol className="ui-scroll-region max-h-52 divide-y divide-slate-200/50 overflow-y-auto pr-2">
+                  <ol className="ui-scroll-region max-h-52 divide-y divide-border overflow-y-auto pr-2">
                     {servedLures.map((lure, index) => (
                       <li key={`${index}-${lure.at}`} className="py-1">
                         <button
                           type="button"
                           onClick={() => setSelectedLure(lure)}
-                          className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left text-xs transition-colors hover:bg-white"
+                          className="flex w-full items-center justify-between gap-3 rounded px-2 py-2 text-left text-xs transition-colors hover:bg-surface"
                         >
-                          <span className="truncate font-bold text-slate-700">
+                          <span className="truncate font-bold text-text">
                             {lure.target}{" "}
-                            <span className="text-slate-400 font-normal font-mono text-[9px] uppercase tracking-wider ml-1 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            <span className="text-text-subtle font-normal font-mono text-[9px] uppercase tracking-wider ml-1 bg-surface px-1.5 py-0.5 rounded border border-border">
                               {lure.content_type}
                             </span>
                           </span>
-                          <span className="font-mono text-slate-400 text-[10px] shrink-0">{lure.at.slice(11, 19)}</span>
+                          <span className="font-mono text-text-subtle text-[10px] shrink-0">{lure.at.slice(11, 19)}</span>
                         </button>
                       </li>
                     ))}
                   </ol>
                 ) : !data.attacker_type_locked ? (
-                  <p className="text-[11px] text-slate-500 p-2 bg-white rounded border border-dashed border-slate-200">
+                  <p className="text-[11px] text-text-muted p-2 bg-surface rounded border border-dashed border-border">
                     Still in Part 1 (attacker type not locked yet) — Part 2 decoy files will start preparing automatically once classification locks.
                   </p>
                 ) : (
-                  <p className="text-[11px] text-slate-400 font-mono p-2 bg-white rounded text-center border border-dashed border-slate-200">None prepared yet.</p>
+                  <p className="text-[11px] text-text-subtle font-mono p-2 bg-surface rounded text-center border border-dashed border-border">None prepared yet.</p>
                 )}
               </div>
             </div>
@@ -882,19 +882,19 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const reportDownloadHref = `/api/session-report?session_id=${encodeURIComponent(sessionId)}`;
 
   return (
-    <div className="space-y-6 pb-12 font-sans bg-[#F9FAFB] min-h-screen text-[#1E293B] relative -mx-4 px-4 sm:-mx-6 sm:px-6 py-6 lg:-mx-8 lg:px-8">
+    <div className="space-y-6 pb-12 font-sans relative">
       <style dangerouslySetInnerHTML={{ __html: `
         #sticky-nav-scroll::-webkit-scrollbar { display: none; }
       `}} />
 
       {/* Print only banner */}
-      <div className="hidden border-b-2 border-slate-200 pb-4 print:block">
+      <div className="hidden border-b-2 border-border pb-4 print:block">
         <div className="flex items-start justify-between">
           <div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">PTI-Honeypot</p>
-            <h1 className="mt-1 text-xl font-bold text-slate-800">Forensic Incident Investigation Report</h1>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-text-muted">PTI-Honeypot</p>
+            <h1 className="mt-1 text-xl font-bold text-text">Forensic Incident Investigation Report</h1>
           </div>
-          <div className="text-right font-mono text-[10px] text-slate-500">
+          <div className="text-right font-mono text-[10px] text-text-muted">
             <div>Session ID: {sessionId}</div>
             <div>Generated: {capturedAt}</div>
           </div>
@@ -902,34 +902,34 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
       </div>
 
       <header className="flex flex-col gap-4 pb-2 print:hidden">
-        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-          <Link href="/dashboard" className="text-blue-600 hover:underline">
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-text-subtle">
+          <Link href="/dashboard" className="text-primary hover:underline">
             Dashboard
           </Link>
           <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          <Link href="/threat-intel" className="text-blue-600 hover:underline">
+          <Link href="/threat-intel" className="text-primary hover:underline">
             Threat Intelligence
           </Link>
           <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
-          <span className="font-mono text-slate-500 bg-slate-200/50 px-1.5 py-0.5 rounded border border-slate-200">
+          <span className="font-mono text-text-muted bg-surface-subtle px-1.5 py-0.5 rounded border border-border">
             {sessionId.slice(0, 14)}...
           </span>
         </div>
 
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-slate-800 sm:text-3xl">Session Analysis</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-text sm:text-3xl">Session Analysis</h1>
             <div className="mt-2.5 flex flex-wrap items-center gap-3">
               <span
                 className={cn(
                   "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border",
-                  sessionStatus === "Closed" ? "bg-emerald-50 text-emerald-600 border-emerald-200" : "bg-blue-50 text-blue-600 border-blue-200 animate-pulse"
+                  sessionStatus === "Closed" ? "bg-success-subtle text-success border-success-border" : "bg-primary-subtle text-primary border-primary-border animate-pulse"
                 )}
               >
                 {sessionStatus}
               </span>
-              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Exact Session ID:</span>
-              <span className="font-mono text-[11px] bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-700 font-medium shadow-xs">{sessionId}</span>
+              <span className="text-[11px] font-bold uppercase tracking-widest text-text-muted">Exact Session ID:</span>
+              <span className="font-mono text-[11px] bg-surface-subtle px-2 py-0.5 rounded border border-border text-text font-medium shadow-xs">{sessionId}</span>
             </div>
           </div>
 
@@ -937,7 +937,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             <button
               type="button"
               onClick={() => window.print()}
-              className="flex items-center gap-1.5 rounded-md border border-orange-600 bg-orange-500 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-orange-600 transition-all"
+              className="flex items-center gap-1.5 rounded-md border border-primary-action bg-primary-action px-3 py-1.5 text-xs font-bold text-on-primary shadow-xs hover:bg-primary-action-hover transition-all"
               title="Print report or save as PDF"
             >
               <Printer className="h-3.5 w-3.5" aria-hidden="true" />
@@ -950,8 +950,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold shadow-xs transition-all border",
                 hasStoredReport
-                  ? "bg-orange-500 text-white border-orange-600 hover:bg-orange-600"
-                  : "pointer-events-none opacity-50 bg-slate-100 text-slate-400 border-slate-200"
+                  ? "bg-primary-action text-on-primary border-primary-action hover:bg-primary-action-hover"
+                  : "pointer-events-none opacity-50 bg-surface-subtle text-text-subtle border-border"
               )}
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -964,7 +964,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
       {/* STICKY NAV */}
       <nav
         id="sticky-nav-scroll"
-        className="sticky top-16 z-30 bg-white/95 backdrop-blur-md border border-slate-200 rounded-lg print:hidden flex gap-1 p-1.5 overflow-x-auto shadow-sm"
+        className="sticky top-16 z-30 bg-surface/95 backdrop-blur-md border border-border rounded-lg print:hidden flex gap-1 p-1.5 overflow-x-auto shadow-xs"
         style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
         aria-label="In-page navigation"
       >
@@ -977,8 +977,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             className={cn(
               "whitespace-nowrap rounded-md px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors select-none",
               activeTab === tab.key
-                ? "bg-orange-500 text-white shadow-sm"
-                : "text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                ? "bg-primary text-on-primary shadow-xs"
+                : "text-text-muted hover:bg-surface-hover hover:text-text"
             )}
           >
             {tab.label}
@@ -988,55 +988,55 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
       {/* Target Metadata Section: 3-Column Design จากรูปเป๊ะๆ */}
       <section id="session-overview" aria-label="Session overview" className="scroll-mt-32">
-        <article className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-          <div className="border-b border-slate-100 px-6 py-4">
-            <h2 className="text-[11px] font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+        <article className="bg-surface border border-border rounded-xl shadow-xs overflow-hidden">
+          <div className="border-b border-border px-6 py-4">
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-text-muted flex items-center gap-2">
               <Activity className="h-3.5 w-3.5 text-blue-500" />
               FORENSIC SESSION METADATA
             </h2>
           </div>
           <div className="p-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-100 gap-6 md:gap-0">
+            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-border gap-6 md:gap-0">
               {/* Group 1: Network Origin */}
               <div className="md:pr-8">
-                <span className="text-[10px] font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
-                  <Globe className="h-3.5 w-3.5 text-slate-500" /> NETWORK ORIGIN
+                <span className="text-[10px] font-bold text-text uppercase tracking-widest flex items-center gap-2 mb-4">
+                  <Globe className="h-3.5 w-3.5 text-text-muted" /> NETWORK ORIGIN
                 </span>
                 <dl className="space-y-4 text-[11px]">
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Origin IP</dt>
-                    <dd className="font-mono font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">
+                    <dt className="text-text-muted font-medium">Origin IP</dt>
+                    <dd className="font-mono font-bold text-primary bg-primary-subtle px-2 py-0.5 rounded border border-primary-border">
                       {originIp}
                     </dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Source Port</dt>
-                    <dd className="font-mono text-slate-800">{sourcePort}</dd>
+                    <dt className="text-text-muted font-medium">Source Port</dt>
+                    <dd className="font-mono text-text">{sourcePort}</dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Protocol</dt>
-                    <dd className="font-mono font-bold text-slate-800 uppercase">{protocol}</dd>
+                    <dt className="text-text-muted font-medium">Protocol</dt>
+                    <dd className="font-mono font-bold text-text uppercase">{protocol}</dd>
                   </div>
                 </dl>
               </div>
 
               {/* Group 2: Target & Sensor */}
               <div className="md:px-8">
-                <span className="text-[10px] font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
-                  <Server className="h-3.5 w-3.5 text-slate-500" /> HONEYPOT SENSOR
+                <span className="text-[10px] font-bold text-text uppercase tracking-widest flex items-center gap-2 mb-4">
+                  <Server className="h-3.5 w-3.5 text-text-muted" /> HONEYPOT SENSOR
                 </span>
                 <dl className="space-y-4 text-[11px]">
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Decoy Sensor</dt>
-                    <dd className="font-bold text-slate-800 truncate max-w-[150px]" title={sensor}>{sensor}</dd>
+                    <dt className="text-text-muted font-medium">Decoy Sensor</dt>
+                    <dd className="font-bold text-text truncate max-w-[150px]" title={sensor}>{sensor}</dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Destination</dt>
-                    <dd className="font-mono text-slate-800 truncate max-w-[150px]">{destination}</dd>
+                    <dt className="text-text-muted font-medium">Destination</dt>
+                    <dd className="font-mono text-text truncate max-w-[150px]">{destination}</dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Captured Evidence</dt>
-                    <dd className="font-medium text-slate-800 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                    <dt className="text-text-muted font-medium">Captured Evidence</dt>
+                    <dd className="font-medium text-text bg-surface-subtle px-2 py-0.5 rounded border border-border">
                       {eventCount} events · {commandCount} commands
                     </dd>
                   </div>
@@ -1045,21 +1045,21 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
               {/* Group 3: Observation Timeline */}
               <div className="md:pl-8">
-                <span className="text-[10px] font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2 mb-4">
-                  <Clock className="h-3.5 w-3.5 text-slate-500" /> TIMELINE &amp; DURATION
+                <span className="text-[10px] font-bold text-text uppercase tracking-widest flex items-center gap-2 mb-4">
+                  <Clock className="h-3.5 w-3.5 text-text-muted" /> TIMELINE &amp; DURATION
                 </span>
                 <dl className="space-y-4 text-[11px]">
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Started At</dt>
-                    <dd className="font-mono text-slate-800">{capturedAt}</dd>
+                    <dt className="text-text-muted font-medium">Started At</dt>
+                    <dd className="font-mono text-text">{capturedAt}</dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Ended At</dt>
-                    <dd className="font-mono text-slate-800">{endTime}</dd>
+                    <dt className="text-text-muted font-medium">Ended At</dt>
+                    <dd className="font-mono text-text">{endTime}</dd>
                   </div>
                   <div className="flex justify-between items-center">
-                    <dt className="text-slate-500 font-medium">Active Dwell Time</dt>
-                    <dd className="font-mono font-bold text-slate-800 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                    <dt className="text-text-muted font-medium">Active Dwell Time</dt>
+                    <dd className="font-mono font-bold text-text bg-surface-subtle px-2 py-0.5 rounded border border-border">
                       {duration}
                     </dd>
                   </div>
@@ -1085,23 +1085,23 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
 
       {/* Command Activity Stream: Terminal Style */}
       <section id="command-evidence" aria-label="Command evidence" className="scroll-mt-32 print:hidden">
-        <article className="bg-white border border-slate-200 rounded-xl shadow-xs flex flex-col overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-6 py-4">
-            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-800">
+        <article className="bg-surface border border-border rounded-xl shadow-xs flex flex-col overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
+            <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-text">
               <Terminal className="h-3.5 w-3.5 text-blue-500" aria-hidden="true" />
               COMMAND EVIDENCE — Command Activity
             </div>
             <div className="flex items-center gap-3">
-              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-slate-100 text-slate-500 border border-slate-200">
+              <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-surface-subtle text-text-muted border border-border">
                 {liveActive ? "Active Session Stream" : "Persisted Log"}
               </span>
               {hasPayload && (
                 <button
                   type="button"
                   onClick={() => void handleCopyPayload(payload)}
-                  className="flex items-center gap-1.5 rounded bg-slate-100 border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-600 hover:bg-slate-200 transition-colors"
+                  className="flex items-center gap-1.5 rounded bg-surface-subtle border border-border px-2 py-1 text-[10px] font-bold text-text-muted hover:bg-surface-hover hover:text-text transition-colors"
                 >
-                  {copiedPayload ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copiedPayload ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
                   <span>{copiedPayload ? "COPIED" : "COPY"}</span>
                 </button>
               )}
@@ -1111,26 +1111,26 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
           {hasCommandEvents || hasPayload ? (
             <div className="p-6">
               
-              <div className="flex select-none items-center gap-2 border-b border-slate-100 pb-3 text-xs text-slate-500 mb-4">
-                <span className={liveActive ? "h-2 w-2 rounded-full bg-emerald-500" : "h-2 w-2 rounded-full bg-slate-400"} aria-hidden="true" />
+              <div className="flex select-none items-center gap-2 border-b border-border pb-3 text-xs text-text-muted mb-4">
+                <span className={liveActive ? "h-2 w-2 rounded-full bg-success" : "h-2 w-2 rounded-full bg-text-subtle"} aria-hidden="true" />
                 <span className="font-bold">{sensor !== "Unavailable" ? "Capture sensor · " + sensor : "Captured command evidence"}</span>
               </div>
-              <dl className="grid gap-x-5 gap-y-3 border-b border-slate-100 pb-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
+              <dl className="grid gap-x-5 gap-y-3 border-b border-border pb-4 sm:grid-cols-2 lg:grid-cols-4 mb-4">
                 <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Command events</dt>
-                  <dd className="mt-1 font-mono text-sm text-slate-700">{commandCount}</dd>
+                  <dt className="text-[10px] font-bold uppercase tracking-widest text-text-subtle">Command events</dt>
+                  <dd className="mt-1 font-mono text-sm text-text">{commandCount}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Text availability</dt>
-                  <dd className="mt-1 text-sm text-slate-700 font-semibold">{textAvailability}</dd>
+                  <dt className="text-[10px] font-bold uppercase tracking-widest text-text-subtle">Text availability</dt>
+                  <dd className="mt-1 text-sm text-text font-semibold">{textAvailability}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Activity</dt>
-                  <dd className="mt-1 text-sm text-slate-700 font-semibold">{liveActive ? "Session active" : "Session closed or idle"}</dd>
+                  <dt className="text-[10px] font-bold uppercase tracking-widest text-text-subtle">Activity</dt>
+                  <dd className="mt-1 text-sm text-text font-semibold">{liveActive ? "Session active" : "Session closed or idle"}</dd>
                 </div>
                 <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Observed interval</dt>
-                  <dd className="mt-1 font-mono text-xs text-slate-500">{commandTimestamps.find((value) => value !== "Not recorded") || "Not recorded"} → {[...commandTimestamps].reverse().find((value) => value !== "Not recorded") || "Not recorded"}</dd>
+                  <dt className="text-[10px] font-bold uppercase tracking-widest text-text-subtle">Observed interval</dt>
+                  <dd className="mt-1 font-mono text-xs text-text-muted">{commandTimestamps.find((value) => value !== "Not recorded") || "Not recorded"} → {[...commandTimestamps].reverse().find((value) => value !== "Not recorded") || "Not recorded"}</dd>
                 </div>
               </dl>
 
@@ -1187,15 +1187,15 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
                   />
                 </div>
               ) : (
-                <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 text-[11px] text-orange-800 font-medium flex items-center gap-2 mt-4">
-                  <ShieldAlert className="h-4 w-4 text-orange-500 shrink-0" />
+                <div className="rounded-lg border border-warning-border bg-warning-subtle p-4 text-[11px] text-text font-medium flex items-center gap-2 mt-4">
+                  <ShieldAlert className="h-4 w-4 text-warning shrink-0" />
                   {textAvailability}{currentCommandView.state === "ready" || currentCommandView.reason.toLowerCase().includes("redacted")
                     ? ". Command text redacted before persistence cannot be recovered."
                     : "."}
                 </div>
               )}
               
-              <p className="mt-4 rounded-md border border-orange-200 bg-orange-50/50 p-3 text-xs text-orange-700">
+              <p className="mt-4 rounded-md border border-warning-border bg-warning-subtle/50 p-3 text-xs text-text-muted">
                 Sensitive Admin-only evidence: command input may contain attacker-entered usernames, passwords, tokens, or other secrets. It is excluded from print/export reports and is not copied automatically.
               </p>
             </div>
@@ -1210,7 +1210,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
       {/* Active Deception Engine State */}
       <section id="deception-state" aria-label="Deception state" className="scroll-mt-32">
         {originIp === "Unknown" ? (
-          <article className="bg-white border border-slate-200 rounded-xl shadow-xs p-10 text-center">
+          <article className="bg-surface border border-border rounded-xl shadow-xs p-10 text-center">
             <RegionState kind="empty" title="No deception decision recorded" description="No origin IP resolved for this session yet." />
           </article>
         ) : (
