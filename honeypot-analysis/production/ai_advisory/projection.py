@@ -193,6 +193,7 @@ POLICY_RULE_IDS = {
     "observed-transfer-event-corroboration",
     "observed-transfer-without-execution",
     "remote-content-piped-to-shell",
+    "review-same-path-file-change",
     "transfer-execution",
     "transfer-permission-change",
     "transfer-permission-execution",
@@ -766,17 +767,25 @@ def build_ai_advisory_projection(
         )
 
     hypotheses = []
+    known_chain_ids = {
+        _clean(chain.get("chain_id"))
+        for collection in (
+            evidence.get("connected_behavior_chains") or [],
+            graph.get("chain_nodes") or [],
+        )
+        for chain in collection
+        if isinstance(chain, Mapping) and _clean(chain.get("chain_id"))
+    }
     for hypothesis_set in report_copy.get("hypothesis_sets") or []:
         if not isinstance(hypothesis_set, Mapping):
             continue
         set_relationship_refs = _strings(hypothesis_set.get("relationship_refs"))
-        # In session_assessment.v4 this field may identify the bounded
-        # behavior-chain question rather than a semantic relationship edge.
-        # The report validator above verifies that ID against the hypothesis
-        # IDs.  It is not an edge and must not be sent to the provider as one.
+        # Typed semantic chains must resolve against the canonical graph.
+        # Keep the legacy bounded behavior-chain format already validated by
+        # the report contract.  Neither kind of chain is a provider edge.
         chain_refs = [
             ref for ref in set_relationship_refs
-            if re.fullmatch(r"behavior_chain_[0-9a-f]{32}", ref)
+            if ref in known_chain_ids or re.fullmatch(r"behavior_chain_[0-9a-f]{32}", ref)
         ]
         edge_refs = [ref for ref in set_relationship_refs if ref not in chain_refs]
         if len(chain_refs) > 1 or set(edge_refs) - relationship_ids:

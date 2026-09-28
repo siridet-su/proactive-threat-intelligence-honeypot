@@ -24,6 +24,7 @@ from production.ai_advisory.rendering import render_validated_advisory
 from production.ai_advisory.security import ProviderAliasScope
 from production.reporting.session_assessment_v4 import build_session_assessment_v4
 from tests.test_observed_attempt_hypothesis_revision import _case
+from tests.test_transfer_family_migration import _payload, _report as _fs_report
 from production.reporting.typed_semantic_family_selection import (
     ACTIVATED_FAMILIES,
 )
@@ -115,6 +116,55 @@ def test_bounded_behavior_chain_hypothesis_is_projected_without_invented_edge() 
     assert len(projection["hypotheses"]) == 2
     assert all(item["relationship_refs"] == [] for item in projection["hypotheses"])
     assert any(item["evidence_refs"] for item in projection["hypotheses"])
+    assert validate_ai_advisory_projection(projection, policy=policy, policy_sha256=digest) == projection
+
+
+def test_typed_semantic_chain_hypothesis_is_projected_without_invented_edge() -> None:
+    payload = _payload("ai-typed-file-preparation", commands=[
+        ("echo demo > /tmp/pti-ai-contract.txt", "unknown", "/home/test"),
+        ("chmod 700 /tmp/pti-ai-contract.txt", "unknown", "/home/test"),
+    ])
+    payload["raw_events"][0].update(invocation_id="a" * 32, cwd_status="confirmed")
+    payload["raw_events"][1].update(invocation_id="b" * 32, cwd_status="confirmed")
+    payload["raw_events"].extend([
+        {
+            "eventid": "cowrie.fs.operation_result",
+            "schema_version": "cowrie_fs_operation_result.v1",
+            "session": payload["session_id"],
+            "invocation_id": "a" * 32,
+            "timestamp": "2026-07-30T03:00:02Z",
+            "operation_type": "file_write",
+            "path": "/tmp/pti-ai-contract.txt",
+            "bytes_written": 5,
+            "success": True,
+        },
+        {
+            "eventid": "cowrie.fs.operation_result",
+            "schema_version": "cowrie_fs_operation_result.v1",
+            "session": payload["session_id"],
+            "invocation_id": "b" * 32,
+            "timestamp": "2026-07-30T03:00:03Z",
+            "operation_type": "permission_modify",
+            "path": "/tmp/pti-ai-contract.txt",
+            "success": True,
+        },
+    ])
+    report = _fs_report(payload)
+    typed_chain_ids = {
+        item["chain_id"]
+        for item in report["canonical_evidence"]["semantic_graph"]["chain_nodes"]
+    }
+    assert any(
+        set(item.get("relationship_refs") or []) & typed_chain_ids
+        for item in report["hypothesis_sets"]
+    )
+    policy, digest, _ = load_ai_advisory_policy()
+    projection = build_ai_advisory_projection(report, policy=policy, policy_sha256=digest)
+    assert projection["hypotheses"]
+    assert all(
+        not set(item["relationship_refs"]) & typed_chain_ids
+        for item in projection["hypotheses"]
+    )
     assert validate_ai_advisory_projection(projection, policy=policy, policy_sha256=digest) == projection
 
 
