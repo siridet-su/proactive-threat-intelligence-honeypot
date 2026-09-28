@@ -3243,3 +3243,17 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: stop the disposable VM or reimage it; no production rollback is involved. The staged project units are inactive and disabled.
 - Follow-up: operator supplies test-scoped write-capable Mongo and PostgreSQL credentials in the VM's private env files, then rerun the same command and verify end-to-end telemetry. Keep B2 disabled until a new write-capable destination is provisioned.
 - Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [fresh installation runbook](../deploy/ansible/README.md), and [VM evidence](validation/2026-09-29-azure-arm64-fresh-installer.md).
+
+### 2026-09-29 — Require hardware sample interval before fresh activation
+
+- Status: repository fix prepared after the first credentialed activation attempt on the disposable Azure VM; host retest pending.
+- Scope and intent: prevent the fresh installer from passing its env gate while the hardware agent lacks its mandatory sample interval.
+- Repository changes: add `NETWORK_SAMPLE_SECONDS` to the hardware env example, fill a blank value with the documented one-second default, require a positive integer in the redacting env check, and add a regression test and runbook note.
+- Host/environment changes actually applied: the credentialed VM run activated Zeek, Cowrie, and the localhost PostgreSQL/Core/Web-corp Compose stack. Go activation reached the hardware agent, which exited because `NETWORK_SAMPLE_SECONDS` was missing; the playbook stopped and disabled all newly started Go units and Redis. No Pi or production service was changed.
+- Runtime/exposure state: on the disposable VM, SSH remains on TCP 22; Cowrie listens only on loopback TCP 2222/2223, Web-corp/Core/PostgreSQL bind only to loopback, and Zeek and Docker are active. The Go and Redis units remain inactive after rollback; B2 backup remains disabled.
+- Validation performed and outcome: the value-redacted private env checks initially passed, exposing the missing-key gap. The hardware journal named the missing key without a credential value. Focused installer tests passed 10/10; Python compilation and whitespace checks passed.
+- Not performed / deferred: the fixed script has not yet been pulled into the VM, full Go activation, MongoDB connectivity and writes, telemetry end to end, Wi-Fi capture, Dashboard, and B2 were not tested at this entry.
+- Risks and data handling: the fix preserves nonblank operator values. Runtime env contents and credentials were not copied into Git or the implementation record. The VM test decoys are bound only to loopback.
+- Rollback: revert the repository fix if necessary; stop the disposable VM's active Cowrie, Zeek, and Compose stack to return it to an inactive state. No production rollback applies.
+- Follow-up: pull the fix on the VM and rerun the same installer with the same reviewed release and vars, then verify service state and a synthetic event.
+- Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md), [hardware agent](../agents/hardware-agent/README.md), and [VM validation](validation/2026-09-29-azure-arm64-fresh-installer.md).

@@ -35,7 +35,7 @@ class CheckPiEnvTests(unittest.TestCase):
                 path.write_text("# operator-specific optional values\n")
                 path.chmod(0o600)
             hardware = private / "hardware.env"
-            hardware.write_text("NETWORK_INTERFACES=wlan0\nNETWORK_PRIMARY_INTERFACE=wlan0\n")
+            hardware.write_text("NETWORK_INTERFACES=wlan0\nNETWORK_PRIMARY_INTERFACE=wlan0\nNETWORK_SAMPLE_SECONDS=1\n")
             hardware.chmod(0o600)
             self.assertEqual(check_pi_env.check_services(root, check_pi_env.selected_services("all", without_backup=True), require_owner=False, profile="fresh-wifi"), [])
             self.assertTrue(any("backup.env" in item for item in check_pi_env.check_services(root, check_pi_env.selected_services("all"), require_owner=False, profile="fresh-wifi")))
@@ -71,11 +71,25 @@ class CheckPiEnvTests(unittest.TestCase):
             shared.chmod(0o600)
             hardware = root / "honeypot/hardware.env"
             hardware.parent.mkdir()
-            hardware.write_text("NETWORK_INTERFACES=eth0\nNETWORK_PRIMARY_INTERFACE=eth0\n")
+            hardware.write_text("NETWORK_INTERFACES=eth0\nNETWORK_PRIMARY_INTERFACE=eth0\nNETWORK_SAMPLE_SECONDS=1\n")
             hardware.chmod(0o600)
             self.assertEqual(
                 check_pi_env.check_services(root, ["hardware"], require_owner=False), []
             )
+
+    def test_hardware_sample_interval_is_required_and_positive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shared = root / "honeypot-agent.env"
+            shared.write_text("REDIS_ADDR=127.0.0.1:6379\nREDIS_DB=0\n")
+            shared.chmod(0o600)
+            hardware = root / "honeypot/hardware.env"
+            hardware.parent.mkdir()
+            hardware.write_text("NETWORK_INTERFACES=eth0\nNETWORK_PRIMARY_INTERFACE=eth0\n")
+            hardware.chmod(0o600)
+            self.assertTrue(any("NETWORK_SAMPLE_SECONDS" in error for error in check_pi_env.check_services(root, ["hardware"], require_owner=False)))
+            hardware.write_text("NETWORK_INTERFACES=eth0\nNETWORK_PRIMARY_INTERFACE=eth0\nNETWORK_SAMPLE_SECONDS=0\n")
+            self.assertTrue(any("positive integer" in error for error in check_pi_env.check_services(root, ["hardware"], require_owner=False)))
 
     def test_fresh_wifi_profile_does_not_require_unused_overlay_address(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

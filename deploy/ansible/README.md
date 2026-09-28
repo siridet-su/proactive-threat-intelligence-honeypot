@@ -80,6 +80,8 @@ operator-chosen `POSTGRES_PASSWORD`. A read-only Atlas handoff URI cannot
 support the live pipeline. Keep these values out of Git, the reviewed vars,
 and terminal output. The installer checks presence and file safety before
 activation; it does not prove credential validity.
+For hardware metrics it fills a blank `NETWORK_SAMPLE_SECONDS` with `1` and
+rejects a missing or non-positive value before starting Go services.
 
 It starts Cowrie with its manifest-bound sanitizer, Zeek with a
 generated TCP 2222/2223 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on

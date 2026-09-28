@@ -27,7 +27,7 @@ REQUIRED = {
     SHARED: {"REDIS_ADDR", "REDIS_DB"},
     "honeypot/processor.env": set(),
     "honeypot/ti-worker.env": set(),
-    "honeypot/hardware.env": {"NETWORK_INTERFACES", "NETWORK_PRIMARY_INTERFACE"},
+    "honeypot/hardware.env": {"NETWORK_INTERFACES", "NETWORK_PRIMARY_INTERFACE", "NETWORK_SAMPLE_SECONDS"},
     "honeypot/backup.env": {
         "BACKUP_MODE", "BACKUP_TARGETS", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY"
     },
@@ -76,6 +76,10 @@ def check_file(path: Path, *, require_owner: bool = True) -> tuple[set[str], lis
         if key in values:
             errors.append(f"duplicate key: {key}")
         values[key] = value.strip().strip('"\'')
+    if "NETWORK_SAMPLE_SECONDS" in values and values["NETWORK_SAMPLE_SECONDS"]:
+        sample = values["NETWORK_SAMPLE_SECONDS"]
+        if not sample.isdigit() or int(sample) <= 0:
+            errors.append("NETWORK_SAMPLE_SECONDS must be a positive integer")
     present = {key for key, value in values.items() if value and not value.startswith("<")}
     return present, errors
 

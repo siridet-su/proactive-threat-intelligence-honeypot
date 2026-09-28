@@ -87,7 +87,7 @@ def main() -> None:
         **{f"ZEEK_{kind}_LOG": f"/opt/zeek/logs/current/{kind.lower()}.log" for kind in ("CONN", "SSH", "SSL", "DNS", "HTTP", "FILES", "NOTICE")},
     }
     changed = fill(Path("/etc/honeypot-agent.env"), shared, verify=("SENSOR_LAN_IP", "SENSOR_LAN_IFACE", "ALLOW_RESP_PORTS"))
-    changed |= fill(Path("/etc/honeypot/hardware.env"), {"NETWORK_INTERFACES": args.interface, "NETWORK_PRIMARY_INTERFACE": args.interface, "HARDWARE_SENSOR_ID": sensor}, verify=("NETWORK_PRIMARY_INTERFACE",))
+    changed |= fill(Path("/etc/honeypot/hardware.env"), {"NETWORK_INTERFACES": args.interface, "NETWORK_PRIMARY_INTERFACE": args.interface, "NETWORK_SAMPLE_SECONDS": "1", "HARDWARE_SENSOR_ID": sensor}, verify=("NETWORK_PRIMARY_INTERFACE",))
     changed |= fill(Path("/etc/honeypot/decoy.env"), {"WEB_CORP_BIND_IP": "127.0.0.1", "ZEEK_LOG_DIR": "/opt/zeek/logs/current"}, verify=("WEB_CORP_BIND_IP", "ZEEK_LOG_DIR"))
     print("FRESH_ENV_CHANGED" if changed else "FRESH_ENV_UNCHANGED")
 
