@@ -693,7 +693,7 @@ const IN_PAGE_TABS = [
   { key: "deception-state", selector: "#deception-state", label: "Deception" },
   { key: "session-evidence", selector: 'section[aria-label="Session evidence"]', label: "Activity Evidence" },
   { key: "classification", selector: 'section[aria-label="Classification evidence"]', label: "ATT&CK mappings" },
-  { key: "ensemble", selector: 'section[aria-label="Model ensemble evidence"]', label: "TTP review order" },
+  { key: "ensemble", selector: 'section[aria-label="TTP recommendation"]', label: "TTP recommendation" },
   { key: "analyst-assessment", selector: 'section[aria-label="Analyst assessment"]', label: "Analyst Assessment" },
   { key: "ti-context", selector: 'section[aria-label="Threat intelligence context"]', label: "TI Context" },
   { key: "evidence-ledger", selector: 'section[aria-label="Evidence ledger"]', label: "Evidence Ledger" },

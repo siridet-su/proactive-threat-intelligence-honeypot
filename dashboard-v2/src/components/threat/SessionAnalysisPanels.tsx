@@ -711,6 +711,7 @@ export function ClassificationList({ items, trustedMappings }: { items: unknown[
           <dd className="mt-0.5 text-base font-semibold text-primary-navy">{value}</dd>
         </div>)}
       </dl>
+      <p className="text-[11px] text-text-muted">Counts describe different things: trusted TTPs are distinct observed ATT&amp;CK techniques; classified events are command-event records. One technique can be linked to several events, and a classified event does not automatically become a trusted mapping.</p>
       <div className="grid gap-4 xl:grid-cols-12">
         <section className="xl:col-span-4">
           <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-primary-navy">Observed behavior</h3>
@@ -1637,6 +1638,11 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   const rrf = record(record(data.session_ttp_advisory).rrf_recommendation);
   const weighted = record(record(data.session_ttp_advisory).weighted_voting_recommendation);
   const weightedRows = new Map(list(weighted.rows).map(record).map((item) => [label(item.technique_id, ""), item]));
+  const recommendedTechnique = recommendations[0] || null;
+  const otherTechniques = recommendations.slice(1).sort((a, b) => a.techniqueId.localeCompare(b.techniqueId));
+  const displayedTechniques = recommendedTechnique ? [recommendedTechnique, ...otherTechniques] : [];
+  const weightedTopRecommendation = list(weighted.recommendation_order)[0];
+  const rrfTopRecommendation = list(rrf.recommendation_order)[0];
   const weightedReady = weighted.schema_version === "session_ttp_weighted_voting_advisory.v1"
     && weighted.session_id === data.session_id
     && recommendations.some((item) => item.rankingScore !== null);
@@ -1660,46 +1666,45 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-text-muted">Model1 proposes candidates; exact-bound Model2 support may change review order, never create a new TTP or finding.</p>
-        <span className="ui-badge text-[10px]">{weightedReady ? "Gated weighted voting · PoC" : "Model1 order"}</span>
+        <p className="text-xs text-text-muted">One Model1 candidate is highlighted for analyst review; exact-bound Model2 support may affect that recommendation, but never creates a TTP or finding.</p>
+        <span className="ui-badge text-[10px]">{weightedReady ? "Gated weighted voting · PoC" : "Model1 recommendation"}</span>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
         {[["Model 1", model1.applicable === true || recommendations.length > 0 ? `${recommendations.length} candidates` : model1.applicable === false ? "Not applicable" : "Not reported"], ["Model 2", hasBoundAvailableModel2(data) ? model2.availability === "PARTIAL" ? "Partial binding" : "Exact binding" : "Unavailable"], ["Techniques compared", String(results.length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-sm font-semibold text-text">{value}</dd></div>)}
       </dl>
-      {!hasBoundAvailableModel2(data) && <p className="text-[10px] text-text-muted">No session-bound Model2 result is available; no ensemble corroboration or combined score is claimed.</p>}
+      {!hasBoundAvailableModel2(data) && <p className="text-[10px] text-text-muted">No session-bound Model2 result is available (status: {readableCode(model2.status || "not reported")}); it did not corroborate or change the Model1 recommendation.</p>}
       {model2OnlyPredictions.length > 0 && <p className="rounded-md border border-border bg-surface-subtle px-3 py-2 text-[11px] text-text-muted">{model2OnlyPredictions.map((item) => `Experimental Model2-only prediction for ${summaryValue(item.technique_id, "unknown technique")}`).join("; ")}: not a confirmed observed behavior, canonical finding, or response decision. Excluded from the Model1-led recommendation list.</p>}
       {model2.availability === "PARTIAL" && unavailableHeads.length > 0 && <details className="rounded-xl border border-warning-border bg-warning-subtle/50">
       <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Why Model2 is partial · unavailable heads <span className="ui-badge ml-2">{unavailableHeads.length}</span></summary>
         <ul className="space-y-2 border-t border-warning-border px-4 py-3 text-sm text-text">{unavailableHeads.map(([technique, reason]) => <li key={technique}><span className="font-mono font-semibold">{technique}</span>: {reason === "t1046_unbound_sensor_context" ? "Nearby sensor traffic shares the source IP and time window, but it is not bound to this Cowrie session. It cannot corroborate T1046." : reason === "t1046_not_observed" || reason === "t1046_multiservice_scan_evidence_missing" ? "No exact-bound multiservice scan observation was recorded. A Cowrie SSH session alone does not establish T1046." : reason === "t1046_scan_evidence_invalid" ? "The scan observation did not pass exact PCAP/Zeek measurement binding checks." : readableCode(reason)}</li>)}</ul>
       </details>}
-      {recommendations.length > 0 ? <section className="overflow-hidden rounded-lg border border-border">
+      {displayedTechniques.length > 0 ? <section className="overflow-hidden rounded-lg border border-border">
         <div className="flex flex-wrap items-start justify-between gap-2 bg-surface-subtle px-3 py-2.5">
           <div>
-            <h3 className="text-xs font-semibold text-text">TTP review order</h3>
-            <p className="mt-0.5 text-[10px] text-text-muted">{weightedReady && recommendations.some((item) => item.model2SupportAdded) ? "Qualified Model2 support adjusted the order." : "Order remains Model1-led."} Priority only—not confidence or a finding.</p>
+            <h3 className="text-xs font-semibold text-text">TTP candidates</h3>
+            <p className="mt-0.5 text-[10px] text-text-muted">Only the highlighted candidate is recommended; the remaining Model1 TTPs are listed without a priority label.</p>
           </div>
-          <span className="ui-badge text-[10px]">Review first → last</span>
+          <span className="ui-badge text-[10px]">Advisory only · not findings</span>
         </div>
-        <ol className="divide-y divide-border">
-          {recommendations.map((item) => <li key={item.techniqueId} className="grid gap-1.5 px-3 py-2.5 text-xs sm:grid-cols-[2rem_minmax(0,1fr)_auto] sm:items-center">
-            <span className="font-mono text-[10px] font-semibold text-text-subtle">#{item.rank}</span>
-            <div className="min-w-0"><p className="font-mono font-semibold text-text">{item.techniqueId}<span className="ml-2 font-sans font-medium text-text-muted">{techniqueNames.get(item.techniqueId) || "Technique name not recorded"}</span></p><p className="mt-0.5 text-[10px] text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support Model1{item.rank !== item.baselineRank ? ` · Model1 rank #${item.baselineRank}` : ""}{item.evidenceRefs.length ? ` · Command refs: ${item.evidenceRefs.slice(0, 4).map((ref) => ref.commandRef).join(", ")}${item.evidenceRefs.length > 4 ? "…" : ""}` : ""}</p></div>
-            <div className="flex flex-wrap items-center gap-1.5 sm:justify-end"><span className="ui-badge text-[10px]">{item.model2SupportAdded ? "Model1 + Model2" : item.model2Support === "does_not_support" ? "Model1 only · ABSENT" : item.model2Support === "not_supported" ? "Model1 only · not covered" : "Model1 only"}</span>{item.rankingScore !== null && <span className="text-[10px] text-text-muted">Weighted vote score <span className="font-mono">{item.rankingScore.toFixed(2)}</span>{item.model2SupportAdded ? ` (+${item.model2RankingComponent.toFixed(2)})` : ""}</span>}</div>
-            {item.model2Support === "does_not_support" && <p className="text-[10px] text-text-subtle sm:col-start-2">Model2 reported ABSENT for its independent head; this does not erase Model1 evidence.</p>}
+        <ul className="divide-y divide-border">
+          {displayedTechniques.map((item, index) => <li key={item.techniqueId} className={`grid gap-1.5 px-3 py-2.5 text-xs sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center ${index === 0 ? "bg-primary-subtle/20" : ""}`}>
+            {index === 0 ? <span className="ui-badge w-fit border-primary-border bg-surface text-[10px] font-bold uppercase text-primary-navy">Recommend</span> : <span aria-hidden="true" />}
+            <div className="min-w-0"><p className="font-mono font-semibold text-text">{item.techniqueId}<span className="ml-2 font-sans font-medium text-text-muted">{techniqueNames.get(item.techniqueId) || "Technique name not recorded"}</span></p><p className="mt-0.5 text-[10px] text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support Model1{index === 0 && item.evidenceRefs.length ? ` · Command refs: ${item.evidenceRefs.slice(0, 4).map((ref) => ref.commandRef).join(", ")}${item.evidenceRefs.length > 4 ? "…" : ""}` : ""}</p></div>
+            {index === 0 && item.model2SupportAdded ? <span className="ui-badge w-fit text-[10px]">Model1 + Model2 support</span> : null}
           </li>)}
-        </ol>
+        </ul>
       </section> : <p className="rounded-md border border-border bg-surface-subtle px-3 py-2 text-xs text-text-muted">No deduplicated command-level Model1 advisory is available. Stable command references may be absent in older snapshots.</p>}
       {weighted.schema_version === "session_ttp_weighted_voting_advisory.v1" && <details className="rounded-xl border border-border bg-surface">
         <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-text">Compare ranking formulas <span className="ui-badge ml-2">PoC</span></summary>
         <div className="grid gap-3 border-t border-border p-3 md:grid-cols-2">
           <div className="rounded-lg border border-primary-border bg-primary-subtle/40 p-3 text-xs">
-            <p className="font-semibold text-text">Ranking formula selected for this PoC review order: gated weighted voting</p>
+            <p className="font-semibold text-text">Formula used for the PoC recommendation: gated weighted voting</p>
             <p className="mt-1 break-words font-mono text-[10px] text-text-muted">{summaryValue(weighted.formula, "Formula not reported")}</p>
-            <p className="mt-1 text-text-muted">Order: {list(weighted.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
+            <p className="mt-1 text-text-muted">Top recommendation: {summaryValue(weightedTopRecommendation, "Unavailable")}</p>
           </div>
           <div className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
             <p className="font-semibold text-text">Comparator: reciprocal-rank</p>
-            <p className="mt-1 text-text-muted">Order: {list(rrf.recommendation_order).map((item) => summaryValue(item)).join(" → ") || "Unavailable"}</p>
+            <p className="mt-1 text-text-muted">Top recommendation: {summaryValue(rrfTopRecommendation, "Unavailable")}</p>
           </div>
           <p className="text-xs leading-5 text-text-muted md:col-span-2">The controlled synthetic comparison favored weighted voting; field accuracy and superiority are not established. This PoC result is not a real-world performance claim.</p>
         </div>
@@ -2193,8 +2198,8 @@ export function SessionAnalysisPanels({
         </Panel>
       </section>
 
-      <section aria-label="TTP review workspace">
-        <Panel eyebrow="" title="TTP review workspace" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} variant="module" renderEmptyContent compactUnavailable>
+      <section aria-label="TTP recommendation">
+        <Panel eyebrow="" title="TTP recommendation" icon={<Network className="h-4 w-4" aria-hidden="true" />} result={ensembleResult} variant="module" renderEmptyContent compactUnavailable>
           <Model2EnsembleSummary data={detail} />
         </Panel>
       </section>

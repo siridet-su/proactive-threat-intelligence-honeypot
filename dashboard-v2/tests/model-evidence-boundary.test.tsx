@@ -10,6 +10,24 @@ import {
 } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("retired command shadow versus session-bound Model2", () => {
+  it("explains why classified-event and trusted-technique counts can differ", () => {
+    const html = renderToStaticMarkup(createElement(ClassificationList, {
+      items: [
+        { evidence_id: "e1", technique_id: "T1033", event_id: "event-1" },
+        { evidence_id: "e2", technique_id: "T1033", event_id: "event-2" },
+        { evidence_id: "e3", technique_id: "T1105", event_id: "event-3" },
+      ],
+      trustedMappings: [
+        { technique_id: "T1033", evidence_refs: [{ event_id: "event-1" }] },
+        { technique_id: "T1105", evidence_refs: [{ event_id: "event-3" }] },
+      ],
+    }));
+    expect(html).toContain("Trusted TTPs");
+    expect(html).toContain("Classified events");
+    expect(html).toContain("Counts describe different things");
+    expect(html).toContain("does not automatically become a trusted mapping");
+  });
+
   it("does not mislabel a legacy command shadow as Model2 evidence", () => {
     const html = renderToStaticMarkup(createElement(ClassificationList, {
       items: [{

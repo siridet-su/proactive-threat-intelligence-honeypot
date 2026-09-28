@@ -2492,3 +2492,17 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert the follow-up UI commit; no service, data, or backend rollback is needed.
 - Follow-up: after an authorized staging push, inspect the Brazil/Korea regional maps, confirm the SSH filter returns the existing server-side results, and review AbuseIPDB/OTX/Shodan panels with fresh, stale, error, and unqueried data.
 - Related ADR/runbook: N/A; presentation and existing filter wiring only; no operating procedure or architecture decision changed.
+
+### 2026-09-28 — Clarify TTP counts and show one recommendation
+
+- Status: staging UI change prepared in an isolated temporary checkout based on exact remote staging commit `f3af6609b84c3efe2e91bf8bcf25507995bc9dbc`; CI/CD deployment follows a push and is not claimed by this entry.
+- Scope and intent: distinguish distinct trusted ATT&CK techniques from classified command events and replace the visible ranked TTP list with one advisory recommendation.
+- Repository changes: add the count explanation beside Trusted observations; change the section and navigation to TTP recommendation; highlight only the leading server-owned weighted-voting candidate while listing other Model1 TTPs without priority labels or scores. Preserve the collapsed formula comparison and technical evidence. Add regression tests.
+- Host/environment changes actually applied: none by this UI change. Pi/GCP Model2 V2 shadow-path activation is recorded separately in ADR-0008 and the Model2 worktree implementation log; this UI change does not alter backend logic, model, policy, MongoDB or service configuration.
+- Runtime/exposure state: frontend still follows the existing staging CI/CD path; until the workflow completes, the live dashboard may retain the old TTP review order.
+- Validation performed and outcome: two focused Vitest files passed 7/7, TypeScript `tsc --noEmit`, scoped ESLint and `git diff --check` passed in a clean npm dependency install.
+- Not performed / deferred: full dashboard suite, authenticated browser review and confirmation of the staging CI/CD run. The screenshot's 2 trusted TTPs and 3 classified events are counts of different entities, not evidence of a counting defect.
+- Risks and data handling: recommendation remains advisory, not trusted ATT&CK evidence, probability, confidence or response authorization. No secrets or raw payloads were added.
+- Rollback: revert only this staging UI commit; no Pi/GCP or database rollback is involved.
+- Follow-up: verify the staging build and check the live session page shows one Recommend badge, other Model1 techniques without rank labels, and the explicit 2-versus-3 count explanation.
+- Related ADR/runbook: N/A; presentation-only.
