@@ -37,6 +37,11 @@ public-WireGuard override is excluded from the fresh installer. The staging
 playbook creates the Web-corp
 spool and parent directories as `root:root` mode `0700` before activation;
 starting Compose without that preparation can auto-create them too broadly.
+The fresh activation playbook then assigns the spool tree to `pti-agent` and
+adds a host-generated Compose override to run only Web-corp with that UID/GID.
+The collector and Web-corp can share private mode-`0600` login files; no
+Docker credential or private event is stored in the override. This does not
+change the existing Pi's external Compose project.
 
 For an offline configuration check after supplying an operator-managed file:
 

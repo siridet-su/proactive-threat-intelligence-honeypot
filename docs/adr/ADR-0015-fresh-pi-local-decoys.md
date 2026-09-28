@@ -32,6 +32,11 @@ Go activation gate could not complete on a clean host.
   override in the fresh installer. Dashboard remains source-based development
   (`npm run dev`) on the developer's host, using separately supplied private
   configuration.
+- On a fresh host, run the Web-corp container with the collector's numeric
+  `pti-agent` UID/GID and keep their shared login spool mode `0700`. This lets
+  the collector read and remove Web-corp's mode-`0600` pending event files.
+  The installer generates the UID/GID override on that host; PostgreSQL and
+  Deception Core retain their separate container identities.
 - Install the manifest-bound Cowrie sanitizer with a separate fresh-install
   contract that has no GCP forwarder dependency. Keep the legacy contract
   intact for the existing Pi. The new installer never installs the sensor
@@ -59,6 +64,9 @@ Go activation gate could not complete on a clean host.
   listeners and Zeek's effective filter after that change.
 - The Go collector needs read access to Cowrie and Zeek logs; its dedicated
   user joins those service groups. It does not receive their write ownership.
+- A compromise of fresh Web-corp can affect its own shared pending-login
+  spool, so that spool contains only retry data and is not a durable evidence
+  store. The collector still validates records before Redis ingestion.
 - The fresh host can collect data before B2 is configured, but those days are
   not remotely archived until the operator enables and verifies backup.
 - The current Pi's ZeroTier/WireGuard/public-Web-corp decisions in ADR-0012

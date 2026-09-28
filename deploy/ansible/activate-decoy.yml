@@ -5,6 +5,7 @@
   gather_facts: true
   vars:
     pti_decoy_release_root: /opt/pti/decoy/releases
+    pti_decoy_user_override: /etc/honeypot/web-corp-user.compose.yaml
   pre_tasks:
     - name: Require one supported fresh ARM64 host
       ansible.builtin.assert:
@@ -45,6 +46,36 @@
   tasks:
     - name: Activate only the reviewed localhost decoy stack
       block:
+        - name: Resolve fresh collector user ID
+          ansible.builtin.command: id -u pti-agent
+          register: pti_decoy_agent_uid
+          changed_when: false
+
+        - name: Resolve fresh collector group ID
+          ansible.builtin.command: id -g pti-agent
+          register: pti_decoy_agent_gid
+          changed_when: false
+
+        - name: Permit only the collector identity to traverse the Web-corp spool
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: pti-agent
+            group: pti-agent
+            mode: '0700'
+          loop:
+            - /var/lib/decoy-honeypot
+            - /var/lib/decoy-honeypot/web-login-spool
+            - /var/lib/decoy-honeypot/web-login-spool/pending
+
+        - name: Bind Web-corp container to the collector's numeric identity
+          ansible.builtin.template:
+            src: templates/web-corp-user.compose.yaml.j2
+            dest: "{{ pti_decoy_user_override }}"
+            owner: root
+            group: root
+            mode: '0644'
+
         - name: Start container runtime
           ansible.builtin.systemd_service:
             name: "{{ item }}"
@@ -64,6 +95,8 @@
               - /etc/honeypot/decoy.env
               - -f
               - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - -f
+              - "{{ pti_decoy_user_override }}"
               - config
               - --quiet
           environment:
@@ -80,6 +113,8 @@
               - /etc/honeypot/decoy.env
               - -f
               - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - -f
+              - "{{ pti_decoy_user_override }}"
               - ps
               - --status
               - running
@@ -99,6 +134,8 @@
               - /etc/honeypot/decoy.env
               - -f
               - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - -f
+              - "{{ pti_decoy_user_override }}"
               - up
               - -d
               - --build
@@ -116,6 +153,8 @@
               - /etc/honeypot/decoy.env
               - -f
               - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - -f
+              - "{{ pti_decoy_user_override }}"
               - up
               - -d
               - --no-build
@@ -160,6 +199,8 @@
               - /etc/honeypot/decoy.env
               - -f
               - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - -f
+              - "{{ pti_decoy_user_override }}"
               - down
           environment:
             WEB_CORP_BIND_IP: 127.0.0.1

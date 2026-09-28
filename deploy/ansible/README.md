@@ -187,6 +187,12 @@ Docker can create a broad default bind-mount directory. Docker,
 its socket, and containerd are left stopped and disabled. Images are not built
 and no container or listener is started. It requires a prepared Pi marker and
 refuses a running Docker host or an unmarked source release.
+At fresh activation the installer changes only this spool tree to the
+`pti-agent` identity and applies a generated Compose override that runs
+Web-corp under that same numeric UID/GID. Its mode-`0600` login files can
+then be drained and deleted by the collector without broadening spool access.
+The override is host-generated and contains no credential; the reviewed decoy
+source bundle stays unchanged.
 
 On the controller, commit reviewed source first and build the bundle. Record
 the reported commit and digest outside Git. On the target, review exact

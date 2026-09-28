@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-29 — Block the retired GCP Cowrie relay at the Pi
+
+- Status: active Pi firewall change; GCP public ingress closure pending.
+- Scope and intent: stop the retired GCP/ZeroTier Cowrie relay from reaching the existing Pi without changing administrator SSH, the DigitalOcean Cowrie forward, or Web-corp.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: update the current architecture, service catalog, and GCP exposure note to record the observed partial closure.
+- Host/environment changes actually applied: removed the Pi UFW allow for the former peer-only ZeroTier Cowrie backend on TCP 2298. No GCP firewall, HAProxy, VM, ZeroTier controller, or DigitalOcean setting was changed by this step.
+- Runtime/exposure state: Pi UFW remains active with default input drop, and its effective user-input chain no longer has a TCP 2298 allow. The retired GCP public TCP 2222 endpoint still accepted a TCP connection after the Pi rule was removed; external closure is not complete. The independent DigitalOcean public TCP 22 route was not changed.
+- Validation performed and outcome: inspected numbered UFW rules and effective `ufw-user-input` chain after deletion; the former allow was absent. A TCP-only probe still connected to the GCP public TCP 2222 endpoint. No Cowrie login or attacker payload was generated for validation.
+- Not performed / deferred: GCP firewall/frontend disablement and post-closure external probe; authenticated GCP access was unavailable from this workspace. No end-to-end decoy test was run.
+- Risks and data handling: the GCP frontend remains publicly reachable until its own ingress is disabled. Existing Cowrie evidence was retained; no secret or raw payload was copied into the repository.
+- Rollback: restore the former peer-scoped Pi UFW allow from owner-controlled configuration only if the relay is explicitly reapproved; leave unrelated firewall rules intact.
+- Follow-up: disable the retired GCP TCP 2222 firewall rule or frontend with authorized GCP access, then verify the external TCP probe fails and update current-state records.
+- Related ADR/runbook: [current architecture](CURRENT-ARCHITECTURE.md), [service catalog](SERVICE-CATALOG.md), and [GCP architecture record](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md).
+
 ### 2026-09-28 — Narrow MongoDB developer handoff after Dashboard auth review
 
 - Status: repository guidance correction prepared; no Atlas account or host changed.
@@ -3257,3 +3272,17 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert the repository fix if necessary; stop the disposable VM's active Cowrie, Zeek, and Compose stack to return it to an inactive state. No production rollback applies.
 - Follow-up: pull the fix on the VM and rerun the same installer with the same reviewed release and vars, then verify service state and a synthetic event.
 - Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md), [hardware agent](../agents/hardware-agent/README.md), and [VM validation](validation/2026-09-29-azure-arm64-fresh-installer.md).
+
+### 2026-09-29 — Share fresh Web-corp spool with the collector identity
+
+- Status: repository activation fix prepared after a credentialed disposable-VM run; host retest pending.
+- Scope and intent: let the fresh collector drain Web-corp's private pending login files while retaining mode-`0600` files and mode-`0700` spool directories.
+- Repository changes: resolve the prepared `pti-agent` UID/GID, assign only the fresh Web-corp spool tree to that identity, and apply a generated Compose user override to every activation/rollback Compose command. Update the fresh installer and decoy runbooks and ADR-0015. The reviewed decoy source bundle and existing Pi Compose files remain unchanged.
+- Host/environment changes actually applied: the previous VM retry filled the hardware sample interval and activated Cowrie, Zeek, Redis, all four core Go units, and the localhost PostgreSQL/Core/Web-corp stack. A post-start collector log reported permission denied while scanning the root-only Web-corp spool. The new override had not been applied at this entry.
+- Runtime/exposure state: the disposable VM's core units and localhost decoys were active after the retry; B2 backup remained inactive and disabled. Administrator SSH stayed on TCP 22; Cowrie SSH/Telnet and all decoy HTTP/database listeners bound only to loopback.
+- Validation performed and outcome: the fresh installer returned `ACTIVE`, all four core Go units plus Redis/Cowrie/Zeek/Docker were active and enabled, Web-corp returned HTTP 200, and socket checks showed only loopback project listeners. The collector spool denial means Web-corp login telemetry was not yet qualified end to end. Ansible syntax and VM retest of the new override follow separately.
+- Not performed / deferred: non-root Web-corp startup, spool drain, Redis/Mongo event persistence, Dashboard login, Pi Wi-Fi behavior, and B2 transfer were not tested for this fix at this entry.
+- Risks and data handling: fresh Web-corp and collector share only the pending-login spool identity. The override contains numeric IDs, not credentials. Pending login payloads were not read or copied into Git. The existing Pi's external Compose is untouched.
+- Rollback: on the disposable VM, stop its fresh Compose stack and Go collector before removing the generated override or changing spool ownership. No production host rollback applies.
+- Follow-up: pull the activation fix to the VM, run the same installer, verify the Web-corp container identity and collector spool access, then send one synthetic login and confirm a single canonical event.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [Web-corp data access](../integrations/web-corp/DATA-ACCESS.md).
