@@ -146,3 +146,14 @@ Reconcile the Dashboard runtime env/template mismatch, define the minimum
 supported feature set, and version the external Compose deployment before
 turning the sequence above into commands that an operator can run. Existing-Pi
 migration remains a separate later manual.
+
+## 2026-09-28 staging addendum
+
+The subsequent decoy staging slice now provides a reviewed source bundle,
+exact Ubuntu Docker/Compose package requests, blank private env skeleton,
+and an inactive final runtime on the disposable ARM64 VM; a separate
+disposable image build and loopback smoke check also passed. The Dashboard staging
+bootstrap and deployment gate now use the current source env names and pause
+until the operator fills the private values. These changes resolve only the
+named staging preparation gaps; persistent container activation, production
+Dashboard identity, and complete fresh-Pi installation remain unverified.

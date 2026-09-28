@@ -14,11 +14,19 @@ sudo ./bootstrap-staging-runtime.sh
 ```
 
 The script creates `/opt/honeypot-dashboard-v2-staging`, installs the staging
-unit and root-owned deploy wrapper, generates separate dashboard application
-credentials with `/usr/bin/openssl rand -hex 32` if the protected staging env
-file does not exist, reloads systemd, and enables only the staging unit. It
+unit and root-owned deploy wrapper, creates a blank root-only staging env
+file if absent, reloads systemd, and enables only the staging unit. It
 does not start a service without a release and does not touch production,
 backend services, Mongo, network rules, or Cloudflare.
+
+Before deployment, fill `/etc/honeypot/services/dashboard-v2-staging.env`
+with `sudoedit`: `MONGODB_URI`, `PTI_ADMIN_PASSWORD` (at least 12 characters),
+and `AUTH_SESSION_SECRET` (at least 32 characters) are required. Keep the
+file owned by root with mode `0600`. The staging wrapper checks required
+names, shape, and permissions without printing values before switching a
+release. Existing env files are preserved, including older files that need
+manual migration from retired `DASHBOARD_V2_*` names. It does not test Mongo
+connectivity or credentials until runtime; do not reuse production secrets.
 
 After the wrapper is installed, a repository administrator can provision the
 dedicated CI account with a public key:
