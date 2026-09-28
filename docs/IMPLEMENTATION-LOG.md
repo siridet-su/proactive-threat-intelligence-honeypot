@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Replace Cowrie watchdog TCP connect with passive listener inspection
+
+- Status: active on the existing Pi; final pre-cutover watchdog rows removed from canonical MongoDB.
+- Scope and intent: keep the 30-second Cowrie service recovery check while preventing its health probe from creating fake attacker sessions. Clear only the remaining exact-pair probe rows produced before the change.
+- Repository branch and commit/PR: `cleanup/loopback-watchdog-mongo-20260928` worktree; commit pending at entry time, no PR opened.
+- Repository changes: track the existing host watchdog source with a `tcp_listen` probe that reads `/proc/net/tcp`, add a guarded Pi cutover installer and runbook, and update the current architecture, service catalog, and Cowrie runbook. The prior MongoDB cleanup tool is reused unchanged.
+- Host/environment changes actually applied: saved the previous watchdog script and protected config under the root-only Pi directory `/var/backups/honeypot/service-watchdog/20260928T143833111619Z`; changed only the Cowrie probe type from active TCP connect to passive listener inspection, ran the service, and resumed its timer. Backed up the final exact-pair MongoDB set under `/var/backups/honeypot/loopback-cowrie-cleanup/20260928T144854364446Z`, then deleted 32 sessions, 64 events, and 128 observable sightings in one exact-ID transaction. No other probe target, Cowrie service configuration, firewall, WireGuard, or VPS setting was changed.
+- Runtime/exposure state: watchdog timer and Cowrie service are active. Cowrie's watchdog state is `HEALTHY` with reason `tcp_listening`; the service still checks and can recover Cowrie according to its existing thresholds. The Dashboard Recent Interceptions feed reads the same canonical sessions collection as the prior cleanup. The live health check no longer opens a Cowrie connection.
+- Validation performed and outcome: the installer verified the staged source and the existing port 22 listener before cutover, then confirmed an active timer and a healthy Cowrie result on the new probe. After about ten minutes of timer runs, the Cowrie JSON log had zero `127.0.0.1` connect events since cutover. The final MongoDB cleanup verified its root-only backup and exact deletion IDs; a read-only post-cleanup preflight found zero eligible watchdog sessions and 94 other loopback sessions intentionally retained (87 with other or incomplete activity and seven pairs excluded by safety checks). The canonical sessions query used by Recent Interceptions returned non-loopback origins for its three newest rows; the newest retained loopback row started at 12:45 UTC.
+- Not performed / deferred: a forced Cowrie failure/restart exercise, reboot persistence check, Dashboard browser refresh after final cleanup, and removal of retained loopback sessions with activity.
+- Risks and data handling: passive listener inspection confirms a socket is listening and the service is active; it does not perform an SSH handshake. The protected host backup and MongoDB archive remain on the Pi; no protected config, credentials, raw attacker event, or archive content was copied into Git.
+- Rollback: restore the exact watchdog script and config from the protected service-watchdog backup directory, then restart the watchdog timer and check Cowrie health. The second MongoDB archive has a verified manifest for a separately reviewed exact-document restore if needed.
+- Follow-up: observe normal watchdog health and the Threat Intelligence feed after a browser refresh; review retained loopback activity separately if desired.
+- Related ADR/runbook: [watchdog runbook](../deploy/service-watchdog/README.md), [Cowrie runbook](../integrations/cowrie/README.md), [current architecture](CURRENT-ARCHITECTURE.md), and [service catalog](SERVICE-CATALOG.md).
+
 ### 2026-09-28 — Remove confirmed Cowrie loopback watchdog sessions from canonical MongoDB
 
 - Status: active one-time data cleanup applied to production MongoDB; watchdog service unchanged and still active.

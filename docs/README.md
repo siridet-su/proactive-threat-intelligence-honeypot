@@ -58,6 +58,8 @@ The status boundary between the active HTTP decoy work and candidate future
 work is summarized in [HTTP decoy scope](design/http-decoy-scope.md).
 The active public-IP HTTPS/VPS/WireGuard procedure is in the
 [web-corp public-VPS HTTPS runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
+The active Pi Cowrie health check and its passive listener probe are in the
+[service-watchdog runbook](../deploy/service-watchdog/README.md).
 
 The tracked decoy source runbooks are [FTP](../integrations/ftp/README.md) and
 [SMTP](../integrations/smtp/README.md). Both services are stopped/future work;

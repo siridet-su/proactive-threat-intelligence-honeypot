@@ -13,7 +13,7 @@ an operational change.
 | Service or component | Exposure | Lifecycle | Owner/status | Telemetry path | Notes |
 | --- | --- | --- | --- | --- | --- |
 | Cowrie SSH | attacker-facing | Current | active, systemd-isolated | Sanitized Cowrie JSON → Go pipeline; legacy forwarder in parallel | Primary focus for adaptive shell work. Artifact bytes are reduced to a local SHA-256 ledger. |
-| Cowrie service watchdog | local loopback only | Current, active on Pi | operations | TCP probe → Cowrie connect/closed events | The host-local 30-second timer probes `127.0.0.1:22`. Cowrie records each successful probe as a session; the timer remains active after the 2026-09-28 exact-session MongoDB cleanup and can create new rows. See the [Cowrie runbook](../integrations/cowrie/README.md). |
+| Cowrie service watchdog | local Pi process/socket inspection | Current, active on Pi | operations | systemd state and passive TCP listener check | The 30-second timer checks `cowrie.service` and reads `/proc/net/tcp` for the port 22 listener without opening a session. The earlier active TCP probe created loopback Cowrie rows; see the [watchdog runbook](../deploy/service-watchdog/README.md) and [Cowrie cleanup runbook](../integrations/cowrie/README.md). |
 | Cowrie Telnet | attacker-facing | Current | inherited foundation | Cowrie JSON → same as SSH | Keep only while its deception value justifies scope. |
 | Cowrie management listener | private overlay | Current | operations | operational logs | Not an attacker-facing decoy. |
 | Admin SSH | Tailscale/ZeroTier only, port 2222 | Current | operations | host audit logs + fail2ban | Key-only, root-disabled; X11 and TCP/agent forwarding disabled. |

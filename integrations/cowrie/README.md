@@ -70,13 +70,16 @@ rollback process.
 ## Current Pi watchdog probe and loopback cleanup
 
 The existing Pi's `honeypot-service-watchdog.timer` runs about every 30 seconds.
-Its Cowrie TCP probe opens a connection to `127.0.0.1:22`. Cowrie emits a
-`cowrie.session.connect` and `cowrie.session.closed` pair, and the normal
-pipeline creates a canonical session with source IP `127.0.0.1`. This probe
-does not authenticate or submit commands. The watchdog is still active and
-will create new sessions until its probe is changed in a separate operation.
+Since the 2026-09-28 cutover, it checks Cowrie's service state and inspects
+`/proc/net/tcp` for the port 22 listener without connecting to Cowrie. The
+earlier active TCP probe opened `127.0.0.1:22` connections. Cowrie emitted a
+`cowrie.session.connect` and `cowrie.session.closed` pair for each check, and
+the normal pipeline created canonical sessions with source IP `127.0.0.1`.
+Those probes did not authenticate or submit commands. See the
+[watchdog runbook](../../deploy/service-watchdog/README.md) for the active
+method and rollback.
 
-The one-time [MongoDB cleanup tool](../../honeypot-analysis/production/tools/clear_loopback_cowrie_sessions.py)
+The [MongoDB cleanup tool](../../honeypot-analysis/production/tools/clear_loopback_cowrie_sessions.py)
 selects only closed `production_live` sessions older than two minutes with
 exactly one processed connect and one processed closed event, both from
 `127.0.0.1`, and a connect destination of `127.0.0.1:22`. It excludes local
@@ -87,3 +90,6 @@ in a transaction. Run without `--execute` to inspect the current counts; an
 execution requires the protected processor environment file and root access.
 The backup directory and counts are printed after the operation. Do not copy
 the archive or the processor environment into Git.
+After a cleanup, reload the Dashboard page to replace its in-memory live-feed
+snapshot. The live feed streams upserts; it does not push MongoDB deletion
+events into an already-open browser tab.

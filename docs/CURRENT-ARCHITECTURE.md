@@ -52,6 +52,7 @@ not rebuilt.
 | Component | State | Notes |
 | --- | --- | --- |
 | Cowrie SSH/Telnet | Active | Attacker-facing deception service with manifest-bound sanitized output and hash-only artifact retention. |
+| Cowrie service watchdog | Active on Pi | The 30-second timer checks the service state and passively confirms an IPv4 port 22 listener through `/proc/net/tcp`. It no longer opens a local SSH connection. The earlier probe's exact-pair MongoDB rows were cleaned separately; see the [watchdog runbook](../deploy/service-watchdog/README.md). |
 | Docker decoy stack | Partial | ZeroTier and WireGuard Web-corp HTTP containers, PostgreSQL, and Deception Core active; direct Pi HTTPS, Odoo, FTP, and SMTP containers stopped. |
 | Web-corp HTTP login decoy | Active | ZeroTier `:80` → container `:8080`; only login POSTs generate new app telemetry. Restricted spool → `raw:web-login` → processor → MongoDB `honeypot_db.events`; raw password stays out of Core commands and `event:canonical`. Old `web_http_request` records remain ingestible. |
 | Web-corp HTTPS | Active on Droplet | Nginx serves public-IP TLS on `:443`, uses `:80` for ACME and redirect, and proxies only over WireGuard to the Pi. Direct self-signed Pi TLS remains stopped. A synthetic login was rejected and persisted with HTTPS/443 metadata. Renewal dry-run passed; real renewal has not yet occurred. |
