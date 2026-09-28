@@ -1,5 +1,7 @@
 # Validation evidence
 
+- [2026-09-28 public Web-corp edge](2026-09-28-public-web-corp-edge.md) — trusted IP HTTPS, private WireGuard backend, synthetic login metadata, Zeek `wg0` ingestion, and renewal dry-run.
+
 - [2026-09-28 Azure ARM64 Cowrie/Zeek staging](2026-09-28-azure-arm64-cowrie-zeek-staging.md) — pinned dependency staging, loopback listener correction, interrupted-run recovery, and inactive final state.
 - [2026-09-28 existing Pi Zeek endpoint filter](2026-09-28-zeek-decoy-endpoint-filter.md) — bounded decoy-port capture and management-port exclusion after restart/reload.
 

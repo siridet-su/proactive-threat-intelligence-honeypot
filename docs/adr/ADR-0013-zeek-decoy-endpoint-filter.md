@@ -37,3 +37,12 @@ Cowrie and Web-corp application telemetry are independent of Zeek capture.
 - Validate a bounded allowed and excluded test flow after each change; inspect
   `packet_filter.log` if this Zeek version emits it. Keep the prior site policy in a protected host backup for
   rollback; do not copy it into Git.
+
+## 2026-09-28 addendum: WireGuard Web-corp backend
+
+The public HTTPS edge in ADR-0014 adds a Pi `wg0` worker. The same generated
+filter admits bidirectional TCP 80 only to the Pi's WireGuard address; the
+collector must also map that destination to `wg0`. The Droplet terminates
+public TLS, so Zeek sees private HTTP on `wg0`, while public HTTPS metadata
+comes from application telemetry. Management and unrelated tunnel traffic
+remain outside the filter.

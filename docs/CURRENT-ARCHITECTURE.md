@@ -24,12 +24,12 @@ Cowrie SSH/Telnet and Zeek observations flow through the Go collector, Redis,
 and processor to MongoDB Atlas; TI enrichment and analysis are separate
 downstream consumers.
 
-Web-corp serves HTTP on ZeroTier `10.58.33.42:80` → container `:8080`; `8080`
-is not a host-published listener. Only login POSTs produce app telemetry and
+Web-corp serves HTTP on ZeroTier `:80` and through a separate Pi WireGuard
+backend `:80` reached by the Droplet's public HTTPS `:443` proxy. Only login POSTs produce app telemetry and
 flow through the restricted spool, Go pipeline, Redis, and MongoDB Atlas.
 Page/scan requests receive page responses without app telemetry or Uvicorn
-access logs. The Pi's direct-TLS `:443` container is stopped; a trusted VPS
-HTTPS edge is target work. FTP, SMTP, and Odoo containers are stopped. Deception
+access logs. The Pi's direct-TLS `:443` container is stopped; the Droplet uses
+a short-lived public-IP certificate with automated renewal. FTP, SMTP, and Odoo containers are stopped. Deception
 Core on loopback `:9000` and PostgreSQL on loopback `:5432` remain active as
 Cowrie dependencies; neither is exposed as a public database/web service.
 
@@ -41,25 +41,26 @@ The legacy sensor forwarder remains active as an inherited parallel path. It
 must not be expanded as part of new features. Its retirement or migration is a
 separate, verified change once the Go pipeline and cloud receiver have parity.
 
-The active decoy stack now has a tracked [Compose source](../deploy/decoy-honeypot/README.md)
+The active decoy stack has a tracked [Compose source](../deploy/decoy-honeypot/README.md)
 and Deception Core build context in this repository. The existing Pi still
-runs its earlier external Compose file; this repository change did not rebuild
-or restart those containers.
+runs its earlier external Compose file with a host-local override for the
+additional WireGuard Web-corp container. The original ZeroTier container was
+not rebuilt.
 
 ## Runtime posture at last verification
 
 | Component | State | Notes |
 | --- | --- | --- |
 | Cowrie SSH/Telnet | Active | Attacker-facing deception service with manifest-bound sanitized output and hash-only artifact retention. |
-| Docker decoy stack | Partial | Web-corp HTTP, PostgreSQL, and Deception Core containers active; direct HTTPS, Odoo, FTP, and SMTP containers stopped. |
+| Docker decoy stack | Partial | ZeroTier and WireGuard Web-corp HTTP containers, PostgreSQL, and Deception Core active; direct Pi HTTPS, Odoo, FTP, and SMTP containers stopped. |
 | Web-corp HTTP login decoy | Active | ZeroTier `:80` → container `:8080`; only login POSTs generate new app telemetry. Restricted spool → `raw:web-login` → processor → MongoDB `honeypot_db.events`; raw password stays out of Core commands and `event:canonical`. Old `web_http_request` records remain ingestible. |
-| Web-corp HTTPS | Stopped on Pi | Direct self-signed TLS container on ZeroTier `:443` stopped 2026-09-25. Public-VPS HTTPS/WireGuard runbook is a not-deployed target. |
+| Web-corp HTTPS | Active on Droplet | Nginx serves public-IP TLS on `:443`, uses `:80` for ACME and redirect, and proxies only over WireGuard to the Pi. Direct self-signed Pi TLS remains stopped. A synthetic login was rejected and persisted with HTTPS/443 metadata. Renewal dry-run passed; real renewal has not yet occurred. |
 | Odoo, FTP, SMTP | Stopped / future | Odoo and the FTP/SMTP containers are stopped. Tracked FTP/SMTP sources remain future work pending event adapters and dashboard integration. |
 | OpenCanary HTTP login | Prepared, stopped (2026-09-24) | HTTP-only `nasLogin` staging on loopback port 8081; local rotating JSONL log; no firewall exposure or central event adapter. |
 | Sensor forwarder | Active, legacy | Inherited cloud-forwarding path. |
 | Go collector/processor/hardware agents | Active | Login pipeline uses collector/processor; hardware uses a 30-document MongoDB live ring plus one-minute rollups; Pi Redis remains bounded and internal. The processor emits validated TI jobs only for eligible observables when `THREAT_INTEL_ENABLED=true`. |
 | Retained data backup worker | Active for `hardware_metrics_1m`, `filesystem_audit`, and `threat_events` | On 2026-09-27 the Pi worker was advanced to the schedule-capable binary from `b75749e`. Its enabled control service schedules the daily Bangkok run at the default 03:30, reads append-only Dashboard schedule revisions, and claims one run per local day. The former fixed timer is disabled and inactive. The first scheduler catch-up completed all three targets on 2026-09-27 without a duplicate run; the source window ended 2026-09-25. The prior archive verification found 29 successful bucket-tagged manifests per target, with 21 threat-event days containing 53,496 records and eight empty days. Older bucket-less manifests and B2 versions were retained. `cwd_audit_projection` remains excluded because it is rebuildable. The sensitive threat-event target remains enabled under the reviewed private-bucket policy; production Dashboard deployment and read-only restore verification remain unverified. |
-| Redis and Zeek | Active | Pi Zeek retains its local manager/logger/proxy cluster with `wlan0` and ZeroTier workers; capture is limited to active Cowrie TCP 22/23 and ZeroTier Web-corp TCP 80 endpoints. Redis streams and the collector remain active. Tailscale inner traffic is outside Zeek capture. |
+| Redis and Zeek | Active | Pi Zeek has `wlan0`, ZeroTier, and `wg0` workers. The filter admits Cowrie TCP 22/23 on the first two interfaces and Web-corp TCP 80 on ZeroTier and `wg0`; other development/management traffic is excluded. Synthetic public HTTPS traffic produced `wg0` conn/http events in MongoDB. Tailscale inner traffic remains outside Zeek capture. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
 | Dashboard Filesystem Activity | Current source merged; local Evidence reviewed; production deployment unverified | `main` retains Route Replay and Admin-only command/download Evidence after retiring session termination. An authenticated localhost screenshot showed command submissions and one canonical file-download event after PR #96 merged. This does not verify a production Dashboard deployment or the Artifact Intelligence link destination. The Pi response agent remains retired; tailnet ACL cleanup and the next Cowrie restart remain pending. See [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md), the [retirement runbook](RESPONSE-CONTROL-PLANE.md), and the [Filesystem working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md). |

@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Activate public Web-corp HTTPS through the Droplet
+
+- Status: active on the existing Droplet and Pi; repository source and runbooks updated.
+- Scope and intent: expose the fake ERP login with trusted public-IP HTTPS while keeping the Pi HTTP backend private, retaining the existing ZeroTier test listener and Cowrie TCP 22 forward, and limiting Zeek to decoy traffic.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: add the opt-in WireGuard Web-corp Compose override, Nginx/Certbot edge templates and units, Zeek `wg0` worker and endpoint filter, collector WireGuard destination mapping and test, ADR-0014, validation evidence, and current-state/runbook updates.
+- Host/environment changes actually applied: on the Pi, added a host-local Compose override and separate WireGuard Web-corp container using the existing built image, deployed the reviewed Zeek config/helper and collector ARM64 binary, and added private collector interface settings. Protected backups of previous Zeek, collector, and override files remain on the host. The original ZeroTier container and dirty local Web-corp source were not overwritten. On the Droplet, installed Nginx and current Certbot, opened host-firewall TCP 80/443 while retaining existing SSH/WireGuard rules, issued staging and production IP certificates, installed the HTTPS proxy, and enabled renewal and expiry-check timers. Root-only pre-edge firewall and Nginx backups remain on the host.
+- Runtime/exposure state: public TCP 22 still forwards to Cowrie; public TCP 23 remains closed. Public TCP 80 serves ACME HTTP-01 and redirects to HTTPS; TCP 443 serves Web-corp through WireGuard to the Pi. The Pi's direct HTTPS container remains stopped. Zeek's local cluster has `wlan0`, ZeroTier, and `wg0` workers; collector and processor are active.
+- Validation performed and outcome: external trusted HTTPS GET returned 200 and HTTP redirected 308; ACME staging/production issuance and `certbot renew --dry-run` passed. A synthetic rejected login persisted with external source and HTTPS/443 metadata. The first login showed a proxy trust mismatch; after correcting the trust peer, a second test passed. Forged forwarding headers on the direct ZeroTier container were ignored. Bounded `wg0` packet capture and Zeek conn/http logs matched the public GET, and MongoDB contained four recent Zeek `wg0` conn/http records. Go tests and synthetic BPF tests passed. The expiry-check service returned success.
+- Not performed / deferred: an actual certificate renewal, external expiry notification, authenticated browser review, sustained public traffic/packet-loss measurement, long-term storage growth, Pi repo checkout sync, and clean-host install acceptance.
+- Risks and data handling: the certificate is short lived; local timer failure is not an off-host alert. Public exposure may increase credential-sensitive login records. No certificate private key, secret, raw login value, protected backup content, or host-private interface address was committed.
+- Rollback: close public TCP 80/443 or disable the Nginx site first; restore protected Droplet firewall/Nginx backups if needed. Stop only the Pi WireGuard Web-corp container and restore protected Zeek/collector copies if reverting telemetry. Preserve the original ZeroTier listener, Cowrie forward, and collected records.
+- Follow-up: connect expiry failure to an off-host alert receiver, observe a real renewal and proxy reload, and measure Zeek/storage volume after representative traffic.
+- Related ADR/runbook: [ADR-0014](adr/ADR-0014-public-web-corp-ip-https-edge.md), [public edge runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md), [edge assets](../deploy/public-web-edge/README.md), and [validation evidence](validation/2026-09-28-public-web-corp-edge.md).
+
 ### 2026-09-28 — Restrict Pi Zeek packets to active decoy endpoints
 
 - Status: active on the existing Pi; repository source and operations documentation updated.

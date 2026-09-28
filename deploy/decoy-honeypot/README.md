@@ -5,6 +5,15 @@ from this path**. The existing Pi still runs the older external Compose
 project. This directory is the source for a future clean-host installation and
 controlled cutover.
 
+An opt-in [`compose.public-web.yaml`](compose.public-web.yaml) defines a
+second Web-corp HTTP container bound only to the Pi WireGuard address. Set
+`WEB_CORP_WG_BIND_IP` and `WEB_CORP_PROXY_PEER_IP` in a private environment,
+then use both Compose files with `--profile public-web` for this service.
+The existing Pi runs a host-local equivalent override alongside its external
+Compose file; the original ZeroTier Web-corp container remains active.
+Never use a wildcard bind or trust all forwarded headers. The VPS edge
+procedure is in the [public Web-corp runbook](../../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
+
 `compose.yaml` contains the three currently active services: PostgreSQL,
 Deception Core, and Web-corp HTTP. The Deception Core image builds from
 [`integrations/deception-core/`](../../integrations/deception-core/); Web-corp

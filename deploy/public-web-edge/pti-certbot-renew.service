@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew public Web-corp IP certificate
+After=network-online.target nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/pti-certbot/bin/certbot renew --quiet --non-interactive --no-random-sleep-on-renew --deploy-hook /usr/local/sbin/pti-nginx-cert-reload

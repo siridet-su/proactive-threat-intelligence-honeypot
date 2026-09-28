@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+
+certificate=/etc/letsencrypt/live/pti-ip-public/fullchain.pem
+if ! /usr/bin/openssl x509 -in "$certificate" -noout -checkend 172800 >/dev/null 2>&1; then
+    /usr/bin/logger -p daemon.crit -t pti-cert-expiry 'Public Web-corp certificate expires within 48 hours or cannot be read'
+    exit 1
+fi

@@ -32,6 +32,8 @@ and historical material inherited from the previous team.
    Pi's Zeek capture to its primary uplink and ZeroTier.
    [ADR-0013](adr/ADR-0013-zeek-decoy-endpoint-filter.md) limits Zeek packets
    to active decoy endpoints on those interfaces.
+   [ADR-0014](adr/ADR-0014-public-web-corp-ip-https-edge.md) defines the
+   public HTTPS edge and private WireGuard backend for Web-corp.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
@@ -54,7 +56,7 @@ The optional Web-corp client source-port capture and trusted-proxy boundary are
 recorded in [ADR-0006](adr/ADR-0006-web-client-source-port.md).
 The status boundary between the active HTTP decoy work and candidate future
 work is summarized in [HTTP decoy scope](design/http-decoy-scope.md).
-The not-yet-deployed public-IP HTTPS/VPS/WireGuard target procedure is in the
+The active public-IP HTTPS/VPS/WireGuard procedure is in the
 [web-corp public-VPS HTTPS runbook](../integrations/web-corp/PUBLIC-VPS-HTTPS.md).
 
 The tracked decoy source runbooks are [FTP](../integrations/ftp/README.md) and

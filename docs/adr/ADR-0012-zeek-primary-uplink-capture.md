@@ -46,3 +46,9 @@ installing the tracked file. Check the new configuration, restart `zeek.service`
 then verify Zeek status, the current log path, and collector health. To roll
 back, restore the protected host copy and restart `zeek.service`. The backup's
 contents and host-specific interface details stay outside Git.
+
+## 2026-09-28 addendum: public Web-corp path
+
+ADR-0014 adds a `wg0` worker to observe only the private Web-corp HTTP
+backend. The Tailscale worker remains removed. The endpoint filter and
+collector gate remain required for the new worker.

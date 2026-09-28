@@ -1,16 +1,16 @@
 # Existing Pi Zeek capture
 
 The tracked `node.cfg` is the reviewed capture scope for the existing Pi:
-one `wlan0` worker and one ZeroTier worker in the local Zeek cluster. There is
+`wlan0`, ZeroTier, and `wg0` workers in the local Zeek cluster. There is
 no Tailscale worker. The fresh-install Ansible Zeek playbook uses its own
 versioned template and has a separate validation boundary.
 
 The active Pi also loads `pti-decoy-capture.zeek` from its site policy. The
 tracked [renderer](render_decoy_capture.py) generates that host-specific file
-from the current `wlan0` and ZeroTier IPv4 addresses before each Zeek start.
+from the current `wlan0`, ZeroTier, and `wg0` IPv4 addresses before each Zeek start.
 The [systemd drop-in](../systemd-services/zeek-decoy-capture.conf) invokes the
 renderer on start and reload. Zeek captures Cowrie TCP 22/23 on both interfaces
-and Web-corp TCP 80 on ZeroTier only, in both directions. Admin SSH 2222 and stopped decoy
+and Web-corp TCP 80 on ZeroTier and `wg0`, in both directions. Admin SSH 2222 and stopped decoy
 ports are outside this filter. The generated file contains private interface
 addresses and stays on the host; it is never committed.
 
@@ -53,4 +53,6 @@ configuration. Never copy a protected backup into this repository.
 
 The interface and endpoint choices are recorded in
 [ADR-0012](../docs/adr/ADR-0012-zeek-primary-uplink-capture.md) and
-[ADR-0013](../docs/adr/ADR-0013-zeek-decoy-endpoint-filter.md).
+[ADR-0013](../docs/adr/ADR-0013-zeek-decoy-endpoint-filter.md), extended for
+the public Web-corp path by
+[ADR-0014](../docs/adr/ADR-0014-public-web-corp-ip-https-edge.md).

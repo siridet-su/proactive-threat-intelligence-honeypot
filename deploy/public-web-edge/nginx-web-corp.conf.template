@@ -1,0 +1,42 @@
+# Render @PUBLIC_IPV4@ and @PI_WG_IPV4@ on the VPS. Never put keys in Git.
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name @PUBLIC_IPV4@;
+    access_log off;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/pti-acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 308 https://@PUBLIC_IPV4@$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name @PUBLIC_IPV4@;
+    access_log off;
+
+    ssl_certificate /etc/letsencrypt/live/pti-ip-public/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pti-ip-public/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+
+    client_max_body_size 32k;
+
+    location / {
+        proxy_pass http://@PI_WG_IPV4@:80;
+        proxy_http_version 1.1;
+        proxy_set_header Host @PUBLIC_IPV4@;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Client-Port $remote_port;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 20s;
+    }
+}

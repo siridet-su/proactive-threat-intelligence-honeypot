@@ -12,7 +12,7 @@ from pathlib import Path
 
 SITE_DIR = Path("/usr/local/zeek/share/zeek/site")
 OUTPUT = SITE_DIR / "pti-decoy-capture.zeek"
-INTERFACES = ("wlan0", "ztxoocdlsi")
+INTERFACES = ("wlan0", "ztxoocdlsi", "wg0")
 
 
 def interface_ipv4(name: str) -> str:
@@ -33,7 +33,7 @@ def interface_ipv4(name: str) -> str:
     return str(ipaddress.IPv4Address(addresses[0]))
 
 
-def capture_filter(wlan_ip: str, zerotier_ip: str) -> str:
+def capture_filter(wlan_ip: str, zerotier_ip: str, wireguard_ip: str) -> str:
     wlan_dst_ports = "(dst port 22 or dst port 23)"
     wlan_src_ports = "(src port 22 or src port 23)"
     zerotier_dst_ports = "(dst port 22 or dst port 23 or dst port 80)"
@@ -43,7 +43,9 @@ def capture_filter(wlan_ip: str, zerotier_ip: str) -> str:
         f"(dst host {wlan_ip} and {wlan_dst_ports}) or "
         f"(src host {wlan_ip} and {wlan_src_ports}) or "
         f"(dst host {zerotier_ip} and {zerotier_dst_ports}) or "
-        f"(src host {zerotier_ip} and {zerotier_src_ports})"
+        f"(src host {zerotier_ip} and {zerotier_src_ports}) or "
+        f"(dst host {wireguard_ip} and dst port 80) or "
+        f"(src host {wireguard_ip} and src port 80)"
         ")"
     )
 
@@ -52,7 +54,7 @@ def main() -> None:
     deadline = time.monotonic() + 40
     while True:
         try:
-            wlan_ip, zerotier_ip = (interface_ipv4(name) for name in INTERFACES)
+            wlan_ip, zerotier_ip, wireguard_ip = (interface_ipv4(name) for name in INTERFACES)
             break
         except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
             if time.monotonic() >= deadline:
@@ -61,7 +63,7 @@ def main() -> None:
 
     content = (
         "# Generated at Zeek startup from active interface addresses. Do not edit.\n"
-        f'redef PacketFilter::restricted_filter = "{capture_filter(wlan_ip, zerotier_ip)}";\n'
+        f'redef PacketFilter::restricted_filter = "{capture_filter(wlan_ip, zerotier_ip, wireguard_ip)}";\n'
     )
     with tempfile.NamedTemporaryFile(
         mode="w", encoding="ascii", dir=SITE_DIR, prefix=".pti-decoy-capture-", delete=False
