@@ -66,3 +66,24 @@ sanitization without weakening credential redaction.
 Do not apply the patch directly to a live dirty Cowrie checkout. Preserve its
 existing patch series and use the project's normal staged deployment and
 rollback process.
+
+## Current Pi watchdog probe and loopback cleanup
+
+The existing Pi's `honeypot-service-watchdog.timer` runs about every 30 seconds.
+Its Cowrie TCP probe opens a connection to `127.0.0.1:22`. Cowrie emits a
+`cowrie.session.connect` and `cowrie.session.closed` pair, and the normal
+pipeline creates a canonical session with source IP `127.0.0.1`. This probe
+does not authenticate or submit commands. The watchdog is still active and
+will create new sessions until its probe is changed in a separate operation.
+
+The one-time [MongoDB cleanup tool](../../honeypot-analysis/production/tools/clear_loopback_cowrie_sessions.py)
+selects only closed `production_live` sessions older than two minutes with
+exactly one processed connect and one processed closed event, both from
+`127.0.0.1`, and a connect destination of `127.0.0.1:22`. It excludes local
+sessions with login, command, or other activity and excludes port 2222. It
+checks every collection for other references, saves the selected documents in
+a verified, root-only Pi backup, then deletes their exact MongoDB `_id` values
+in a transaction. Run without `--execute` to inspect the current counts; an
+execution requires the protected processor environment file and root access.
+The backup directory and counts are printed after the operation. Do not copy
+the archive or the processor environment into Git.

@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Remove confirmed Cowrie loopback watchdog sessions from canonical MongoDB
+
+- Status: active one-time data cleanup applied to production MongoDB; watchdog service unchanged and still active.
+- Scope and intent: clear only closed Cowrie `127.0.0.1:22` sessions with exactly one processed connect event and one processed closed event. Preserve local sessions with login, command, or other activity, and preserve port 2222 sessions.
+- Repository branch and commit/PR: `cleanup/loopback-watchdog-mongo-20260928` worktree from `origin/main` at `231ff59`; commit pending at entry time, no PR opened.
+- Repository changes: add a guarded exact-ID MongoDB cleanup tool and document the active watchdog probe and cleanup procedure. The separate installation worktree was not modified.
+- Host/environment changes actually applied: read the protected Pi MongoDB connection file without exposing its contents; backed up and verified the exact selected documents under the root-only Pi directory `/var/backups/honeypot/loopback-cowrie-cleanup/20260928T142449488526Z`; deleted 1,336 canonical sessions, 2,672 canonical events, 5,344 observable sightings, 10 prediction outbox documents, and 10 prediction snapshots in one MongoDB transaction. No Pi service, timer, environment file, firewall rule, or VPS setting was changed.
+- Runtime/exposure state: Cowrie and the 30-second local watchdog probe remain active. A read-only post-cleanup inspection found 96 current `127.0.0.1` sessions: 87 with other or incomplete activity, eight connect/closed pairs excluded by safety checks, and one new eligible watchdog session generated after the deletion. New probe sessions will continue to appear until the watchdog probe changes.
+- Validation performed and outcome: preflight classified the live session/event records by session identity, event pair, destination, processed state, and ended state. The tool verified the protected Extended JSON backups before deletion, checked exact document counts inside the transaction, and verified that all selected `_id` values were absent after commit. The post-cleanup read-only preflight confirmed the preserved non-probe groups and one newly generated probe row.
+- Not performed / deferred: watchdog probe change, Dashboard deployment or browser refresh check, protected-backup restore exercise, and removal of the remaining loopback sessions with activity. The existing `observables` aggregate was not rewritten because it also represents retained loopback activity and its lifetime sighting count is not a direct count of current sightings.
+- Risks and data handling: the protected archive may contain sensitive telemetry and remains only on the Pi. No credentials, raw events, payloads, or archive contents were added to Git. Continued watchdog probes will repopulate MongoDB until the source is corrected.
+- Rollback: review the protected archive manifest and its SHA-256 hashes, then restore only the listed exact BSON documents through a reviewed PyMongo Extended JSON import after checking for newer records with the same `_id`. Preserve the archive and audit entry.
+- Follow-up: change the watchdog Cowrie check to avoid opening a TCP session, then run the tool's read-only preflight again and review any later exact-pair rows for a separate cleanup.
+- Related ADR/runbook: [Cowrie runbook](../integrations/cowrie/README.md), [service catalog](SERVICE-CATALOG.md), and [cleanup tool](../honeypot-analysis/production/tools/clear_loopback_cowrie_sessions.py).
+
 ### 2026-09-28 — Include HTTP sessions in Threat Intelligence Console rows per page and pagination
 
 - Status: repository Dashboard change prepared; not applied to a host or activated.
