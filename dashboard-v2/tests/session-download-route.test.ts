@@ -41,7 +41,7 @@ describe("session-scoped file download evidence route", () => {
     vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
     vi.spyOn(commandServer, "resolveCanonicalSessionIdForCommandEvidence").mockResolvedValue(SESSION_ID);
     const load = vi.spyOn(downloadServer, "loadSessionDownloads").mockResolvedValue({
-      downloads: [{ event_id: "event-1", timestamp: "2026-09-27T00:00:00Z", sha256: HASH }], truncated: false,
+      downloads: [{ event_id: "event-1", timestamp: "2026-09-27T00:00:00Z", sha256: HASH, kind: "network_download" }], truncated: false,
     });
     const response = await callRoute();
     const body = await response.json();

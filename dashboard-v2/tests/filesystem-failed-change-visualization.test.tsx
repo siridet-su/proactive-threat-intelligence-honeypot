@@ -580,9 +580,8 @@ describe("FSV-005 failed-change visualization", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Selected CWD context");
-    expect(container.textContent).toContain(VERIFIED_ORIGIN);
-    expect(container.textContent).toContain("attempted destination unavailable or unverified");
+    expect(container.textContent).toContain("Session-scoped command evidence");
+    expect(container.textContent).toContain("not automatically linked to the selected CWD hop");
     assertHostileDestinationAbsent(container);
   });
 

@@ -44,7 +44,7 @@
       {
         "artifact_id": "threat-hypothesis-runtime",
         "path": "production/reporting/threat_hypothesis.py",
-        "sha256": "4da2da33bf0af640e8e40ffb7e05e5ef0edb4926c235b7f15784088970b1db5d",
+        "sha256": "e380b1f0fbd881ad77093f6c81f497c313bb03b896179a9b2bb835c10d40eb02",
         "purpose": "hypothesis derivation, evidence references, limitations, and authority boundary",
         "supports": [
           "the executable derive/render behavior bound to the reviewed policy"
@@ -56,13 +56,25 @@
       {
         "artifact_id": "typed-relationship-runtime",
         "path": "production/correlation/session_behavior_relationships.py",
-        "sha256": "0b0fff8136a8005a9db3efc7c105692fb1db056d8704e03f369975ab20ac5ed9",
+        "sha256": "c4191d79ac96d770cef0c4077175493947feddc397e0759c906e279c1781addd",
         "purpose": "ordered relationship and same-entity predicate evaluation",
         "supports": [
           "typed chain predicates and chronological relationship checks"
         ],
         "does_not_support": [
           "real-world success or attacker intent"
+        ]
+      },
+      {
+        "artifact_id": "cowrie-network-transfer-boundary",
+        "path": "production/utils/cowrie_transfer.py",
+        "sha256": "f5d7dca04e1c154acaec382fdabf9fbe23f5cd927b52305548b8d42cafb2d307",
+        "purpose": "distinguish Cowrie download events from local shell redirection artifacts",
+        "supports": [
+          "network transfer observation requires a parsed source URL for file_download"
+        ],
+        "does_not_support": [
+          "network transfer from a Cowrie event ID or artifact hash alone"
         ]
       },
       {

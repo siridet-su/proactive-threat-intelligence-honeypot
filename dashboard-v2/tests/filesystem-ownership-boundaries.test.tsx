@@ -198,7 +198,8 @@ describe("FA-012 ownership boundaries", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("No active honeypot sessions");
+    expect(container.querySelector('[aria-label="Live honeypot activity"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("No verified working directory data yet");
     expect(vi.getTimerCount()).toBe(0);
   });
 

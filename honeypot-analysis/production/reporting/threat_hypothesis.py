@@ -31,6 +31,7 @@ from production.reporting.typed_semantic_chain_selection import (
     validate_typed_chain_selection_provenance,
 )
 from production.utils.serialization import stable_id
+from production.utils.cowrie_transfer import is_cowrie_network_transfer
 
 
 EVIDENCE_STATUSES = {"supported", "partially_supported", "insufficient_evidence"}
@@ -166,6 +167,7 @@ def _event_evidence(raw_events: List[Dict[str, Any]], session_id: str) -> List[D
         "cowrie.command.input",
         "cowrie.command.success",
         "cowrie.command.failed",
+        "cowrie.fs.operation_result",
         "cowrie.session.file_download",
         "cowrie.session.file_upload",
     }
@@ -197,7 +199,7 @@ def _event_evidence(raw_events: List[Dict[str, Any]], session_id: str) -> List[D
                 if eventid == "cowrie.command.success"
                 else "cowrie_reported_failure"
             )
-        if eventid in {"cowrie.session.file_download", "cowrie.session.file_upload"}:
+        if is_cowrie_network_transfer(event):
             item["sha256"] = _clean(event.get("shasum"))
             item["transfer_observed"] = True
         output.append(item)
@@ -448,7 +450,9 @@ def _event_refs(observed: Dict[str, Any], eventid: str) -> List[str]:
     return [
         _clean(item.get("evidence_id"))
         for item in observed.get("cowrie_event_evidence") or []
-        if item.get("eventid") == eventid and _clean(item.get("evidence_id"))
+        if (item.get("eventid") == eventid
+            and (eventid != "cowrie.session.file_download" or item.get("transfer_observed") is True)
+            and _clean(item.get("evidence_id")))
     ]
 
 

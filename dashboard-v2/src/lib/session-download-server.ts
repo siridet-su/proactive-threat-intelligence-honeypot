@@ -10,9 +10,24 @@ export interface SessionDownloadEvidence {
   event_id: string;
   timestamp: string | null;
   sha256: string | null;
+  kind: "network_download" | "local_redirection" | "unverified";
 }
 
-/** Bounded, hash-only projection of canonical Cowrie download events for one verified session. */
+function eventKind(payload: Record<string, unknown>): SessionDownloadEvidence["kind"] {
+  if (typeof payload.url === "string" && payload.url.length <= 4096) {
+    try {
+      const url = new URL(payload.url);
+      if (["http:", "https:", "ftp:", "sftp:"].includes(url.protocol) && url.hostname) return "network_download";
+    } catch { /* A malformed URL is not evidence of a network download. */ }
+  }
+  if (typeof payload.destfile === "string" && payload.destfile.length > 0
+    && typeof payload.message === "string" && payload.message.startsWith("Saved redir contents")) {
+    return "local_redirection";
+  }
+  return "unverified";
+}
+
+/** Bounded, hash-only projection of Cowrie file artifact events for one verified session. */
 export async function loadSessionDownloads(sessionId: string): Promise<{ downloads: SessionDownloadEvidence[]; truncated: boolean }> {
   if (!CANONICAL_SESSION_ID_PATTERN.test(sessionId)) throw new TypeError("invalid canonical session identifier");
   const client = await getMongoClient();
@@ -35,6 +50,7 @@ export async function loadSessionDownloads(sessionId: string): Promise<{ downloa
       event_id: row.event_id,
       timestamp: typeof timestamp === "string" && timestamp.length <= 64 ? timestamp : null,
       sha256: normalizeSha256(payload.shasum ?? payload.sha256),
+      kind: eventKind(payload),
     }];
   });
   return { downloads, truncated: rows.length > MAX_DOWNLOADS };
