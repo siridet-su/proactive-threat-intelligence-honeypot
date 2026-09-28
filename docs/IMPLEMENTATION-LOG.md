@@ -3231,3 +3231,13 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Validation performed and outcome: TypeScript, full lint, and a local production Webpack build passed. A new late-result frontend test verifies that a closed session refreshes after its first snapshot and stops once report and AI are ready. The full Dashboard test suite passed with 847 passed, two expected failures and 14 skipped. Full lint initially failed on the pre-existing replay effect and passed after its narrow correction. Authenticated browser behavior has not yet been verified.
 - Not performed / deferred: no production Dashboard deployment or backend restart. A future live session is still needed to verify the end-to-end timing in an authenticated browser.
 - Rollback: revert only this Dashboard frontend change on staging; no host data rollback is required.
+
+### 2026-09-28 — Staging activation addendum for late Session Analysis refresh
+
+- Status: Dashboard staging release active; production Dashboard unchanged.
+- Repository change applied: commit `b0b1d6b3a2e9af85b738c9bcff8c00e55d2821f3` was pushed to `staging` after fast-forwarding over a concurrent topology change. The Dashboard staging CI and deploy jobs both completed successfully.
+- Host/environment changes actually applied: staging CI/CD activated the exact commit in `/opt/honeypot-dashboard-v2-staging/current` and restarted the staging Dashboard service. No manual GCP backend deployment, model change, policy change, database write, or Pi configuration change was performed. The old staging instance took its configured stop timeout before the new service became active.
+- Runtime/exposure state: GCP staging service was active and its loopback login returned HTTP 200; the public Cloudflare login page showed the STAGING build marker for `b0b1d6b3a2e9`. This verifies the frontend release identity, not authenticated session rendering.
+- Validation performed and outcome: staging CI/deploy succeeded, full local Dashboard lint, TypeScript, 847 passing tests with two expected failures and 14 skipped, and a local production Webpack build passed. The investigated monitor session had a completed report, available guidance, hypothesis set, and accepted AI advisory when checked read-only.
+- Not performed / deferred: no fresh post-release session was created to time the browser's automatic late-result transition, and no authenticated browser visual assertion was made. Production Dashboard remains on its prior release.
+- Rollback: staging can return to its previous immutable release if the new UI refresh causes a regression; do not change the GCP backend for this frontend-only fix.
