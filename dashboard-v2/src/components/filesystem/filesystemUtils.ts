@@ -689,11 +689,14 @@ export function calculateHistoryTimeMetrics(
 }
 
 export type ReplayPacingMode = "realistic" | "uniform";
+export const REPLAY_STEP_DELAY_1X_MS = 3000;
+export const REPLAY_STEP_DELAY_2X_MS = 1500;
 
 /**
  * Calculates playback delay based on pacing mode and real event dwell delta.
- * In "uniform" mode: returns fixed playbackSpeed (e.g. 1400ms or 700ms).
- * In "realistic" mode: returns dynamic delay clamped between 300ms and 3200ms.
+ * In "uniform" mode: returns the selected fixed interval (3000ms or 1500ms).
+ * In "realistic" mode: compresses recorded dwell into 2000-8000ms at 1x,
+ * then halves that interval at 2x.
  */
 export function calculateReplayPacingDelay(
   deltaMs: number,
@@ -704,7 +707,7 @@ export function calculateReplayPacingDelay(
     return playbackSpeed;
   }
 
-  const speedFactor = playbackSpeed === 700 ? 2 : 1;
+  const speedFactor = playbackSpeed === REPLAY_STEP_DELAY_2X_MS ? 2 : 1;
   const safeDelta = Math.max(0, Number.isFinite(deltaMs) ? deltaMs : 0);
 
   let unscaledDelay: number;
@@ -718,8 +721,8 @@ export function calculateReplayPacingDelay(
     unscaledDelay = 2200 + Math.min(1000, Math.log10(safeDelta / 60_000) * 500);
   }
 
-  const finalDelay = Math.round(unscaledDelay / speedFactor);
-  return Math.min(3200, Math.max(300, finalDelay));
+  const boundedDelay = Math.min(8000, Math.max(2000, Math.round(unscaledDelay * 10 / 3)));
+  return Math.round(boundedDelay / speedFactor);
 }
 
 export function directorySegment(path: string): string {

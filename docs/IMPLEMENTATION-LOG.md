@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Lengthen Filesystem Activity Route Replay pacing
+
+- Status: repository change prepared on a staging-based branch; browser deployment not verified.
+- Scope and intent: make both 1x and 2x Route Replay easier to follow without changing recorded event timestamps or hop order.
+- Repository branch and commit/PR: `fix/filesystem-replay-slower-20260928` from `origin/staging` at `7f7e5a9`; commit pending at entry time.
+- Repository changes: increase Step intervals from 1400/700 ms to 3000/1500 ms; scale Real playback to 2000–8000 ms at 1x and 1000–4000 ms at 2x while retaining timestamp-based relative pacing. Update existing timing assertions and current replay documentation.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB data, or credential changed in this repository step.
+- Runtime/exposure state: the operator reports both 1x and 2x Route Replay are too fast. The slower timing will become active only on a Dashboard deployment containing this revision.
+- Validation performed and outcome: source review confirmed playback waits through `calculateReplayPacingDelay` and the Step interval also controls route animation duration. `git diff --check` passed.
+- Not performed / deferred: automated tests, interactive playback review, staging deployment confirmation, and production deployment.
+- Risks and data handling: replay remains a compressed visualization of retained timestamps, not a wall-clock reproduction. No attacker content or secret was added to this record.
+- Rollback: revert this pacing commit; no data rollback is required.
+- Follow-up: confirm the deployed revision and review multi-hop playback at both speeds and in both pacing modes.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [CWD tracking replay guide](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md).
+
 ### 2026-09-28 — Prevent Route Replay from playing a one-event session
 
 - Status: repository correction prepared on a staging-based branch; deployment not yet verified.

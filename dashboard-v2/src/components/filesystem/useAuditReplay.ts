@@ -12,6 +12,8 @@ import {
   buildReplayTimeline,
   calculateReplayPacingDelay,
   getHistoryWindowMetrics,
+  REPLAY_STEP_DELAY_1X_MS,
+  REPLAY_STEP_DELAY_2X_MS,
   type ActiveHopRoute,
   type HistoryWindowMetrics,
   type HopTimeMetrics,
@@ -79,7 +81,7 @@ export function deriveActiveHopRoute(
 }
 
 export function getNextPlaybackSpeed(currentSpeed: number): number {
-  return currentSpeed === 1400 ? 700 : 1400;
+  return currentSpeed === REPLAY_STEP_DELAY_1X_MS ? REPLAY_STEP_DELAY_2X_MS : REPLAY_STEP_DELAY_1X_MS;
 }
 
 export function getNextPacingMode(currentMode: ReplayPacingMode): ReplayPacingMode {
@@ -196,7 +198,7 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   } = options;
 
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(1400);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(REPLAY_STEP_DELAY_1X_MS);
   const [pacingMode, setPacingMode] = useState<ReplayPacingMode>(initialPacingMode);
   const [showFailedAttempts, setShowFailedAttempts] = useState(true);
 

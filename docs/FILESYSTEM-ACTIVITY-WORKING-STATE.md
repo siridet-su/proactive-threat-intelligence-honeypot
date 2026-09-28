@@ -59,6 +59,10 @@ rows in the hosted Evidence panel, but it does not establish the deployment
 revision, response headers, or role denial. `FS-027` and `FS-028` are
 intentionally in progress alongside `FS-026` for the Source IP copy control and
 the one-event Route Replay playback correction.
+The staging source lengthens Route Replay pacing: Step waits
+3 seconds at 1x or 1.5 seconds at 2x; Real uses the recorded event spacing
+compressed to 2–8 seconds at 1x or 1–4 seconds at 2x. Deployment and visual
+review of this pacing change are pending.
 `FS-020` through `FS-024` are deferred
 product additions, not blockers for the accepted evidence/replay scope. In
 particular, `FS-024` has a local radar implementation but lacks its stated

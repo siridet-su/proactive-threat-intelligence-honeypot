@@ -2,7 +2,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Clock, CornerDownRight, FastF
 import type { KeyboardEvent } from "react";
 
 import type { SessionCwdHistoryEvent } from "@/lib/dashboardTypes";
-import { actionLabel, formatElapsedTime, formatFailedChangeMessage, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex } from "./filesystemUtils";
+import { actionLabel, formatElapsedTime, formatFailedChangeMessage, formatFromPath, isInitialSshEntry, mapReplayTimelineValueToIndex, REPLAY_STEP_DELAY_1X_MS } from "./filesystemUtils";
 
 export interface ReplayTransportProps {
   isAnchoredSelected: boolean;
@@ -256,7 +256,7 @@ export function ReplayTransport({
               className="px-2 h-7 rounded-md text-xs font-mono font-medium hover:bg-surface-hover hover:text-text transition-colors text-text-muted"
               title="Toggle playback speed (1x / 2x)"
             >
-              {playbackSpeed === 1400 ? "1x" : "2x"}
+              {playbackSpeed === REPLAY_STEP_DELAY_1X_MS ? "1x" : "2x"}
             </button>
             <div className="w-px h-3.5 bg-border mx-0.5" />
             <button
