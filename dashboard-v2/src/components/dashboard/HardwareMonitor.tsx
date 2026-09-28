@@ -197,11 +197,13 @@ export function HardwareMonitor() {
       setLoading(false);
     };
     const fetchSnapshot = async () => {
+      const startedAt = Date.now();
       try {
         const response = await fetch("/api/hardware", { cache: "no-store" });
         if (!response.ok) throw new Error("Hardware request failed");
         const data: unknown = await response.json();
         if (!Array.isArray(data)) throw new Error("Hardware response unavailable");
+        if (lastStreamDataAt > startedAt) return;
         receiveSnapshot(data.filter(isHardwareTelemetry));
       } catch {
         if (!hasSnapshot) {

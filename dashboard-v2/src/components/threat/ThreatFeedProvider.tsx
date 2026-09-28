@@ -53,7 +53,10 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
       if (!Array.isArray(data)) throw new Error("Threat response unavailable");
 
       // Do not let a slower REST response replace a newer SSE update.
-      if (lastStreamDataAt.current > startedAt) return;
+      if (lastStreamDataAt.current > startedAt) {
+        setStatus("ready");
+        return;
+      }
 
       setThreats(sortThreats(data.filter(isDashboardThreatEvent)));
       hasSnapshot.current = true;

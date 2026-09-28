@@ -2789,3 +2789,12 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Risks and data handling: silent-stream reconciliation adds bounded periodic reads while the page is open; no credentials, payloads, or protected URIs were copied into source or docs.
 - Rollback: revert only the frontend reconciliation change after confirming the previously deployed frontend identity; do not alter backend policy as part of a UI rollback.
 - Follow-up: verify staging build and authenticated SSE-vs-snapshot behavior on Filesystem Activity and System Health before claiming the public website is current.
+
+### 2026-09-28 — Follow-up correction for silent-stream reconciliation
+
+- Status: a small frontend follow-up was prepared after the first staging push; website activation of this follow-up is not yet verified.
+- Repository changes: prevent slower REST reconciliation from overwriting a newer SSE sample in hardware telemetry and restore the threat feed's ready status when a newer SSE update supersedes a REST response.
+- Host/environment changes actually applied: none by this correction. The first release pointer advanced on GCP, and its staging service eventually returned to active after a delayed shutdown; this does not prove the follow-up has deployed.
+- Validation performed and outcome: focused Vitest 42/42, scoped ESLint, and TypeScript check passed.
+- Not performed / deferred: authenticated browser verification and backend H1/H2/G1/G2 activation.
+- Risks and data handling: no new data fields, policy, secrets, or production backend changes.
