@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Prepare hosted Dashboard command evidence from canonical MongoDB
+
+- Status: repository change prepared; hosted production setting and deployment not yet applied.
+- Scope and intent: make the Admin-only Filesystem Activity Command events panel usable when Dashboard and the private Pi monitor do not share a loopback interface.
+- Repository branch and commit/PR: `feature/filesystem-activity-command-evidence-20260928` worktree from `origin/main`; commit/PR pending at entry time.
+- Repository changes: add an explicit server-only `PTI_ADMIN_COMMANDS_SOURCE=mongo` production source selection using the existing bounded exact-session canonical command projection; keep the colocated monitor path as the default. Record the hosted source boundary in ADR-0016 and update the Dashboard API, operating instructions, Filesystem Activity working state, and architecture snapshot.
+- Host/environment changes actually applied: none. No Railway variable, Dashboard deployment, Pi service, MongoDB document, or credential changed in this repository step.
+- Runtime/exposure state: the production screenshot shows the Admin Command events panel reporting the protected source as unavailable. The hosted source remains inactive until the new code is deployed and the private Railway setting is applied. The existing monitor path remains the default.
+- Validation performed and outcome: source inspection traced the panel message to HTTP 503 from the command route and confirmed that the current production loader requires a same-host loopback monitor and owner-only token file. The changed route, loader, and documentation were reviewed; `git diff --check` passed. No production response or protected command content was captured.
+- Not performed / deferred: automated tests, production deployment, private Railway setting, authenticated 200/403 and no-store checks, and confirmation of command rows for the selected session.
+- Risks and data handling: command input can contain attacker-entered secrets. The opt-in Mongo path preserves Admin authorization, canonical session binding, bounded projection, and private no-store responses; no raw command input or credentials were copied into Git. Monitor failures do not silently fall back to MongoDB.
+- Rollback: unset `PTI_ADMIN_COMMANDS_SOURCE` to restore the monitor-only source; revert the repository change if needed.
+- Follow-up: connect Railway access, apply the private setting and reviewed deployment, then verify a known retained command session through the authenticated Admin view without recording command text.
+- Related ADR/runbook: [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md), [Dashboard runbook](../dashboard-v2/README.md), and [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md).
+
 ### 2026-09-28 — Replace Cowrie watchdog TCP connect with passive listener inspection
 
 - Status: active on the existing Pi; final pre-cutover watchdog rows removed from canonical MongoDB.

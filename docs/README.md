@@ -34,6 +34,8 @@ and historical material inherited from the previous team.
    to active decoy endpoints on those interfaces.
    [ADR-0014](adr/ADR-0014-public-web-corp-ip-https-edge.md) defines the
    public HTTPS edge and private WireGuard backend for Web-corp.
+   [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md) defines the
+   hosted Dashboard source for Admin-only Cowrie command evidence.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.

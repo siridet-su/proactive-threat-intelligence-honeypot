@@ -1,6 +1,6 @@
 # Dashboard v2 API architecture
 
-This is a read-only dashboard data path with a local browser-session boundary. The current source does not put MongoDB credentials in the Next application and does not allow browser code to choose a database target.
+This is a read-only dashboard data path with a local browser-session boundary. MongoDB credentials, where configured, stay in the Next server environment; browser code cannot choose a database target.
 
 ## Request flow
 
@@ -23,13 +23,14 @@ dashboard page --GET /api/... + cookie--> Next catch-all BFF
 
 Admin session view --GET /api/sessions/{id}/commands + cookie--> dedicated Next Admin route
                                                        |-- Admin role/session checks
-                                                       |-- owner-only raw-command token file
+                                                       |-- authenticated canonical session binding
                                                        v
-                                      monitor_web 127.0.0.1:8090 / internal route
-                                                       |-- loopback + bearer checks
-                                                       |-- canonical sensor/session binding
-                                                       v
-                                    bounded sensitive command-only projection
+                                      explicit server-side source selection
+                                      |-- default: owner-only token file and
+                                      |   monitor_web 127.0.0.1:8090 internal route
+                                      |-- hosted opt-in: canonical MongoDB events
+                                      v
+                             bounded sensitive command-only projection
 ```
 
 Hardware telemetry uses two dedicated authenticated Next routes outside the
@@ -53,7 +54,7 @@ The auth handler is `src/app/api/auth/route.ts`, with cookie derivation and timi
 
 The default BFF origin is `http://127.0.0.1:8090`, the existing `monitor_web` service. The active 2026-09-01 monitor deployment exposes `/api/session-detail` as the bounded session-detail contract; the browser-compatible `/api/session` key is mapped to that upstream path. The older `/api/session` monitor route remains a legacy compatibility route and is not used by dashboard-v2. The active monitor also returns an incompatible success-with-error response or `404` for `/api/sessions` and `/api/events`; its bounded generic table routes are the current working contract for those two browser keys. For this exact loopback origin, the BFF therefore uses the measured generic compatibility response first for `sessions` and `events` and forwards `session` directly to `/api/session-detail`. Other origins retain the structured-route probe/fallback behavior. `monitor_web` supplies liveness/readiness, the bounded session-detail route, structured session/event/advisory routes, and the semantic/table routes. `dashboard_api` supplies the semantic/table routes and overlaps the health routes, but it does not implement the monitor-specific `/api/sessions`, `/api/session-detail`, `/api/events`, or `/api/ai-advisory` paths. A deployment that changes `DASHBOARD_API_ORIGIN` must preserve this compatibility or those paths will return an upstream not-found response.
 
-The private `monitor_web` route `/api/internal/session-commands` remains excluded from the generic BFF allowlist. Dashboard-v2 has a separate same-origin Admin route at `/api/sessions/{id}/commands`; it does not proxy arbitrary paths. Both layers validate authority, the monitor is loopback-only, and the dedicated token is read server-side from a protected file. Public session projections stay redacted; raw command input is no-store, excluded from print/PDF, and never joined into public exports.
+The private `monitor_web` route `/api/internal/session-commands` remains excluded from the generic BFF allowlist. Dashboard-v2 has a separate same-origin Admin route at `/api/sessions/{id}/commands`; it does not proxy arbitrary paths. The default colocated path uses a loopback monitor and a dedicated token read from a protected file. The hosted production path requires `PTI_ADMIN_COMMANDS_SOURCE=mongo` in the private server environment and reads the same bounded, exact-session submission projection from canonical MongoDB. Both paths require the Dashboard Admin session and authenticated canonical identity binding; monitor failure does not trigger a Mongo fallback. Public session projections stay redacted; raw command input is no-store, excluded from print/PDF, and never joined into public exports. See [ADR-0016](../../docs/adr/ADR-0016-hosted-dashboard-command-evidence.md).
 
 ## Backend and storage layers
 

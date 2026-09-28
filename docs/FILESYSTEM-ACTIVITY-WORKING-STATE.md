@@ -51,7 +51,10 @@ authenticated local browser screenshot showed command submissions and one
 canonical file-download event for the selected session. The link destination
 and production Dashboard deployment were not verified in that screenshot.
 
-No FS item is currently in progress. `FS-020` through `FS-024` are deferred
+`FS-026` is now in progress to restore hosted production Command events while
+preserving the accepted Admin-only Evidence contract. Its repository source is
+prepared, but the private Railway setting, deployment, and authenticated
+production check remain outstanding. `FS-020` through `FS-024` are deferred
 product additions, not blockers for the accepted evidence/replay scope. In
 particular, `FS-024` has a local radar implementation but lacks its stated
 authenticated Live-state visual acceptance. `FS-022` has exact-session command
@@ -83,10 +86,16 @@ a virtual filesystem read/write.
 
 Local development review needs the explicit private
 `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` setting and loopback access; without
-it or a configured production monitor credential, the Evidence API reports
-unavailable even when canonical command events exist. Both paths return
-submitted command inputs only, avoiding duplicate success/failure outcome
-rows. The local route remains Admin-only and no-store.
+an enabled local source or configured production source, the Evidence API
+reports unavailable even when canonical command events exist. Both existing
+paths return submitted command inputs only, avoiding duplicate success/failure
+outcome rows. The local route remains Admin-only and no-store.
+
+For a separately hosted production Dashboard, `FS-026` prepares an explicit
+private `PTI_ADMIN_COMMANDS_SOURCE=mongo` option that reuses the exact-session
+canonical projection. The current monitor source remains the default; the new
+option is inactive until the hosted deployment is configured and verified.
+See [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md).
 
 Deferred evidence direction:
 
@@ -172,6 +181,7 @@ deferred and can be reopened as separate work.
 | `FS-023` | `DEFERRED` | Forensic export and shareable evidence links. | Exported JSON/CSV preserves session, event IDs, timestamps, status, and filter scope; shared links open the same session/hop without embedding sensitive data. | Backlog; not part of FA-014. |
 | `FS-024` | `DEFERRED` | Add a full-surface square radar treatment to Live topology. | Establish a 1000×1000 logical radar plane that fills the available Live panel; omit persistent inner and outer range-frame boxes and use canvas-edge ticks instead; add four short diagonal corner rays anchored at the actual responsive canvas corners with angles recalculated from each canvas width/height ratio so each ray stays collinear with the sweep from center to corner; connect opposing edge ticks with visible, continuous, perpendicular full-canvas crosshairs through the exact center and beneath the sweep; add two subtle full-canvas diagonal guides between opposite corners, through the exact center, scaled to the responsive canvas aspect ratio; use a shared 1.5px stroke width for crosshairs and edge ticks; set perpendicular crosshair opacity to 0.2 to match the diagonal guides while preserving the brighter primary-color edge ticks and their glow; compute the sweep beam's first rectangle-boundary intersection as its angle turns; keep the multi-stop gradient wave in a 48-degree sector behind the crisp moving beam and restore its peak opacity to 0.48; omit the extra blurred bloom and static center haze, and retain a restrained glow attached to the beam; retain the solid 32×32 circular primary-color emitter at the exact center, without an icon; animate one circular wave from the exact center until it passes the farthest responsive canvas corner; calculate its radius from the measured canvas dimensions plus 16px of overscan so the wave remains circular on rectangular canvases; expand quickly from the source and ease down as it approaches the boundary while attenuation dims the wave and its aura from high intensity at the source to a faint outline at the corner; hold the wave beyond the boundary while it fades, then keep the origin quiet for about 0.6 seconds before the next pulse in a 7-second cycle; disable the wave for reduced-motion users; render the full themed radar plane and overlay only when the live snapshot has no sessions; once a session exists, use the normal neutral map surface; omit the themed radar grid, axes, edge/corner ticks, sweep, and pulse outline; render a neutral background grid only while View > Show background grid is enabled, phase it so both grid axes intersect at the canvas center and align with the radar crosshairs; omit the status title in the steady listening state while retaining operator-facing copy during loading/reconnect; derive grid, emitter, wave, edge-tick, and sweep colors from the system primary token (brick orange in light theme and bright brass in dark theme); keep the radar plane a solid untinted surface (white in light theme and the dark surface token in dark theme); keep corner marks decorative without adding telemetry, omit corner readouts; place retained-session count beside the Session Audit control, keep topology controls interactive when live sessions are present; disable navigation, view, appearance, and layout actions in the Live empty state, keeping the fullscreen toggle enabled so operators can enter and exit the expanded canvas; leave Audit presentation unchanged. | Implemented in the local dashboard; the authenticated `/filesystem-activity` page returned HTTP 200. Screenshot review remains needed to confirm the themed standby treatment disappears on populated topology while the neutral grid still follows View > Show background grid. |
 | `FS-025` | `DONE` | Replace duplicated CWD content in Evidence with an Admin-only, exact-session Cowrie command view. | Resolve sensor-local IDs only through one authenticated canonical event binding; validate both requested and canonical IDs in the response; show event type, ID, timestamp, input, redaction, and truncation; distinguish sign-in/admin, empty, and unavailable states; state that command input is not linked to a CWD hop and does not prove execution or file access. | The command route and local source passed 12 focused tests; PR #96 added 11 focused download/artifact tests, lint, TypeScript, and a webpack production build, then passed Dashboard staging CI. On 2026-09-28 the operator's authenticated localhost screenshot showed retained command rows and one canonical download event with event ID and SHA-256 for the selected session. Production deployment and opening the hash link were not verified. |
+| `FS-026` | `IN PROGRESS` | Enable hosted production command Evidence without a same-host monitor. | Keep Admin and exact-session binding; select canonical MongoDB only through a private server setting; retain bounded no-store submissions; verify a known retained command session, non-Admin denial, and cache headers after Railway deployment without copying command text into evidence. | Repository change prepared in the isolated Filesystem Activity worktree. Railway configuration, deployment, and production verification pending. |
 
 ## Deferred outside this workstream
 

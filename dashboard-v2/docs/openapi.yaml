@@ -225,12 +225,14 @@ paths:
         exact-session Cowrie input, which may contain attacker-entered
         credentials. Response is no-store and excluded from public projections,
         reports, and exports. The server uses a private loopback monitor route
-        and a dedicated owner-only credential file.
+        and owner-only credential file by default. Hosted production may
+        explicitly select the canonical MongoDB source with the private
+        PTI_ADMIN_COMMANDS_SOURCE=mongo setting.
       parameters:
         - name: id
           in: path
           required: true
-          schema: {type: string, pattern: '^session_v1_[0-9a-f]{32}$'}
+          schema: {type: string, description: Canonical session ID or authenticated sensor-local session alias}
       responses:
         '200':
           description: Bounded sensitive Admin command evidence
@@ -240,7 +242,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/JsonRecord'}
-        '400': {description: Invalid canonical session id}
+        '400': {description: Invalid session ID or no unique authenticated canonical binding}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {description: Admin role required}
         '503': {$ref: '#/components/responses/Unavailable'}
