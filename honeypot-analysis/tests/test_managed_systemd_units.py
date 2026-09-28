@@ -80,6 +80,24 @@ def test_gcp_profile_accepts_only_the_exact_reviewed_enabled_set() -> None:
     ]
 
 
+def test_gcp_profile_recognizes_existing_external_dashboard_shadow_and_watchdog_units() -> None:
+    loaded = _loaded()
+    unit_files, active = _valid_gcp_inventory()
+    external = loaded.document["profiles"]["gcp_backend"]["allowed_external_enabled_units"]
+    assert external == [
+        "honeypot-dashboard-v2-staging.service",
+        "honeypot-dashboard-v2.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
+        "honeypot-service-watchdog.timer",
+    ]
+    unit_files.update({unit: "enabled" for unit in external})
+    result = validate_unit_inventory(
+        loaded, "gcp_backend", unit_files=unit_files, active_units=active
+    )
+    assert result["status"] == "valid"
+
+
 def test_obsolete_backtest_is_invalid_even_when_disabled() -> None:
     loaded = _loaded()
     unit_files, active = _valid_gcp_inventory()

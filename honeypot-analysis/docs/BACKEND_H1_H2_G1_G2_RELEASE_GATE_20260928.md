@@ -28,3 +28,9 @@ The existing out-of-manifest active-host state is not a substitute for a new ver
 ## 2026-09-28 current-runtime test addendum
 
 The project owner selected alignment with the current runtime, not restoration of unsupported V6/AI-v2/next-behavior APIs. ADR-0010 records the boundary. Thirteen non-collecting historical modules are preserved in the research archive; 15 historical assertions remain in the active test files as individually documented strict expected failures. Current-policy tests were corrected for Atlas Flex's 5-GB capacity, managed systemd units, S1's private artifact boundary, and packaged service imports. **`pytest tests -q` exits successfully: 2,140 passed, 77 skipped, 15 strict expected failures, zero failures/collection errors.** Historical expected failures are not evidence of those experiments working. The immutable release, host, model identity, and live report/API/PDF gates remain pending.
+
+## 2026-09-28 GCP staged-release gate addendum
+
+The tested `6be281e2` package was pushed to staging and copied to a new, inactive GCP release. Its v7 manifest and separate CISA/Sigma/MITRE cache hash checks passed. The preserved runtime can import the changed modules but has no `pytest` installed, so the full suite was run in the clean local checkout. No active pointer or service was changed.
+
+The live managed-unit guard then identified five already-enabled but unlisted external units: both Dashboard-v2 units, both Next-Distinct shadow units, and the watchdog timer. A new candidate policy records exactly those existing units as allowed external services. This does **not** enable or alter them. The first staged package is superseded; a fresh commit/package/manifest and full test rerun are required before activation.

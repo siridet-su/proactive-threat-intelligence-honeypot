@@ -1,7 +1,7 @@
 {
   "schema_version": "managed_systemd_units.v1",
   "policy_id": "honeypot-controlled-poc-units",
-  "version": "2026-07-30",
+  "version": "2026-09-28",
   "profiles": {
     "gcp_backend": {
       "managed_installed_units": [
@@ -43,7 +43,13 @@
         "honeypot-threat-hunt-worker.service",
         "honeypot-webhook-dispatcher.service"
       ],
-      "allowed_external_enabled_units": [],
+      "allowed_external_enabled_units": [
+        "honeypot-dashboard-v2-staging.service",
+        "honeypot-dashboard-v2.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
+        "honeypot-service-watchdog.timer"
+      ],
       "prohibited_units": [
         "honeypot-calibration-worker.service",
         "honeypot-calibration-worker.timer",

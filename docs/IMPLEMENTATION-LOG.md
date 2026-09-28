@@ -48,6 +48,15 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Reconcile GCP managed-unit inventory before backend release
+
+- Status: prepared in the isolated staging checkout; host unit configuration unchanged and candidate not yet activated.
+- Scope: the release guard found five already-enabled Dashboard, Next-Distinct PoC, and watchdog units absent from the reviewed external-unit inventory. Add exactly those names to `allowed_external_enabled_units` and advance the policy version; do not enable, disable, or restart those units as part of this policy correction.
+- Validation: a dedicated test asserts the exact five-unit set and that an unknown enabled writer still fails closed. Full release tests and live GCP policy validation must pass before activation.
+- Runtime risk: this is an inventory allowlist update, not a grant of response authority. The existing production release remains active until the new immutable package and manifest pass verification.
+- Rollback: retain the previously verified release and restore its pointer if activation fails; do not mutate historical policies in place.
+- Related runbook: `honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md`.
+
 ### 2026-09-28 — Prepare additional bounded hypothesis and manual guidance candidates
 
 - Status: research-only repository candidate prepared; not activated or deployed.
