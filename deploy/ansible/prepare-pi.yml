@@ -103,7 +103,7 @@
 
     - name: Parse approved non-secret manifest metadata
       ansible.builtin.set_fact:
-        pti_manifest: "{{ pti_manifest_raw | from_json }}"
+        pti_manifest: "{{ pti_manifest_raw if pti_manifest_raw is mapping else (pti_manifest_raw | from_json) }}"
       no_log: true
 
     - name: Detect a prior PTI preparation marker

@@ -3215,3 +3215,16 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert the repository assertion change if necessary; no host rollback applies to the failed preparation attempt.
 - Follow-up: pull the fix into the VM checkout and rerun the same approved release and vars.
 - Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md) and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
+
+### 2026-09-29 — Accept Ansible-native manifest metadata during preparation
+
+- Status: repository compatibility fix prepared during the same clean VM rehearsal; service activation remains pending.
+- Repository changes: accept the approved manifest metadata as a mapping when Ansible already converts the JSON lookup result, while still parsing it when it remains a string.
+- Host/environment changes actually applied: none from the second installer attempt. The VM passed file-byte SHA-256 verification and stopped at the manifest parsing task before package or service mutation.
+- Runtime/exposure state: administrator SSH remains on TCP 22; no project service was activated.
+- Validation performed and outcome: a minimal Ansible 2.16 playbook showed the file lookup stored through `set_fact` had type `dict`, and `from_json` on that value raised a type error. Rerun validation follows in a dated addendum.
+- Not performed / deferred: the preparation and audit playbooks, env pause, and activation had not completed when this entry was written.
+- Risks and data handling: the manifest is non-secret release metadata. No private env value was read or recorded.
+- Rollback: revert this mapping-aware expression if it causes a compatibility regression; the failed VM attempt made no project host change.
+- Follow-up: pull the fix to the VM and rerun the same approved release and vars.
+- Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md).
