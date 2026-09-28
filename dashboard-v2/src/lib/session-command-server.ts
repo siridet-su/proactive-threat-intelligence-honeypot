@@ -284,7 +284,9 @@ export async function loadLocalAdminCowrieCommands(sessionId: string): Promise<A
   const client = await getMongoClient();
   const rows = await client.db("honeypot_canonical_v1").collection("events")
     .find(
-      { session_id: sessionId, eventid: { $in: [...COMMAND_EVENT_IDS] } },
+      // The monitor returns submitted commands only. Success/failure events can
+      // repeat the same input and must not become duplicate Evidence rows.
+      { session_id: sessionId, eventid: "cowrie.command.input" },
       { projection: { _id: 0, event_id: 1, eventid: 1, timestamp: 1, payload_json: 1 } },
     )
     .sort({ timestamp: 1, event_id: 1 })

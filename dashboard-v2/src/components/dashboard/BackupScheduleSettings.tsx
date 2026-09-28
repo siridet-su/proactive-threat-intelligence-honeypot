@@ -216,24 +216,19 @@ export function BackupScheduleSettings() {
                 <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "temporary" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "temporary"} onChange={selectTemporaryMode} />Temporary</label>
                 {temporary && <label className={`flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors ${mode === "clear_override" ? "border-primary-border bg-primary-subtle text-text" : "border-border bg-surface text-text-muted hover:border-primary-border"}`}><input className="accent-primary" type="radio" name="backup-schedule-mode" checked={mode === "clear_override"} onChange={() => { setMode("clear_override"); changeTime(settings?.base_time ?? "03:30"); }} />Return to permanent</label>}
               </div>
-              <div className="mt-3 grid gap-4 xl:grid-cols-2">
-                <div>
-                  <div className="rounded-lg border border-border bg-surface p-3">
+              <div className="mt-3 rounded-lg border border-border bg-surface p-3 sm:p-4">
+                <div className="grid gap-x-6 gap-y-4 lg:grid-cols-2">
+                  <div className="min-w-0">
                     <p className="text-xs font-medium text-text-muted">{mode === "clear_override" ? "Permanent time resumes · Asia/Bangkok (24-hour)" : "Daily time · Asia/Bangkok (24-hour)"}</p>
                     <div className="mt-2 flex items-center gap-2">
                       <ScheduleNumberPicker label="Hour" value={selectedHour} values={HOURS} disabled={!editable || busy || mode === "clear_override"} onChange={(hour) => changeTime(`${hour}:${selectedMinute}`)} />
                       <span className="pt-4 text-lg font-semibold text-text-muted" aria-hidden="true">:</span>
                       <ScheduleNumberPicker label="Minute" value={selectedMinute} values={MINUTES} disabled={!editable || busy || mode === "clear_override"} onChange={(minute) => changeTime(`${selectedHour}:${minute}`)} />
                     </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="mr-1 text-text-muted">Quick times</span>
-                      {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" disabled={mode === "clear_override"} aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
-                    </div>
                   </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-border bg-surface p-3">
-                    <div className="relative h-[68px]">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-text-muted">Schedule scope</p>
+                    <div className="relative mt-2 h-[68px]">
                       <AnimatePresence initial={false}>
                         {mode === "temporary" ? <motion.div key="temporary-range" className="absolute inset-x-0 top-0" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={reducedMotion ? { duration: 0 } : { duration: 0.15 }}>
                           <ScheduleRangePicker startDate={startDate} durationDays={days} today={view.local_date} disabled={!editable || busy} onChange={(day, duration) => { setStartDate(day); setDays(duration); setPreview(null); }} />
@@ -244,13 +239,16 @@ export function BackupScheduleSettings() {
                       </AnimatePresence>
                     </div>
                   </div>
-                  <div className="flex gap-2 rounded-lg border border-info-border bg-info-subtle p-3 text-xs leading-5 text-text-muted">
-                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />
-                    <p>A completed run today will not repeat. A schedule change takes effect on the next eligible run.</p>
+                </div>
+                <div className="mt-4 grid gap-3 border-t border-border pt-3 lg:grid-cols-2 lg:gap-6">
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <span className="mr-1 text-text-muted">Quick times</span>
+                    {QUICK_TIMES.map((quickTime) => <button key={quickTime} type="button" disabled={mode === "clear_override"} aria-pressed={time === quickTime} onClick={() => changeTime(quickTime)} className={`rounded-md border px-2.5 py-1 font-mono transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${time === quickTime ? "border-primary-border bg-primary-subtle text-primary" : "border-border bg-surface-subtle text-text-muted hover:border-primary-border hover:text-text"}`}>{quickTime}</button>)}
                   </div>
+                  <p className="flex items-start gap-2 text-xs leading-5 text-text-muted"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-info" aria-hidden="true" />A completed run today will not repeat. Changes take effect on the next eligible run.</p>
                 </div>
               </div>
-              <button type="button" className="ui-button mt-4 min-h-9 px-3 text-xs" onClick={() => void previewChange()}>Preview change</button>
+              <div className="mt-3 flex justify-end"><button type="button" className="ui-button min-h-9 px-3 text-xs" onClick={() => void previewChange()}>Preview change</button></div>
             </fieldset>
             {preview && <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-info-border bg-info-subtle p-3 text-xs text-text">
               <div className="min-w-0">

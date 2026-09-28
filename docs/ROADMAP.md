@@ -2,9 +2,44 @@
 title: Project roadmap
 status: target
 last_verified: 2026-09-24
+last_updated: 2026-09-28
 ---
 
 # Project roadmap
+
+## Current delivery focus — installation manual
+
+The current Filesystem Activity implementation round closed on 2026-09-28.
+The accepted local Evidence slice and deferred FS additions are recorded in
+[Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md).
+Production Dashboard deployment remains unverified; closure does not claim a
+production rollout.
+
+The next documentation workstream is the installation manual for a **fresh
+ARM64 Raspberry Pi from a clean OS**. Start from the verified
+[current architecture](CURRENT-ARCHITECTURE.md) and the proposed
+[installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), using the
+[installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) to resolve
+the current release/env gaps. Separate runnable
+instructions from future appliance design. The blueprint's retired
+Dashboard-to-Pi disconnect/control path is historical, not an installation
+requirement. Existing-Pi migration is a later, separate procedure. No
+customer installer is currently declared ready to run.
+
+The first implementation slice now stages checked Linux ARM64 Go-agent
+artifacts and inactive systemd units on a disposable Ubuntu 24.04 ARM64 VM
+through [Ansible](../deploy/ansible/README.md). It does not install Cowrie,
+Zeek, the Docker decoys, or Dashboard, and has not been qualified on a VM or
+Pi. Complete their pinned releases, service access rules, operator credential
+checks, and activation sequence before calling the installer runnable for a
+fresh Pi.
+
+The accepted installer boundary is in
+[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md): prepare
+versioned dependencies, service units, and non-secret configuration; leave
+application services stopped while the operator supplies private `.env` files
+and credentials; validate and activate in a separate step. The installer must
+not generate or copy credentials.
 
 ## Phase 0 — Establish project truth
 

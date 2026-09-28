@@ -63,6 +63,201 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: push through the existing staging CI/CD route if checks pass, then verify the deployed page and API.
 - Related ADR/runbook: unified Threat Intelligence session directory implementation.
 
+### 2026-09-28 — Harden offline Pi preparation before VM acceptance
+
+- Status: repository change prepared; not applied to a VM, Pi, or Dashboard host.
+- Scope and intent: make the first Ansible preparation slice resumable, pin its package and release inputs, and verify transferred binaries before units are installed.
+- Repository branch and commit/PR: `fix/installer-prepare-hardening`; commit/PR follow this entry.
+- Repository changes: require an approved manifest SHA-256 and exact top-level package versions; reject unexpected release content and malformed manifests; verify staged manifest and binary hashes on the target; reject active or enabled services and symlinked installation paths; record a release-bound `preparing`/`prepared` marker so an interrupted preparation can rerun with the same bundle. Add a focused pull-request CI workflow and update the operator runbook and tests.
+- Host/environment changes actually applied: none. Only a temporary local ARM64 build and read-only local checks were run.
+- Runtime/exposure state: existing Pi and Dashboard services remain unchanged; no VM or production service was installed, enabled, or exposed.
+- Validation performed and outcome: 25 focused Python tests, Ansible syntax check, workflow YAML parse, an offline five-agent ARM64 cross-build with pinned-digest verification, a read-only local Ansible expression check, Markdown links, and `git diff --check` passed. Full playbook execution and the new CI workflow have not yet run on GitHub.
+- Not performed / deferred: clean ARM64 VM apply/retry test, Pi hardware acceptance, Cowrie/Zeek/Compose/Dashboard installation, private-config validation, activation, and production rollback.
+- Risks and data handling: a SHA-256 supplied from the same untrusted bundle is not an authenticity proof; operators must use the reviewed build receipt. Top-level package versions are pinned, while transitive dependencies still depend on approved Ubuntu package sources. No credentials or private env contents entered this change.
+- Rollback: revert this repository change if needed; no host rollback is required because no host was modified.
+- Follow-up: exercise first run, interrupted rerun, wrong digest, active-service rejection, and rollback on a disposable ARM64 VM before declaring the preparation phase qualified.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [Ansible preparation runbook](../deploy/ansible/README.md), and [VM test target](INSTALLER-VM-TEST-TARGET.md).
+
+### 2026-09-28 — Prepare first Ansible slice for fresh ARM64 Pi installation
+
+- Status: repository implementation prepared; not applied to a host or activated.
+- Scope and intent: begin the accepted fresh-Pi installer with an idempotent, non-secret Ansible preparation step, reusing the prior read-only planner and ARM64 release builder.
+- Repository branch and commit/PR: `feat/ansible-pi-prepare`; commit/PR follow this entry.
+- Repository changes: import the plan-only profiles, builder, tests, and draft manuals from the unmerged installer branch; add a release verifier, Ansible playbook, inactive Go service templates, inventory example, and operator runbook. The playbook installs base packages and Redis, stops/disables Redis, stages a verified release, and leaves application units disabled. It does not touch `.env` files.
+- Host/environment changes actually applied: none. No Pi, Dashboard, or VM was changed.
+- Runtime/exposure state: existing Pi and Dashboard runtime are unchanged; no new trap port or service is active.
+- Validation performed and outcome: 22 focused Python tests, Ansible syntax check, local Markdown links, and `git diff --check` passed. The five Go modules passed tests and cross-built to a static Linux ARM64 bundle with network downloads disabled; the bundle verifier passed, and rendered systemd units passed `systemd-analyze verify` against those binaries. No clean ARM64 VM execution or hardware acceptance was performed.
+- Not performed / deferred: Cowrie/Zeek/Compose/Dashboard installation, Redis private-binding verification on a clean VM, collector log ACLs, value-redacting activation, existing-Pi migration, and production rollback tests.
+- Risks and data handling: source units contain old checkout paths, so the new templates point to the versioned bundle; their runtime permissions remain unqualified until VM tests. The bundle contains binaries and hashes only. No private env values, credentials, or attacker content were copied into the repo.
+- Rollback: restore the disposable VM snapshot for first validation; production rollback is deferred until acceptance. Revert the branch commit for repository rollback.
+- Follow-up: qualify this prepare phase on a clean ARM64 VM, pin and package remaining service artifacts, then implement separate operator-input validation and activation.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [Ansible preparation runbook](../deploy/ansible/README.md), [VM test target](INSTALLER-VM-TEST-TARGET.md), and [readiness audit](INSTALLATION-READINESS-2026-09-28.md).
+
+### 2026-09-28 — Set installer boundary for operator-managed private configuration
+
+- Status: design and documentation prepared; no installer apply mode or host deployment performed.
+- Scope and intent: define the first fresh-Pi installer as a preparatory installation of services, dependencies, and non-secret configuration, with operator-managed `.env` and credentials.
+- Repository branch and commit/PR: `docs/installer-operator-credentials`; commit/PR follow this entry.
+- Repository changes: add ADR-0009 and align the installer blueprint, readiness audit, roadmap, and documentation index with a separate validation/activation phase.
+- Host/environment changes actually applied: none in this change; no private file was created, read, changed, or copied.
+- Runtime/exposure state: the existing Pi and Dashboard services remain as previously audited. No new service was installed or enabled.
+- Validation performed and outcome: reviewed the current plan-only profile, readiness findings, and installer blueprint; checked changed Markdown links and `git diff --check` locally.
+- Not performed / deferred: apply/activate implementation, ARM64 VM and Pi installation tests, Dashboard staging env correction, and existing-Pi migration.
+- Risks and data handling: a prepared installation is deliberately not operational; activation must fail if required operator inputs are absent. No credential values or raw attacker material enter this record.
+- Rollback: revert the documentation change with a dated ADR supersession if the accepted boundary changes; no host rollback is needed.
+- Follow-up: implement versioned, non-secret preparation artifacts and a value-redacting activation preflight on the installer branch; then qualify them on a disposable ARM64 VM.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md), and [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-28 — Addendum: identify unmerged installer planning branch
+
+- Status: documentation corrected; no host change or installation performed.
+- Scope and intent: supplement the installation-readiness audit after finding existing installer work outside `main`.
+- Repository branch and commit/PR: `docs/installation-audit-addendum`; commit/PR follow this entry.
+- Repository changes: document `feat/appliance-installer` at `ddf4f3c` and its plan-only CLI, profiles, tests, and draft manuals. Clarify that no runnable full-system installer is present on `main`.
+- Host/environment changes actually applied: none in this addendum.
+- Runtime/exposure state: unchanged from the preceding audit; no service or release was touched.
+- Validation performed and outcome: inspected the branch commit, file list, CLI execution-mode guard, draft manuals, and PR status. The branch is unmerged and has no PR.
+- Not performed / deferred: merge or rebase of the installer branch, fresh-OS installation, and VM or Pi acceptance tests.
+- Risks and data handling: the branch is based on an older `main` revision; the plan-only tool must not be presented as an installation command. No secrets were recorded.
+- Rollback: revert this documentation addendum with a new dated correction if the branch state changes.
+- Follow-up: rebase and review installer work against current `main` and the readiness blockers before developing apply mode.
+- Related ADR/runbook: [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) and [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md).
+
+### 2026-09-28 — Audit fresh-Pi installation readiness and tighten an exposed env file
+
+- Status: repository readiness document prepared; one Pi file-permission correction applied; no installation or deployment performed.
+- Scope and intent: compare current repository and Dashboard environment contracts with the running `pi-t` host before drafting a clean-OS Raspberry Pi installation manual.
+- Repository branch and commit/PR: `docs/installation-readiness-audit`; commit/PR follow this entry.
+- Repository changes: add a sanitized installation-readiness audit and link it from the documentation index and roadmap. The target is a fresh ARM64 Pi; migration of the existing Pi remains separate.
+- Host/environment changes actually applied: changed only the Pi checkout's `dashboard-v2/.env.local` mode from `0664` to `0600` and verified the result. No env value, service, binary, database, firewall rule, or active release pointer was changed.
+- Runtime/exposure state: Cowrie, Redis, Zeek, collector, processor, hardware, TI, backup control, and legacy forwarder remained active during the read-only inventory. Dashboard services were not installed on that Pi. The Dashboard production host was not accessed.
+- Validation performed and outcome: inspected source and Pi branch status, OS/architecture, service and Compose inventory, env key names and modes without printing values, and current Dashboard runtime key references. Local Markdown links resolved and `git diff --check` passed.
+- Not performed / deferred: fresh-OS installation test, Dashboard production env audit, backup restore rehearsal, existing-Pi migration, and changes to the stale staging Dashboard env bootstrap/template.
+- Risks and data handling: the Pi checkout is dirty and divergent; current Dashboard staging env names do not match current application auth settings. No credential values or raw attacker content were copied to the repo. The permission correction limits local read access to a file containing `MONGODB_URI`.
+- Rollback: restore the prior mode only if an owner-approved operational dependency requires it; otherwise retain `0600`. Revert the documentation commit separately if the audit record is superseded, using a dated correction rather than rewriting historical facts.
+- Follow-up: define a pinned fresh-Pi release and reconcile Dashboard env/bootstrap and external Compose ownership before publishing runnable installation steps.
+- Related ADR/runbook: [installation readiness audit](INSTALLATION-READINESS-2026-09-28.md), [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), [current architecture](CURRENT-ARCHITECTURE.md), and [security policy](SECURITY-AND-MALWARE-POLICY.md).
+
+### 2026-09-28 — Close the current Filesystem Activity round and hand off installation documentation
+
+- Status: repository documentation prepared; no host deployment in this change.
+- Scope and intent: reconcile the live working state with merged PR #96 and the operator's authenticated local Evidence review, then make the installation manual the next distinct documentation focus.
+- Repository branch and commit/PR: `docs/filesystem-activity-closure-handoff`; commit/PR follow this entry. PR #96 previously merged at `8cffe85`.
+- Repository changes: mark the accepted local `FS-025` Evidence slice `DONE`; move unaccepted `FS-020` through `FS-024` to `DEFERRED`; update the Filesystem working state, architecture snapshot, roadmap, documentation index, and installer blueprint handoff. Earlier implementation-log entries remain unchanged; this entry corrects their now-stale pending-PR and unreviewed-local-browser status.
+- Host/environment changes actually applied: none. No Pi service, Dashboard process, database, secret, or installer was changed.
+- Runtime/exposure state: the operator's localhost Dashboard displayed command rows and one canonical file-download event for the selected session after PR #96 merged. The production Dashboard deployment remains unverified. The customer installer is still proposed, not runnable.
+- Validation performed and outcome: reviewed PR #96 merge and passing CI, the operator-provided browser screenshot, and tracked FS statuses. A documentation consistency check confirmed `FS-020` through `FS-024` are `DEFERRED`, `FS-025` is `DONE`, no FS item remains `IN PROGRESS`, and local Markdown links resolve. `git diff --check` passed.
+- Not performed / deferred: production Dashboard deployment, opening the Artifact Intelligence hash link, authenticated Live radar acceptance, CWD-hop/file-operation correlation, forensic export, and installation-manual implementation.
+- Risks and data handling: closure applies only to the accepted current Filesystem scope. No real attacker content, private configuration, or credentials were copied into documentation. Historical installer control-plane examples remain marked as superseded by ADR-0007.
+- Rollback: revert this documentation commit; no host rollback is needed.
+- Follow-up: write and verify the installation manual against current deployment facts, with a declared target path and runnable versus proposed steps separated.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md), [current architecture](CURRENT-ARCHITECTURE.md), [roadmap](ROADMAP.md), [installer blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md), and [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md).
+
+### 2026-09-27 — Add session download evidence and exact artifact hash lookup
+
+- Status: repository change prepared; not deployed.
+- Scope and intent: show retained Cowrie file-download events alongside command submissions in Filesystem Activity Evidence and link their SHA-256 to Artifact Intelligence.
+- Repository branch and commit/PR: `feat/filesystem-session-download-evidence`; commit/PR pending.
+- Repository changes: add an Admin-only, no-store exact-session canonical download endpoint with bounded event ID, timestamp, and hash metadata; add a separate Evidence section while retaining command rows; make exact SHA-256 search fall back to observed events if no enrichment record matches; read the hash from the Artifact Intelligence URL; update API and working-state documentation.
+- Host/environment changes actually applied: read-only Pi inspection of canonical and normalized event metadata. No service, database document, configuration, or Pi binary was changed.
+- Runtime/exposure state: the active Dashboard and Pi remain unchanged. The new Evidence section becomes available when this Dashboard revision is deployed.
+- Validation performed and outcome: Pi metadata showed 725 canonical file-download events across 496 canonical sessions; a sampled canonical row carried a valid SHA-256. The normalized collection held 804 file-download events. Eleven focused tests, targeted ESLint, TypeScript, and webpack production build passed. Default Turbopack build could not bind an internal port in this execution environment.
+- Not performed / deferred: authenticated browser review and Dashboard deployment; CWD-hop correlation, file read/write inference, and artifact byte retrieval.
+- Risks and data handling: response is Admin-only and exposes hash metadata, never raw Cowrie payloads, URLs, paths, or bytes. Canonical and normalized collections have different event counts; the view deliberately uses only canonical rows with verified session identity. Exact hash fallback remains bounded by the existing event scan limit.
+- Rollback: revert this Dashboard change; no host rollback is required until separately deployed.
+- Follow-up: verify a known session with a canonical download event in an authenticated browser after deployment.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md), [Dashboard API contract](../dashboard-v2/docs/API.md), and [ADR-0002](adr/ADR-0002-hash-only-malware-handling.md).
+
+### 2026-09-27 — Restore local Filesystem Evidence access and align command rows
+
+- Status: repository correction prepared; private local development source enabled; production Dashboard deployment not performed.
+- Scope and intent: investigate the Evidence Retry/error state in Session audit & replay and make local command review match the production monitor's submission-only list.
+- Repository branch and commit/PR: `fix/filesystem-command-evidence-dev`; commit and PR follow this entry.
+- Repository changes: limit the local Admin command query to `cowrie.command.input` so outcome events do not duplicate submissions; isolate the route's missing-alias test from live Mongo; document the explicit development gate and current Evidence source. No authentication, canonical binding, or production monitor contract was relaxed.
+- Host/environment changes actually applied: set `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` in the ignored, owner-only `dashboard-v2/.env.local` for this development workspace. No Pi service, production Dashboard configuration, or canonical record was changed. The existing Dashboard process was not restarted from this environment.
+- Runtime/exposure state: the flag is available to a development-mode Next server on loopback after it reloads the local environment. The route still requires an authenticated Admin and exact verified session binding. Production remains on the separate protected monitor path.
+- Validation performed and outcome: read-only Mongo metadata showed 5,341 stored command-input events and a valid alias for a sampled command session. A temporary live route smoke test returned commands for that sensor-local session with submission-only rows; 9 focused tests passed. The committed 12-test command suite, targeted ESLint, TypeScript, and `git diff --check` passed locally. No raw inputs were printed or added to fixtures.
+- Not performed / deferred: authenticated browser review in the operator's running localhost process and production Dashboard deployment were not performed; that process may need a restart to load the changed environment.
+- Risks and data handling: the local route can return sensitive retained command input to an Admin on loopback. The flag and credentials remain outside Git; responses are private/no-store. Redacted-before-persistence originals remain unrecoverable.
+- Rollback: remove the local development flag and restart that dev server; revert the repository correction if the submission-only query must be restored.
+- Follow-up: verify the Evidence tab after the operator's dev server reloads, then continue FS-025 acceptance with an authenticated browser review.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Dashboard API contract](../dashboard-v2/docs/API.md).
+
+### 2026-09-27 — Balance backup schedule form layout
+
+- Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.
+- Scope and intent: remove the uneven nested cards and excess space in the schedule editor reported after the preceding alignment change.
+- Repository branch and commit/PR: `fix/backup-schedule-form-layout`; commit and PR follow this entry.
+- Repository changes: place the time and scope controls in one shared surface with aligned columns, move quick times and the scheduling explanation into a full-width footer, and align Preview change to the right. The existing fixed-height scope transition remains for stable Permanent and Temporary switching.
+- Host/environment changes actually applied: none. No schedule revision, Pi service, manifest, or B2 object was changed.
+- Runtime/exposure state: the active daily backup schedule remains unchanged; the layout appears only where the updated Dashboard revision is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint, TypeScript compilation, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review and production Dashboard deployment were not performed.
+- Risks and data handling: layout-only change; no new data flow or credential exposure.
+- Rollback: revert this UI commit.
+- Follow-up: inspect Permanent and Temporary layouts after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
+### 2026-09-27 — Align backup schedule scope with time inputs
+
+- Status: repository Dashboard UI correction prepared; Dashboard deployment not performed.
+- Scope and intent: align the schedule scope field with the Hour and Minute controls for easier scanning.
+- Repository branch and commit/PR: `fix/backup-schedule-scope-alignment`; commit and PR follow this entry.
+- Repository changes: add a small "Schedule scope" heading above the existing Permanent, Temporary, and return-to-permanent scope field. The shared spacing places its label and value on the same rows as the time controls without changing form behavior.
+- Host/environment changes actually applied: none. No Pi worker, schedule revision, manifest, or B2 object was changed.
+- Runtime/exposure state: the active backup schedule remains unchanged; the alignment appears only where the updated Dashboard revision is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review and production Dashboard deployment were not performed.
+- Risks and data handling: layout-only change; no new data flow or credential exposure.
+- Rollback: revert this UI commit.
+- Follow-up: inspect Permanent and Temporary modes after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
+### 2026-09-27 — Clarify backup coverage and add bounded hardware history
+
+- Status: repository Dashboard change prepared; Dashboard deployment not performed.
+- Scope and intent: distinguish completed manifest checks from actual archive objects, explain empty days, allow bounded historical review, and remove unused space in the hardware card.
+- Repository branch and commit/PR: `feat/backup-coverage-history`; commit and PR follow this entry.
+- Repository changes: add an authenticated, read-only hardware history endpoint with non-overlapping 29-day windows and a 36-period bound; add Older/Newer/Latest controls, separate checked/archived/empty/review counts, clearer empty-day text, and a full-width card layout with live Pi controls below the calendar. Clarify the source summary's eligible-day wording and document the endpoint contract.
+- Host/environment changes actually applied: none. No Pi worker, MongoDB manifest, schedule, or B2 object was changed.
+- Runtime/exposure state: the existing Pi schedule remains 01:00 Asia/Bangkok. The new history view becomes active only where this Dashboard revision is deployed; manual actions continue to use the latest live window.
+- Validation performed and outcome: targeted hardware backup tests, Dashboard production build, TypeScript compilation, targeted ESLint, and `git diff --check` passed locally.
+- Not performed / deferred: authenticated browser visual review, production Dashboard deployment, Pi worker changes, and restore rehearsal were not performed.
+- Risks and data handling: historical gaps before target activation can appear as missing, so the UI labels history read-only and leaves actions on the live window. The endpoint reads only bounded manifest metadata and does not expose archive contents or credentials.
+- Rollback: revert this Dashboard change; no host rollback is needed unless separately deployed.
+- Follow-up: verify layout and historical paging in an authenticated browser after deployment.
+- Related ADR/runbook: [Dashboard API contract](../dashboard-v2/docs/API.md) and [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
+### 2026-09-27 — Remove stale fixed-time label from hardware backup card
+
+- Status: repository Dashboard UI correction prepared; production Dashboard deployment not performed.
+- Scope and intent: stop showing the obsolete fixed 03:30 time beside hardware backup controls after the daily schedule became configurable.
+- Repository branch and commit/PR: `fix/backup-sidebar-schedule-label`; commit and PR follow this entry.
+- Repository changes: replace the hardcoded time with `Daily · Asia/Bangkok`; the schedule card above remains the source for the actual current time. No API, Pi worker, or stored schedule change.
+- Host/environment changes actually applied: none. The Pi worker rollout and audited request recorded in the next entry remain active.
+- Runtime/exposure state: the currently running Pi schedule is 01:00 Asia/Bangkok; this wording appears wherever the updated Dashboard code is loaded.
+- Validation performed and outcome: targeted Dashboard ESLint and `git diff --check` passed locally; the change is a static label correction.
+- Not performed / deferred: production Dashboard deployment and authenticated browser visual review were not performed for this label correction.
+- Risks and data handling: no new data flow or credentials. The sidebar now names the timezone but leaves exact time to the schedule card.
+- Rollback: revert this UI commit.
+- Follow-up: inspect the label after Dashboard deployment.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
+### 2026-09-27 — Deploy and verify manual backup window correction on Pi
+
+- Status: Pi control worker correction installed and active; Dashboard UI correction is merged into `main` but no production Dashboard deployment was performed.
+- Scope and intent: apply the tested manual-window fix from [PR #89](https://github.com/siridet-su/proactive-threat-intelligence-honeypot/pull/89) and verify the previously skipped 2026-08-27 hardware day.
+- Repository branch and commit/PR: deployment used merge commit `8527d31` from PR #89; this dated deployment record was added on `docs/backup-manual-window-rollout`.
+- Repository changes: no worker source change beyond PR #89. This entry records host application and read-only validation after that merge.
+- Host/environment changes actually applied: built the Linux ARM64 worker from clean merge commit `8527d31`, verified its SHA-256 on the Pi, saved the previous root-owned binary at `/var/backups/hardware-backup-control-20260927-1c06e18c.bin`, installed the new binary atomically, and restarted only `honeypot-hardware-backup-control.service`. The Pi repository branch and its unrelated modified file were not changed. An operator-approved `run_missing` request was inserted directly into the audited control collection for this maintenance verification, without using the Dashboard API.
+- Runtime/exposure state: the Pi control service is active with the new binary and a fresh heartbeat. The approved request completed successfully for 1/1 selected day, 2026-08-27. Its active-bucket manifest is successful but empty: 0 records, 0 archive bytes, and no B2 object. The stored daily schedule remains 01:00 Asia/Bangkok.
+- Validation performed and outcome: `go test ./...`, Dashboard TypeScript and targeted ESLint checks, Linux ARM64 cross-build, GitHub Dashboard staging CI, local/Pi binary hash comparison, service status, Pi journal, request progress, and manifest metadata all passed. Read-only counts found zero `hardware_metrics_1m` records for that UTC day with either BSON Date or ISO string timestamps, confirming the empty result is not caused by an old timestamp field.
+- Not performed / deferred: production Dashboard deployment, read-only restore rehearsal, and the next scheduled Pi run were not tested in this deployment.
+- Risks and data handling: the worker now follows the displayed scheduled-run window for manual actions; a later eligible day with records may create a B2 object. This verified day was empty and created none. No credentials, source records, archive contents, or protected configuration contents were copied into the repository.
+- Rollback: restore the protected previous binary atomically and restart the control service if needed; PR #89 can be reverted separately for repository rollback.
+- Follow-up: verify the next scheduled run and inspect the Dashboard after its UI code is deployed; the other two 2026-08-27 target exceptions remain separate from the hardware request.
+- Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md) and [hardware backup worker runbook](../agents/hardware-backup/README.md).
+
 ### 2026-09-27 — Align manual backup actions with displayed coverage
 
 - Status: repository Pi worker correction prepared; not deployed to the Pi.
@@ -2521,3 +2716,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert only this staging UI commit; no Pi/GCP or database rollback is involved.
 - Follow-up: verify the staging build and check the live session page shows one Recommend badge, other Model1 techniques without rank labels, and the explicit 2-versus-3 count explanation.
 - Related ADR/runbook: N/A; presentation-only.
+
+### 2026-09-28 — Support dark mode in Session Analysis detail page
+
+- Status: repository styling update completed on `edit-dashboard`; host/production deployment pending.
+- Scope and intent: eliminate remaining white sections in the Session Analysis page (`/threat-intel/[id]`) during dark mode by replacing hardcoded Tailwind light classes with semantic theme tokens.
+- Repository branch and commit/PR: `edit-dashboard`.
+- Repository changes: update `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx` to replace fixed `bg-[#F9FAFB]`, `bg-white`, `bg-slate-50`, `bg-slate-100`, `border-slate-200`, and `text-slate-800` classes with semantic theme tokens (`bg-surface`, `bg-surface-subtle`, `border-border`, `text-text`, `text-text-muted`, `text-text-subtle`, `var(--map-land)`).
+- Host/environment changes actually applied: none. No host, systemd service, database, or production deployment was altered.
+- Runtime/exposure state: local development update only; production Dashboard has not been deployed.
+- Validation performed and outcome: `npx tsc --noEmit` passed with zero errors; targeted session and threat intelligence test suites (11 files, 62 passed tests) passed cleanly.
+- Not performed / deferred: production Docker/staging rollout was deferred.
+- Risks and data handling: purely presentational CSS class adjustments; no API contracts, data models, credentials, or telemetry boundaries are affected.
+- Rollback: git checkout of `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx`.
+- Follow-up: verify visual presentation across both light and dark mode themes in the browser.
+- Related ADR/runbook: `dashboard-v2/docs/PRODUCTION_THEME_DESIGN_SPEC.md`.

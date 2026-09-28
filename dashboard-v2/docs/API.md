@@ -37,7 +37,10 @@ ambiguous bindings fail closed. It does not infer identity from IP or time.
 The production server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an
 owner-only regular file and forwards only the verified canonical ID to
 `http://127.0.0.1:8090/api/internal/session-commands`. Explicit local
-development review instead reads `honeypot_canonical_v1.events` on loopback.
+development review instead reads `honeypot_canonical_v1.events` on loopback
+when `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` is set in the private local
+environment and the Next server runs in development mode. The development
+projection returns command submissions only, matching the monitor route.
 The monitor additionally requires `LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a
 loopback bind/client, and the dedicated bearer token. The browser never
 receives this token. Responses are bounded and `no-store`; the v2 response
@@ -48,6 +51,17 @@ sensitive and may contain attacker-entered credentials. The UI excludes it
 from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
 Invalid/missing credentials or mismatched canonical sensor/session identity
 fail closed. Text already redacted before persistence cannot be recovered.
+
+`GET /api/sessions/{id}/file-downloads` uses the same Admin check and verified
+canonical session binding. It reads at most 101 canonical
+`cowrie.session.file_download` rows and returns at most 100 newest events with
+event ID, timestamp, and valid SHA-256 (or `null`). The response includes the
+requested and canonical session IDs, a truncation flag, and private/no-store
+headers. Raw payloads, URLs, paths, and bytes are excluded. The Evidence UI
+links the hash to `/malware-vault?q={sha256}`. Exact hash search checks observed
+events when no enrichment record matches that hash, even when other hashes
+already have threat intel. A download event alone does not establish file
+execution or virtual filesystem read/write activity.
 
 ## Backup daily schedule endpoints
 
@@ -121,6 +135,23 @@ capacity values, root-disk percentage and capacity values, temperature, and
 `wlan0` RX/TX throughput. Raw counters, legacy memory aliases, and audit-only
 collector fields are kept outside this browser-facing live ring. Older v2
 documents remain readable during the rolling deployment.
+
+## Hardware backup history
+
+`GET /api/hardware/backup` remains the live hardware backup status and control
+view. `GET /api/hardware/backup/history?period=N` is an authenticated,
+read-only history view. `N` is an integer from 1 through 36; period 1 is the
+29 eligible UTC days immediately before the live window. Each later period
+moves back by another 29 days, so the windows do not overlap. The response
+contains `period`, `expected_window`, 29 daily manifest states, and
+`has_older`. Both routes use `Cache-Control: no-store`.
+
+The Dashboard labels a successful zero-record day as **Empty** and counts it
+as a completed manifest check, not as a B2 archive. The archived-day count
+requires an archive object name. Historical navigation changes only the
+calendar and its counts; the Pi controls, latest request, and storage snapshot
+continue to show live state. Days before a target was activated can appear as
+missing in historical windows and are not queued by navigating history.
 
 ## Error contract
 

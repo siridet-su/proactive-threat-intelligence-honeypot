@@ -1,0 +1,340 @@
+---
+# Prepare a clean Ubuntu ARM64 Pi. No private env contents are read or written.
+- name: Prepare PTI sensor agents without activation
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_release_id: ""
+    pti_release_source: ""
+    pti_manifest_sha256: ""
+    pti_agent_user: pti-agent
+    pti_agent_group: pti-agent
+    pti_release_root: /opt/pti/sensor/releases
+    pti_unit_names:
+      - honeypot-collector.service
+      - honeypot-processor.service
+      - honeypot-ti-worker.service
+      - honeypot-hardware.service
+      - honeypot-hardware-backup-control.service
+    pti_other_sensor_units:
+      - cowrie.service
+      - zeek.service
+      - opencanary.service
+      - honeypot-sensor-forwarder.service
+    pti_base_package_names:
+      - ca-certificates
+      - python3
+      - python3-venv
+      - redis-server
+    pti_package_versions: {}
+  pre_tasks:
+    - name: Require selected Ubuntu ARM64 target and explicit release
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - pti_release_source is match('^/')
+          - pti_manifest_sha256 is match('^[0-9a-f]{64}$')
+        fail_msg: Prepare requires Ubuntu 24.04 ARM64, a release ID, an absolute local release path, and an approved manifest SHA-256.
+
+    - name: Verify local bundle before any host mutation
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../scripts/verify_sensor_release.py"
+          - --release-dir
+          - "{{ pti_release_source }}"
+          - --release-id
+          - "{{ pti_release_id }}"
+          - --manifest-sha256
+          - "{{ pti_manifest_sha256 }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Load approved non-secret manifest metadata
+      ansible.builtin.set_fact:
+        pti_manifest_raw: "{{ lookup('ansible.builtin.file', pti_release_source + '/manifest.json', rstrip=False) }}"
+      no_log: true
+
+    - name: Confirm the manifest did not change after verification
+      ansible.builtin.assert:
+        that:
+          - pti_manifest_raw | hash('sha256') == pti_manifest_sha256
+        fail_msg: Release manifest changed after local verification.
+
+    - name: Require one reviewed exact version for every host package
+      ansible.builtin.assert:
+        that:
+          - pti_package_versions is mapping
+          - (pti_package_versions.keys() | list | sort) == (pti_base_package_names | sort)
+        fail_msg: Exact approved versions are required for every host package.
+
+    - name: Validate approved package version syntax
+      ansible.builtin.assert:
+        that:
+          - pti_package_versions[item] is string
+          - (pti_package_versions[item] | string) is match('^[A-Za-z0-9][A-Za-z0-9.+:~_-]*$')
+          - not (pti_package_versions[item] | string).startswith('REPLACE_')
+        fail_msg: Invalid approved package version.
+      loop: "{{ pti_base_package_names }}"
+
+    - name: Build exact package request from reviewed versions
+      ansible.builtin.set_fact:
+        pti_exact_packages: []
+
+    - name: Append reviewed exact package versions
+      ansible.builtin.set_fact:
+        pti_exact_packages: "{{ pti_exact_packages + [item + '=' + (pti_package_versions[item] | string)] }}"
+      loop: "{{ pti_base_package_names }}"
+
+    - name: Parse approved non-secret manifest metadata
+      ansible.builtin.set_fact:
+        pti_manifest: "{{ pti_manifest_raw | from_json }}"
+      no_log: true
+
+    - name: Detect a prior PTI preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_prepare_marker
+
+    - name: Read prior preparation marker when present
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_prior_marker_file
+      when: pti_prepare_marker.stat.exists
+
+    - name: Validate prior preparation marker before trusting it
+      ansible.builtin.assert:
+        that:
+          - pti_prepare_marker.stat.isreg
+          - not pti_prepare_marker.stat.islnk
+          - pti_prepare_marker.stat.uid == 0
+          - pti_prepare_marker.stat.mode == '0644'
+          - (pti_prior_marker_file.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_prior_marker_file.content | b64decode | from_json).release_id == pti_release_id
+          - (pti_prior_marker_file.content | b64decode | from_json).manifest_sha256 == pti_manifest_sha256
+          - (pti_prior_marker_file.content | b64decode | from_json).state in ['preparing', 'prepared']
+        fail_msg: Existing preparation marker is invalid or belongs to another release.
+      when: pti_prepare_marker.stat.exists
+
+    - name: Detect existing release path
+      ansible.builtin.stat:
+        path: "{{ pti_release_root }}/{{ pti_release_id }}"
+      register: pti_existing_release
+
+    - name: Inspect preparation directory ancestors
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /opt/pti
+        - /opt/pti/sensor
+        - /opt/pti/sensor/releases
+        - /etc/honeypot
+        - /var/lib/pti-installer
+        - /var/lib/honeypot
+        - /var/lib/honeypot/hardware-backups
+      register: pti_directory_ancestors
+
+    - name: Refuse symlinked preparation directories
+      ansible.builtin.assert:
+        that:
+          - not item.stat.islnk
+        fail_msg: A preparation directory is a symlink; refusing to write through it.
+      loop: "{{ pti_directory_ancestors.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.stat.exists
+
+    - name: Refuse a symlinked release path
+      ansible.builtin.assert:
+        that:
+          - not pti_existing_release.stat.islnk
+        fail_msg: Release path is a symlink; refusing to copy through it.
+      when: pti_existing_release.stat.exists
+
+    - name: Refuse to overwrite an unmarked release path
+      ansible.builtin.assert:
+        that:
+          - pti_prepare_marker.stat.exists or not pti_existing_release.stat.exists
+        fail_msg: Release path exists without a PTI preparation marker.
+
+    - name: Detect existing sensor service installation
+      ansible.builtin.stat:
+        path: "/etc/systemd/system/{{ item }}"
+      loop: "{{ pti_unit_names }}"
+      register: pti_existing_units
+
+    - name: Detect running services before any host mutation
+      ansible.builtin.service_facts:
+
+    - name: Refuse a host with other sensor services already installed
+      ansible.builtin.assert:
+        that:
+          - (pti_other_sensor_units | intersect(ansible_facts.services.keys() | list) | length) == 0
+        fail_msg: Cowrie, Zeek, OpenCanary, or legacy sensor service already exists; use migration procedures.
+
+    - name: Refuse to prepare over an active PTI service
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services[item].state != 'running'
+          - ansible_facts.services[item].get('status', 'unknown') != 'enabled'
+        fail_msg: An active or enabled PTI service was found; use the migration runbook.
+      loop: "{{ pti_unit_names }}"
+      when: item in ansible_facts.services
+
+    - name: Refuse a host with an already running Redis service
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services['redis-server.service'].state != 'running'
+          - ansible_facts.services['redis-server.service'].get('status', 'unknown') != 'enabled'
+        fail_msg: Redis is already active or enabled; this playbook is only for a clean host.
+      when: "'redis-server.service' in ansible_facts.services"
+
+    - name: Refuse an existing or partially prepared host without our marker
+      ansible.builtin.assert:
+        that:
+          - pti_prepare_marker.stat.exists or (pti_existing_units.results | selectattr('stat.exists') | list | length == 0)
+          - pti_prepare_marker.stat.exists or ((pti_unit_names | intersect(ansible_facts.services.keys() | list) | length) == 0)
+        fail_msg: Existing PTI units found without a prepare marker; use the migration runbook.
+
+    - name: Detect existing private agent configuration
+      ansible.builtin.stat:
+        path: /etc/honeypot-agent.env
+      register: pti_private_agent_env
+
+    - name: Refuse a host with existing private agent configuration
+      ansible.builtin.assert:
+        that:
+          - pti_prepare_marker.stat.exists or not pti_private_agent_env.stat.exists
+        fail_msg: Existing private agent configuration found; this playbook is for a clean host.
+
+  tasks:
+    - name: Create non-secret installer state directory
+      ansible.builtin.file:
+        path: /var/lib/pti-installer
+        state: directory
+        owner: root
+        group: root
+        mode: '0750'
+
+    - name: Record resumable preparation state before package changes
+      ansible.builtin.copy:
+        content: "{{ {'schema': 'pti.prepare.v1', 'release_id': pti_release_id, 'manifest_sha256': pti_manifest_sha256, 'state': 'preparing'} | to_json }}\n"
+        dest: /var/lib/pti-installer/prepared-release
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install host-side dependencies without a general OS upgrade
+      ansible.builtin.apt:
+        name: "{{ pti_exact_packages }}"
+        state: present
+        update_cache: true
+        install_recommends: false
+        policy_rc_d: 101
+
+    - name: Keep Redis stopped until activation
+      ansible.builtin.systemd_service:
+        name: redis-server.service
+        state: stopped
+        enabled: false
+
+    - name: Create dedicated non-login agent group
+      ansible.builtin.group:
+        name: "{{ pti_agent_group }}"
+        system: true
+
+    - name: Create dedicated non-login agent user
+      ansible.builtin.user:
+        name: "{{ pti_agent_user }}"
+        group: "{{ pti_agent_group }}"
+        system: true
+        shell: /usr/sbin/nologin
+        create_home: false
+
+    - name: Create non-secret installation directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: "{{ item.owner }}"
+        group: "{{ item.group }}"
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: /etc/honeypot, owner: root, group: root, mode: '0750'}
+        - {path: /var/lib/honeypot/hardware-backups, owner: "{{ pti_agent_user }}", group: "{{ pti_agent_group }}", mode: '0750'}
+        - {path: /opt/pti/sensor/releases, owner: root, group: root, mode: '0755'}
+        - {path: "/opt/pti/sensor/releases/{{ pti_release_id }}", owner: root, group: root, mode: '0755'}
+
+    - name: Copy verified ARM64 release bundle
+      ansible.builtin.copy:
+        src: "{{ pti_release_source }}/"
+        dest: "{{ pti_release_root }}/{{ pti_release_id }}/"
+        owner: root
+        group: root
+        mode: preserve
+
+    - name: Verify staged manifest digest on the target
+      ansible.builtin.stat:
+        path: "{{ pti_release_root }}/{{ pti_release_id }}/manifest.json"
+        checksum_algorithm: sha256
+      register: pti_staged_manifest
+
+    - name: Confirm staged manifest is exactly the approved one
+      ansible.builtin.assert:
+        that:
+          - pti_staged_manifest.stat.isreg
+          - not pti_staged_manifest.stat.islnk
+          - pti_staged_manifest.stat.checksum == pti_manifest_sha256
+        fail_msg: Staged manifest differs from the approved release; units were not installed.
+
+    - name: Verify staged binary hashes on the target
+      ansible.builtin.stat:
+        path: "{{ pti_release_root }}/{{ pti_release_id }}/{{ item.binary }}"
+        checksum_algorithm: sha256
+      loop: "{{ pti_manifest.modules }}"
+      register: pti_staged_binaries
+
+    - name: Confirm every staged binary matches the approved manifest
+      ansible.builtin.assert:
+        that:
+          - item.stat.isreg
+          - not item.stat.islnk
+          - item.stat.checksum == item.item.sha256
+        fail_msg: A staged binary differs from the approved release; units were not installed.
+      loop: "{{ pti_staged_binaries.results }}"
+      loop_control:
+        label: "{{ item.item.id }}"
+
+    - name: Install portable but inactive systemd units
+      ansible.builtin.template:
+        src: "units/{{ item }}.j2"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ pti_unit_names }}"
+      register: pti_units_written
+
+    - name: Reload systemd after installing units
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: pti_units_written.changed
+
+    - name: Leave all application services stopped and disabled
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop: "{{ pti_unit_names }}"
+
+    - name: Record non-secret preparation marker
+      ansible.builtin.copy:
+        content: "{{ {'schema': 'pti.prepare.v1', 'release_id': pti_release_id, 'manifest_sha256': pti_manifest_sha256, 'state': 'prepared'} | to_json }}\n"
+        dest: /var/lib/pti-installer/prepared-release
+        owner: root
+        group: root
+        mode: '0644'

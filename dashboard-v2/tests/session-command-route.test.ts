@@ -127,6 +127,7 @@ describe("Admin-only Cowrie command evidence route", () => {
   it("rejects noncanonical session ids without calling the sensitive upstream", async () => {
     vi.spyOn(authSession, "getSessionFromRequest").mockResolvedValue(operator("admin"));
     vi.spyOn(authSession, "isAdmin").mockReturnValue(true);
+    vi.spyOn(commandServer, "resolveCanonicalSessionIdForCommandEvidence").mockResolvedValue(null);
     const loadCommands = vi.spyOn(commandServer, "loadAdminCowrieCommands");
 
     const response = await callRoute("session-safe");

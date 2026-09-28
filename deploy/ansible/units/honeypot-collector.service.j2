@@ -1,0 +1,18 @@
+[Unit]
+Description=PTI Go collector
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User={{ pti_agent_user }}
+Group={{ pti_agent_group }}
+WorkingDirectory={{ pti_release_root }}/{{ pti_release_id }}
+EnvironmentFile=/etc/honeypot-agent.env
+ExecStart={{ pti_release_root }}/{{ pti_release_id }}/bin/pti-collector
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
