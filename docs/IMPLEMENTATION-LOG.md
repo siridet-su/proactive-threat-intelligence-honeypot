@@ -2656,3 +2656,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the protected previous binary and restart the control service, and re-enable the fixed 03:30 timer as a pair. Preserve schedule revisions, run claims, manifests, and B2 versions for audit.
 - Follow-up: monitor the next scheduled run and authenticated schedule UI; perform a read-only restore rehearsal before claiming recovery readiness.
 - Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-28 — Support dark mode in Session Analysis detail page
+
+- Status: repository styling update completed on `edit-dashboard`; host/production deployment pending.
+- Scope and intent: eliminate remaining white sections in the Session Analysis page (`/threat-intel/[id]`) during dark mode by replacing hardcoded Tailwind light classes with semantic theme tokens.
+- Repository branch and commit/PR: `edit-dashboard`.
+- Repository changes: update `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx` to replace fixed `bg-[#F9FAFB]`, `bg-white`, `bg-slate-50`, `bg-slate-100`, `border-slate-200`, and `text-slate-800` classes with semantic theme tokens (`bg-surface`, `bg-surface-subtle`, `border-border`, `text-text`, `text-text-muted`, `text-text-subtle`, `var(--map-land)`).
+- Host/environment changes actually applied: none. No host, systemd service, database, or production deployment was altered.
+- Runtime/exposure state: local development update only; production Dashboard has not been deployed.
+- Validation performed and outcome: `npx tsc --noEmit` passed with zero errors; targeted session and threat intelligence test suites (11 files, 62 passed tests) passed cleanly.
+- Not performed / deferred: production Docker/staging rollout was deferred.
+- Risks and data handling: purely presentational CSS class adjustments; no API contracts, data models, credentials, or telemetry boundaries are affected.
+- Rollback: git checkout of `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx`.
+- Follow-up: verify visual presentation across both light and dark mode themes in the browser.
+- Related ADR/runbook: `dashboard-v2/docs/PRODUCTION_THEME_DESIGN_SPEC.md`.
