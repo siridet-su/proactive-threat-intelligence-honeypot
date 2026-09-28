@@ -8,8 +8,8 @@
     pti_cowrie_bundle_sha256: ''
     pti_cowrie_bundle_revision: ''
     pti_cowrie_interface: wlan0
-    pti_cowrie_ssh_port: 22
-    pti_cowrie_telnet_port: 23
+    pti_cowrie_ssh_port: 2222
+    pti_cowrie_telnet_port: 2223
     pti_cowrie_root: /home/cowrie/cowrie
     pti_cowrie_output_root: /opt/honeypot-cowrie-output
   pre_tasks:

@@ -19,8 +19,8 @@
   "pti_docker_version": "REPLACE_WITH_APPROVED_VERSION",
   "pti_compose_version": "REPLACE_WITH_APPROVED_VERSION",
   "pti_cowrie_interface": "wlan0",
-  "pti_cowrie_ssh_port": 22,
-  "pti_cowrie_telnet_port": 23,
+  "pti_cowrie_ssh_port": 2222,
+  "pti_cowrie_telnet_port": 2223,
   "pti_zeek_interface": "wlan0",
-  "pti_zeek_ports": [22, 23]
+  "pti_zeek_ports": [2222, 2223]
 }

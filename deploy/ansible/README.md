@@ -9,12 +9,12 @@ a separate source-based developer process.
 
 ## One-command fresh Pi flow
 
-Use one clean Ubuntu 24.04 ARM64 Pi. Establish and **verify a separate
-administrator SSH route** before Cowrie takes Wi-Fi TCP 22/23. The installer
-checks both ports for collisions and will stop without changing the admin SSH
-configuration. The disposable VM profile uses `lo` and TCP 2223/2323 so its
-administrator SSH on 22 remains untouched. No existing `pi-t` service is
-changed by this fresh-host procedure.
+Use one clean Ubuntu 24.04 ARM64 Pi. Leave administrator SSH on TCP 22 during
+installation. The reviewed Wi-Fi example starts Cowrie on TCP 2222/2223 and
+sets Zeek to capture those same ports, so the installer does not move SSH.
+It checks the chosen Cowrie ports for collisions before activation. The
+disposable VM profile uses `lo` and TCP 2223/2323 for its bounded tests. No
+existing `pi-t` service is changed by this fresh-host procedure.
 
 Build the Go release and the reviewed Cowrie source archive as described below.
 After this repository is committed, build the fresh sanitizer package from
@@ -51,7 +51,7 @@ nonblank operator values are preserved. It pauses before starting any fresh
 service while required secrets or settings are missing. Fill the actual files
 on the Pi with `sudoedit` or an approved private upload, then run the **same
 command**. It starts Cowrie with its manifest-bound sanitizer, Zeek with a
-generated TCP 22/23 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
+generated TCP 2222/2223 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
 `127.0.0.1`, Redis, and the four core Go services. The B2 backup control unit
 stays stopped and disabled. It never installs the legacy GCP
 sensor forwarder or the public Web-corp Compose override. Existing Pi behavior
@@ -68,12 +68,20 @@ belongs in the developer's separate private restore environment, never in
 will stop and disable the fresh backup unit. See the
 [B2 handoff](../../docs/B2-ARCHIVE-HANDOFF.md).
 
-Cowrie refuses port 22/23 if real SSH or another process still listens there.
+The reviewed vars file can specify another Cowrie port pair if Zeek's port
+list matches it. Moving Cowrie to the well-known 22/23 pair is a separate
+operator-reviewed exposure change: first establish and test an alternate
+administrator route, then review the private env, Cowrie listener, and Zeek
+capture together. A same-release installer retry refuses changed active
+Cowrie markers or nonblank `ALLOW_RESP_PORTS`; do not use it as an in-place
+port migration tool. Cowrie refuses any chosen port already used by another
+process.
 Zeek refuses an interface without exactly one IPv4 address. If the Wi-Fi
 address changes later, edit `SENSOR_LAN_IP` in the private env and restart
 Cowrie and Zeek under a reviewed rebinding procedure; a same-release installer
 retry refuses stale network values. Cowrie's user cannot log in; systemd grants
-only the low-port bind capability. The Go collector user joins the Cowrie and
+only the bind capability needed if a reviewed deployment later uses low ports.
+The Go collector user joins the Cowrie and
 Zeek groups for log reads. Do not copy private env values into the reviewed
 vars file or repository.
 

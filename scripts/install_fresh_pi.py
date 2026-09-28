@@ -65,8 +65,6 @@ def reviewed_full_vars(path: Path) -> dict:
         raise InstallError("Cowrie needs two distinct valid TCP ports")
     if data.get("pti_zeek_ports") != list(ports):
         raise InstallError("Zeek capture ports must exactly match Cowrie listeners")
-    if data["pti_zeek_interface"] == "wlan0" and ports != (22, 23):
-        raise InstallError("fresh Wi-Fi Pi contract uses Cowrie TCP 22/23")
     if data["pti_zeek_interface"] == "lo" and 22 in ports:
         raise InstallError("VM loopback test must leave administrator SSH port 22 alone")
     return data

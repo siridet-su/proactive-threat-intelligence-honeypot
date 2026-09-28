@@ -5,7 +5,7 @@
   gather_facts: true
   vars:
     pti_zeek_interface: wlan0
-    pti_zeek_ports: [22, 23]
+    pti_zeek_ports: [2222, 2223]
   pre_tasks:
     - name: Require one supported host and reviewed capture scope
       ansible.builtin.assert:

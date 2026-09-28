@@ -23,9 +23,9 @@ def reviewed_vars(tmp_path: Path) -> dict:
         "pti_compose_version": "2.3-4",
         "pti_zeek_interface": "wlan0",
         "pti_cowrie_interface": "wlan0",
-        "pti_cowrie_ssh_port": 22,
-        "pti_cowrie_telnet_port": 23,
-        "pti_zeek_ports": [22, 23],
+        "pti_cowrie_ssh_port": 2222,
+        "pti_cowrie_telnet_port": 2223,
+        "pti_zeek_ports": [2222, 2223],
     }
     for name, digest in (
         ("pti_cowrie_archive", "pti_cowrie_sha256"),
@@ -39,15 +39,25 @@ def reviewed_vars(tmp_path: Path) -> dict:
     return data
 
 
-def test_fresh_scope_requires_exact_wifi_listener_and_capture_ports(tmp_path):
+def test_fresh_scope_requires_matching_listener_and_capture_ports(tmp_path):
     data = reviewed_vars(tmp_path)
     path = tmp_path / "vars.json"
     path.write_text(json.dumps(data))
-    assert installer.reviewed_full_vars(path)["pti_zeek_ports"] == [22, 23]
+    assert installer.reviewed_full_vars(path)["pti_zeek_ports"] == [2222, 2223]
     data["pti_zeek_ports"] = [22, 80]
     path.write_text(json.dumps(data))
     with pytest.raises(installer.InstallError, match="exactly match"):
         installer.reviewed_full_vars(path)
+
+
+def test_reviewed_wifi_ports_can_change_together_before_install(tmp_path):
+    data = reviewed_vars(tmp_path)
+    data["pti_cowrie_ssh_port"] = 22
+    data["pti_cowrie_telnet_port"] = 23
+    data["pti_zeek_ports"] = [22, 23]
+    path = tmp_path / "vars.json"
+    path.write_text(json.dumps(data))
+    assert installer.reviewed_full_vars(path)["pti_zeek_ports"] == [22, 23]
 
 
 def test_fresh_artifact_digest_is_checked_before_host_mutation(tmp_path):

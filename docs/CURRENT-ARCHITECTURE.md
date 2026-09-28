@@ -51,8 +51,8 @@ additional WireGuard Web-corp container. The original ZeroTier container was
 not rebuilt.
 
 The clean-host target in [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md)
-differs from that existing Pi: Cowrie listens on the Pi Wi-Fi address at
-TCP 22/23 after admin SSH is separated, Zeek captures that Wi-Fi interface
+differs from that existing Pi: Cowrie defaults to the Pi Wi-Fi address at
+TCP 2222/2223 while administrator SSH remains on 22. Zeek captures that Wi-Fi interface
 with a narrow port filter, and Web-corp/Core/PostgreSQL bind to loopback. The
 disposable ARM64 VM verified these services with loopback test ports and
 synthetic private input. It did not validate Go/Atlas/B2 end to end, and it

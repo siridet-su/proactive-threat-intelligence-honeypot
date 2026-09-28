@@ -3144,3 +3144,60 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: git checkout of `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx`.
 - Follow-up: verify visual presentation across both light and dark mode themes in the browser.
 - Related ADR/runbook: `dashboard-v2/docs/PRODUCTION_THEME_DESIGN_SPEC.md`.
+
+### 2026-09-28 — Guard fresh-Pi administrator SSH migration before Cowrie
+
+- Status: repository implementation prepared; bounded dual-port rollback tested on the disposable Azure VM; no full cutover or Pi deployment.
+- Scope and intent: let the fresh Wi-Fi installer choose an available administrator SSH port without relying on an operator remembering a manual migration, while keeping TCP 22 recoverable until the new route has been authenticated.
+- Repository changes: add a target-side Ubuntu 24.04 `ssh.socket` helper and controller orchestration, port suggestion and collision checks, local access receipt, dual-port verification, timed cutover rollback, and installer routing through the confirmed new port. Update the fresh-install runbook and ADR-0015; add focused tests and validation record.
+- Host/environment changes actually applied: on the disposable Azure ARM64 VM only, copied the helper and briefly opened SSH on 22 and 2222. Controller access to 2222 timed out; the helper and then the new controller orchestration each rolled back through 22 during bounded tests. A final probe showed the VM back in fresh SSH state with 22 active. No firewall or cloud security rule was changed.
+- Runtime/exposure state: no active Pi or production service was changed. The VM remains accessible on administrator SSH 22. No Cowrie service was started by this test.
+- Validation performed and outcome: the installer suite passed with `PYTHONPATH=.` (42 tests and five subtests), as did Python compilation and whitespace checks. The VM's blocked new-port case demonstrated safe rollback before Cowrie activation. An initial `pytest` invocation without repository `PYTHONPATH` failed collection for three existing imports; the corrected run passed.
+- Not performed / deferred: successful port cutover, actual timed rollback expiry, Wi-Fi Pi activation, end-to-end installation, and console recovery drill remain untested.
+- Risks and data handling: external firewall or router policy can block an apparently free local port, so controller authentication is mandatory before cutover. The receipt stores only inventory path and port, with owner-only file permissions; it stores no SSH key or credential.
+- Rollback: before cutover, the target helper removes its managed SSH drop-in and restores port 22. During cutover, a 150-second systemd timer is armed and cancelled only after the new route is confirmed. Console recovery remains the last resort if host or controller fails during a network change.
+- Follow-up: validate a successful cutover and timeout rollback on a console-accessible clean host with its management port allowed, then test the full installer and Cowrie bind to 22.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh Pi installation](../deploy/ansible/README.md), and [bounded validation](validation/2026-09-28-admin-ssh-cutover.md).
+
+### 2026-09-28 — Withdraw automatic administrator SSH migration
+
+- Status: automatic migration removed from the working tree before commit at the operator's request; the earlier entry remains as an audit record of the bounded experiment.
+- Scope and intent: avoid changing the administrator's SSH route automatically during fresh-Pi installation.
+- Repository changes: remove the proposed controller and target migration helpers and their focused tests; restore the existing fresh installer, runbook, and ADR-0015 contract. Cowrie remains configured for TCP 22/23 on a real Wi-Fi Pi; the installer still requires a separately established administrator SSH route and refuses a port collision.
+- Host/environment changes actually applied: removed the copied migration helper from the disposable Azure VM and the controller's local test receipt. The VM had no managed SSH drop-in or migration marker, and `ssh.socket` was active with effective TCP port 22. No Pi service was changed.
+- Runtime/exposure state: the Azure VM remains on administrator SSH 22. The active Pi and its Cowrie configuration were not changed by this withdrawal.
+- Validation performed and outcome: read-only VM checks confirmed active `ssh.socket`, effective port 22, and absence of the managed drop-in and marker before removing the dormant helper. The remaining installer suite passed (38 tests and five subtests), and `git diff --check` passed.
+- Not performed / deferred: no Cowrie port change or full clean-Pi installation was performed. Whether the fresh Pi should use Cowrie's upstream high ports instead of the project's 22/23 policy remains a separate decision.
+- Risks and data handling: a fresh Pi with real SSH occupying 22 will stop at the existing Cowrie collision gate until its operator establishes a separate route or changes the decoy port policy. No credential or private config contents were copied into the repository.
+- Rollback: not applicable to the withdrawn code. The earlier VM dual-port experiment was already rolled back before this addendum.
+- Follow-up: decide whether to keep the existing 22/23 decoy exposure contract or explicitly move Cowrie and Zeek to high ports for the fresh-Pi profile.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh Pi installation](../deploy/ansible/README.md), and [historical validation](validation/2026-09-28-admin-ssh-cutover.md).
+
+### 2026-09-28 — Default fresh-Pi Cowrie and Zeek to high ports
+
+- Status: repository change prepared; no host deployment.
+- Scope and intent: let a developer install the fresh Wi-Fi profile while administrator SSH stays on TCP 22, and leave well-known decoy exposure as a separate reviewed change.
+- Repository changes: set the reviewed Wi-Fi example and Ansible defaults to Cowrie SSH/Telnet TCP 2222/2223 and matching Zeek capture ports; continue deriving `ALLOW_RESP_PORTS` from those vars. Remove the wrapper's hard-coded Wi-Fi 22/23 requirement while keeping distinct valid TCP ports and exact Cowrie/Zeek agreement. Update the installer runbook, current architecture, ADR-0015, and focused validation tests.
+- Host/environment changes actually applied: none. No Pi, disposable VM, firewall, SSH daemon, Cowrie listener, or Zeek process was changed for this port-default update.
+- Runtime/exposure state: the active Pi still uses its existing Cowrie and Zeek 22/23 configuration and separate administrator SSH route. The revised 2222/2223 defaults apply only to a future fresh installation using the updated reviewed vars.
+- Validation performed and outcome: validation commands and results are recorded after this entry once complete.
+- Not performed / deferred: no full fresh-Pi installation, live 2222/2223 listener check, Wi-Fi capture check, or public 22/23 exposure migration was performed.
+- Risks and data handling: the high-port profile will not receive scans aimed only at 22/23. A reviewed vars change to 22/23 still requires an alternate administrator route and listener checks before first activation; the same-release retry refuses an active Cowrie port change. No private values were added to the repository.
+- Rollback: restore the prior reviewed vars and matching Cowrie/Zeek defaults before deploying a fresh host; existing Pi services are unaffected.
+- Follow-up: test the high-port profile end to end on a clean Pi and write a separate, console-backed exposure procedure if the developer elects to move Cowrie to 22/23.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh Pi installation](../deploy/ansible/README.md), and [current architecture](CURRENT-ARCHITECTURE.md).
+
+### 2026-09-28 — Validate fresh-Pi high-port defaults
+
+- Status: validation addendum to the repository-only port-default change above; no host deployment.
+- Repository changes: add a reproducible validation record; no further runtime code change in this addendum.
+- Host/environment changes actually applied: none. The active Pi and disposable VM were not modified for these checks.
+- Runtime/exposure state: repository defaults for future fresh installs are Cowrie and Zeek TCP 2222/2223; the active Pi retains its previously deployed 22/23 listeners and capture policy.
+- Validation performed and outcome: `PYTHONPATH=. pytest -q tests/installer` passed (39 tests, five subtests); syntax checks passed for the three affected Ansible playbooks; Python compilation, example JSON parsing, and `git diff --check` passed. The Ansible syntax check used a localhost inventory with no `pi_sensors` host, so it produced a non-fatal host-pattern warning and ran no tasks.
+- Not performed / deferred: no fresh-Pi activation, live listener/capture verification, or migration of the active Pi.
+- Risks and data handling: high-port decoys do not attract scans addressed only to well-known 22/23. The tested override accepts reviewed matching ports before first install but does not prove an in-place migration. No private configuration or credentials were inspected or recorded.
+- Rollback: revert the repository port-default change before a fresh deployment if needed; no host rollback applies.
+- Follow-up: run a clean Wi-Fi Pi end-to-end test with the approved release and confirm Cowrie listeners, Zeek filter, and SSH administrator access.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh Pi installation](../deploy/ansible/README.md), and [validation record](validation/2026-09-28-fresh-high-port-defaults.md).
+
+Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/2223 produced source and destination filter terms for both ports. The temporary file was removed; no service was started or changed.

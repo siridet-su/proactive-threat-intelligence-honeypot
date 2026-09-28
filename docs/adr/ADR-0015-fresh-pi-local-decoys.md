@@ -15,10 +15,12 @@ Go activation gate could not complete on a clean host.
 ## Decision
 
 - On a new Pi, bind Cowrie SSH/Telnet to the current `wlan0` IPv4 address on
-  TCP 22/23. The dedicated non-login `cowrie` account owns its source, private
-  state, and logs. A systemd capability grants only the low-port bind right.
-  Administrator SSH must already be reachable on a different management port;
-  the installer refuses a listener collision instead of changing SSH remotely.
+  TCP 2222/2223 by default. The dedicated non-login `cowrie` account owns its
+  source, private state, and logs. Administrator SSH remains on TCP 22 during
+  installation; the installer never changes it. The reviewed vars may select
+  another matching Cowrie/Zeek port pair, subject to listener checks. Moving
+  Cowrie to TCP 22/23 is a separate operator-reviewed exposure change after
+  an alternate administrator SSH route has been tested.
 - Run one standalone Zeek worker on the same Wi-Fi interface. Its generated
   BPF policy accepts bidirectional TCP traffic only for the Pi's Cowrie
   address and ports. Regenerate and install the policy before every start;
@@ -45,10 +47,11 @@ Go activation gate could not complete on a clean host.
 
 ## Consequences
 
-- A clean OS with administrator SSH on TCP 22 stops at the Cowrie collision
-  gate. The operator first establishes and verifies a separate management
-  route, then reruns the installer. This prevents lockout and impersonating the
-  real administrator SSH service.
+- A clean OS with administrator SSH on TCP 22 can install the default Cowrie
+  profile without changing its management route. The high-port decoy receives
+  traffic addressed to 2222/2223; scans aimed only at 22/23 reach the real
+  SSH service or no Telnet service until an explicit exposure change is made.
+  A same-release retry does not migrate an active Cowrie port pair in place.
 - The fresh installer has no public HTTP endpoint. Developers can inspect
   Web-corp at `http://127.0.0.1/` on the Pi or through an approved SSH tunnel.
 - A Wi-Fi DHCP change requires a restart of Cowrie and Zeek to rebind and
