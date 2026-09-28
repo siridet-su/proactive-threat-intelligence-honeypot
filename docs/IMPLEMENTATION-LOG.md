@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Restore classic Live radar sweep with fewer static guides
+
+- Status: repository UI revision prepared on a staging-based branch; deployment not verified.
+- Scope and intent: restore the operator-preferred full-canvas radar appearance while reducing the center emitter and leaving only short cardinal edge ticks as static guides.
+- Repository branch and commit/PR: `fix/live-radar-classic-20260928` from `origin/staging` at `3ee4b86`; commit pending at entry time.
+- Repository changes: restore the edge-reaching 48-degree sweep, multi-stop trail, plain radar surface, visible grid, and expanding circular wave; remove faint range rings, continuous crosshairs, full-canvas diagonals, and corner rays; use a 16px solid center emitter instead of the earlier 32px one. Keep the separate loading state, connection copy, snapshot receipt age, Pause/Resume control, reduced-motion behavior, and populated-map transition.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB data, or credential changed in this repository step.
+- Runtime/exposure state: the revised appearance is inactive until a Dashboard containing this revision deploys. The current hosted appearance was not rechecked for this entry.
+- Validation performed and outcome: source review checked that the restored wave resizes to the responsive canvas and is omitted when paused or reduced motion is enabled; whitespace check pending at entry time.
+- Not performed / deferred: automated tests, authenticated browser visual review, staging deployment confirmation, and production deployment.
+- Risks and data handling: the sweep and wave are decorative and do not represent attacker locations. No raw telemetry or secret was added to this record.
+- Rollback: revert this UI revision; no host data rollback is required.
+- Follow-up: review the empty Live radar in light/dark themes and different panel sizes after deployment.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Live topology canvas](../dashboard-v2/src/components/filesystem/TopologyCanvas.tsx).
+
 ### 2026-09-28 — Refine Live empty radar and motion controls
 
 - Status: repository UI change prepared on a staging-based branch; deployment not verified.

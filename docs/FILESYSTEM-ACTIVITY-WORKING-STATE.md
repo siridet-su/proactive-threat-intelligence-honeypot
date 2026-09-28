@@ -59,7 +59,7 @@ rows in the hosted Evidence panel, but it does not establish the deployment
 revision, response headers, or role denial. `FS-027` through `FS-030` are
 intentionally in progress alongside `FS-026` for the Source IP copy control,
 the one-event Route Replay playback correction, the Live loading-to-empty
-transition, and the quieter Live radar treatment.
+transition, and the revised Live radar treatment.
 The staging source lengthens Route Replay pacing: Step waits
 3 seconds at 1x or 1.5 seconds at 2x; Real uses the recorded event spacing
 compressed to 2–8 seconds at 1x or 1–4 seconds at 2x. Deployment and visual
@@ -67,9 +67,10 @@ review of this pacing change are pending.
 `FS-020` through `FS-024` are deferred
 product additions, not blockers for the accepted evidence/replay scope. In
 particular, `FS-024` has a local radar implementation but lacks its stated
-authenticated Live-state visual acceptance. Its detailed corner rays,
-full-canvas axes, large emitter, and expanding wave are superseded in the
-staging design by `FS-030`; `FS-024` remains a record of the earlier proposal.
+authenticated Live-state visual acceptance. Its corner rays, full-canvas axes,
+and large emitter are superseded in the staging design by `FS-030`. The
+full-canvas sweep and expanding wave are retained in the revised `FS-030`;
+`FS-024` remains a record of the earlier proposal.
 `FS-022` has exact-session command
 and download observations, but its broader CWD-hop and file-operation
 correlation remains deferred. Customer installation documentation is the next
@@ -198,7 +199,7 @@ deferred and can be reopened as separate work.
 | `FS-027` | `IN PROGRESS` | Copy the selected audited session's Source IP. | Show a keyboard-accessible Copy IP control beside the session selector; copy only the selected IP; do not select or change a session when the control is activated; show copy success or failure without exposing additional session data. | Repository UI change prepared on the staging-based Filesystem Activity branch; deployment and interactive review pending. |
 | `FS-028` | `IN PROGRESS` | Stop Route Replay playback for a one-event session. | Keep Play disabled when fewer than two route events are loaded, explain that there are no steps to replay, and ensure the timer cannot remain in Pause after history shrinks to one event. Apply the same availability rule to sidebar, compact toolbar, and Space shortcut. | Operator screenshot showed Hop 1/1 stuck on Pause; repository correction prepared on a staging-based branch. Deployment and interactive review pending. |
 | `FS-029` | `IN PROGRESS` | Separate Live topology loading from empty radar standby. | Show a plain loading placeholder until the first snapshot is available; show the radar only after a resolved empty snapshot, including when the stream is still connecting; keep the panel dimensions stable and respect reduced motion during the brief reveal. | Operator screenshot showed loading text drawn over radar. Repository correction prepared on a staging-based branch; deployment and visual review pending. |
-| `FS-030` | `IN PROGRESS` | Make the Live empty radar calmer and its state clearer. | Use two faint range rings, a contained slow sweep, small center marker, and short edge ticks; show no-active-session copy and a real snapshot receipt age; distinguish connecting, live, and reconnecting; let operators pause/resume sweep, honor reduced motion, and fade the populated map into the same panel. | Operator approved the visual direction on 2026-09-28. Repository implementation prepared on a staging-based branch; deployed visual review pending. |
+| `FS-030` | `IN PROGRESS` | Refine the Live empty radar while keeping its original full-canvas visual. | Use the original edge-reaching 48-degree sweep and expanding circular wave on a plain radar surface; remove the continuous crosshairs, full-canvas diagonals, corner rays, and faint range rings; keep four short cardinal edge ticks and shrink the solid center emitter from 32px to 16px. Show no-active-session copy and actual snapshot receipt age; distinguish connecting, live, and reconnecting; let operators pause/resume sweep, honor reduced motion, and fade the populated map into the same panel. | Operator preferred the original visual with fewer static lines on 2026-09-28. Repository revision prepared on a staging-based branch; deployed visual review pending. |
 
 ## Deferred outside this workstream
 

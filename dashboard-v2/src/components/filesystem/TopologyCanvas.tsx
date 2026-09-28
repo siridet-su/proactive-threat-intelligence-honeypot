@@ -108,9 +108,11 @@ function sameElementBounds(
 
 type LiveTopologyStandbyMode = "connecting" | "listening" | "reconnecting";
 
-const LIVE_RADAR_SWEEP_DURATION_MS = 12_000;
-const LIVE_RADAR_TRAIL_ANGLE = (28 * Math.PI) / 180;
+const LIVE_RADAR_SWEEP_DURATION_MS = 9_000;
+const LIVE_RADAR_TRAIL_ANGLE = (48 * Math.PI) / 180;
 const LIVE_RADAR_FULL_TURN = Math.PI * 2;
+const LIVE_RADAR_WAVE_OVERSCAN_PX = 16;
+type RadarPoint = { x: number; y: number };
 type RadarRgb = { red: number; green: number; blue: number };
 
 function readRadarAccent(context: CanvasRenderingContext2D, element: HTMLElement): RadarRgb {
@@ -147,6 +149,34 @@ function radarRgba({ red, green, blue }: RadarRgb, opacity: number) {
   return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
+function normalizeRadarAngle(angle: number) {
+  return ((angle % LIVE_RADAR_FULL_TURN) + LIVE_RADAR_FULL_TURN) % LIVE_RADAR_FULL_TURN;
+}
+
+/** Angle is clockwise from 12 o'clock, matching the radar's sweep direction. */
+function radarPointAtCanvasEdge(width: number, height: number, angle: number): RadarPoint {
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const directionX = Math.sin(angle);
+  const directionY = -Math.cos(angle);
+  const distanceToVerticalEdge = directionX > 0
+    ? (width - centerX) / directionX
+    : directionX < 0
+      ? -centerX / directionX
+      : Number.POSITIVE_INFINITY;
+  const distanceToHorizontalEdge = directionY > 0
+    ? (height - centerY) / directionY
+    : directionY < 0
+      ? -centerY / directionY
+      : Number.POSITIVE_INFINITY;
+  const distance = Math.min(distanceToVerticalEdge, distanceToHorizontalEdge);
+
+  return {
+    x: centerX + directionX * distance,
+    y: centerY + directionY * distance,
+  };
+}
+
 function drawLiveRadarSweep(
   context: CanvasRenderingContext2D,
   width: number,
@@ -156,23 +186,67 @@ function drawLiveRadarSweep(
 ) {
   const centerX = width / 2;
   const centerY = height / 2;
-  const radius = Math.min(width, height) * 0.38;
-  const beamAngle = angle - Math.PI / 2;
+  const trailingAngle = angle - LIVE_RADAR_TRAIL_ANGLE;
+  const beamEnd = radarPointAtCanvasEdge(width, height, angle);
+  const trailEnd = radarPointAtCanvasEdge(width, height, trailingAngle);
+  const corners: RadarPoint[] = [
+    { x: 0, y: 0 },
+    { x: width, y: 0 },
+    { x: width, y: height },
+    { x: 0, y: height },
+  ];
+  const cornersAlongTrail = corners
+    .map((corner) => {
+      const cornerAngle = normalizeRadarAngle(Math.atan2(corner.x - centerX, centerY - corner.y));
+      return { ...corner, angleBehindBeam: normalizeRadarAngle(angle - cornerAngle) };
+    })
+    .filter(({ angleBehindBeam }) => angleBehindBeam > 1e-6 && angleBehindBeam < LIVE_RADAR_TRAIL_ANGLE - 1e-6)
+    .sort((left, right) => left.angleBehindBeam - right.angleBehindBeam);
 
   context.clearRect(0, 0, width, height);
   context.beginPath();
   context.moveTo(centerX, centerY);
-  context.arc(centerX, centerY, radius, beamAngle - LIVE_RADAR_TRAIL_ANGLE, beamAngle);
+  context.lineTo(beamEnd.x, beamEnd.y);
+  for (const corner of cornersAlongTrail) context.lineTo(corner.x, corner.y);
+  context.lineTo(trailEnd.x, trailEnd.y);
   context.closePath();
-  context.fillStyle = radarRgba(accent, 0.055);
+
+  const conicStop = LIVE_RADAR_TRAIL_ANGLE / LIVE_RADAR_FULL_TURN;
+  const usesConicGradient = typeof context.createConicGradient === "function";
+  const trailGradient = usesConicGradient
+    ? context.createConicGradient(trailingAngle - Math.PI / 2, centerX, centerY)
+    : context.createLinearGradient(trailEnd.x, trailEnd.y, beamEnd.x, beamEnd.y);
+  const finalStop = usesConicGradient ? conicStop : 1;
+  const trailStops = [
+    { progress: 0, opacity: 0 },
+    { progress: 0.16, opacity: 0.004 },
+    { progress: 0.38, opacity: 0.015 },
+    { progress: 0.58, opacity: 0.04 },
+    { progress: 0.76, opacity: 0.14 },
+    { progress: 0.9, opacity: 0.3 },
+    { progress: 1, opacity: 0.48 },
+  ];
+  for (const stop of trailStops) {
+    trailGradient.addColorStop(finalStop * stop.progress, radarRgba(accent, stop.opacity));
+  }
+
+  context.save();
+  context.clip();
+  context.fillStyle = trailGradient;
   context.fill();
+  context.restore();
 
   context.beginPath();
   context.moveTo(centerX, centerY);
-  context.lineTo(centerX + radius * Math.cos(beamAngle), centerY + radius * Math.sin(beamAngle));
-  context.strokeStyle = radarRgba(accent, 0.38);
-  context.lineWidth = 1;
+  context.lineTo(beamEnd.x, beamEnd.y);
+  context.save();
+  context.shadowColor = radarRgba(accent, 0.42);
+  context.shadowBlur = 9;
+  context.strokeStyle = radarRgba(accent, 0.9);
+  context.lineWidth = 1.5;
+  context.lineCap = "butt";
   context.stroke();
+  context.restore();
 }
 
 function LiveRadarOverlay({
@@ -185,8 +259,31 @@ function LiveRadarOverlay({
   paused?: boolean;
 }) {
   const radarOverlayRef = useRef<HTMLDivElement>(null);
+  const radarWaveSvgRef = useRef<SVGSVGElement>(null);
   const radarSweepCanvasRef = useRef<HTMLCanvasElement>(null);
   const sweepElapsedRef = useRef(0);
+
+  useLayoutEffect(() => {
+    const overlay = radarOverlayRef.current;
+    if (!overlay) return;
+
+    const resizeWave = () => {
+      const { width, height } = overlay.getBoundingClientRect();
+      if (width <= 0 || height <= 0) return;
+      const waveSvg = radarWaveSvgRef.current;
+      const wave = waveSvg?.querySelector<SVGCircleElement>(".pti-live-radar-wave");
+      if (!waveSvg || !wave) return;
+      waveSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      wave.setAttribute("cx", String(width / 2));
+      wave.setAttribute("cy", String(height / 2));
+      wave.setAttribute("r", String(Math.hypot(width / 2, height / 2) + LIVE_RADAR_WAVE_OVERSCAN_PX));
+    };
+
+    resizeWave();
+    const observer = new ResizeObserver(resizeWave);
+    observer.observe(overlay);
+    return () => observer.disconnect();
+  }, [paused, reducedMotion]);
 
   useEffect(() => {
     if (reducedMotion) return;
@@ -270,8 +367,23 @@ function LiveRadarOverlay({
       aria-hidden="true"
     >
       {showGrid && <div className="pti-live-radar-grid absolute inset-0" />}
-      <span className="pti-live-radar-ring is-inner" />
-      <span className="pti-live-radar-ring is-outer" />
+      {!reducedMotion && !paused && (
+        <svg
+          ref={radarWaveSvgRef}
+          className="absolute inset-0 h-full w-full"
+          viewBox={`0 0 ${LIVE_RADAR_CANVAS_SIZE} ${LIVE_RADAR_CANVAS_SIZE}`}
+          preserveAspectRatio="none"
+        >
+          <g className="pti-live-radar-wave-shell">
+            <circle
+              className="pti-live-radar-wave"
+              cx={LIVE_RADAR_CANVAS_SIZE / 2}
+              cy={LIVE_RADAR_CANVAS_SIZE / 2}
+              r={Math.hypot(LIVE_RADAR_CANVAS_SIZE / 2, LIVE_RADAR_CANVAS_SIZE / 2) + LIVE_RADAR_WAVE_OVERSCAN_PX}
+            />
+          </g>
+        </svg>
+      )}
 
       {!reducedMotion && (
         <canvas
@@ -333,7 +445,7 @@ function LiveTopologyStandby({
     >
       <LiveRadarOverlay reducedMotion={reducedMotion} paused={isSweepPaused} />
       <div
-        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full`}
+        className={`pti-live-radar-hub is-${mode} absolute left-1/2 top-1/2 z-20 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full`}
         aria-hidden="true"
       />
       <LiveRadarMotionControl
@@ -341,7 +453,7 @@ function LiveTopologyStandby({
         onToggle={onToggleSweep}
         reducedMotion={reducedMotion}
       />
-      <div className="pti-live-radar-status absolute left-1/2 top-[calc(50%+2.5rem)] z-10 w-[min(21rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border/70 bg-surface/90 px-5 py-4 text-center shadow-sm backdrop-blur-sm">
+      <div className="pti-live-radar-status absolute left-1/2 top-1/2 z-10 flex w-full max-w-lg -translate-x-1/2 flex-col items-center px-6 pt-14 text-center sm:px-8">
         <div role="status" aria-live="polite">
           <h3 className="text-base font-semibold text-text">{title}</h3>
           <p className="mt-1 text-xs text-text-muted">
