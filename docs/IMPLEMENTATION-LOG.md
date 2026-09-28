@@ -48,6 +48,17 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Activate bounded H1/H2 and G1/G2 backend release on GCP
+
+- Status: active on GCP; immutable backend revision `29006d1656335cde0e8e14a7176e3c760d65e031`. Staging source includes this revision; the Dashboard frontend is managed by its separate CI/CD path.
+- Scope: approved H1/H2 hypotheses and G1/G2 manual response guidance, plus exact preservation of the already-live Model2 bridge source and a five-name correction to the GCP external-unit inventory. No model, threshold, canonical authority, or automatic response behavior was changed.
+- Host changes: installed a new package/release, issued an official root-owned MongoDB storage-successor receipt for the exact v7 manifest, atomically switched `/opt/honeypot`, and restarted analysis worker, Dashboard API, monitor web, AI advisory worker, and Model2 ensemble bridge. The previously active release remains available for pointer rollback. No MongoDB migration/write was performed by the release steps.
+- Recovery during rollout: the first pointer switch exposed a missing storage-successor receipt; the analysis worker restarted instead of remaining healthy. The pointer and five services were restored to the prior active release. After issuing and independently testing the receipt, a second switch completed with the services stable. The earlier staged package was not activated and remains superseded.
+- Validation: clean local full suite `2141 passed, 77 skipped, 15 strict xfailed`; new managed-unit test `9 passed`; active GCP v7 manifest verified (925 release files), runtime feed cache hashes passed, managed-unit inventory valid with zero errors, all five affected services active, Dashboard readiness and monitor health HTTP 200. In-memory active-runtime H1/G1, H2, G2, and negative cases passed; a temporary PDF rendered with a valid PDF signature. These are mechanics/operational smokes, not a real Pi session or model-performance evaluation.
+- Not verified: no new Pi→GCP Cowrie session was generated for this release; existing immutable reports were not rewritten. Website presentation of a newly generated H1/H2/G1/G2 report is therefore still unverified. The loopback API and PDF smokes do not replace that end-to-end check.
+- Rollback: retain the previously active release pointer target and the separately verified historical rollback release; any rollback must verify the matching storage receipt and service health before declaring completion.
+- Related evidence: `honeypot-analysis/docs/BACKEND_H1_H2_G1_G2_RELEASE_GATE_20260928.md`, `honeypot-analysis/docs/STORAGE_RELEASE_SUCCESSOR.md`, and `honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md`.
+
 ### 2026-09-28 — Reconcile GCP managed-unit inventory before backend release
 
 - Status: prepared in the isolated staging checkout; host unit configuration unchanged and candidate not yet activated.

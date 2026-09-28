@@ -34,3 +34,11 @@ The project owner selected alignment with the current runtime, not restoration o
 The tested `6be281e2` package was pushed to staging and copied to a new, inactive GCP release. Its v7 manifest and separate CISA/Sigma/MITRE cache hash checks passed. The preserved runtime can import the changed modules but has no `pytest` installed, so the full suite was run in the clean local checkout. No active pointer or service was changed.
 
 The live managed-unit guard then identified five already-enabled but unlisted external units: both Dashboard-v2 units, both Next-Distinct shadow units, and the watchdog timer. A new candidate policy records exactly those existing units as allowed external services. This does **not** enable or alter them. The first staged package is superseded; a fresh commit/package/manifest and full test rerun are required before activation.
+
+## 2026-09-28 activation result
+
+Revision `29006d1656335cde0e8e14a7176e3c760d65e031` was packaged and pushed to staging after `pytest tests -q` completed with **2,141 passed, 77 skipped, 15 strict xfailed, no unexpected failures**. The new v7 GCP release manifest verifies 925 files and binds the exact configuration, private artifacts, dependency identities, and current runtime-feed provenance path. The managed-unit profile is valid with zero inventory errors.
+
+The first pointer activation was immediately reversed because the analysis worker could not find the required MongoDB storage-successor receipt. No MongoDB schema or data was changed. The official receipt was issued for the verified candidate, and `require_active_release` passed read-only against its exact tree. After a second atomic switch, all five affected services remained active through a 15-second restart-stability check. Final manifest/policy checks passed; local Dashboard readiness and monitor health returned HTTP 200.
+
+Active-runtime in-memory smokes passed for H1/G1, H2, G2, and a negative case, plus temporary PDF rendering. These did not write MongoDB, create a canonical session, invoke a provider, or demonstrate a new real Pi→GCP session. A newly generated website report showing these additions remains an explicit end-to-end evidence gap; historical immutable reports should not be expected to change.
