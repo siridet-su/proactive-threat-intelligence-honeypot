@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Restrict Pi Zeek packets to active decoy endpoints
+
+- Status: active on the existing Pi; repository source and operations documentation updated.
+- Scope and intent: exclude development and management traffic from Zeek capture while keeping current Cowrie and Web-corp decoy observations.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: add a host-address-aware BPF policy renderer and Zeek systemd start/reload drop-in, ADR-0013, validation evidence, and current-state/runbook updates. The tracked node list remains `wlan0` plus ZeroTier.
+- Host/environment changes actually applied: on `pi-t`, backed up the prior Zeek site policy in a root-only host location, installed the renderer and systemd drop-in, replaced the broad local filter with a generated-policy load, checked Zeek, restarted it, and tested a subsequent reload. No firewall, VPN, Cowrie, Web-corp, collector, or processor configuration was changed.
+- Runtime/exposure state: Zeek's five local cluster nodes are running. Its filter accepts bidirectional Cowrie TCP 22/23 to the Pi on `wlan0` and ZeroTier and Web-corp TCP 80 to the Pi on ZeroTier. Tailscale is not captured. Cowrie, ZeroTier, collector, and processor remain active.
+- Validation performed and outcome: verified live listeners for Cowrie 22/23 and Web-corp 80, with FTP 21 and direct HTTPS 443 absent; the generated BPF compiled with `tcpdump -d`, and a synthetic eight-packet pcap admitted three decoy packets while excluding five development/management cases. `zeekctl check`, systemd restart, systemd reload, and node status passed. Bounded no-payload connections from a ZeroTier peer to 22/23/80 produced only those three destination ports in the new `conn.log`; an equivalent connection to admin 2222 did not appear. All four TCP connects succeeded. Zeek, collector, and processor stayed active. See the linked evidence note.
+- Not performed / deferred: a live `wlan0` decoy-flow test, sustained packet-loss/CPU measurements, post-change MongoDB volume comparison, and a real interface-address-renewal test. This Zeek version did not emit a usable `packet_filter.log` entry during the bounded check.
+- Risks and data handling: a changed interface address while Zeek is running requires a service restart or reload. A newly enabled decoy port requires a reviewed filter update. The generated policy and protected backup remain on the Pi; no private interface address, secret, or raw event was copied into Git.
+- Rollback: restore the protected prior `local.zeek` from `/var/backups/honeypot/zeek/`, remove the decoy filter drop-in and generated policy, reload systemd, then restart Zeek and verify node/collector health.
+- Follow-up: compare Zeek event volume and resource use after a representative interval and update the filter when a stopped decoy becomes active.
+- Related ADR/runbook: [ADR-0013](adr/ADR-0013-zeek-decoy-endpoint-filter.md), [existing-Pi Zeek runbook](../zeek/README.md), and [validation evidence](validation/2026-09-28-zeek-decoy-endpoint-filter.md).
+
 ### 2026-09-28 — Limit existing Pi Zeek capture to wlan0 and ZeroTier
 
 - Status: active on existing Pi; Dashboard label correction prepared in repository only.

@@ -30,6 +30,8 @@ and historical material inherited from the previous team.
    Pi env skeletons while preserving operator-managed credentials.
    [ADR-0012](adr/ADR-0012-zeek-primary-uplink-capture.md) scopes the existing
    Pi's Zeek capture to its primary uplink and ZeroTier.
+   [ADR-0013](adr/ADR-0013-zeek-decoy-endpoint-filter.md) limits Zeek packets
+   to active decoy endpoints on those interfaces.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
