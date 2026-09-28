@@ -56,9 +56,10 @@ preserving the accepted Admin-only Evidence contract. Its repository source is
 prepared, but the private Railway setting, deployment, and authenticated
 production check remain outstanding. A later operator screenshot shows command
 rows in the hosted Evidence panel, but it does not establish the deployment
-revision, response headers, or role denial. `FS-027` and `FS-028` are
-intentionally in progress alongside `FS-026` for the Source IP copy control and
-the one-event Route Replay playback correction.
+revision, response headers, or role denial. `FS-027` through `FS-029` are
+intentionally in progress alongside `FS-026` for the Source IP copy control,
+the one-event Route Replay playback correction, and the Live loading-to-empty
+transition.
 The staging source lengthens Route Replay pacing: Step waits
 3 seconds at 1x or 1.5 seconds at 2x; Real uses the recorded event spacing
 compressed to 2–8 seconds at 1x or 1–4 seconds at 2x. Deployment and visual
@@ -193,6 +194,7 @@ deferred and can be reopened as separate work.
 | `FS-026` | `IN PROGRESS` | Enable hosted production command Evidence without a same-host monitor. | Keep Admin and exact-session binding; select canonical MongoDB only through a private server setting; retain bounded no-store submissions; verify a known retained command session, non-Admin denial, and cache headers after Railway deployment without copying command text into evidence. | Repository change prepared in the isolated Filesystem Activity worktree. Railway configuration, deployment, and production verification pending. |
 | `FS-027` | `IN PROGRESS` | Copy the selected audited session's Source IP. | Show a keyboard-accessible Copy IP control beside the session selector; copy only the selected IP; do not select or change a session when the control is activated; show copy success or failure without exposing additional session data. | Repository UI change prepared on the staging-based Filesystem Activity branch; deployment and interactive review pending. |
 | `FS-028` | `IN PROGRESS` | Stop Route Replay playback for a one-event session. | Keep Play disabled when fewer than two route events are loaded, explain that there are no steps to replay, and ensure the timer cannot remain in Pause after history shrinks to one event. Apply the same availability rule to sidebar, compact toolbar, and Space shortcut. | Operator screenshot showed Hop 1/1 stuck on Pause; repository correction prepared on a staging-based branch. Deployment and interactive review pending. |
+| `FS-029` | `IN PROGRESS` | Separate Live topology loading from empty radar standby. | Show a plain loading placeholder until the first snapshot is available; show the radar only after a resolved empty snapshot, including when the stream is still connecting; keep the panel dimensions stable and respect reduced motion during the brief reveal. | Operator screenshot showed loading text drawn over radar. Repository correction prepared on a staging-based branch; deployment and visual review pending. |
 
 ## Deferred outside this workstream
 

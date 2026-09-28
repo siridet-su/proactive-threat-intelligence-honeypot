@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Separate Live topology loading from empty radar standby
+
+- Status: repository correction prepared on a staging-based branch; deployment not verified.
+- Scope and intent: prevent the Live topology loading message and empty-state radar from appearing together or causing a visible restart at first load.
+- Repository branch and commit/PR: `fix/live-topology-loading-empty-20260928` from `origin/staging` at `0c7e6f7`; commit pending at entry time.
+- Repository changes: render a plain full-height loading placeholder before the first snapshot; mount radar only after an empty snapshot is available, reveal it briefly, and keep it visible while the SSE stream is connecting. Respect reduced-motion settings and record the transition contract as `FS-029`.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB data, or credential changed in this repository step.
+- Runtime/exposure state: the operator screenshot shows the hosted loading message on the radar surface. The correction is inactive until a Dashboard containing this revision deploys.
+- Validation performed and outcome: source inspection traced the overlap to the loading branch rendering `LiveTopologyStandby`, which mounts the radar. `git diff --check` passed.
+- Not performed / deferred: automated tests, interactive visual review, staging deployment confirmation, and production deployment.
+- Risks and data handling: the change affects presentation only; no telemetry or source-IP data was changed or recorded.
+- Rollback: revert this UI commit; no host data rollback is required.
+- Follow-up: review initial load with an empty snapshot, a populated snapshot, and reconnect after the Dashboard deploys.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Live topology canvas](../dashboard-v2/src/components/filesystem/TopologyCanvas.tsx).
+
 ### 2026-09-28 — Lengthen Filesystem Activity Route Replay pacing
 
 - Status: repository change prepared on a staging-based branch; browser deployment not verified.

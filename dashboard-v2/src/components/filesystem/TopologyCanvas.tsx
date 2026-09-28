@@ -9,6 +9,7 @@ import {
   Folder,
   FolderOpen,
   HardDrive,
+  LoaderCircle,
   Move,
   RotateCcw,
   Route,
@@ -104,7 +105,7 @@ function sameElementBounds(
   });
 }
 
-type LiveTopologyStandbyMode = "loading" | "listening" | "reconnecting";
+type LiveTopologyStandbyMode = "listening" | "reconnecting";
 type RadarPoint = { x: number; y: number };
 
 const LIVE_RADAR_SWEEP_DURATION_MS = 9_000;
@@ -425,6 +426,20 @@ function LiveRadarOverlay({
   );
 }
 
+function LiveTopologyLoading() {
+  return (
+    <section
+      role="status"
+      aria-live="polite"
+      className="flex min-h-[25rem] flex-1 flex-col items-center justify-center rounded-xl border border-border bg-surface px-5 py-10 text-center sm:px-8"
+    >
+      <LoaderCircle className="mb-4 h-8 w-8 animate-spin text-primary motion-reduce:animate-none" aria-hidden="true" />
+      <h3 className="text-lg font-semibold text-text">Loading live topology</h3>
+      <p className="mt-2 text-sm text-text-muted">Preparing the latest activity</p>
+    </section>
+  );
+}
+
 function LiveTopologyStandby({
   mode,
   onReconnect,
@@ -435,22 +450,12 @@ function LiveTopologyStandby({
   reducedMotion: boolean;
 }) {
   const isReconnecting = mode === "reconnecting";
-  const title =
-    mode === "loading"
-      ? "Loading live topology"
-      : isReconnecting
-        ? "Reconnecting to live activity"
-        : null;
-  const status =
-    mode === "loading"
-      ? "Preparing the latest activity"
-      : isReconnecting
-        ? "Showing the last available topology"
-        : null;
+  const title = isReconnecting ? "Reconnecting to live activity" : null;
+  const status = isReconnecting ? "Showing the last available topology" : null;
 
   return (
     <section
-      className="pti-live-radar relative isolate flex min-h-[25rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-border px-5 py-10 sm:px-8"
+      className="pti-live-radar pti-live-radar-standby relative isolate flex min-h-[25rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-border px-5 py-10 sm:px-8"
       aria-label="Live honeypot activity"
     >
       <LiveRadarOverlay reducedMotion={reducedMotion} />
@@ -1225,11 +1230,7 @@ export function TopologyCanvas({
               variant="topology"
             />
           ) : (
-            <LiveTopologyStandby
-              mode="loading"
-              onReconnect={onReconnect}
-              reducedMotion={Boolean(reducedMotion)}
-            />
+            <LiveTopologyLoading />
           )}
         </div>
       ) : !snapshot?.nodes.length ? (
@@ -1242,13 +1243,7 @@ export function TopologyCanvas({
           )}
           {!isAuditMode && snapshot && snapshot.sessions.length === 0 ? (
             <LiveTopologyStandby
-              mode={
-                streamState === "live"
-                  ? "listening"
-                  : streamState === "connecting"
-                    ? "loading"
-                    : "reconnecting"
-              }
+              mode={streamState === "stale" ? "reconnecting" : "listening"}
               onReconnect={onReconnect}
               reducedMotion={Boolean(reducedMotion)}
             />

@@ -333,6 +333,19 @@
   background: var(--pti-radar-bg);
 }
 
+@keyframes pti-live-radar-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pti-live-radar-standby {
+  animation: pti-live-radar-reveal 240ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pti-live-radar-standby { animation: none; }
+}
+
 .pti-live-radar-grid {
   --pti-radar-grid-cell-size: 2.5rem;
   --pti-radar-grid-cell-half-size: 1.25rem;
@@ -500,7 +513,6 @@
   color: var(--pti-radar-accent);
 }
 
-.pti-live-radar-status-line.is-loading,
 .pti-live-radar-status-line.is-reconnecting {
   color: var(--warning);
 }
@@ -521,7 +533,6 @@
   box-shadow: 0 0 1.25rem var(--pti-radar-hub-glow);
 }
 
-.pti-live-radar-hub.is-loading,
 .pti-live-radar-hub.is-reconnecting {
   --pti-radar-hub-emitter: var(--warning);
   --pti-radar-hub-glow: color-mix(in srgb, var(--warning) 12%, transparent);
