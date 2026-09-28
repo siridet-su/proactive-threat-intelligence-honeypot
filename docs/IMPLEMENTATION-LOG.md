@@ -48,6 +48,36 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Integrate hosted command evidence source into staging
+
+- Status: staging repository change prepared; staging service deployment not verified.
+- Scope and intent: carry the Admin-only hosted Mongo command source from main commit `6c04127` into the diverged staging branch without importing unrelated main changes.
+- Repository branch and commit/PR: `merge/filesystem-command-evidence-staging-20260928` from `origin/staging` at `9618b07`; cherry-pick commit pending at entry time.
+- Repository changes: add the explicit server-only `PTI_ADMIN_COMMANDS_SOURCE=mongo` selection and its ADR, API, runbook, architecture, and Filesystem Activity records. Preserve existing staging backend and Dashboard work.
+- Host/environment changes actually applied: none. No Railway, staging host, Pi, MongoDB, credential, or service setting changed by this integration.
+- Runtime/exposure state: the source selection is inactive without the private environment setting. Existing staging and production runtime state was not inspected in this integration step.
+- Validation performed and outcome: resolved the implementation-log conflict by retaining both chronological records; reviewed the route and loader delta against staging, and `git diff --cached --check` passed. No command contents were read.
+- Not performed / deferred: automated tests, staging deploy/CI review, private environment setting, authenticated command request, and production activation.
+- Risks and data handling: the new source can return attacker-entered command text to authorized Admin sessions only; no raw command content, URI, or token was added to this record. An absent setting retains the monitor path.
+- Rollback: revert the staging integration commit; unset `PTI_ADMIN_COMMANDS_SOURCE` if separately configured on a host.
+- Follow-up: confirm staging deployment identity and configure the private source only on the intended hosted Dashboard, then verify Admin/no-store behavior without capturing command text.
+- Related ADR/runbook: [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md) and [Dashboard runbook](../dashboard-v2/README.md).
+
+### 2026-09-28 — Prepare hosted Dashboard command evidence from canonical MongoDB
+
+- Status: repository change prepared; hosted production setting and deployment not yet applied.
+- Scope and intent: make the Admin-only Filesystem Activity Command events panel usable when Dashboard and the private Pi monitor do not share a loopback interface.
+- Repository branch and commit/PR: `feature/filesystem-activity-command-evidence-20260928` worktree from `origin/main`; commit/PR pending at entry time.
+- Repository changes: add an explicit server-only `PTI_ADMIN_COMMANDS_SOURCE=mongo` production source selection using the existing bounded exact-session canonical command projection; keep the colocated monitor path as the default. Record the hosted source boundary in ADR-0016 and update the Dashboard API, operating instructions, Filesystem Activity working state, and architecture snapshot.
+- Host/environment changes actually applied: none. No Railway variable, Dashboard deployment, Pi service, MongoDB document, or credential changed in this repository step.
+- Runtime/exposure state: the production screenshot shows the Admin Command events panel reporting the protected source as unavailable. The hosted source remains inactive until the new code is deployed and the private Railway setting is applied. The existing monitor path remains the default.
+- Validation performed and outcome: source inspection traced the panel message to HTTP 503 from the command route and confirmed that the current production loader requires a same-host loopback monitor and owner-only token file. The changed route, loader, and documentation were reviewed; `git diff --check` passed. No production response or protected command content was captured.
+- Not performed / deferred: automated tests, production deployment, private Railway setting, authenticated 200/403 and no-store checks, and confirmation of command rows for the selected session.
+- Risks and data handling: command input can contain attacker-entered secrets. The opt-in Mongo path preserves Admin authorization, canonical session binding, bounded projection, and private no-store responses; no raw command input or credentials were copied into Git. Monitor failures do not silently fall back to MongoDB.
+- Rollback: unset `PTI_ADMIN_COMMANDS_SOURCE` to restore the monitor-only source; revert the repository change if needed.
+- Follow-up: connect Railway access, apply the private setting and reviewed deployment, then verify a known retained command session through the authenticated Admin view without recording command text.
+- Related ADR/runbook: [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md), [Dashboard runbook](../dashboard-v2/README.md), and [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md).
+
 ### 2026-09-28 — Activate bounded H1/H2 and G1/G2 backend release on GCP
 
 - Status: active on GCP; immutable backend revision `29006d1656335cde0e8e14a7176e3c760d65e031`. Staging source includes this revision; the Dashboard frontend is managed by its separate CI/CD path.

@@ -4,6 +4,7 @@ import { getSessionFromRequest, isAdmin } from "@/lib/auth/session";
 import {
   loadAdminCowrieCommands,
   loadLocalAdminCowrieCommands,
+  loadProductionMongoAdminCowrieCommands,
   resolveCanonicalSessionIdForCommandEvidence,
 } from "@/lib/session-command-server";
 import { CANONICAL_SESSION_ID_PATTERN, isValidSensorSessionIdentifier } from "@/lib/sensor-session-identity";
@@ -41,6 +42,8 @@ export async function GET(
 
     const localReview = process.env.NODE_ENV === "development"
       && process.env.PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO === "true";
+    const productionMongoReview = process.env.NODE_ENV === "production"
+      && process.env.PTI_ADMIN_COMMANDS_SOURCE === "mongo";
     if (localReview && !new Set(["127.0.0.1", "localhost", "[::1]"]).has(new URL(request.url).hostname)) {
       return json({ ok: false, error: "Local command review requires loopback access" }, 403);
     }
@@ -50,7 +53,9 @@ export async function GET(
     }
     const projection = localReview
       ? await loadLocalAdminCowrieCommands(canonicalSessionId)
-      : await loadAdminCowrieCommands(canonicalSessionId);
+      : productionMongoReview
+        ? await loadProductionMongoAdminCowrieCommands(canonicalSessionId)
+        : await loadAdminCowrieCommands(canonicalSessionId);
     return json({
       ...projection,
       schema_version: "dashboard.admin_cowrie_commands.v2",
