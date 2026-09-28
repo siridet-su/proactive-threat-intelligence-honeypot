@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attackerTypeQueryValue,
   buildSessionDirectoryRows,
+  normalizeAttackerType,
   SESSION_ATTACKER_TYPE_OPTIONS,
 } from "@/lib/threat-intel-session-directory";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
@@ -16,7 +17,7 @@ const sshSession: DashboardThreatEvent = {
   src_ip: "198.51.100.10",
   sourceIp: "198.51.100.10",
   severity: "Medium",
-  classification: "Unknown",
+  classification: "Bot",
   typeColor: "",
   duration: "Closed",
   end_time: "2026-09-27T12:00:24.000Z",
@@ -107,6 +108,7 @@ describe("unified session directory projection", () => {
     expect(rows[1]).toMatchObject({
       href: "/threat-intel/ssh-session-1",
       sensor: "pi-cowrie-01",
+      attackerType: "Bot",
       activity: "Command activity",
       dwellTime: "24s",
       status: "Closed",
@@ -118,6 +120,15 @@ describe("unified session directory projection", () => {
     expect(buildSessionDirectoryRows([sshSession], [httpSession], "http")).toHaveLength(1);
     expect(buildSessionDirectoryRows([sshSession], [httpSession], "all", "/web/login").map((row) => row.protocol))
       .toEqual(["HTTP"]);
+  });
+
+  it("uses only supported attacker categories and leaves unknown labels unclassified", () => {
+    expect(normalizeAttackerType("APT")).toBe("APT");
+    expect(normalizeAttackerType("ScriptKiddie")).toBe("ScriptKiddie");
+    expect(normalizeAttackerType("untrusted value")).toBe("Unclassified");
+    expect(normalizeAttackerType(null)).toBe("Unclassified");
+    const [row] = buildSessionDirectoryRows([{ ...sshSession, classification: "Untrusted value" }], [], "ssh");
+    expect(row.attackerType).toBe("Unclassified");
   });
 
   it("does not invent an HTTP status or location precision", () => {

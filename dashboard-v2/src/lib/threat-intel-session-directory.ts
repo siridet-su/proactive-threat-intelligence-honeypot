@@ -3,6 +3,7 @@ import type { WebHttpSession } from "@/lib/web-http-intel";
 
 export type SessionProtocolFilter = "all" | "ssh" | "http";
 export type SessionAttackerTypeFilter = "All" | "APT" | "Bot" | "ScriptKiddie";
+export type SessionAttackerType = Exclude<SessionAttackerTypeFilter, "All"> | "Unclassified";
 
 /** Values accepted by the existing threat-directory backend. */
 export const SESSION_ATTACKER_TYPE_OPTIONS: ReadonlyArray<{
@@ -27,6 +28,7 @@ export type SessionDirectoryRow = {
   id: string;
   href: string;
   protocol: "SSH" | "HTTP";
+  attackerType: SessionAttackerType | null;
   sensor: string;
   origin: string;
   originDetail: string;
@@ -86,12 +88,14 @@ function sshRow(session: DashboardThreatEvent): SessionDirectoryRow {
     ? session.geo.country
     : "Country unavailable";
   const sensor = session.sensor || "Cowrie";
+  const attackerType = normalizeAttackerType(session.classification);
 
   return {
     key: `ssh:${session.id}`,
     id: session.id,
     href: `/threat-intel/${encodeURIComponent(session.id)}`,
     protocol: "SSH",
+    attackerType,
     sensor,
     origin: session.sourceIp || "Origin unavailable",
     originDetail: country === "Country unavailable" ? country : `Approximate · ${country}`,
@@ -102,7 +106,7 @@ function sshRow(session: DashboardThreatEvent): SessionDirectoryRow {
     dwellTime: sshDwellTime(session, status),
     status,
     sortTimestamp: timestamp(startedAt) ?? 0,
-    searchText: [session.id, session.sourceIp, session.sensor, country, "ssh cowrie"].join(" ").toLowerCase(),
+    searchText: [session.id, session.sourceIp, session.sensor, country, attackerType, "ssh cowrie"].join(" ").toLowerCase(),
   };
 }
 
@@ -128,6 +132,7 @@ function httpRow(session: WebHttpSession & { id: string }): SessionDirectoryRow 
     id: session.id,
     href: `/threat-intel/http/${encodeURIComponent(session.id)}`,
     protocol: "HTTP",
+    attackerType: null,
     sensor: "web-corp",
     origin,
     originDetail,
@@ -145,6 +150,11 @@ function httpRow(session: WebHttpSession & { id: string }): SessionDirectoryRow 
       ...session.events.flatMap((event) => [event.method, event.path, ...event.signals]),
     ].join(" ").toLowerCase(),
   };
+}
+
+export function normalizeAttackerType(value: unknown): SessionAttackerType {
+  if (value === "APT" || value === "Bot" || value === "ScriptKiddie") return value;
+  return "Unclassified";
 }
 
 export function buildSessionDirectoryRows(

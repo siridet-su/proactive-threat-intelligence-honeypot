@@ -206,7 +206,7 @@ describe("session assessment presentation", () => {
       ensemble_evidence: { model1: { applicable: true }, model2: { available: false, status: "INCONCLUSIVE_EXPERIMENTAL_SHADOW" } },
     }} />);
     expect(html).toContain("No session-bound Model2 result is available");
-    expect(html).toContain("no ensemble corroboration or combined score is claimed");
+    expect(html).toContain("it did not corroborate or change the Model1 recommendation");
   });
 
   it("distinguishes raw Model2 agreement from an evidence-qualified vote", () => {

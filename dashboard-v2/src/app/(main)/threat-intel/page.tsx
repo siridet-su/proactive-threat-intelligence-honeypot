@@ -31,6 +31,7 @@ import {
   buildSessionDirectoryRows,
   SESSION_ATTACKER_TYPE_OPTIONS,
   type SessionAttackerTypeFilter,
+  type SessionAttackerType,
   type SessionDirectoryRow,
   type SessionProtocolFilter,
 } from "@/lib/threat-intel-session-directory";
@@ -584,7 +585,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
               <th scope="col" className="py-3 px-5 text-left">Protocol / Sensor</th>
               <th scope="col" className="py-3 px-5 text-left">Origin</th>
               <th scope="col" className="py-3 px-5 text-left">Started</th>
-              <th scope="col" className="py-3 px-5 text-left">Activity</th>
+              <th scope="col" className="py-3 px-5 text-left">Activity / attacker type</th>
               <th scope="col" className="py-3 px-5 text-right">Dwell time</th>
               <th scope="col" className="py-3 px-5 text-right">Status</th>
             </tr>
@@ -629,8 +630,9 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
                   </td>
                   <td className="whitespace-nowrap py-3 px-5 text-text-muted" title={row.startedAt || undefined}>{row.startedLabel}</td>
                   <td className="py-3 px-5 text-text">
-                    {row.activity}
-                    {row.protocol === "HTTP" && row.activity.includes("injection hint") && <span className="ml-1 text-[10px] text-warning">· review only</span>}
+                    {row.protocol === "SSH"
+                      ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} />
+                      : <>{row.activity}{row.activity.includes("injection hint") && <span className="ml-1 text-[10px] text-warning">· review only</span>}</>}
                   </td>
                   <td className="whitespace-nowrap py-3 px-5 text-right font-mono text-text-muted">{row.dwellTime}</td>
                   <td className="py-3 px-5 text-right">
@@ -661,7 +663,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
               <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Origin</span><span className="font-mono text-text">{row.origin}</span><span className="block text-[10px] text-text-muted">{row.originDetail}</span></div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Started</span><span className="text-text">{row.startedLabel}</span></div>
-                <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Activity</span><span className="text-text">{row.activity}</span>{row.protocol === "HTTP" && row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}</div>
+                <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">{row.protocol === "SSH" ? "Attacker type" : "Activity"}</span>{row.protocol === "SSH" ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} /> : <><span className="text-text">{row.activity}</span>{row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}</>}</div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Dwell time</span><span className="font-mono text-text-muted">{row.dwellTime}</span></div>
               </div>
             </Link>
@@ -670,6 +672,18 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
       </div>
     </>
   );
+}
+
+function AttackerTypeBadge({ type }: { type: SessionAttackerType }) {
+  const label = type === "ScriptKiddie" ? "Script Kiddie" : type;
+  const color = type === "APT"
+    ? "border-danger-border bg-danger-subtle text-danger"
+    : type === "Bot"
+      ? "border-border bg-surface-subtle text-text"
+      : type === "ScriptKiddie"
+        ? "border-warning-border bg-warning-subtle text-warning"
+        : "border-border bg-surface-subtle text-text-muted";
+  return <span className={cn("inline-flex rounded-md border px-2 py-1 text-[10px] font-semibold", color)}>{label}</span>;
 }
 
 function SessionStatusBadge({ status }: { status: SessionDirectoryRow["status"] }) {

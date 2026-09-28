@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Show SSH attacker category in the unified session directory
+
+- Status: repository Dashboard change prepared; staging deployment pending verification after push.
+- Scope and intent: replace generic SSH command-activity text in the unified session directory with the attacker category already returned by the Dashboard API, while preserving HTTP request activity.
+- Repository branch and commit/PR: `staging-release`, based on `087a022be852843f103e120a366fcfe795b46daa`; new commit pending.
+- Repository changes: project the existing SSH `classification` value into the directory row and render APT, Bot, Script Kiddie, or Unclassified as a compact tag on desktop and mobile. Unknown values fail closed to Unclassified. HTTP activity remains unchanged. Update the focused directory test and an outdated advisory-copy assertion; no API, schema, backend, or classification behavior changes.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: not deployed at the time of this entry. The category remains an existing classification/projection and must not be interpreted as verified actor attribution.
+- Validation performed and outcome: focused Threat Intel/advisory tests passed (27/27); TypeScript, targeted ESLint, and `git diff --check` passed. `npx next build --webpack` passed; default Turbopack build could not bind a port in the sandbox. Full Vitest suite: 827 passed, 5 failed in Filesystem/command-route test files, 2 expected failures, and 14 skipped. Backend targeted suites passed (116 passed, 2 skipped); a separate AI-presentation suite could not be collected because its import does not match the checked-out dirty source tree. One authorized public Cowrie session reached the verified HAProxy-to-Cowrie route. Analysis completed for that session; Model2 identity binding was complete, but T1105 transfer and T1110 repeated-auth gates correctly rejected raw PRESENT outputs, and T1046 was unavailable. No policy-supported canonical threat hypothesis was produced because the attempted fetch did not complete. Response guidance was manual-only. AI advisory returned accepted/valid on one on-demand provider call. The PDF endpoint returned HTTP 200 and a valid PDF. ETI reported `NO_STORED_PROVIDER_RESULT` for its eligible observable although enrichment jobs had completed. The session source was marked public by the system.
+- Not performed / deferred: staging deployment and authenticated browser inspection remain pending. The benign fetch did not complete and no transfer observation was produced. No direct/manual MongoDB writes, service changes, or config changes were made; the test session itself was stored through the normal application pipeline.
+- Risks and data handling: display reuses the current API field and does not claim verified actor identity. The single test session followed the normal pipeline; its on-demand AI advisory called the configured provider. No credentials, raw commands, payloads, or source IP were added to the UI or this log.
+- Rollback: revert the Dashboard UI commit; no backend or data rollback is required.
+- Follow-up: push through the existing staging CI/CD route if checks pass, then verify the deployed page and API.
+- Related ADR/runbook: unified Threat Intelligence session directory implementation.
+
 ### 2026-09-27 — Align manual backup actions with displayed coverage
 
 - Status: repository Pi worker correction prepared; not deployed to the Pi.
