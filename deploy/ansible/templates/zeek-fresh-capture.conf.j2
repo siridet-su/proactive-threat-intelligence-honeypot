@@ -1,0 +1,5 @@
+[Service]
+ExecStartPre=
+ExecStartPre=/usr/bin/python3 /usr/local/libexec/pti-zeek-render-fresh-capture --interface {{ pti_zeek_interface }} --ports {{ pti_zeek_ports | join(',') }} --output /opt/zeek/share/zeek/site/pti-fresh-capture.zeek
+ExecStartPre=/opt/zeek/bin/zeekctl check
+ExecStartPre=/opt/zeek/bin/zeekctl install

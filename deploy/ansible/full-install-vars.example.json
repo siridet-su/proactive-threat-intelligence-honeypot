@@ -1,0 +1,26 @@
+{
+  "pti_release_id": "REPLACE_WITH_RELEASE_ID",
+  "pti_release_source": "/absolute/path/to/reviewed/go-release",
+  "pti_manifest_sha256": "REPLACE_WITH_APPROVED_64_HEX_DIGEST",
+  "pti_package_versions": {
+    "ca-certificates": "REPLACE_WITH_APPROVED_VERSION",
+    "python3": "REPLACE_WITH_APPROVED_VERSION",
+    "python3-venv": "REPLACE_WITH_APPROVED_VERSION",
+    "redis-server": "REPLACE_WITH_APPROVED_VERSION"
+  },
+  "pti_cowrie_archive": "/absolute/path/to/reviewed/cowrie-source.tar.gz",
+  "pti_cowrie_sha256": "REPLACE_WITH_APPROVED_64_HEX_DIGEST",
+  "pti_cowrie_bundle": "/absolute/path/to/reviewed/cowrie-output.tar",
+  "pti_cowrie_bundle_sha256": "REPLACE_WITH_APPROVED_64_HEX_DIGEST",
+  "pti_cowrie_bundle_revision": "REPLACE_WITH_40_HEX_GIT_REVISION",
+  "pti_decoy_archive": "/absolute/path/to/reviewed/decoy-source.tar.gz",
+  "pti_decoy_sha256": "REPLACE_WITH_APPROVED_64_HEX_DIGEST",
+  "pti_decoy_commit": "REPLACE_WITH_40_HEX_GIT_REVISION",
+  "pti_docker_version": "REPLACE_WITH_APPROVED_VERSION",
+  "pti_compose_version": "REPLACE_WITH_APPROVED_VERSION",
+  "pti_cowrie_interface": "wlan0",
+  "pti_cowrie_ssh_port": 22,
+  "pti_cowrie_telnet_port": 23,
+  "pti_zeek_interface": "wlan0",
+  "pti_zeek_ports": [22, 23]
+}

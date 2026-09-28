@@ -1,0 +1,171 @@
+---
+- name: Activate prepared PostgreSQL, Core, and localhost Web-corp
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_decoy_release_root: /opt/pti/decoy/releases
+  pre_tasks:
+    - name: Require one supported fresh ARM64 host
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+
+    - name: Require the clean-host Pi preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_decoy_fresh_prepare
+
+    - name: Refuse a host outside the fresh installer
+      ansible.builtin.assert:
+        that:
+          - pti_decoy_fresh_prepare.stat.isreg | default(false)
+          - pti_decoy_fresh_prepare.stat.uid == 0
+          - pti_decoy_fresh_prepare.stat.mode == '0644'
+
+    - name: Read prepared decoy source identity
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/decoy-source
+      register: pti_decoy_marker
+
+    - name: Require prepared source release
+      ansible.builtin.assert:
+        that:
+          - (pti_decoy_marker.content | b64decode | from_json).schema == 'pti.decoy-source.v1'
+          - (pti_decoy_marker.content | b64decode | from_json).state == 'prepared'
+          - (pti_decoy_marker.content | b64decode | from_json).commit is match('^[0-9a-f]{40}$')
+
+    - name: Check operator env shape and localhost binding without showing values
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_decoy_env.py /etc/honeypot/decoy.env"
+      changed_when: false
+
+  tasks:
+    - name: Activate only the reviewed localhost decoy stack
+      block:
+        - name: Start container runtime
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop:
+            - containerd.service
+            - docker.socket
+            - docker.service
+
+        - name: Validate private Compose inputs without exposing values
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - --env-file
+              - /etc/honeypot/decoy.env
+              - -f
+              - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - config
+              - --quiet
+          environment:
+            WEB_CORP_BIND_IP: 127.0.0.1
+          changed_when: false
+          no_log: true
+
+        - name: Check whether the three reviewed services already run
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - --env-file
+              - /etc/honeypot/decoy.env
+              - -f
+              - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - ps
+              - --status
+              - running
+              - --services
+          environment:
+            WEB_CORP_BIND_IP: 127.0.0.1
+          register: pti_decoy_running_services
+          changed_when: false
+          no_log: true
+
+        - name: Build and start the three localhost decoy services
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - --env-file
+              - /etc/honeypot/decoy.env
+              - -f
+              - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - up
+              - -d
+              - --build
+          environment:
+            WEB_CORP_BIND_IP: 127.0.0.1
+          no_log: true
+          when: "['postgres', 'deception-core', 'web-corp'] | difference(pti_decoy_running_services.stdout_lines) | length > 0"
+
+        - name: Reconcile running services with the reviewed localhost config
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - --env-file
+              - /etc/honeypot/decoy.env
+              - -f
+              - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - up
+              - -d
+              - --no-build
+          environment:
+            WEB_CORP_BIND_IP: 127.0.0.1
+          register: pti_decoy_reconcile
+          changed_when: "'Recreated' in pti_decoy_reconcile.stderr or 'Started' in pti_decoy_reconcile.stderr or 'Created' in pti_decoy_reconcile.stderr"
+          no_log: true
+          when: "['postgres', 'deception-core', 'web-corp'] | difference(pti_decoy_running_services.stdout_lines) | length == 0"
+
+        - name: Verify Web-corp responds on loopback
+          ansible.builtin.uri:
+            url: http://127.0.0.1/
+            status_code: 200
+            timeout: 10
+          register: pti_web_corp_health
+          retries: 6
+          delay: 2
+          until: pti_web_corp_health is succeeded
+
+        - name: Verify Docker published only loopback decoy ports
+          ansible.builtin.command:
+            argv: [/usr/bin/docker, ps, --format, "{{ '{{.Ports}}' }}"]
+          register: pti_decoy_ports
+          changed_when: false
+
+        - name: Require no public bind for Web-corp, Core, or PostgreSQL
+          ansible.builtin.assert:
+            that:
+              - "'0.0.0.0:80->' not in pti_decoy_ports.stdout"
+              - "':::80->' not in pti_decoy_ports.stdout"
+              - "'0.0.0.0:5432->' not in pti_decoy_ports.stdout"
+              - "'0.0.0.0:9000->' not in pti_decoy_ports.stdout"
+
+      rescue:
+        - name: Stop only the fresh decoy Compose stack after activation failure
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/docker
+              - compose
+              - --env-file
+              - /etc/honeypot/decoy.env
+              - -f
+              - "{{ pti_decoy_release_root }}/{{ (pti_decoy_marker.content | b64decode | from_json).commit }}/deploy/decoy-honeypot/compose.yaml"
+              - down
+          environment:
+            WEB_CORP_BIND_IP: 127.0.0.1
+          no_log: true
+          failed_when: false
+
+        - name: Report failed localhost activation
+          ansible.builtin.fail:
+            msg: Decoy activation failed; the fresh Compose stack was stopped without deleting volumes.

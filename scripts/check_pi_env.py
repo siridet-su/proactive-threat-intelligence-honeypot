@@ -80,7 +80,7 @@ def check_file(path: Path, *, require_owner: bool = True) -> tuple[set[str], lis
     return present, errors
 
 
-def check_services(root: Path, services: list[str], *, require_owner: bool = True) -> list[str]:
+def check_services(root: Path, services: list[str], *, require_owner: bool = True, profile: str = "existing") -> list[str]:
     needed_files = dict.fromkeys(file for service in services for file in FILES[service])
     errors: list[str] = []
     present_by_file: dict[str, set[str]] = {}
@@ -92,7 +92,10 @@ def check_services(root: Path, services: list[str], *, require_owner: bool = Tru
         errors.extend(f"{name}: missing value for {key}" for key in sorted(missing))
     shared_present = present_by_file.get(SHARED, set())
     for service in services:
-        missing = SERVICE_SHARED_KEYS[service] - shared_present
+        required = SERVICE_SHARED_KEYS[service].copy()
+        if profile == "fresh-wifi" and service == "collector":
+            required -= {"SENSOR_ZT_IP", "SENSOR_ZT_IFACE"}
+        missing = required - shared_present
         errors.extend(f"{SHARED}: {service} needs {key}" for key in sorted(missing))
     return errors
 
@@ -100,10 +103,11 @@ def check_services(root: Path, services: list[str], *, require_owner: bool = Tru
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--service", choices=[*FILES, "all"], default="all")
+    parser.add_argument("--profile", choices=["existing", "fresh-wifi"], default="existing")
     parser.add_argument("--etc-root", type=Path, default=Path("/etc"))
     args = parser.parse_args()
     services = list(FILES) if args.service == "all" else [args.service]
-    errors = check_services(args.etc_root, services)
+    errors = check_services(args.etc_root, services, profile=args.profile)
     if errors:
         for error in errors:
             print(f"FAIL {error}", file=sys.stderr)

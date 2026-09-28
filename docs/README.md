@@ -34,11 +34,16 @@ and historical material inherited from the previous team.
    to active decoy endpoints on those interfaces.
    [ADR-0014](adr/ADR-0014-public-web-corp-ip-https-edge.md) defines the
    public HTTPS edge and private WireGuard backend for Web-corp.
+   [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md) defines fresh-Pi Wi-Fi
+   Cowrie/Zeek and localhost Web-corp, separately from the active Pi.
    [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md) defines the
    hosted Dashboard source for Admin-only Cowrie command evidence.
+
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.
+12. [Legacy forwarder purpose](LEGACY-SENSOR-FORWARDER.md) — why the existing Pi still sends a separate Cowrie stream to GCP.
+13. [MongoDB developer handoff](MONGODB-DEV-HANDOFF.md) — scoped read access or sanitized data without reusing owner credentials.
 
 The first [Ansible Pi preparation slice](../deploy/ansible/README.md) has
 [partial ARM64 VM validation](validation/2026-09-28-azure-arm64-installer-first-run.md)
@@ -53,6 +58,10 @@ The [Docker decoy staging slice](../deploy/ansible/README.md) also passed on
 the disposable ARM64 VM; a separate image build and loopback smoke run were
 cleaned up afterward. See
 its [evidence](validation/2026-09-28-azure-arm64-decoy-staging.md).
+The newer fresh-host activation path has [bounded VM checks](validation/2026-09-28-azure-arm64-fresh-activation.md) for Cowrie,
+Zeek's effective packet filter, and localhost Web-corp. It is not a live Pi or
+full Atlas/B2/Dashboard acceptance result; see the
+[fresh installation runbook](../deploy/ansible/README.md).
 
 The event contract and retrieval steps for fake ERP login attempts are in
 [Web-corp login telemetry](design/web-login-telemetry.md), the

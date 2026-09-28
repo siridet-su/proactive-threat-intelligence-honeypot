@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Prepare fresh Pi local decoys and bounded ARM64 activation
+
+- Status: repository implementation prepared; bounded service activation tested and then stopped on a disposable ARM64 VM. Existing Pi and Droplet remain unchanged.
+- Scope and intent: make a clean Ubuntu ARM64 Pi install Cowrie, narrow Zeek, localhost Web-corp/Core/PostgreSQL, and the Go stack through one resumable controller command, while omitting the legacy GCP sensor forwarder. Keep Dashboard as a local source-based developer process.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: add the fresh full-stack installer and non-secret env filler, Cowrie/Zeek/decoy activation playbooks, fresh Cowrie sanitizer contract, Wi-Fi-only collector configuration profile, Dashboard `npm run dev` launcher, targeted tests, ADR-0015, current-state/runbook updates, MongoDB handoff guidance, and legacy forwarder explanation.
+- Host/environment changes actually applied: the disposable Azure Ubuntu 24.04 ARM64 VM was used for isolated Cowrie, Zeek, and Compose activation with synthetic inputs and loopback-only test ports. The full installer prepared and retried the same release, then paused at a missing private MongoDB URI. No Go service or Dashboard was activated on that VM. No existing Pi, Droplet, or Dashboard host was changed.
+- Runtime/exposure state: after the VM checks, the test Compose stack and volumes were removed, Cowrie/Zeek/Docker services were stopped and disabled, the synthetic database password was cleared, and the provisional Cowrie activation files were removed. Only administrator SSH and local DNS stub listeners remained on the VM. The existing Pi forwarder remains active; a future fresh Pi install will omit it.
+- Validation performed and outcome: Cowrie emitted sanitized events from a synthetic SSH connection and a repeat activation made no changes. Zeek's corrected effective filter and connection log admitted only synthetic Cowrie test ports, excluding SSH management and HTTP test traffic. Web-corp returned HTTP 200; Core mounted the reviewed Zeek log path after Compose reconciliation; a further retry made no changes. Targeted Python, Go, syntax, and Ansible checks passed. The full installer pause and same-release preparation retry passed. See the linked validation record.
+- Not performed / deferred: completed full-stack activation with private credentials, Wi-Fi port-22/23 cutover on a clean Pi, Go → Redis → Atlas/B2 event and backup verification, Dashboard authenticated browser review, restore test, final sanitizer package rebuilt from the committed revision, and production deployment.
+- Risks and data handling: administrator SSH must be moved and verified separately before Cowrie claims Wi-Fi TCP 22. Wi-Fi address changes require reviewed Cowrie/Zeek rebinding. Read-only Atlas access can still expose sensitive fields; no developer database account or credential was created. No secret, raw attacker payload, private endpoint, or private config content was committed.
+- Rollback: on a new test host, stop and disable only the fresh services and remove its disposable Compose project after preserving any needed data. Existing Pi rollback is not applicable because it was not changed. Repository code can be reverted before deployment.
+- Follow-up: build final release artifacts from the committed tree, run a clean-Pi acceptance test after administrator SSH separation, and verify the data path with operator-managed credentials before using the installation for production.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh install runbook](../deploy/ansible/README.md), [VM evidence](validation/2026-09-28-azure-arm64-fresh-activation.md), [MongoDB handoff](MONGODB-DEV-HANDOFF.md), and [forwarder explanation](LEGACY-SENSOR-FORWARDER.md).
+
 ### 2026-09-28 — Prepare hosted Dashboard command evidence from canonical MongoDB
 
 - Status: repository change prepared; hosted production setting and deployment not yet applied.
@@ -92,6 +107,7 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: review the protected archive manifest and its SHA-256 hashes, then restore only the listed exact BSON documents through a reviewed PyMongo Extended JSON import after checking for newer records with the same `_id`. Preserve the archive and audit entry.
 - Follow-up: change the watchdog Cowrie check to avoid opening a TCP session, then run the tool's read-only preflight again and review any later exact-pair rows for a separate cleanup.
 - Related ADR/runbook: [Cowrie runbook](../integrations/cowrie/README.md), [service catalog](SERVICE-CATALOG.md), and [cleanup tool](../honeypot-analysis/production/tools/clear_loopback_cowrie_sessions.py).
+
 
 ### 2026-09-28 — Stage Docker decoys and correct Dashboard staging env gate
 

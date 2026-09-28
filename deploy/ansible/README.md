@@ -1,11 +1,82 @@
-# Fresh Pi preparation — first Ansible slice
+# Fresh Pi installation and staged components
 
-Status: **first prepare, blank-env pause, and unchanged-file retry passed on a
-disposable Ubuntu 24.04 ARM64 VM; not qualified for a production Raspberry Pi**.
-The resumable entry point builds a missing
-Go release, prepares the host, checks operator configuration and prerequisites,
-and activates the five Go units only when its gates pass. It is not a complete
-Cowrie, Zeek, decoy, or Dashboard installer.
+Status: **Cowrie, narrow Zeek, and localhost decoys passed bounded activation
+on a disposable Ubuntu 24.04 ARM64 VM; a full clean-Pi/Atlas/B2 run remains
+unqualified**. The earlier `install_pi_sensor.py` handles the Go-only slice.
+The new `install_fresh_pi.py` coordinates the full Pi service stack from one
+command and pauses until the operator fills private credentials. Dashboard is
+a separate source-based developer process.
+
+## One-command fresh Pi flow
+
+Use one clean Ubuntu 24.04 ARM64 Pi. Establish and **verify a separate
+administrator SSH route** before Cowrie takes Wi-Fi TCP 22/23. The installer
+checks both ports for collisions and will stop without changing the admin SSH
+configuration. The disposable VM profile uses `lo` and TCP 2223/2323 so its
+administrator SSH on 22 remains untouched. No existing `pi-t` service is
+changed by this fresh-host procedure.
+
+Build the Go release and the reviewed Cowrie source archive as described below.
+After this repository is committed, build the fresh sanitizer package from
+that exact commit. Build the decoy source bundle from the same reviewed clean
+Git state. These artifacts and their approved SHA-256 values stay outside Git:
+
+```sh
+PYTHONPATH=honeypot-analysis python3 -m production.tools.cowrie_output_integration build \
+  --source-root honeypot-analysis --bundle-root /path/to/new/cowrie-output-bundle \
+  --revision "$(git rev-parse HEAD)" --fresh
+PYTHONPATH=honeypot-analysis python3 -m production.tools.cowrie_output_integration package \
+  --bundle-root /path/to/new/cowrie-output-bundle \
+  --package /path/to/reviewed/cowrie-output.tar
+python3 scripts/build_decoy_bundle.py --output /path/to/reviewed/decoy-source.tar.gz
+```
+
+Copy `full-install-vars.example.json` to a private **non-secret** reviewed vars
+file outside Git. Fill the three artifact paths and digests, Git revisions,
+reviewed exact package versions, and the Wi-Fi listener/interface fields. On
+the target, compare candidate package versions with `apt-cache policy`. The
+sanitizer package's revision is the commit used to build it. The wrapper
+rechecks every supplied archive digest before host mutation.
+
+```sh
+python3 scripts/install_fresh_pi.py \
+  --inventory /path/to/private-inventory.ini \
+  --vars /path/to/reviewed-full-install-vars.json
+```
+
+The wrapper prepares Go, Cowrie, Zeek, and Docker/Compose; copies the reviewed
+source and env examples; and fills **only blank non-secret** interface, log,
+port, hostname, and localhost values in actual private env files. Existing
+nonblank operator values are preserved. It pauses before starting any fresh
+service while required secrets or settings are missing. Fill the actual files
+on the Pi with `sudoedit` or an approved private upload, then run the **same
+command**. It starts Cowrie with its manifest-bound sanitizer, Zeek with a
+generated TCP 22/23 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
+`127.0.0.1`, Redis, and the five Go services. It never installs the legacy GCP
+sensor forwarder or the public Web-corp Compose override. Existing Pi behavior
+is separate; see [ADR-0015](../../docs/adr/ADR-0015-fresh-pi-local-decoys.md).
+
+Cowrie refuses port 22/23 if real SSH or another process still listens there.
+Zeek refuses an interface without exactly one IPv4 address. If the Wi-Fi
+address changes later, edit `SENSOR_LAN_IP` in the private env and restart
+Cowrie and Zeek under a reviewed rebinding procedure; a same-release installer
+retry refuses stale network values. Cowrie's user cannot log in; systemd grants
+only the low-port bind capability. The Go collector user joins the Cowrie and
+Zeek groups for log reads. Do not copy private env values into the reviewed
+vars file or repository.
+
+For the separate Dashboard developer checkout, run
+`bash scripts/start_dashboard_dev.sh`. On first run it creates an ignored
+`dashboard-v2/.env.local` skeleton and pauses. After the developer fills it,
+the script installs lockfile dependencies when missing and runs `npm run dev`
+bound to `127.0.0.1`. No Dashboard image is built by this flow. Live Atlas
+handoff uses [separate scoped access](../../docs/MONGODB-DEV-HANDOFF.md).
+
+The [VM evidence](../../docs/validation/2026-09-28-azure-arm64-fresh-activation.md)
+covers immediate service/listener checks and a synthetic Cowrie/Zeek port
+test. It does not prove the full Go → Redis → Atlas pipeline,
+real B2 backup, Dashboard authentication, Wi-Fi DHCP behavior, or clean-Pi
+network exposure. Keep those as acceptance gates before production use.
 
 ## One command to resume the current Pi slice
 
@@ -48,8 +119,9 @@ rerun after fixing the cause.
 The Go activation check verifies file shape and immediate process state. It
 does not prove Mongo/B2 credentials, telemetry delivery, scheduled backup
 execution, or recovery. The clean VM acceptance run must check those before
-production use. Cowrie, Zeek, and Docker decoys have separate **staging**
-playbooks below; decoy activation and Dashboard installation remain pending.
+production use. The Go-only wrapper still requires separately activated
+Cowrie and Zeek. For a new host, use the full-stack wrapper above. Dashboard
+remains a separate source-based developer process.
 
 ## Stage Docker decoy source on the ARM64 test sensor
 
@@ -89,10 +161,9 @@ it was fully stopped and its test volumes removed. This is evidence for
 ARM64 build and basic startup, not an activation step in the playbook.
 
 This stage does not build images, prove image base digests, activate Docker,
-validate private credentials, or install the Dashboard. The one-command Go
-wrapper does not invoke this playbook yet; it still requires Cowrie and Zeek
-to be staged separately. Leave public trap ports closed until later
-activation and synthetic acceptance checks pass.
+validate private credentials, or install the Dashboard. The Go-only wrapper
+does not invoke this playbook; the fresh full-stack wrapper above does. Leave
+public trap ports closed until activation and synthetic acceptance checks pass.
 
 ## Stage Zeek and Cowrie on a prepared test sensor
 
@@ -131,17 +202,17 @@ Cowrie's venv uses the checkout's pinned direct requirements; transitive
 Python packages are resolved online and are not yet hash locked. The playbook
 verifies the patched source hashes and `pip check`, then leaves Cowrie inactive
 without a service or listener. **Do not start Cowrie from this staged source.**
-The fresh-install sanitized output bundle, private config, log permissions,
-service unit, and safe listener cutover still need an accepted installer.
-The existing sanitized-output installer is for a running legacy deployment
-and must not be used as a fresh-host shortcut. The one-command Go wrapper
-does not invoke either staging playbook yet, so run them separately on the
-reviewed test host before attempting Go activation.
+The fresh full-stack wrapper above installs the sanitized output bundle,
+private config, log permissions, service unit, and listener. The existing
+sanitized-output installer is for a running legacy deployment and must not be
+used as a fresh-host shortcut. The Go-only wrapper does not invoke either
+staging playbook, so use the full-stack wrapper for a new host.
 
 The [first ARM64 VM result](../../docs/validation/2026-09-28-azure-arm64-installer-first-run.md)
-covers preparation and the expected blank-env pause only. Activation and
-the full installer have not been tested. Separate Cowrie/Zeek staging is
-recorded in the [dependency VM result](../../docs/validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
+covers preparation and the expected blank-env pause only. Later bounded
+Cowrie, Zeek, and decoy activation is recorded in the fresh-stack VM evidence;
+full private-credential activation remains untested. Separate Cowrie/Zeek
+staging is recorded in the [dependency VM result](../../docs/validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
 On that controller, Ansible's
 local RPC server could not start inside the tool sandbox, so the run used the
 approved unsandboxed execution path. An unrelated unsafe system SSH config

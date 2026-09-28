@@ -53,6 +53,16 @@ class CheckPiEnvTests(unittest.TestCase):
                 check_pi_env.check_services(root, ["hardware"], require_owner=False), []
             )
 
+    def test_fresh_wifi_profile_does_not_require_unused_overlay_address(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            shared = root / "honeypot-agent.env"
+            keys = check_pi_env.SERVICE_SHARED_KEYS["collector"] - {"SENSOR_ZT_IP", "SENSOR_ZT_IFACE"}
+            shared.write_text("REDIS_ADDR=127.0.0.1:6379\nREDIS_DB=0\n" + "".join(f"{key}=synthetic\n" for key in sorted(keys)))
+            shared.chmod(0o600)
+            self.assertEqual(check_pi_env.check_services(root, ["collector"], require_owner=False, profile="fresh-wifi"), [])
+            self.assertTrue(any("SENSOR_ZT_IP" in item for item in check_pi_env.check_services(root, ["collector"], require_owner=False)))
+
 
 if __name__ == "__main__":
     unittest.main()

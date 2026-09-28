@@ -1,0 +1,334 @@
+---
+- name: Activate private-output Cowrie on a fresh prepared sensor
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_cowrie_bundle: ''
+    pti_cowrie_bundle_sha256: ''
+    pti_cowrie_bundle_revision: ''
+    pti_cowrie_interface: wlan0
+    pti_cowrie_ssh_port: 22
+    pti_cowrie_telnet_port: 23
+    pti_cowrie_root: /home/cowrie/cowrie
+    pti_cowrie_output_root: /opt/honeypot-cowrie-output
+  pre_tasks:
+    - name: Require reviewed bundle, fresh host, and explicit listener interface
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_cowrie_bundle is match('^/')
+          - pti_cowrie_bundle_sha256 is match('^[0-9a-f]{64}$')
+          - pti_cowrie_bundle_revision is match('^[0-9a-f]{40}$')
+          - pti_cowrie_interface in ansible_facts['interfaces']
+          - pti_cowrie_ssh_port | int >= 1
+          - pti_cowrie_ssh_port | int <= 65535
+          - pti_cowrie_telnet_port | int >= 1
+          - pti_cowrie_telnet_port | int <= 65535
+          - pti_cowrie_ssh_port | int != pti_cowrie_telnet_port | int
+
+    - name: Verify local bundle digest before touching the host
+      ansible.builtin.stat:
+        path: "{{ pti_cowrie_bundle }}"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: pti_cowrie_local_bundle
+
+    - name: Require exact approved bundle
+      ansible.builtin.assert:
+        that:
+          - pti_cowrie_local_bundle.stat.isreg | default(false)
+          - not (pti_cowrie_local_bundle.stat.islnk | default(false))
+          - pti_cowrie_local_bundle.stat.checksum == pti_cowrie_bundle_sha256
+
+    - name: Check fresh-install markers and existing Cowrie config
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /var/lib/pti-installer/prepared-release
+        - /var/lib/pti-installer/cowrie-source
+        - /var/lib/pti-installer/cowrie-fresh
+        - "{{ pti_cowrie_root }}/etc/cowrie.cfg"
+      register: pti_cowrie_markers
+
+    - name: Require prepared source and refuse unmarked configuration
+      ansible.builtin.assert:
+        that:
+          - pti_cowrie_markers.results[0].stat.isreg | default(false)
+          - pti_cowrie_markers.results[1].stat.isreg | default(false)
+          - not (pti_cowrie_markers.results[2].stat.islnk | default(false))
+          - not (pti_cowrie_markers.results[3].stat.islnk | default(false))
+          - not pti_cowrie_markers.results[3].stat.exists or pti_cowrie_markers.results[2].stat.isreg | default(false)
+        fail_msg: Cowrie source must be prepared and an existing config must belong to this fresh installer.
+
+    - name: Read existing fresh-install marker on retry
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/cowrie-fresh
+      register: pti_cowrie_fresh_marker
+      when: pti_cowrie_markers.results[2].stat.exists
+
+    - name: Require same reviewed bundle and network settings on retry
+      ansible.builtin.assert:
+        that:
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).schema == 'pti.cowrie-fresh.v1'
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).state in ['preparing', 'active']
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).sha256 == pti_cowrie_bundle_sha256
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).revision == pti_cowrie_bundle_revision
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).interface == pti_cowrie_interface
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).ssh_port == pti_cowrie_ssh_port | int
+          - (pti_cowrie_fresh_marker.content | b64decode | from_json).telnet_port == pti_cowrie_telnet_port | int
+      when: pti_cowrie_markers.results[2].stat.exists
+
+    - name: Reject listener collision before the first activation
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_cowrie_ports.py --port {{ pti_cowrie_ssh_port }} --port {{ pti_cowrie_telnet_port }}"
+      changed_when: false
+      when: not pti_cowrie_markers.results[2].stat.exists
+
+  tasks:
+    - name: Mark fresh installation before changing Cowrie runtime files
+      ansible.builtin.copy:
+        dest: /var/lib/pti-installer/cowrie-fresh
+        content: "{{ {'schema': 'pti.cowrie-fresh.v1', 'state': 'preparing', 'sha256': pti_cowrie_bundle_sha256, 'revision': pti_cowrie_bundle_revision, 'interface': pti_cowrie_interface, 'ssh_port': pti_cowrie_ssh_port | int, 'telnet_port': pti_cowrie_telnet_port | int} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'
+      when: not pti_cowrie_markers.results[2].stat.exists
+
+    - name: Grant collector read access to sanitized Cowrie and Zeek logs
+      ansible.builtin.user:
+        name: pti-agent
+        groups: [cowrie, zeek]
+        append: true
+
+    - name: Create private output bundle parents
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: cowrie
+        group: cowrie
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /opt/honeypot-cowrie-output, mode: '0755' }
+        - { path: /opt/honeypot-cowrie-output/releases, mode: '0700' }
+        - { path: "/opt/honeypot-cowrie-output/releases/{{ pti_cowrie_bundle_revision }}", mode: '0700' }
+
+    - name: Copy approved sanitizer package to protected staging
+      ansible.builtin.copy:
+        src: "{{ pti_cowrie_bundle }}"
+        dest: "/var/lib/pti-installer/cowrie-output-{{ pti_cowrie_bundle_sha256 }}.tar"
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Extract sanitizer bundle on first run or interrupted preparation
+      ansible.builtin.unarchive:
+        src: "/var/lib/pti-installer/cowrie-output-{{ pti_cowrie_bundle_sha256 }}.tar"
+        dest: "{{ pti_cowrie_output_root }}/releases/{{ pti_cowrie_bundle_revision }}"
+        remote_src: true
+        owner: cowrie
+        group: cowrie
+      when: >-
+        not pti_cowrie_markers.results[2].stat.exists or
+        (pti_cowrie_fresh_marker.content | b64decode | from_json).state == 'preparing'
+
+    - name: Verify extracted bundle as Cowrie user
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - cowrie
+          - --
+          - /home/cowrie/venv/bin/python
+          - -m
+          - production.tools.cowrie_output_integration
+          - verify-bundle
+          - --bundle-root
+          - "{{ pti_cowrie_output_root }}/releases/{{ pti_cowrie_bundle_revision }}"
+          - --expected-revision
+          - "{{ pti_cowrie_bundle_revision }}"
+      environment:
+        PYTHONDONTWRITEBYTECODE: '1'
+        PYTHONPATH: "{{ pti_cowrie_output_root }}/releases/{{ pti_cowrie_bundle_revision }}"
+      changed_when: false
+
+    - name: Point current sanitizer link at reviewed release
+      ansible.builtin.file:
+        src: "{{ pti_cowrie_output_root }}/releases/{{ pti_cowrie_bundle_revision }}"
+        dest: "{{ pti_cowrie_output_root }}/current"
+        state: link
+        owner: cowrie
+        group: cowrie
+
+    - name: Expose reviewed Cowrie output plugin through source tree
+      ansible.builtin.file:
+        src: "{{ pti_cowrie_output_root }}/current/production/cowrie_output/sanitized_jsonlog.py"
+        dest: "{{ pti_cowrie_root }}/src/cowrie/output/sanitizedjson.py"
+        state: link
+        owner: cowrie
+        group: cowrie
+
+    - name: Use prepared venv at the sanitizer's canonical path
+      ansible.builtin.file:
+        src: /home/cowrie/venv
+        dest: "{{ pti_cowrie_root }}/cowrie-env"
+        state: link
+        owner: cowrie
+        group: cowrie
+
+    - name: Install fresh Cowrie config renderer
+      ansible.builtin.copy:
+        src: ../../scripts/render_fresh_cowrie_config.py
+        dest: /usr/local/libexec/pti-render-fresh-cowrie-config
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Render private config only when absent
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - cowrie
+          - --
+          - /usr/bin/python3
+          - /usr/local/libexec/pti-render-fresh-cowrie-config
+          - --source
+          - "{{ pti_cowrie_root }}/etc/cowrie.cfg.dist"
+          - --destination
+          - "{{ pti_cowrie_root }}/etc/cowrie.cfg"
+          - --bundle-root
+          - "{{ pti_cowrie_output_root }}/current"
+          - --interface
+          - "{{ pti_cowrie_interface }}"
+          - --ssh-port
+          - "{{ pti_cowrie_ssh_port }}"
+          - --telnet-port
+          - "{{ pti_cowrie_telnet_port }}"
+      environment:
+        PYTHONDONTWRITEBYTECODE: '1'
+        PYTHONPATH: "{{ pti_cowrie_output_root }}/current"
+      when: not pti_cowrie_markers.results[3].stat.exists
+
+    - name: Create private state and log directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: cowrie
+        group: cowrie
+        mode: '0700'
+      loop:
+        - "{{ pti_cowrie_root }}/var/lib/cowrie"
+        - "{{ pti_cowrie_root }}/var/log/cowrie"
+
+    - name: Create restricted Cowrie support files only when absent
+      ansible.builtin.copy:
+        content: ''
+        dest: "{{ item }}"
+        owner: cowrie
+        group: cowrie
+        mode: '0600'
+        force: false
+      loop:
+        - /home/cowrie/users.txt
+        - "{{ pti_cowrie_root }}/var/log/cowrie/cowrie_custom.json"
+
+    - name: Find files shipped inside the private log directory
+      ansible.builtin.find:
+        paths: "{{ pti_cowrie_root }}/var/log/cowrie"
+        file_type: file
+        hidden: true
+        recurse: true
+      register: pti_cowrie_log_files
+
+    - name: Restrict existing log and placeholder file permissions
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        owner: cowrie
+        group: cowrie
+        mode: "{{ '0640' if item.path == pti_cowrie_root + '/var/log/cowrie/cowrie.json' else '0600' }}"
+      loop: "{{ pti_cowrie_log_files.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+
+    - name: Install fresh Cowrie service and sanitizer drop-in directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/cowrie.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install Cowrie base unit
+      ansible.builtin.copy:
+        src: files/cowrie.service
+        dest: /etc/systemd/system/cowrie.service
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install reviewed sanitizer unit drop-in
+      ansible.builtin.copy:
+        src: "{{ pti_cowrie_output_root }}/current/deployment/cowrie_output/20-sanitized-output.conf"
+        dest: /etc/systemd/system/cowrie.service.d/20-sanitized-output.conf
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install reviewed Cowrie log rotation
+      ansible.builtin.copy:
+        src: "{{ pti_cowrie_output_root }}/current/deployment/cowrie_output/cowrie.logrotate"
+        dest: /etc/logrotate.d/cowrie
+        remote_src: true
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Reload systemd for fresh Cowrie
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Validate sanitizer and private paths before starting listener
+      ansible.builtin.command:
+        argv:
+          - /usr/sbin/runuser
+          - -u
+          - cowrie
+          - --
+          - "{{ pti_cowrie_root }}/cowrie-env/bin/python"
+          - -m
+          - production.tools.cowrie_output_integration
+          - validate
+          - --config
+          - "{{ pti_cowrie_root }}/etc/cowrie.cfg"
+          - --bundle-root
+          - "{{ pti_cowrie_output_root }}/current"
+          - --plugin-link
+          - "{{ pti_cowrie_root }}/src/cowrie/output/sanitizedjson.py"
+          - --drop-in
+          - /etc/systemd/system/cowrie.service.d/20-sanitized-output.conf
+          - --logrotate
+          - /etc/logrotate.d/cowrie
+          - --live-permissions
+      environment:
+        PYTHONDONTWRITEBYTECODE: '1'
+        PYTHONPATH: "{{ pti_cowrie_output_root }}/current:{{ pti_cowrie_root }}/src"
+      changed_when: false
+
+    - name: Start private-output Cowrie
+      ansible.builtin.systemd_service:
+        name: cowrie.service
+        state: started
+        enabled: true
+
+    - name: Record approved fresh Cowrie installation
+      ansible.builtin.copy:
+        dest: /var/lib/pti-installer/cowrie-fresh
+        content: "{{ {'schema': 'pti.cowrie-fresh.v1', 'state': 'active', 'sha256': pti_cowrie_bundle_sha256, 'revision': pti_cowrie_bundle_revision, 'interface': pti_cowrie_interface, 'ssh_port': pti_cowrie_ssh_port | int, 'telnet_port': pti_cowrie_telnet_port | int} | to_json }}\n"
+        owner: root
+        group: root
+        mode: '0644'

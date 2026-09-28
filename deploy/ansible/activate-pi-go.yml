@@ -8,6 +8,7 @@
   vars:
     pti_release_id: ""
     pti_manifest_sha256: ""
+    pti_env_profile: existing
     pti_units:
       - honeypot-collector.service
       - honeypot-processor.service
@@ -53,7 +54,7 @@
           - (pti_marker_file.content | b64decode | from_json).manifest_sha256 == pti_manifest_sha256
 
     - name: Check operator-uploaded env paths and required names without printing values
-      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all"
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile {{ pti_env_profile }}"
       changed_when: false
 
     - name: Check Redis binds only to loopback before starting it

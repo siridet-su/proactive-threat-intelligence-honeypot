@@ -1,0 +1,13 @@
+---
+- name: Pause fresh activation until operator env files are ready
+  hosts: pi_sensors
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check required Go configuration names and file safety
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all --profile fresh-wifi"
+      changed_when: false
+
+    - name: Check decoy credential and localhost binding without showing values
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_decoy_env.py /etc/honeypot/decoy.env"
+      changed_when: false

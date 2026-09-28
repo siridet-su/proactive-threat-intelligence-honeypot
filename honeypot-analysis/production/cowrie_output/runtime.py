@@ -87,6 +87,17 @@ DEPLOYMENT_CONTRACT = {
         "authority": "diagnostic_only",
     },
 }
+FRESH_DEPLOYMENT_CONTRACT = {
+    **DEPLOYMENT_CONTRACT,
+    "compatibility": {
+        **DEPLOYMENT_CONTRACT["compatibility"],
+        "cowrie_output_base_sha256": "15c879fb9c5632fa8b7753920aeb5d849c6df2121888acf4f8948c4ad61df89b",
+    },
+    "service_impact": {
+        "stop_then_start": ["cowrie.service"],
+        "must_remain_active": [],
+    },
+}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_BUNDLE_FILES = frozenset(
     {
@@ -214,7 +225,7 @@ def _validate_manifest_document(document: Any) -> dict[str, Any]:
         is None
     ):
         raise CowrieOutputBoundaryError("bundle component identity is invalid")
-    if document["deployment"] != DEPLOYMENT_CONTRACT:
+    if document["deployment"] not in (DEPLOYMENT_CONTRACT, FRESH_DEPLOYMENT_CONTRACT):
         raise CowrieOutputBoundaryError("bundle deployment contract is invalid")
     files = document.get("files")
     if not isinstance(files, Mapping) or set(files) != REQUIRED_BUNDLE_FILES:

@@ -291,7 +291,10 @@ lease state are tracked independently for every alert/target pair.
 
 ## Raspberry Pi Sensor
 
-Install only the forwarder service on the Pi. Cowrie should keep writing
+This section documents the **existing Pi's legacy cloud-analysis path**. It is
+not part of the fresh-Pi installer; see the
+[purpose and retirement boundary](../../../docs/LEGACY-SENSOR-FORWARDER.md).
+For that legacy path, install only the forwarder service on the Pi. Cowrie should keep writing
 `cowrie.json`; the forwarder tails that file and posts outbound batches to the
 GCP ingest API.
 

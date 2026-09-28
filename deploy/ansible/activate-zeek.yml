@@ -1,0 +1,108 @@
+---
+- name: Activate narrow Zeek capture on the prepared interface
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_zeek_interface: wlan0
+    pti_zeek_ports: [22, 23]
+  pre_tasks:
+    - name: Require one supported host and reviewed capture scope
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_zeek_interface in ansible_facts['interfaces']
+          - pti_zeek_ports | length > 0
+          - pti_zeek_ports | unique | length == pti_zeek_ports | length
+          - pti_zeek_ports | min | int >= 1
+          - pti_zeek_ports | max | int <= 65535
+
+    - name: Require staged Zeek unit and matching interface
+      ansible.builtin.command: /usr/bin/test -f /etc/systemd/system/zeek.service
+      changed_when: false
+
+    - name: Require the clean-host Pi preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_zeek_fresh_prepare
+
+    - name: Refuse a host outside the fresh installer
+      ansible.builtin.assert:
+        that:
+          - pti_zeek_fresh_prepare.stat.isreg | default(false)
+          - pti_zeek_fresh_prepare.stat.uid == 0
+          - pti_zeek_fresh_prepare.stat.mode == '0644'
+
+    - name: Read staged node configuration
+      ansible.builtin.slurp:
+        src: /opt/zeek/etc/node.cfg
+      register: pti_zeek_node
+
+    - name: Reject interface mismatch before starting capture
+      ansible.builtin.assert:
+        that:
+          - "('interface=' ~ pti_zeek_interface) in (pti_zeek_node.content | b64decode)"
+
+  tasks:
+    - name: Create local service helper and drop-in directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      loop:
+        - /usr/local/libexec
+        - /etc/systemd/system/zeek.service.d
+
+    - name: Install narrow policy renderer
+      ansible.builtin.copy:
+        src: ../../zeek/render_fresh_capture.py
+        dest: /usr/local/libexec/pti-zeek-render-fresh-capture
+        owner: root
+        group: root
+        mode: '0755'
+      register: pti_zeek_renderer
+
+    - name: Install service pre-start policy renderer
+      ansible.builtin.template:
+        src: templates/zeek-fresh-capture.conf.j2
+        dest: /etc/systemd/system/zeek.service.d/pti-fresh-capture.conf
+        owner: root
+        group: root
+        mode: '0644'
+      register: pti_zeek_filter_unit
+
+    - name: Refresh systemd after policy unit change
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+      when: pti_zeek_filter_unit.changed
+
+    - name: Render policy before loading it
+      ansible.builtin.command:
+        argv: [python3, /usr/local/libexec/pti-zeek-render-fresh-capture, --interface, "{{ pti_zeek_interface }}", --output, /opt/zeek/share/zeek/site/pti-fresh-capture.zeek, --ports, "{{ pti_zeek_ports | join(',') }}"]
+      changed_when: false
+
+    - name: Add narrow policy load to fresh Zeek site
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/share/zeek/site/local.zeek
+        line: '@load ./pti-fresh-capture'
+        state: present
+      register: pti_zeek_site_load
+
+    - name: Check Zeek policy before activation
+      ansible.builtin.command: /opt/zeek/bin/zeekctl check
+      changed_when: false
+
+    - name: Start or refresh Zeek with the reviewed narrow capture scope
+      ansible.builtin.systemd_service:
+        name: zeek.service
+        state: "{{ 'restarted' if pti_zeek_renderer.changed or pti_zeek_filter_unit.changed or pti_zeek_site_load.changed else 'started' }}"
+        enabled: true
+
+    - name: Check active Zeek process
+      ansible.builtin.command: /opt/zeek/bin/zeekctl status
+      changed_when: false

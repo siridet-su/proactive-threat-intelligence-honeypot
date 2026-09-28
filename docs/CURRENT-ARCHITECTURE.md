@@ -40,12 +40,23 @@ Backblaze B2 archive.
 The legacy sensor forwarder remains active as an inherited parallel path. It
 must not be expanded as part of new features. Its retirement or migration is a
 separate, verified change once the Go pipeline and cloud receiver have parity.
+The [forwarder explanation](LEGACY-SENSOR-FORWARDER.md) records its GCP ingest
+purpose and the Dashboard read-path reason it remains active on the existing
+Pi. A new Pi installation omits it.
 
 The active decoy stack has a tracked [Compose source](../deploy/decoy-honeypot/README.md)
 and Deception Core build context in this repository. The existing Pi still
 runs its earlier external Compose file with a host-local override for the
 additional WireGuard Web-corp container. The original ZeroTier container was
 not rebuilt.
+
+The clean-host target in [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md)
+differs from that existing Pi: Cowrie listens on the Pi Wi-Fi address at
+TCP 22/23 after admin SSH is separated, Zeek captures that Wi-Fi interface
+with a narrow port filter, and Web-corp/Core/PostgreSQL bind to loopback. The
+disposable ARM64 VM verified these services with loopback test ports and
+synthetic private input. It did not validate Go/Atlas/B2 end to end, and it
+does not change the current Pi or public Droplet.
 
 ## Runtime posture at last verification
 

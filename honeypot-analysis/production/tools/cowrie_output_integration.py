@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from production.cowrie_output.runtime import (
     DEPLOYMENT_CONTRACT,
+    FRESH_DEPLOYMENT_CONTRACT,
     EXPECTED_STARTING_SANITIZER_REVISION,
     MANIFEST_NAME,
     MANIFEST_SCHEMA_VERSION,
@@ -58,7 +59,7 @@ def _write_exclusive(path: Path, payload: bytes, mode: int = 0o600) -> None:
         raise
 
 
-def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[str, Any]:
+def build_bundle(source_root: Path, bundle_root: Path, revision: str, *, fresh: bool = False) -> dict[str, Any]:
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase Git SHA-1")
     if bundle_root.exists():
@@ -85,9 +86,10 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
                 directory.chmod(0o700)
         policy_relative = "configs/cowrie_output_privacy.v1.json"
         policy = load_policy(bundle_root / policy_relative)
+        contract = FRESH_DEPLOYMENT_CONTRACT if fresh else DEPLOYMENT_CONTRACT
         identity_payload = json.dumps(
             {
-                "deployment": DEPLOYMENT_CONTRACT,
+                "deployment": contract,
                 "git_revision": revision,
                 "files": inventory,
                 "policy_sha256": policy.sha256,
@@ -101,7 +103,7 @@ def build_bundle(source_root: Path, bundle_root: Path, revision: str) -> dict[st
         "component_id": (
             "cowrie_output_" + hashlib.sha256(identity_payload).hexdigest()[:32]
         ),
-            "deployment": json.loads(json.dumps(DEPLOYMENT_CONTRACT)),
+            "deployment": json.loads(json.dumps(contract)),
             "files": inventory,
             "policy": {
                 "relative_path": policy_relative,
@@ -610,7 +612,7 @@ def inspect_plugin_readiness(boundary, *, write_state: bool = False) -> dict[str
             raise CowrieOutputBoundaryError("effective Cowrie output class is invalid")
         output_base_path = Path(output_base.__file__).resolve(strict=True)
         loader_path = output_base_path.parents[2] / "twisted/plugins/cowrie_plugin.py"
-        compatibility = DEPLOYMENT_CONTRACT["compatibility"]
+        compatibility = verify_bundle(boundary.bundle_root)[0]["deployment"]["compatibility"]
         if _sha256_file(output_base_path) != compatibility["cowrie_output_base_sha256"]:
             raise CowrieOutputBoundaryError("Cowrie output base compatibility hash differs")
         if _sha256_file(loader_path) != compatibility["cowrie_output_loader_sha256"]:
@@ -794,6 +796,7 @@ def main() -> int:
     build.add_argument("--source-root", required=True)
     build.add_argument("--bundle-root", required=True)
     build.add_argument("--revision", required=True)
+    build.add_argument("--fresh", action="store_true", help="bundle for a fresh sensor without the legacy GCP forwarder")
 
     extract_package_command = commands.add_parser("extract-package")
     extract_package_command.add_argument("--package", required=True)
@@ -848,7 +851,7 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "build":
         manifest = build_bundle(
-            Path(args.source_root), Path(args.bundle_root), args.revision
+            Path(args.source_root), Path(args.bundle_root), args.revision, fresh=args.fresh
         )
         print(json.dumps(manifest, sort_keys=True))
         return 0

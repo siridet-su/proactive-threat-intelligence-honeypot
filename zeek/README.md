@@ -1,5 +1,17 @@
 # Existing Pi Zeek capture
 
+For a clean Pi, use the [fresh installer](../deploy/ansible/README.md). It
+stages one standalone Zeek worker on `wlan0`, then
+[`render_fresh_capture.py`](render_fresh_capture.py) resolves the current
+interface IPv4 and installs a BPF policy for only Cowrie TCP 22/23 in both
+directions before Zeek starts. The VM test substitutes `lo` and TCP
+2223/2323. ZeekControl's `install` step is required before `start`; a plain
+`check`/`start` left the earlier broad policy in place during VM testing.
+Confirm `packet_filter.log` contains the reviewed filter and that a bounded
+test produces only the selected destination ports in `conn.log`. A Wi-Fi
+address change requires a restart so the policy is regenerated. The fresh
+policy does not change the existing Pi cluster described below.
+
 The tracked `node.cfg` is the reviewed capture scope for the existing Pi:
 `wlan0`, ZeroTier, and `wg0` workers in the local Zeek cluster. There is
 no Tailscale worker. The fresh-install Ansible Zeek playbook uses its own
