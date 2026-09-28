@@ -127,7 +127,7 @@ export function computeTogglePlayState(
   selectedHistoryIndex: number,
   isAnchoredSelected: boolean,
 ): { isPlaying: boolean; targetEventId?: string | null } {
-  if (isAnchoredSelected) {
+  if (isAnchoredSelected || displayedHistory.length <= 1) {
     return { isPlaying: false };
   }
   const willPlay = !isPlaying;
@@ -366,7 +366,11 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
 
   // Synchronized auto-play timer for audit mode with dynamic pacing support
   useEffect(() => {
-    if (viewMode !== "audit" || !isPlaying || isAnchoredSelected) return;
+    if (!isPlaying) return;
+    if (viewMode !== "audit" || isAnchoredSelected || displayedHistory.length <= 1) {
+      setIsPlaying(false);
+      return;
+    }
 
     if (selectedHistoryIndex >= displayedHistory.length - 1) {
       return;

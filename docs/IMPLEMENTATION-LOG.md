@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Prevent Route Replay from playing a one-event session
+
+- Status: repository correction prepared on a staging-based branch; deployment not yet verified.
+- Scope and intent: stop the Play control from remaining in Pause when the selected audit session has only one loaded route event and no next step.
+- Repository branch and commit/PR: `fix/filesystem-home-only-replay-20260928` from `origin/staging` at `817f9fc`; commit pending at entry time.
+- Repository changes: guard the replay state transition and timer when fewer than two events are loaded; disable Play in the Forensic Studio and compact toolbars, and show a short no-steps explanation in Route Replay. Record `FS-028` in the Filesystem Activity working state.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB document, or credential changed in this repository step.
+- Runtime/exposure state: the operator screenshot shows a hosted Hop 1/1 Route Replay stuck displaying Pause. The correction is inactive until the updated Dashboard revision deploys.
+- Validation performed and outcome: source inspection found that the toggle could set `isPlaying=true` for a one-event array while the playback effect returned without scheduling a timer. `git diff --check` passed.
+- Not performed / deferred: automated tests, interactive keyboard review, staging deployment confirmation, and production deployment.
+- Risks and data handling: the change affects local playback presentation only. No raw event payload, command input, Source IP, credential, or token was added to the repository record.
+- Rollback: revert this UI and replay-state commit; no host data rollback is needed.
+- Follow-up: push staging and review Hop 1/1 disabled Play and multi-hop playback after its Dashboard deploy.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [replay hook](../dashboard-v2/src/components/filesystem/useAuditReplay.ts).
+
 ### 2026-09-28 — Add selected Source IP copy control to Filesystem Activity
 
 - Status: repository UI change prepared on a staging-based branch; deployment not yet verified.

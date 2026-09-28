@@ -56,8 +56,9 @@ preserving the accepted Admin-only Evidence contract. Its repository source is
 prepared, but the private Railway setting, deployment, and authenticated
 production check remain outstanding. A later operator screenshot shows command
 rows in the hosted Evidence panel, but it does not establish the deployment
-revision, response headers, or role denial. `FS-027` is intentionally in
-progress alongside `FS-026` for the requested session Source IP copy control.
+revision, response headers, or role denial. `FS-027` and `FS-028` are
+intentionally in progress alongside `FS-026` for the Source IP copy control and
+the one-event Route Replay playback correction.
 `FS-020` through `FS-024` are deferred
 product additions, not blockers for the accepted evidence/replay scope. In
 particular, `FS-024` has a local radar implementation but lacks its stated
@@ -187,6 +188,7 @@ deferred and can be reopened as separate work.
 | `FS-025` | `DONE` | Replace duplicated CWD content in Evidence with an Admin-only, exact-session Cowrie command view. | Resolve sensor-local IDs only through one authenticated canonical event binding; validate both requested and canonical IDs in the response; show event type, ID, timestamp, input, redaction, and truncation; distinguish sign-in/admin, empty, and unavailable states; state that command input is not linked to a CWD hop and does not prove execution or file access. | The command route and local source passed 12 focused tests; PR #96 added 11 focused download/artifact tests, lint, TypeScript, and a webpack production build, then passed Dashboard staging CI. On 2026-09-28 the operator's authenticated localhost screenshot showed retained command rows and one canonical download event with event ID and SHA-256 for the selected session. Production deployment and opening the hash link were not verified. |
 | `FS-026` | `IN PROGRESS` | Enable hosted production command Evidence without a same-host monitor. | Keep Admin and exact-session binding; select canonical MongoDB only through a private server setting; retain bounded no-store submissions; verify a known retained command session, non-Admin denial, and cache headers after Railway deployment without copying command text into evidence. | Repository change prepared in the isolated Filesystem Activity worktree. Railway configuration, deployment, and production verification pending. |
 | `FS-027` | `IN PROGRESS` | Copy the selected audited session's Source IP. | Show a keyboard-accessible Copy IP control beside the session selector; copy only the selected IP; do not select or change a session when the control is activated; show copy success or failure without exposing additional session data. | Repository UI change prepared on the staging-based Filesystem Activity branch; deployment and interactive review pending. |
+| `FS-028` | `IN PROGRESS` | Stop Route Replay playback for a one-event session. | Keep Play disabled when fewer than two route events are loaded, explain that there are no steps to replay, and ensure the timer cannot remain in Pause after history shrinks to one event. Apply the same availability rule to sidebar, compact toolbar, and Space shortcut. | Operator screenshot showed Hop 1/1 stuck on Pause; repository correction prepared on a staging-based branch. Deployment and interactive review pending. |
 
 ## Deferred outside this workstream
 

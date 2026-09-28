@@ -62,6 +62,7 @@ export function ReplayTransport({
 }: ReplayTransportProps) {
   const fromPathStr = selectedHistoryEvent && isInitialSshEntry(selectedHistoryEvent) ? "[SSH Login]" : selectedHistoryEvent ? formatFromPath(selectedHistoryEvent) : "";
   const toPathStr = selectedHistoryEvent?.toPath ?? "Unknown";
+  const canReplay = !isAnchoredSelected && displayedHistoryLength > 1;
 
   return (
     <div className="sticky top-0 z-10 rounded-xl border border-border bg-surface p-3 shadow-md space-y-3" aria-live="polite">
@@ -157,6 +158,12 @@ export function ReplayTransport({
         </div>
       </div>
 
+      {displayedHistoryLength <= 1 && (
+        <p role="status" className="text-center text-xs text-text-subtle">
+          Only one route event is available. There are no steps to replay.
+        </p>
+      )}
+
       {/* Controls Row */}
       {/* Controls Area */}
       <div className="flex flex-col gap-2.5 pt-2">
@@ -196,8 +203,9 @@ export function ReplayTransport({
                   : "bg-primary/10 text-primary hover:bg-primary/20"
               }`}
               onClick={handleTogglePlay}
-              disabled={isAnchoredSelected}
-              aria-label={isPlaying ? "Pause" : "Play"}
+              disabled={!canReplay}
+              aria-label={!canReplay && !isAnchoredSelected ? "No route steps to replay" : isPlaying ? "Pause" : "Play"}
+              title={!canReplay && !isAnchoredSelected ? "No route steps to replay" : undefined}
             >
               {isPlaying ? (
                 <>
