@@ -83,7 +83,7 @@ activation; it does not prove credential validity.
 For hardware metrics it fills a blank `NETWORK_SAMPLE_SECONDS` with `1` and
 rejects a missing or non-positive value before starting Go services.
 
-It starts Cowrie with its manifest-bound sanitizer, Zeek with a
+It starts Cowrie with its manifest-bound sanitizer, Zeek with JSON logs and a
 generated TCP 2222/2223 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
 `127.0.0.1`, Redis, and the four core Go services. The B2 backup control unit
 stays stopped and disabled. It never installs the legacy GCP
@@ -115,7 +115,9 @@ Cowrie and Zeek under a reviewed rebinding procedure; a same-release installer
 retry refuses stale network values. Cowrie's user cannot log in; systemd grants
 only the bind capability needed if a reviewed deployment later uses low ports.
 The Go collector user joins the Cowrie and
-Zeek groups for log reads. Do not copy private env values into the reviewed
+Zeek groups for log reads. Cowrie's JSON log directory permits group traversal
+while its private state directory remains owner-only; the JSON log itself is
+group-readable. Do not copy private env values into the reviewed
 vars file or repository.
 
 For the separate Dashboard developer checkout, run

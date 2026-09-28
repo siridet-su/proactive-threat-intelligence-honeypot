@@ -93,6 +93,13 @@
         state: present
       register: pti_zeek_site_load
 
+    - name: Emit JSON logs for the fresh collector
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/share/zeek/site/local.zeek
+        line: '@load policy/tuning/json-logs'
+        state: present
+      register: pti_zeek_json_load
+
     - name: Check Zeek policy before activation
       ansible.builtin.command: /opt/zeek/bin/zeekctl check
       changed_when: false
@@ -100,7 +107,7 @@
     - name: Start or refresh Zeek with the reviewed narrow capture scope
       ansible.builtin.systemd_service:
         name: zeek.service
-        state: "{{ 'restarted' if pti_zeek_renderer.changed or pti_zeek_filter_unit.changed or pti_zeek_site_load.changed else 'started' }}"
+        state: "{{ 'restarted' if pti_zeek_renderer.changed or pti_zeek_filter_unit.changed or pti_zeek_site_load.changed or pti_zeek_json_load.changed else 'started' }}"
         enabled: true
 
     - name: Check active Zeek process

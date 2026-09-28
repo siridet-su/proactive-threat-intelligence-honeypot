@@ -215,14 +215,14 @@
 
     - name: Create private state and log directories
       ansible.builtin.file:
-        path: "{{ item }}"
+        path: "{{ item.path }}"
         state: directory
         owner: cowrie
         group: cowrie
-        mode: '0700'
+        mode: "{{ item.mode }}"
       loop:
-        - "{{ pti_cowrie_root }}/var/lib/cowrie"
-        - "{{ pti_cowrie_root }}/var/log/cowrie"
+        - { path: "{{ pti_cowrie_root }}/var/lib/cowrie", mode: '0700' }
+        - { path: "{{ pti_cowrie_root }}/var/log/cowrie", mode: '0750' }
 
     - name: Create restricted Cowrie support files only when absent
       ansible.builtin.copy:

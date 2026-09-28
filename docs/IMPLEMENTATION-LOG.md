@@ -53,15 +53,15 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Status: active Pi firewall change; GCP public ingress closure pending.
 - Scope and intent: stop the retired GCP/ZeroTier Cowrie relay from reaching the existing Pi without changing administrator SSH, the DigitalOcean Cowrie forward, or Web-corp.
 - Repository branch and commit/PR: `main` working tree; commit pending at entry time.
-- Repository changes: update the current architecture, service catalog, and GCP exposure note to record the observed partial closure.
-- Host/environment changes actually applied: removed the Pi UFW allow for the former peer-only ZeroTier Cowrie backend on TCP 2298. No GCP firewall, HAProxy, VM, ZeroTier controller, or DigitalOcean setting was changed by this step.
-- Runtime/exposure state: Pi UFW remains active with default input drop, and its effective user-input chain no longer has a TCP 2298 allow. The retired GCP public TCP 2222 endpoint still accepted a TCP connection after the Pi rule was removed; external closure is not complete. The independent DigitalOcean public TCP 22 route was not changed.
-- Validation performed and outcome: inspected numbered UFW rules and effective `ufw-user-input` chain after deletion; the former allow was absent. A TCP-only probe still connected to the GCP public TCP 2222 endpoint. No Cowrie login or attacker payload was generated for validation.
+- Repository changes: update the current architecture, service catalog, and GCP exposure/runbook notes to record the observed partial closure and prevent the older rebuild procedure from recreating the relay.
+- Host/environment changes actually applied: removed the Pi UFW allow for the former peer-only ZeroTier Cowrie backend on TCP 2298, then inserted an explicit deny for TCP 2298 on the ZeroTier interface for IPv4 and IPv6. No GCP firewall, HAProxy, VM, ZeroTier controller, or DigitalOcean setting was changed by this step.
+- Runtime/exposure state: Pi UFW remains active with default input drop; its effective IPv4 and IPv6 user-input chains drop new TCP 2298 traffic on ZeroTier before other user rules. The retired GCP public TCP 2222 endpoint still accepted a TCP connection after the Pi allow was removed; external closure is not complete. The independent DigitalOcean public TCP 22 route was not changed.
+- Validation performed and outcome: inspected numbered UFW rules and effective IPv4/IPv6 user-input chains after the changes; the former allow was absent and the explicit deny was present first. A TCP-only probe still connected to the GCP public TCP 2222 endpoint. At 18:09 UTC, the previously observed source's latest Cowrie connection was still the 17:53 UTC record. No Cowrie login or attacker payload was generated for validation.
 - Not performed / deferred: GCP firewall/frontend disablement and post-closure external probe; authenticated GCP access was unavailable from this workspace. No end-to-end decoy test was run.
 - Risks and data handling: the GCP frontend remains publicly reachable until its own ingress is disabled. Existing Cowrie evidence was retained; no secret or raw payload was copied into the repository.
-- Rollback: restore the former peer-scoped Pi UFW allow from owner-controlled configuration only if the relay is explicitly reapproved; leave unrelated firewall rules intact.
+- Rollback: remove only the named Pi ZeroTier TCP 2298 deny and restore the former peer-scoped allow from owner-controlled configuration only if the relay is explicitly reapproved; leave unrelated firewall rules intact.
 - Follow-up: disable the retired GCP TCP 2222 firewall rule or frontend with authorized GCP access, then verify the external TCP probe fails and update current-state records.
-- Related ADR/runbook: [current architecture](CURRENT-ARCHITECTURE.md), [service catalog](SERVICE-CATALOG.md), and [GCP architecture record](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md).
+- Related ADR/runbook: [current architecture](CURRENT-ARCHITECTURE.md), [service catalog](SERVICE-CATALOG.md), [GCP architecture record](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md), and [GCP rebuild runbook](../honeypot-analysis/docs/GCP_VM_REBUILD_RUNBOOK.md).
 
 ### 2026-09-28 — Narrow MongoDB developer handoff after Dashboard auth review
 
@@ -3286,3 +3286,17 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: on the disposable VM, stop its fresh Compose stack and Go collector before removing the generated override or changing spool ownership. No production host rollback applies.
 - Follow-up: pull the activation fix to the VM, run the same installer, verify the Web-corp container identity and collector spool access, then send one synthetic login and confirm a single canonical event.
 - Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [Web-corp data access](../integrations/web-corp/DATA-ACCESS.md).
+
+### 2026-09-29 — Align fresh Cowrie and Zeek logs with the collector
+
+- Status: repository fix prepared after synthetic loopback checks on the disposable VM; host retest pending.
+- Scope and intent: make the fresh collector able to read Cowrie's sanitized JSON log and parse Zeek's connection events.
+- Repository changes: permit the `cowrie` group to traverse only Cowrie's log directory while retaining owner-only private state and group-readable `cowrie.json`; load Zeek's packaged JSON logging policy and restart Zeek when the policy is first added. Update the fresh runbook and ADR-0015.
+- Host/environment changes actually applied: before this fix, one synthetic Web-corp login was accepted, drained from the private spool into Redis, and found as one matching canonical MongoDB event. A synthetic loopback SSH banner exchange reached Cowrie; its log grew and Zeek wrote `conn.log`, but Redis had no Cowrie or Zeek connection entry. No Pi or production host was changed by the proposed log fix.
+- Runtime/exposure state: the disposable VM's core services and localhost decoys remained active; B2 was inactive. Cowrie's existing log directory was mode `0700`, blocking the collector despite its `cowrie` group membership. Zeek's `conn.log` was in default ASCII form and the collector rejected it as invalid JSON.
+- Validation performed and outcome: a host permission probe showed `pti-agent` could not read Cowrie's JSON log; `namei` identified the blocking directory. The collector journal reported invalid JSON for Zeek `conn.log`. The Web-corp canonical-event probe returned one matching record without reading or printing payloads.
+- Not performed / deferred: retest of group-readable Cowrie logs, JSON Zeek output, their Redis/Mongo ingestion, physical Wi-Fi capture, Dashboard, and B2 transfer.
+- Risks and data handling: the log contains sanitized Cowrie output but may still include attacker activity; it remains readable only to owner and the explicit group. No raw log lines, attacker payloads, private env contents, or credentials were copied into Git.
+- Rollback: restore the prior Cowrie log-directory mode and remove the Zeek JSON policy load on the disposable VM if needed; no production rollback applies.
+- Follow-up: pull the fix to the VM, rerun the same installer, and verify one bounded Cowrie/Zeek event traverses the collector and processor.
+- Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [VM validation](validation/2026-09-29-azure-arm64-fresh-installer.md).

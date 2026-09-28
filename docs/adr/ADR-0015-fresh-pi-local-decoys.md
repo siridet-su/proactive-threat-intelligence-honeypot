@@ -24,7 +24,8 @@ Go activation gate could not complete on a clean host.
 - Run one standalone Zeek worker on the same Wi-Fi interface. Its generated
   BPF policy accepts bidirectional TCP traffic only for the Pi's Cowrie
   address and ports. Regenerate and install the policy before every start;
-  fail closed if that interface lacks one unambiguous IPv4 address. Web-corp
+  fail closed if that interface lacks one unambiguous IPv4 address. Emit JSON
+  logs for the Go collector. Web-corp
   loopback traffic is outside Wi-Fi capture; its app login spool remains the
   telemetry source.
 - Run PostgreSQL, Deception Core, and Web-corp from the tracked Compose source
@@ -63,7 +64,9 @@ Go activation gate could not complete on a clean host.
   regenerate the filter. The service procedure must verify their current
   listeners and Zeek's effective filter after that change.
 - The Go collector needs read access to Cowrie and Zeek logs; its dedicated
-  user joins those service groups. It does not receive their write ownership.
+  user joins those service groups. Cowrie permits group traversal of its log
+  directory and group read of the JSON log; its private state stays owner-only.
+  The collector does not receive their write ownership.
 - A compromise of fresh Web-corp can affect its own shared pending-login
   spool, so that spool contains only retry data and is not a durable evidence
   store. The collector still validates records before Redis ingestion.
