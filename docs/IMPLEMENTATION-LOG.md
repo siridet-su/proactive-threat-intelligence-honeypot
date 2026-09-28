@@ -3315,3 +3315,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: stop the disposable VM or its fresh project services if the rehearsal is no longer needed; no production service rollback applies. Synthetic records in MongoDB require a separate reviewed cleanup if desired.
 - Follow-up: accept the same release on physical Pi `wlan0`, verify reboot/capture/listener behavior, and separately provision and test a new B2 write destination before backup opt-in.
 - Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh installation runbook](../deploy/ansible/README.md), and [activation evidence](validation/2026-09-29-azure-arm64-fresh-activation.md).
+
+### 2026-09-29 — Stop the disposable VM after fresh-stack acceptance
+
+- Status: stopped and disabled on the disposable Azure ARM64 VM.
+- Scope and intent: prevent the test VM from continuing to send events to the same configured MongoDB destination as the existing Pi.
+- Repository branch and commit/PR: `main`; documentation addendum, commit pending at entry time.
+- Repository changes: append this shutdown record and a post-test addendum to the VM activation evidence; no runtime code or configuration changed in the repository.
+- Host/environment changes actually applied: stopped and disabled the VM's five honeypot Go units, Cowrie, Zeek, Redis, Docker service/socket, and containerd. Set the three fresh-stack containers' restart policies to `no` and stopped them. The existing Pi was not changed.
+- Runtime/exposure state: all eleven checked VM systemd units are `inactive` and `disabled`. The fresh-stack containers were stopped. The checked project TCP listeners are closed; administrator SSH remains available on TCP 22. B2 backup control is among the disabled units.
+- Validation performed and outcome: checked systemd active and enabled states for all eleven units and checked listening TCP sockets for the project's service ports. Only TCP 22 remained in that port check.
+- Not performed / deferred: VM reboot persistence and a later MongoDB count query were not tested. Existing synthetic records in the configured MongoDB destination were not removed.
+- Risks and data handling: private credentials remain on the VM for a future operator-controlled retest; disabled units must be deliberately restarted before they can write again. No credential or event payload was copied into this record.
+- Rollback: explicitly re-enable and start the reviewed VM services only for a new isolated test after confirming the destination and sensor identity; do not start this VM alongside the existing Pi against a shared write destination.
+- Follow-up: use a separate test MongoDB destination for any future VM acceptance or keep the VM stack stopped.
+- Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md) and [VM activation evidence](validation/2026-09-29-azure-arm64-fresh-activation.md).

@@ -78,3 +78,18 @@ copied into this repository.
 Run a separate clean physical Pi acceptance test using `wlan0`, then verify
 service restart, capture filter, and event persistence. Keep backup disabled
 until a new owner-controlled write destination passes upload and restore.
+
+## 2026-09-29 post-test shutdown addendum
+
+After the bounded acceptance test, the operator requested that the disposable
+VM stop writing to the destination shared with the existing Pi. On the VM,
+the five honeypot Go systemd units, Cowrie, Zeek, Redis, Docker service and
+socket, and containerd were stopped and disabled. The three fresh-stack
+containers were stopped and their restart policies changed to `no`.
+
+All eleven checked units reported `inactive` and `disabled`. A TCP listener
+check for the project service ports found only administrator SSH on port 22.
+The existing Pi was not changed. This shutdown supersedes the active VM state
+reported above; the earlier successful test result remains historical evidence.
+Reboot persistence and a later MongoDB count query were not tested. Synthetic
+records already written to the configured MongoDB destination remain there.
