@@ -1,7 +1,7 @@
 ---
 title: Honeypot service catalog
 status: current
-last_verified: 2026-09-25
+last_verified: 2026-09-28
 ---
 
 # Honeypot service catalog
@@ -22,7 +22,7 @@ an operational change.
 | FTP decoy | None currently; external Compose definition retains ZeroTier bindings | Future, stopped 2026-09-25 | source tracked; not in active login scope | No current telemetry; planned adapter must not copy the legacy credential-bearing Core command path | Tracked source: [integrations/ftp](../integrations/ftp/README.md). Dashboard and canonical MongoDB integration are future work. Shared VFS schema remains deployment data outside Git. |
 | SMTP sink | None currently; external Compose definition retains loopback `127.0.0.1:25` | Future, stopped 2026-09-25 | source tracked; not in active login scope | No current telemetry; planned normalized adapter | Tracked source: [integrations/smtp](../integrations/smtp/README.md). Dashboard and canonical MongoDB integration are future work. |
 | PostgreSQL / Odoo / Deception Core | PostgreSQL `127.0.0.1:5432`; Core `127.0.0.1:9000`; Odoo `127.0.0.1:8069` | PostgreSQL/Core current; Odoo stopped 2026-09-25 | current project | Internal logs; Core/PostgreSQL support Cowrie integrations | Kept active for Cowrie's native `psql.py` and Core hooks. Odoo is not in the web login path. No endpoint is public. |
-| Zeek | sensor | Current, active | current project | Go collector | Interface workers feed Redis with zero observed pending lag at verification. |
+| Zeek | Pi `wlan0` and ZeroTier capture | Current, active | current project | Go collector → Redis | Two workers in the existing local cluster capture the primary uplink and ZeroTier inner traffic. Tailscale continues for management/local tests without its Zeek worker. See [ADR-0012](adr/ADR-0012-zeek-primary-uplink-capture.md). |
 | Go collector/processor | telemetry | Current, active | current project | Redis → Atlas/canonical stream | Principal ingestion path. The processor emits validated TI jobs when `THREAT_INTEL_ENABLED=true` and bounds the Redis queue. |
 | Hardware agent | local telemetry | Current, active | current project | Redis `raw:hardware` → MongoDB `hardware_live` + `hardware_metrics_1m` | One-second samples replace 30 fixed live slots; history receives one rollup per sensor/minute. |
 | Retained data backup worker | outbound B2 from Pi | Current, all three retained-data targets active | current project | MongoDB retention sources → gzip archive → private Backblaze B2 | `hardware_metrics_1m`, `filesystem_audit`, and the reviewed sensitive `threat_events` target are active on the Pi. The upload worker has no `readFiles` or `deleteFiles` capability. |

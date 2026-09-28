@@ -28,6 +28,8 @@ and historical material inherited from the previous team.
    active decoy Compose source and the separate Pi cutover boundary.
    [ADR-0011](adr/ADR-0011-installer-private-env-skeletons.md) permits blank
    Pi env skeletons while preserving operator-managed credentials.
+   [ADR-0012](adr/ADR-0012-zeek-primary-uplink-capture.md) scopes the existing
+   Pi's Zeek capture to its primary uplink and ZeroTier.
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.
 11. [Validation evidence](validation/README.md) — bounded staging checks and inventory snapshots.

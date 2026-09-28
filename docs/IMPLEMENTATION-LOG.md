@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Limit existing Pi Zeek capture to wlan0 and ZeroTier
+
+- Status: active on existing Pi; Dashboard label correction prepared in repository only.
+- Scope and intent: keep primary-uplink and local-test ZeroTier observation, remove only the Tailscale capture worker, and correct the Dashboard's description of `wlan0`.
+- Repository branch and commit/PR: `main` working tree; commit/PR pending.
+- Repository changes: remove `worker-tailscale0` from tracked `zeek/node.cfg`, update the `wlan0` hardware-card caption, add ADR-0012 and the existing-Pi Zeek runbook, and update current-state docs.
+- Host/environment changes actually applied: on `pi-t`, saved the prior node configuration in a root-only protected host backup, stopped Zeek with its old node list, installed the two-worker configuration, checked it, and started Zeek. A first attempt to switch to standalone mode failed `zeekctl check` with a telemetry-port error on the Pi's Zeek version; the original cluster configuration was restored and all original workers restarted before the reviewed two-worker cutover. No VPN, Cowrie, collector, processor, or Dashboard host configuration was changed.
+- Runtime/exposure state: Zeek's logger, manager, proxy, `worker-wlan0`, and `worker-zerotier0` are running; no Tailscale Zeek worker remains. Tailscale and ZeroTier connectivity and Cowrie continue unchanged. Collector and processor services are active. The Dashboard source label is not deployed by this change.
+- Validation performed and outcome: `zeekctl check` passed for all five configured nodes; `zeekctl status` and process arguments showed the two intended worker interfaces and no stale Tailscale worker. `logs/current` still resolves to the logger spool, `conn.log` had a fresh modification time, collector and processor were active, and the collector journal had no warning since cutover. Targeted ESLint and TypeScript typecheck passed for the Dashboard source.
+- Not performed / deferred: live packet-level attribution, post-cutover MongoDB volume comparison, and production Dashboard deployment.
+- Risks and data handling: ZeroTier produced most measured overlay Zeek documents, so retaining it preserves most prior event volume. The protected host backup and any packet/event contents were not copied into Git.
+- Rollback: restore the protected Pi node configuration from `/var/backups/honeypot/zeek/`, then restart `zeek.service` and verify status. Restore the prior UI source in Git if needed.
+- Follow-up: measure retained Zeek volume after a representative interval and review ZeroTier capture only if its observation value or cost changes.
+- Related ADR/runbook: [ADR-0012](adr/ADR-0012-zeek-primary-uplink-capture.md) and [existing-Pi Zeek runbook](../zeek/README.md).
+
 ### 2026-09-28 — Track Zeek process health through systemd PID
 
 - Status: unit refinement tested on disposable Azure ARM64 VM; service inactive afterward.
