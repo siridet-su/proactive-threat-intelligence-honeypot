@@ -13,8 +13,13 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Bound event chain");
     expect(html).toContain("h-[min(65vh,28rem)] overflow-y-auto");
     expect(html).toContain("grid-cols-[1rem_minmax(0,1fr)]");
+    expect(html).toContain("grid-cols-[minmax(0,1fr)_9.5rem_3.5rem]");
+    expect(html).toContain("sm:grid-cols-[minmax(0,1fr)_15rem_4rem]");
+    expect(html.match(/data-testid="timeline-event-row"/g)).toHaveLength(3);
+    expect(html.match(/data-testid="timeline-state-slot"/g)).toHaveLength(3);
+    expect(html).toContain("-bottom-2.5 left-[0.4375rem] top-4 w-px bg-primary-navy-line");
     expect(html).toContain("bg-primary-navy-line");
-    expect(html).toContain("Latest");
+    expect(html).toContain("LATEST");
     expect(html).not.toContain("overflow-x-auto");
   });
 
@@ -28,7 +33,19 @@ describe("session assessment presentation", () => {
 
     expect(html).not.toContain("event-0");
     expect(html).toContain("event-100");
-    expect(html.match(/>Latest<\/span>/g)).toHaveLength(1);
+    expect(html.match(/>LATEST<\/span>/g)).toHaveLength(1);
+  });
+
+  it("keeps technical model details collapsed and compacts mostly unavailable fields", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-technical-details",
+      ensemble_evidence: { model1: { applicable: true } },
+    }} />);
+
+    expect(html).toContain("Technical details");
+    expect(html).toContain("Limited technical detail · 1 of 11 fields recorded.");
+    expect(html).not.toMatch(/<details[^>]*open(?:=|\s|>)/);
+    expect(html.match(/<details/g)).toHaveLength(1);
   });
 
   it("keeps source-IP recurrence rows within a sticky-header scroll frame", () => {
@@ -52,7 +69,7 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Repeated source-IP activity indicates recurrence only");
   });
 
-  it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
+  it("shows provider-specific metadata panels and bounded results without double-counting cache", () => {
     const sourceIpCache = [
       { provider: "abuseipdb", cache_key: "abuse-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { abuse_confidence_score: 100, total_reports: 1809, country_code: "SE" } },
       { provider: "otx", cache_key: "otx-1", lookup_status: "OK", lookup_at: "2026-09-23T19:13:25Z", expires_at: "2026-09-24T19:13:25Z", normalized_context: { pulses: [{ pulse_id: "p1", name: "Observed SSH scanner feed" }], truncated: false } },
@@ -62,14 +79,20 @@ describe("session assessment presentation", () => {
       sessionData={{ status: "TI_AVAILABLE", counts: { eligible_observables: 1 }, source_ip_cache: sourceIpCache }}
       observableData={{ source_ip_cache: sourceIpCache, observable: { value: "203.0.113.9" } }}
     />);
-    expect(html).toContain("AbuseIPDB score:");
-    expect(html).toContain("1809 community reports");
-    expect(html).toContain("OTX pulse matches: 1");
+    expect(html).toContain("Provider Intelligence");
+    expect(html).toContain("abuse score");
+    expect(html).toContain("community reports");
+    expect(html).toContain("1809");
+    expect(html).toContain("pulse matches");
     expect(html).toContain("Observed SSH scanner feed");
-    expect(html).toContain("ssh 22");
+    expect(html).toContain("ports");
+    expect(html).toContain("ssh 22, nginx 80");
+    expect(html).toContain("not necessarily observed in this Cowrie session");
     expect(html).toContain("3 source-IP provider lookup results");
-    expect(html).toContain("What the providers reported");
-    expect(html).toContain("Lookup provenance and technical details");
+    expect(html).toContain("max-h-[620px] overflow-y-auto");
+    expect(html).toContain("lg:grid-cols-2");
+    expect(html).toContain("Technical details");
+    expect(html).not.toMatch(/<details[^>]*open(?:=|\s|>)/);
     expect(html).not.toContain("abuseipdb cache");
     expect(html).not.toContain("normalized context:");
     expect(html).not.toContain("6 source-IP provider lookup results");
@@ -136,7 +159,24 @@ describe("session assessment presentation", () => {
     expect(html).not.toContain("ti fresh");
     expect(html).not.toContain("freshness: FRESH");
     expect(html).toContain("Last lookup: Not executed");
-    expect(html).toContain("provider not queried");
+    expect(html).toContain("No provider lookup was executed");
+    expect(html).toContain("Lookup status");
+    expect(html).toContain("AlienVault OTX");
+    expect(html).not.toContain("Recorded Not recorded · provider not queried");
+  });
+
+  it("distinguishes a provider error from an unexecuted lookup", () => {
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{ status: "TI_AVAILABLE", counts: { eligible_observables: 1 }, provider_status: {
+        otx: { lookup_status: "PROVIDER_ERROR", record_count: 1, lookup_at: "2026-09-27T10:00:00Z" },
+      } }}
+      observableData={{ observable: { value: "203.0.113.9" } }}
+    />);
+
+    expect(html).toContain("Provider error");
+    expect(html).toContain("Provider records");
+    expect(html).toContain("Provider lookup returned Provider error");
+    expect(html).not.toContain("No provider lookup was executed");
   });
 
   it("shows validated AI selections even when no narrative template was rendered", () => {
@@ -166,7 +206,7 @@ describe("session assessment presentation", () => {
       ensemble_evidence: { model1: { applicable: true }, model2: { available: false, status: "INCONCLUSIVE_EXPERIMENTAL_SHADOW" } },
     }} />);
     expect(html).toContain("No session-bound Model2 result is available");
-    expect(html).toContain("no ensemble corroboration or combined score is claimed");
+    expect(html).toContain("it did not corroborate or change the Model1 recommendation");
   });
 
   it("distinguishes raw Model2 agreement from an evidence-qualified vote", () => {

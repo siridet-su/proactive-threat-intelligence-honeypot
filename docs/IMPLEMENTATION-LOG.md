@@ -257,6 +257,20 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: remove this repository change; no host rollback is needed because no host was modified.
 - Follow-up: build and test the Core image on a disposable ARM64 VM, validate host paths and private inputs, then plan a separate Pi cutover.
 - Related ADR/runbook: [ADR-0010](adr/ADR-0010-track-active-decoy-compose.md), [decoy Compose runbook](../deploy/decoy-honeypot/README.md), and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).
+### 2026-09-28 — Show SSH attacker category in the unified session directory
+
+- Status: repository Dashboard change prepared; staging deployment pending verification after push.
+- Scope and intent: replace generic SSH command-activity text in the unified session directory with the attacker category already returned by the Dashboard API, while preserving HTTP request activity.
+- Repository branch and commit/PR: `staging-release`; Dashboard change commit `f1395dbd`, followed by merge of current `origin/main` at `f824ff575`.
+- Repository changes: project the existing SSH `classification` value into the directory row and render APT, Bot, Script Kiddie, or Unclassified as a compact tag on desktop and mobile. Unknown values fail closed to Unclassified. HTTP activity remains unchanged. Update the focused directory test and an outdated advisory-copy assertion; no API, schema, backend, or classification behavior changes.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: not deployed at the time of this entry. The category remains an existing classification/projection and must not be interpreted as verified actor attribution.
+- Validation performed and outcome: focused Threat Intel/advisory tests passed (27/27); TypeScript, targeted ESLint, and `git diff --check` passed. `npx next build --webpack` passed; default Turbopack build could not bind a port in the sandbox. Full Vitest suite: 827 passed, 5 failed in Filesystem/command-route test files, 2 expected failures, and 14 skipped. Backend targeted suites passed (116 passed, 2 skipped); a separate AI-presentation suite could not be collected because its import does not match the checked-out dirty source tree. One authorized public Cowrie session reached the verified HAProxy-to-Cowrie route. Analysis completed for that session; Model2 identity binding was complete, but T1105 transfer and T1110 repeated-auth gates correctly rejected raw PRESENT outputs, and T1046 was unavailable. No policy-supported canonical threat hypothesis was produced because the attempted fetch did not complete. Response guidance was manual-only. AI advisory returned accepted/valid on one on-demand provider call. The PDF endpoint returned HTTP 200 and a valid PDF. ETI reported `NO_STORED_PROVIDER_RESULT` for its eligible observable although enrichment jobs had completed. The session source was marked public by the system.
+- Not performed / deferred: staging deployment and authenticated browser inspection remain pending. The benign fetch did not complete and no transfer observation was produced. No direct/manual MongoDB writes, service changes, or config changes were made; the test session itself was stored through the normal application pipeline.
+- Risks and data handling: display reuses the current API field and does not claim verified actor identity. The single test session followed the normal pipeline; its on-demand AI advisory called the configured provider. No credentials, raw commands, payloads, or source IP were added to the UI or this log.
+- Rollback: revert the Dashboard UI commit; no backend or data rollback is required.
+- Follow-up: push through the existing staging CI/CD route if checks pass, then verify the deployed page and API.
+- Related ADR/runbook: unified Threat Intelligence session directory implementation.
 
 ### 2026-09-28 — Harden offline Pi preparation before VM acceptance
 
@@ -2852,6 +2866,7 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Follow-up: build and install a clean ARM64 binary, verify its heartbeat and default-time run claim, disable the old timer only after the control scheduler is healthy, then record actual host state in a dated addendum.
 - Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
 
+
 ### 2026-09-27 — Activate Pi daily backup scheduler
 
 - Status: installed and active on the Pi; Dashboard production deployment remains pending.
@@ -2866,3 +2881,62 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the protected previous binary and restart the control service, and re-enable the fixed 03:30 timer as a pair. Preserve schedule revisions, run claims, manifests, and B2 versions for audit.
 - Follow-up: monitor the next scheduled run and authenticated schedule UI; perform a read-only restore rehearsal before claiming recovery readiness.
 - Related ADR/runbook: [ADR-0008](adr/ADR-0008-dashboard-backup-daily-schedule.md), [worker runbook](../agents/hardware-backup/README.md), and [Dashboard API contract](../dashboard-v2/docs/API.md#backup-daily-schedule-endpoints).
+
+### 2026-09-27 — Align Activity Evidence timeline and compact technical details
+
+- Status: repository Dashboard UI change prepared on an isolated branch; staging deployment pending.
+- Scope and intent: keep event timestamps aligned when only the latest event has a state label, and make technical/provenance fields secondary to analyst-facing summaries.
+- Repository branch and commit/PR: `codex/fix-activity-evidence-timeline-20260927`; commit and staging push follow this entry.
+- Repository changes: render Activity Evidence rows with a consistent information, timestamp, and reserved state-label grid; retain the connected navy timeline, use orange only for LATEST, and slightly reduce event spacing. Keep expandable technical details collapsed by default, avoid duplicated fields and unnecessary nested disclosures, and compact mostly unavailable or zero-valued field sets. Add presentation regression assertions.
+- Host/environment changes actually applied: none. No GCP service, application, backend, MongoDB data, or production configuration was changed manually.
+- Runtime/exposure state: not yet deployed. Pushing the change to staging is intended to trigger the configured CI/CD workflow; workflow completion and live visibility are not verified by this entry.
+- Validation performed and outcome: focused session-analysis and classification-detail tests passed (21/21); full Dashboard lint and `npx tsc --noEmit` passed; the staging workflow's external-TI tests passed (8/8) and BFF/staging contract tests passed (10/10); the production build passed with `npm run build -- --webpack`. The full Dashboard suite reported 815 passed, 5 failed, 2 expected failures, and 14 skipped (74 files). The five failures are in filesystem-topology empty states, filesystem CWD/path-interest presentation, and a session-command route status assertion; they are outside the changed files and were not investigated as part of this UI fix. The default Turbopack build could not run in this local linked-dependency setup because Turbopack rejects the external `node_modules` symlink; this is not a clean CI checkout.
+- Not performed / deferred: authenticated browser visual review, default-Turbopack build in a clean dependency installation, resolution of the unrelated full-suite failures, and confirmation of the staging CI/CD result.
+- Risks and data handling: presentation-only; event data, server behavior, policies, and response authority are unchanged. No session payloads or secrets were added.
+- Rollback: revert the UI commit on the staging branch; no host or data rollback is required.
+- Follow-up: inspect the staging workflow result and review the event alignment and collapsed technical-detail sections in an authenticated browser.
+- Related ADR/runbook: N/A; no operating procedure or architecture decision changed.
+
+### 2026-09-27 — Restore session classification filtering and structure provider intelligence
+
+- Status: repository Dashboard UI correction prepared in an isolated worktree; not pushed or deployed.
+- Scope and intent: restore the existing SSH attacker-type filter after unifying protocol browsing, tighten approximate-origin map framing, and make external provider evidence scannable without changing its source contract.
+- Repository branch and commit/PR: detached worktree based on staging commit `b30a7e49`; follow-up commit and PR pending.
+- Repository changes: expose the existing server-side attacker types (`APT`, `Bot`, `ScriptKiddie`) only in the SSH view and pass the selected value through the directory and export APIs; do not invent a Telnet protocol distinction absent from the current directory projection. Set single-origin and clustered multi-origin map zoom caps to regional scale. Replace paragraph-heavy external-TI cards with provider-specific metadata panels, keep the provider summary outside a 620px-bounded results viewport, retain allowlisted provider fields and collapsed provenance details, and distinguish provider errors from lookups that were not executed. Add/adjust focused regression tests.
+- Host/environment changes actually applied: none. No backend, API/schema, MongoDB, provider request, GCP service, or production configuration was changed. A temporary dependency symlink used for local checks was removed automatically after validation.
+- Runtime/exposure state: these changes exist only in the isolated repository worktree. They are not active on staging or production; the configured CI/CD behavior has not been triggered for this follow-up.
+- Validation performed and outcome: focused map, session-directory, and session-analysis presentation tests passed (26/26); Dashboard `tsc --noEmit`, ESLint on changed source/tests, and `git diff --check` passed. No production build or authenticated browser review was performed.
+- Not performed / deferred: no push, CI/CD run, staging/production deployment, map screenshot review, live session/API check, or full Dashboard test suite was performed.
+- Risks and data handling: the map's automatic view now starts closer (8x) while retaining approximate-geolocation semantics and a manual reset; provider records remain contextual and non-authoritative. Attacker-type values continue to use the backend's existing server-side filter and pagination. No secrets or raw request payloads were added.
+- Rollback: revert the follow-up UI commit; no service, data, or backend rollback is needed.
+- Follow-up: after an authorized staging push, inspect the Brazil/Korea regional maps, confirm the SSH filter returns the existing server-side results, and review AbuseIPDB/OTX/Shodan panels with fresh, stale, error, and unqueried data.
+- Related ADR/runbook: N/A; presentation and existing filter wiring only; no operating procedure or architecture decision changed.
+
+### 2026-09-28 — Clarify TTP counts and show one recommendation
+
+- Status: staging UI change prepared in an isolated temporary checkout based on exact remote staging commit `f3af6609b84c3efe2e91bf8bcf25507995bc9dbc`; CI/CD deployment follows a push and is not claimed by this entry.
+- Scope and intent: distinguish distinct trusted ATT&CK techniques from classified command events and replace the visible ranked TTP list with one advisory recommendation.
+- Repository changes: add the count explanation beside Trusted observations; change the section and navigation to TTP recommendation; highlight only the leading server-owned weighted-voting candidate while listing other Model1 TTPs without priority labels or scores. Preserve the collapsed formula comparison and technical evidence. Add regression tests.
+- Host/environment changes actually applied: none by this UI change. Pi/GCP Model2 V2 shadow-path activation is recorded separately in ADR-0008 and the Model2 worktree implementation log; this UI change does not alter backend logic, model, policy, MongoDB or service configuration.
+- Runtime/exposure state: frontend still follows the existing staging CI/CD path; until the workflow completes, the live dashboard may retain the old TTP review order.
+- Validation performed and outcome: two focused Vitest files passed 7/7, TypeScript `tsc --noEmit`, scoped ESLint and `git diff --check` passed in a clean npm dependency install.
+- Not performed / deferred: full dashboard suite, authenticated browser review and confirmation of the staging CI/CD run. The screenshot's 2 trusted TTPs and 3 classified events are counts of different entities, not evidence of a counting defect.
+- Risks and data handling: recommendation remains advisory, not trusted ATT&CK evidence, probability, confidence or response authorization. No secrets or raw payloads were added.
+- Rollback: revert only this staging UI commit; no Pi/GCP or database rollback is involved.
+- Follow-up: verify the staging build and check the live session page shows one Recommend badge, other Model1 techniques without rank labels, and the explicit 2-versus-3 count explanation.
+- Related ADR/runbook: N/A; presentation-only.
+
+### 2026-09-28 — Support dark mode in Session Analysis detail page
+
+- Status: repository styling update completed on `edit-dashboard`; host/production deployment pending.
+- Scope and intent: eliminate remaining white sections in the Session Analysis page (`/threat-intel/[id]`) during dark mode by replacing hardcoded Tailwind light classes with semantic theme tokens.
+- Repository branch and commit/PR: `edit-dashboard`.
+- Repository changes: update `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx` to replace fixed `bg-[#F9FAFB]`, `bg-white`, `bg-slate-50`, `bg-slate-100`, `border-slate-200`, and `text-slate-800` classes with semantic theme tokens (`bg-surface`, `bg-surface-subtle`, `border-border`, `text-text`, `text-text-muted`, `text-text-subtle`, `var(--map-land)`).
+- Host/environment changes actually applied: none. No host, systemd service, database, or production deployment was altered.
+- Runtime/exposure state: local development update only; production Dashboard has not been deployed.
+- Validation performed and outcome: `npx tsc --noEmit` passed with zero errors; targeted session and threat intelligence test suites (11 files, 62 passed tests) passed cleanly.
+- Not performed / deferred: production Docker/staging rollout was deferred.
+- Risks and data handling: purely presentational CSS class adjustments; no API contracts, data models, credentials, or telemetry boundaries are affected.
+- Rollback: git checkout of `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx`.
+- Follow-up: verify visual presentation across both light and dark mode themes in the browser.
+- Related ADR/runbook: `dashboard-v2/docs/PRODUCTION_THEME_DESIGN_SPEC.md`.
