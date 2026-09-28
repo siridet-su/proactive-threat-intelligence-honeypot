@@ -179,6 +179,9 @@ export function HardwareMonitor() {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let fallbackTimer: number | null = null;
+    let reconciliationTimer: number | null = null;
+    let streamConnected = false;
+    let lastStreamDataAt = 0;
     let hasSnapshot = false;
 
     const receiveSnapshot = (incoming: HardwareTelemetry[]) => {
@@ -240,6 +243,7 @@ export function HardwareMonitor() {
         try {
           const message = parseHardwareStreamMessage(JSON.parse(event.data));
           if (!message) return;
+          lastStreamDataAt = Date.now();
           if (message.type === "initial") receiveSnapshot(message.data);
           else receiveUpdate(message.data);
         } catch {
@@ -248,12 +252,15 @@ export function HardwareMonitor() {
       };
       connection.onopen = () => {
         if (!disposed) {
+          streamConnected = true;
+          lastStreamDataAt = Date.now();
           stopFallback();
           setConnectionState("live");
         }
       };
       connection.onerror = () => {
         if (disposed || source !== connection) return;
+        streamConnected = false;
         connection.close();
         source = null;
         startFallback();
@@ -262,10 +269,16 @@ export function HardwareMonitor() {
     };
 
     connect();
+    reconciliationTimer = window.setInterval(() => {
+      if (streamConnected && Date.now() - lastStreamDataAt >= 20_000) {
+        void fetchSnapshot();
+      }
+    }, 15_000);
     return () => {
       disposed = true;
       source?.close();
       stopFallback();
+      if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, []);

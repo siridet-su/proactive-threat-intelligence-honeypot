@@ -268,6 +268,30 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       manager.dispose();
     });
 
+    it("reconciles a quiet but open stream and stops after disposal", async () => {
+      vi.useFakeTimers();
+      try {
+        const source = new MockEventSource("/api/filesystem-topology/stream");
+        const fetchFallback = vi.fn().mockResolvedValue(new Response(JSON.stringify(baseEmptySnapshot), { status: 200 }));
+        const manager = new FilesystemStreamLifecycleManager({
+          createEventSource: () => source as unknown as EventSource,
+          fetchFallback,
+          onSnapshot: vi.fn(),
+          onStreamState: vi.fn(),
+          onHydrated: vi.fn(),
+        });
+        manager.connect();
+        source.onopen?.(new Event("open"));
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(fetchFallback).toHaveBeenCalledTimes(2); // initial + quiet-stream reconciliation
+        manager.dispose();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(fetchFallback).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("shows an error instead of loading forever when both SSE and REST stall", async () => {
       vi.useFakeTimers();
       const onRegionStatus = vi.fn();

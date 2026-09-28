@@ -29,6 +29,8 @@ export class FilesystemStreamLifecycleManager {
   private currentGeneration = 0;
   private source: EventSource | null = null;
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
+  private lastStreamSnapshotAt = 0;
   private fallbackAbortController: AbortController | null = null;
   private connectionCount = 0;
   private cleanupCount = 0;
@@ -45,6 +47,8 @@ export class FilesystemStreamLifecycleManager {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
     }
+
+    this.stopReconciliation();
 
     if (this.fallbackAbortController) {
       this.fallbackAbortController.abort();
@@ -76,6 +80,7 @@ export class FilesystemStreamLifecycleManager {
         const data = (message as { data?: unknown }).data;
         if (!isSnapshot(data)) return;
         this.options.onSnapshot(data);
+        this.lastStreamSnapshotAt = Date.now();
         this.options.onStreamState("live");
       } catch {
         /* retain last valid topology */
@@ -91,6 +96,15 @@ export class FilesystemStreamLifecycleManager {
       }
       this.options.onHydrated();
       this.options.onStreamState("live");
+      this.lastStreamSnapshotAt = Date.now();
+      // An open SSE connection may carry heartbeats while its data source is
+      // stalled. Reconcile with the bounded read endpoint during quiet periods.
+      this.reconciliationTimer = setInterval(() => {
+        if (this.disposed || this.currentGeneration !== generation || this.source !== source) return;
+        if (Date.now() - this.lastStreamSnapshotAt >= 15_000) {
+          void this.fetchFallbackSnapshot(generation);
+        }
+      }, 15_000);
     };
 
     source.onerror = () => {
@@ -99,6 +113,7 @@ export class FilesystemStreamLifecycleManager {
       }
       this.options.onHydrated();
       this.options.onStreamState("stale");
+      this.stopReconciliation();
       this.cleanupCount++;
       source.close();
       this.source = null;
@@ -118,7 +133,6 @@ export class FilesystemStreamLifecycleManager {
 
   private async fetchFallbackSnapshot(generation: number): Promise<void> {
     if (this.disposed || this.currentGeneration !== generation) return;
-
     if (this.fallbackAbortController) {
       this.fallbackAbortController.abort();
     }
@@ -156,6 +170,13 @@ export class FilesystemStreamLifecycleManager {
     }
   }
 
+  private stopReconciliation(): void {
+    if (this.reconciliationTimer !== null) {
+      clearInterval(this.reconciliationTimer);
+      this.reconciliationTimer = null;
+    }
+  }
+
   public reconnect(): void {
     if (!this.disposed) {
       this.connect();
@@ -165,6 +186,7 @@ export class FilesystemStreamLifecycleManager {
   public dispose(): void {
     this.disposed = true;
     this.currentGeneration++;
+    this.stopReconciliation();
     if (this.retryTimeout !== null) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;

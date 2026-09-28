@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Prepare additional bounded hypothesis and manual guidance candidates
+
+- Status: research-only repository candidate prepared; not activated or deployed.
+- Scope and intent: replay proposed same-path file preparation and unconfirmed-transfer execution hypotheses, plus file-change and execution/deletion review guidance, against the current validated Cowrie typed-fact and chain selector contracts.
+- Repository branch and commit/PR: isolated clean `staging-release` checkout based on `986337926`; no commit or PR in this entry.
+- Repository changes: add `honeypot-analysis/research/threat_hypothesis_expansion_20260928/candidate.py`, focused synthetic replay tests, and a readiness/activation plan. Candidate output is non-authoritative, contains only bounded references and explanatory text, and has no production report or response write path.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: existing production and staging policy, model, API, Dashboard, PDF, and guidance remain active as before. The new candidate is not loaded by those services.
+- Validation performed and outcome: 8/8 candidate replay tests passed; 19/19 combined candidate, behavioral-remediation, and response-guidance-v3 tests passed. Python compile and `git diff --check` passed. Replay checks cover same-path positives/negatives, direct transfer evidence, baseline chain coexistence, manual-only guidance, and absence of raw command/path in candidate output.
+- Not performed / deferred: policy review, reviewed-policy hash registration, UI/PDF/AI projection, live session smoke, host deployment, and provider requests. A broader v6 graph-guidance test could not import `CONTROLLED_SYNTHETIC_PROVENANCE_MARKER` from the checked-out storage module; one existing v5-to-AI projection test failed report validation. No production source touched by this candidate explains either pre-existing cross-module issue; they remain separate blockers to a broad green suite.
+- Risks and data handling: neither a Cowrie command outcome nor a typed relationship proves real-host effects or attacker intent. Candidate abstains when transfer-event identity cannot be bound to the path. Fixtures are synthetic and contain no credentials or real attacker payloads.
+- Rollback: remove the isolated research package and its test/log entry; no host or data rollback is needed.
+- Follow-up: review the exact proposed language and authority boundaries, promote accepted cases into new policy identities, update the reviewed registry while preserving historical hashes, then verify backend/UI/PDF and staged runtime behavior.
+- Related ADR/runbook: `honeypot-analysis/research/threat_hypothesis_expansion_20260928/READINESS_AND_ACTIVATION_PLAN_TH.md`.
+
 ### 2026-09-28 — Correct canonical-finding assessment outcome after end-to-end rehearsal
 
 - Status: repository Dashboard correction prepared; staging deployment pending push and CI/CD verification.
@@ -2761,3 +2776,16 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: git checkout of `dashboard-v2/src/app/(main)/threat-intel/[id]/page.tsx`.
 - Follow-up: verify visual presentation across both light and dark mode themes in the browser.
 - Related ADR/runbook: `dashboard-v2/docs/PRODUCTION_THEME_DESIGN_SPEC.md`.
+
+### 2026-09-28 — Reconcile silent Dashboard streams with bounded snapshots
+
+- Status: frontend source change prepared and locally verified; website deployment and authenticated browser verification pending.
+- Scope and intent: keep Filesystem Activity and System Health updating when an SSE connection stays open but stops delivering data events; preserve SSE as the primary path and use bounded read endpoints for quiet-stream reconciliation.
+- Repository changes: add quiet-stream snapshot reconciliation to the filesystem stream manager, hardware monitor, and shared threat feed; add a filesystem watchdog regression test. No backend schema, policy, model, or response authority was changed by this frontend fix.
+- Host/environment changes actually applied: none. GCP analysis worker and monitor web were checked read-only and were active; their current policy/matcher source hashes matched this isolated checkout. No GCP release, service restart, database write, or website rollout occurred in this verification step.
+- Runtime/exposure state: existing website remains on its prior release until a separate staging CI/CD rollout succeeds.
+- Validation performed and outcome: focused Vitest 42/42, scoped ESLint, TypeScript check, and `next build --webpack` passed. Default Turbopack build failed in this execution environment because its CSS worker could not bind a port; that is not a successful default-build result.
+- Not performed / deferred: authenticated browser/SSE network trace, staging CI/CD rollout, and backend activation of newly approved H1/H2/G1/G2 policy text. The latter requires matcher, provenance, historical-policy registry, and report/API/PDF compatibility work before host application.
+- Risks and data handling: silent-stream reconciliation adds bounded periodic reads while the page is open; no credentials, payloads, or protected URIs were copied into source or docs.
+- Rollback: revert only the frontend reconciliation change after confirming the previously deployed frontend identity; do not alter backend policy as part of a UI rollback.
+- Follow-up: verify staging build and authenticated SSE-vs-snapshot behavior on Filesystem Activity and System Health before claiming the public website is current.
