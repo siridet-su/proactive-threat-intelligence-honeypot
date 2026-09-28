@@ -375,6 +375,31 @@ def test_duplicate_fs_results_do_not_upgrade_input() -> None:
     assert observations[0]["command_outcome"] == "outcome_unknown"
 
 
+def test_fs_result_before_command_input_fails_closed() -> None:
+    session_id = "out-of-order-fs-result"
+    input_event = _command_event(
+        session_id, "echo demo > /tmp/demo.sh", index=0, outcome="unknown"
+    )
+    input_event["invocation_id"] = "a" * 32
+    result_event = {
+        "eventid": "cowrie.fs.operation_result",
+        "schema_version": "cowrie_fs_operation_result.v1",
+        "session": session_id,
+        "invocation_id": "a" * 32,
+        "timestamp": "2026-07-30T03:00:01Z",
+        "operation_type": "file_write",
+        "path": "/tmp/demo.sh",
+        "success": True,
+        "bytes_written": 5,
+    }
+    policy = resolve_behavior_policy(path_text=str(BEHAVIOR_POLICY))
+    observations = _build_command_observations(
+        {"session_id": session_id, "raw_events": [result_event, input_event]}, policy
+    )
+    assert len(observations) == 1
+    assert observations[0]["command_outcome"] == "outcome_unknown"
+
+
 def test_paired_fs_results_enable_bounded_h1_g1_without_extra_commands() -> None:
     session_id = "paired-h1-g1"
     payload = _payload(

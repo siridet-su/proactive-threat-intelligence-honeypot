@@ -124,12 +124,13 @@ def _bound_fs_operation_result(
     if _clean(command_event.get("session")) != session_id:
         return None
     matching_inputs = [
-        item for item in raw_events
+        (index, item) for index, item in enumerate(raw_events)
         if _clean(item.get("eventid")) == "cowrie.command.input"
         and _clean(item.get("invocation_id")) == invocation
     ]
-    if len(matching_inputs) != 1:
+    if len(matching_inputs) != 1 or matching_inputs[0][1] is not command_event:
         return None
+    input_index = matching_inputs[0][0]
     command = _clean(command_event.get("input"))
     fragments = split_compound_command(command, split_pipes=True)
     if len(fragments) != 1 or fragments[0].text != command:
@@ -149,6 +150,8 @@ def _bound_fs_operation_result(
     if len(candidates) != 1:
         return None
     index, result = candidates[0]
+    if index <= input_index:
+        return None
     if (
         _clean(result.get("schema_version")) != "cowrie_fs_operation_result.v1"
         or _clean(result.get("session")) != session_id

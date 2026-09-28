@@ -96,3 +96,11 @@ passed with **846 passed, 14 skipped, 2 expected failures**. The ten new
 focused cases cover exact pairing, wrong identity/path/time, duplicate and
 missing outcomes, and H1/G1 report projection. These are contract tests,
 not proof that the Pi currently emits the event.
+
+An additional release review found that timestamp checks alone did not prove
+event ordering. The binder now requires the result's durable event position
+to be strictly after its unique input event. The first GCP package for
+`cd4b4d20893b4e749a61846ba04c1b80d464f013` is staged but inactive;
+its receipt does not authorize deploying this later correction. It is
+superseded and must not be activated. A fresh commit, full regression,
+manifest, and receipt are required.
