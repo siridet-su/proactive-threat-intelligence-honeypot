@@ -98,6 +98,12 @@ shows canonical `cowrie.session.file_download` event metadata and links its
 SHA-256 to Artifact Intelligence. A download event does not prove execution or
 a virtual filesystem read/write.
 
+`FS-031` prepares a per-event Copy command action in the Admin Evidence view.
+It copies only that event's retained input to the operator's clipboard. The
+action is absent for redacted or empty inputs, and a truncated event labels
+the action as copying only the available input. Clipboard success or failure
+is shown beside that event; no new evidence endpoint or server write is added.
+
 Local development review needs the explicit private
 `PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` setting and loopback access; without
 an enabled local source or configured production source, the Evidence API
@@ -200,6 +206,7 @@ deferred and can be reopened as separate work.
 | `FS-028` | `IN PROGRESS` | Stop Route Replay playback for a one-event session. | Keep Play disabled when fewer than two route events are loaded, explain that there are no steps to replay, and ensure the timer cannot remain in Pause after history shrinks to one event. Apply the same availability rule to sidebar, compact toolbar, and Space shortcut. | Operator screenshot showed Hop 1/1 stuck on Pause; repository correction prepared on a staging-based branch. Deployment and interactive review pending. |
 | `FS-029` | `IN PROGRESS` | Separate Live topology loading from empty radar standby. | Show a plain loading placeholder until the first snapshot is available; show the radar only after a resolved empty snapshot, including when the stream is still connecting; keep the panel dimensions stable and respect reduced motion during the brief reveal. | Operator screenshot showed loading text drawn over radar. Repository correction prepared on a staging-based branch; deployment and visual review pending. |
 | `FS-030` | `IN PROGRESS` | Refine the Live empty radar while keeping its original full-canvas visual. | Use the original edge-reaching 48-degree sweep and expanding circular wave on a plain radar surface; remove the continuous crosshairs, full-canvas diagonals, corner rays, and faint range rings; keep four short cardinal edge ticks and shrink the solid center emitter from 32px to 16px. Show no-active-session copy and actual snapshot receipt age; distinguish connecting, live, and reconnecting; let operators pause/resume sweep, honor reduced motion, and fade the populated map into the same panel. | Operator preferred the original visual with fewer static lines on 2026-09-28. Repository revision prepared on a staging-based branch; deployed visual review pending. |
+| `FS-031` | `IN PROGRESS` | Copy one retained command input from its Evidence event. | Offer a keyboard-accessible Copy command action only for events with retained input; copy exactly that event's input without executing it or changing the selected session; label truncated input as partial and report clipboard success/failure beside the event. Keep redacted or missing input unavailable. | Operator requested the action after seeing a multi-command bot script in one production Evidence event on 2026-09-29. Repository UI change prepared on a staging-based branch; deployment and interactive review pending. |
 
 ## Deferred outside this workstream
 

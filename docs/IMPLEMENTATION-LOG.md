@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-29 — Add per-event command copy action in Filesystem Evidence
+
+- Status: repository UI change prepared on a staging-based branch; deployment not verified.
+- Scope and intent: let an Admin copy the complete retained input of one Cowrie command event, including a multi-command submission, from the Evidence panel.
+- Repository branch and commit/PR: `feature/evidence-command-action-20260929` from `origin/staging` at `abefc04`; commit pending at entry time.
+- Repository changes: add a Copy command action beside each available command input, copy only that event's exact retained input, show per-event success/failure feedback, and label a truncated event as Copy available input. Hide the action for redacted or missing input. Update `FS-031` current-state target.
+- Host/environment changes actually applied: none. No Dashboard service, Railway setting, Pi service, MongoDB data, or credential changed in this repository step.
+- Runtime/exposure state: the hosted screenshot shows an Admin Evidence event containing a long command submission. The new copy action is inactive until a Dashboard containing this revision deploys; hosted deployment was not checked.
+- Validation performed and outcome: source review confirmed the action uses the selected event's input and preserves the existing Admin-only retrieval route; whitespace check pending at entry time.
+- Not performed / deferred: automated tests, authenticated browser interaction, clipboard-permission review across browsers, staging deployment confirmation, and production deployment.
+- Risks and data handling: copied input can contain attacker-supplied text or secrets; the action is user initiated and writes only to the local clipboard. No command input, raw payload, or secret was copied into this record. Truncated input remains partial.
+- Rollback: revert this UI commit; no host data rollback is required.
+- Follow-up: verify one available, one truncated, and one unavailable command event after deployment, including clipboard failure feedback.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md), [hosted command evidence ADR](adr/ADR-0016-hosted-dashboard-command-evidence.md), and [Command Evidence panel](../dashboard-v2/src/components/filesystem/CommandEvidencePanel.tsx).
+
 ### 2026-09-28 — Restore classic Live radar sweep with fewer static guides
 
 - Status: repository UI revision prepared on a staging-based branch; deployment not verified.

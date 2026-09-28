@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Clock3, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
+import { AlertTriangle, Check, Clock3, Copy, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 
 import { RegionState } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession } from "@/lib/dashboardTypes";
@@ -37,6 +37,12 @@ type LoadResult =
   | { sessionId: string; status: "forbidden" }
   | { sessionId: string; status: "unavailable"; message: string }
   | { sessionId: string; status: "error"; message: string };
+
+type CopyFeedback = {
+  sessionId: string;
+  eventId: string;
+  status: "copied" | "failed";
+};
 
 interface CommandEvidencePanelProps {
   selectedSession: FilesystemTopologySession;
@@ -160,8 +166,19 @@ function eventLabel(eventid: CommandEvidenceEvent["eventid"]): string {
 export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelProps) {
   const [result, setResult] = useState<LoadResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
   const sessionId = selectedSession.sessionId;
   const currentResult = result?.sessionId === sessionId ? result : null;
+
+  const copyCommand = async (command: CommandEvidenceEvent) => {
+    if (!command.command_text_available || !command.input || command.input.trim() === "[REDACTED]") return;
+    try {
+      await navigator.clipboard.writeText(command.input);
+      setCopyFeedback({ sessionId, eventId: command.event_id, status: "copied" });
+    } catch {
+      setCopyFeedback({ sessionId, eventId: command.event_id, status: "failed" });
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -299,6 +316,9 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
             {commands.map((command) => {
               const isRedacted = command.input.trim() === "[REDACTED]";
               const commandTextVisible = command.command_text_available && command.input.length > 0 && !isRedacted;
+              const currentCopyFeedback = copyFeedback?.sessionId === sessionId && copyFeedback.eventId === command.event_id
+                ? copyFeedback.status
+                : null;
               return (
                 <li key={command.event_id}>
                   <article className="rounded-lg border border-border bg-surface-subtle p-2.5">
@@ -317,9 +337,40 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
                       )}
                     </div>
                     {commandTextVisible ? (
-                      <pre dir="ltr" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-xs leading-relaxed text-text">
-                        {displayInput(command.input)}
-                      </pre>
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-text-subtle">Submitted input</span>
+                          <button
+                            type="button"
+                            onClick={() => void copyCommand(command)}
+                            aria-label={`${command.input_truncated ? "Copy available command input" : "Copy command input"} for event ${command.event_id}`}
+                            className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs font-medium text-text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                          >
+                            {currentCopyFeedback === "copied" ? (
+                              <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                            ) : (
+                              <Copy className={`h-3.5 w-3.5 ${currentCopyFeedback === "failed" ? "text-danger" : ""}`} aria-hidden="true" />
+                            )}
+                            {currentCopyFeedback === "copied"
+                              ? "Copied"
+                              : currentCopyFeedback === "failed"
+                                ? "Copy failed"
+                                : command.input_truncated
+                                  ? "Copy available input"
+                                  : "Copy command"}
+                          </button>
+                        </div>
+                        <span role="status" className="sr-only">
+                          {currentCopyFeedback === "copied"
+                            ? `Command input copied for event ${command.event_id}`
+                            : currentCopyFeedback === "failed"
+                              ? `Could not copy command input for event ${command.event_id}`
+                              : ""}
+                        </span>
+                        <pre dir="ltr" className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-xs leading-relaxed text-text">
+                          {displayInput(command.input)}
+                        </pre>
+                      </div>
                     ) : (
                       <p className="mt-2 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-text-muted">
                         {isRedacted
