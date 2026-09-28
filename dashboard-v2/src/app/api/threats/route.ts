@@ -15,10 +15,10 @@ export async function GET(request: Request) {
 
     const threats = await getThreatSnapshot(range);
 
-    // ตั้งค่า Cache 5 วินาที ลดการดึงข้อมูลซ้ำซ้อนจากหลายคอมโพเนนต์
+    // This authenticated live feed must not be cached by a browser or proxy.
     return NextResponse.json(threats, {
       headers: {
-        'Cache-Control': 'public, s-maxage=5, stale-while-revalidate=10',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (error: unknown) {

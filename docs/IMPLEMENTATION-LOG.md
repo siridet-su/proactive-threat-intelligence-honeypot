@@ -2798,3 +2798,13 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Validation performed and outcome: focused Vitest 42/42, scoped ESLint, and TypeScript check passed.
 - Not performed / deferred: authenticated browser verification and backend H1/H2/G1/G2 activation.
 - Risks and data handling: no new data fields, policy, secrets, or production backend changes.
+
+### 2026-09-28 — Prevent caching of authenticated live snapshot routes
+
+- Status: frontend/BFF source fix prepared after an operator reported that System Health and Filesystem Activity still required manual refresh; live authenticated verification remains pending.
+- Repository changes: set `Cache-Control: private, no-store` on `/api/threats` and `/api/hardware` read responses and add focused cache-policy tests. The filesystem topology read route already returned `no-store` and was not changed.
+- Host/environment changes actually applied: none by this entry. The prior staging build was verified active and the public login page exposed its exact build identity; no backend model, report policy, service configuration, database, or credentials were modified.
+- Validation performed and outcome: 44 focused tests passed across live route cache and stream/freshness contracts; TypeScript and scoped ESLint passed. This does not yet prove the operator's browser receives new values automatically.
+- Not performed / deferred: authenticated browser trace with a real update, complete dashboard regression suite, and GCP activation of the new H1/H2/G1/G2 rules.
+- Risks and data handling: bounded live reads may increase backend snapshot requests while a page remains open, but responses are authenticated and no longer shared-cacheable. No secrets or raw attacker data were added.
+- Follow-up: promote through staging CI/CD, verify the exact release pointer and public endpoint, and inspect an authenticated live page before claiming full resolution.

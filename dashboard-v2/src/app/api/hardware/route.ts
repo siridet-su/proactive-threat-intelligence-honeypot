@@ -13,7 +13,9 @@ export async function GET(request: Request) {
 
   try {
     // hardware_live is the agent-maintained rolling window for the live monitor.
-    return NextResponse.json(await getRecentHardwareMetrics());
+    return NextResponse.json(await getRecentHardwareMetrics(), {
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error: unknown) {
     console.error("Failed to fetch hardware metrics:", error);
     const message = error instanceof Error ? error.message : "Failed to fetch metrics";
