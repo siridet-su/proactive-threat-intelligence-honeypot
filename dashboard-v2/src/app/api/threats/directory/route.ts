@@ -11,6 +11,12 @@ function parsePositiveInteger(value: string | null, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseNonNegativeInteger(value: string | null): number | undefined {
+  if (value === null) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
@@ -25,6 +31,8 @@ export async function GET(request: Request) {
       attackerType: searchParams.get("attackerType") ?? undefined,
       page: parsePositiveInteger(searchParams.get("page"), 1),
       pageSize: parsePositiveInteger(searchParams.get("pageSize"), 20),
+      offset: parseNonNegativeInteger(searchParams.get("offset")),
+      limit: parseNonNegativeInteger(searchParams.get("limit")),
     });
 
     return NextResponse.json(directory, {

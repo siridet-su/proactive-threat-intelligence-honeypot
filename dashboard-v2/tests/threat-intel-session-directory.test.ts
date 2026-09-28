@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attackerTypeQueryValue,
   buildSessionDirectoryRows,
+  calculateDirectoryPagination,
   normalizeAttackerType,
   SESSION_ATTACKER_TYPE_OPTIONS,
 } from "@/lib/threat-intel-session-directory";
@@ -81,17 +82,34 @@ const httpSession: WebHttpSession = {
 };
 
 describe("unified session directory projection", () => {
-  it("preserves exactly the backend-supported attacker types and scopes them to SSH", () => {
+  it("preserves exactly the backend-supported attacker types and queries them when applicable", () => {
     expect(SESSION_ATTACKER_TYPE_OPTIONS).toEqual([
       { value: "APT", label: "APT" },
       { value: "Bot", label: "Bot" },
       { value: "ScriptKiddie", label: "Script Kiddie" },
+      { value: "Unknown", label: "Unknown" },
     ]);
     expect(attackerTypeQueryValue("ssh", "APT")).toBe("APT");
     expect(attackerTypeQueryValue("ssh", "ScriptKiddie")).toBe("ScriptKiddie");
-    expect(attackerTypeQueryValue("all", "APT")).toBeNull();
+    expect(attackerTypeQueryValue("ssh", "Unknown")).toBe("Unknown");
+    expect(attackerTypeQueryValue("all", "APT")).toBe("APT");
     expect(attackerTypeQueryValue("http", "APT")).toBeNull();
     expect(attackerTypeQueryValue("ssh", "All")).toBeNull();
+    expect(attackerTypeQueryValue("all", "All")).toBeNull();
+  });
+
+  it("filters sessions by attacker type including Unknown for HTTP and unclassified SSH", () => {
+    const aptRows = buildSessionDirectoryRows([sshSession], [httpSession], "all", "", "APT");
+    expect(aptRows).toHaveLength(0);
+
+    const botRows = buildSessionDirectoryRows([sshSession], [httpSession], "all", "", "Bot");
+    expect(botRows).toHaveLength(1);
+    expect(botRows[0].id).toBe("ssh-session-1");
+
+    const unknownRows = buildSessionDirectoryRows([sshSession], [httpSession], "all", "", "Unknown");
+    expect(unknownRows).toHaveLength(1);
+    expect(unknownRows[0].protocol).toBe("HTTP");
+    expect(unknownRows[0].attackerType).toBe("Unknown");
   });
 
   it("merges SSH and HTTP while keeping protocol-specific destinations and fields", () => {
@@ -122,18 +140,112 @@ describe("unified session directory projection", () => {
       .toEqual(["HTTP"]);
   });
 
-  it("uses only supported attacker categories and leaves unknown labels unclassified", () => {
+  it("uses only supported attacker categories and leaves unknown labels as Unknown", () => {
     expect(normalizeAttackerType("APT")).toBe("APT");
     expect(normalizeAttackerType("ScriptKiddie")).toBe("ScriptKiddie");
-    expect(normalizeAttackerType("untrusted value")).toBe("Unclassified");
-    expect(normalizeAttackerType(null)).toBe("Unclassified");
+    expect(normalizeAttackerType("untrusted value")).toBe("Unknown");
+    expect(normalizeAttackerType(null)).toBe("Unknown");
     const [row] = buildSessionDirectoryRows([{ ...sshSession, classification: "Untrusted value" }], [], "ssh");
-    expect(row.attackerType).toBe("Unclassified");
+    expect(row.attackerType).toBe("Unknown");
   });
 
   it("does not invent an HTTP status or location precision", () => {
     const row = buildSessionDirectoryRows([], [httpSession], "http")[0];
     expect(row.status).toBe("Observed");
     expect(row.originDetail).toBe("Location unavailable");
+  });
+
+  describe("calculateDirectoryPagination", () => {
+    it("includes both HTTP and SSH in total sessions, pages, and respects rows per page limit in all view", () => {
+      // 5 HTTP sessions, 20 SSH sessions, pageSize = 15
+      const page1 = calculateDirectoryPagination(20, 5, "all", 15, 1);
+      expect(page1).toEqual({
+        totalSessions: 25,
+        totalPages: 2,
+        page: 1,
+        pageSize: 15,
+        httpOffset: 0,
+        httpLimit: 5,
+        sshOffset: 0,
+        sshLimit: 10,
+      });
+      // Sum of items on page 1 is exactly 15 (pageSize)
+      expect(page1.httpLimit + page1.sshLimit).toBe(15);
+
+      const page2 = calculateDirectoryPagination(20, 5, "all", 15, 2);
+      expect(page2).toEqual({
+        totalSessions: 25,
+        totalPages: 2,
+        page: 2,
+        pageSize: 15,
+        httpOffset: 0,
+        httpLimit: 0,
+        sshOffset: 10,
+        sshLimit: 15,
+      });
+      // Page 2 displays the next 15 SSH items
+      expect(page2.httpLimit + page2.sshLimit).toBe(15);
+    });
+
+    it("paginates HTTP sessions correctly and sets sshLimit to 0 in http view", () => {
+      const page1 = calculateDirectoryPagination(50, 20, "http", 15, 1);
+      expect(page1).toEqual({
+        totalSessions: 20,
+        totalPages: 2,
+        page: 1,
+        pageSize: 15,
+        httpOffset: 0,
+        httpLimit: 15,
+        sshOffset: 0,
+        sshLimit: 0,
+      });
+
+      const page2 = calculateDirectoryPagination(50, 20, "http", 15, 2);
+      expect(page2).toEqual({
+        totalSessions: 20,
+        totalPages: 2,
+        page: 2,
+        pageSize: 15,
+        httpOffset: 15,
+        httpLimit: 5,
+        sshOffset: 0,
+        sshLimit: 0,
+      });
+    });
+
+    it("paginates SSH sessions correctly and sets httpLimit to 0 in ssh view", () => {
+      const page1 = calculateDirectoryPagination(30, 10, "ssh", 15, 1);
+      expect(page1).toEqual({
+        totalSessions: 30,
+        totalPages: 2,
+        page: 1,
+        pageSize: 15,
+        httpOffset: 0,
+        httpLimit: 0,
+        sshOffset: 0,
+        sshLimit: 15,
+      });
+
+      const page2 = calculateDirectoryPagination(30, 10, "ssh", 15, 2);
+      expect(page2).toEqual({
+        totalSessions: 30,
+        totalPages: 2,
+        page: 2,
+        pageSize: 15,
+        httpOffset: 0,
+        httpLimit: 0,
+        sshOffset: 15,
+        sshLimit: 15,
+      });
+    });
+
+    it("clamps requested page number to safe boundary [1, totalPages]", () => {
+      const clampedHigh = calculateDirectoryPagination(10, 5, "all", 15, 99);
+      expect(clampedHigh.page).toBe(1);
+      expect(clampedHigh.totalPages).toBe(1);
+
+      const clampedLow = calculateDirectoryPagination(10, 5, "all", 15, 0);
+      expect(clampedLow.page).toBe(1);
+    });
   });
 });

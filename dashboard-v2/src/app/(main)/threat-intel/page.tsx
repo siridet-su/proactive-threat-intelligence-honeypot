@@ -29,6 +29,7 @@ import { groupWebHttpSessions, type WebHttpHint, type WebHttpSession } from "@/l
 import {
   attackerTypeQueryValue,
   buildSessionDirectoryRows,
+  calculateDirectoryPagination,
   SESSION_ATTACKER_TYPE_OPTIONS,
   type SessionAttackerTypeFilter,
   type SessionAttackerType,
@@ -80,14 +81,75 @@ export default function ThreatIntelPage() {
     directoryRef.current = directory;
   }, [directory]);
 
+  const httpSessions = useMemo(
+    () => (httpItems ? groupWebHttpSessions(httpItems).filter((item): item is WebHttpSession & { id: string } => typeof item.id === "string") : []),
+    [httpItems],
+  );
+
+  const matchingHttpRows = useMemo(
+    () => buildSessionDirectoryRows([], httpSessions, "http", queryInput, attackerTypeFilter),
+    [httpSessions, queryInput, attackerTypeFilter],
+  );
+  const matchingHttpCount = matchingHttpRows.length;
+
+  const directoryItems = useMemo(() => directory?.items ?? [], [directory?.items]);
+  const directoryTotal = directory?.total ?? 0;
+
+  const pagination = useMemo(() => {
+    return calculateDirectoryPagination(
+      directoryTotal,
+      matchingHttpCount,
+      protocolFilter,
+      pageSize,
+      currentPage,
+    );
+  }, [directoryTotal, matchingHttpCount, protocolFilter, pageSize, currentPage]);
+
+  const totalSessionsCount = pagination.totalSessions;
+  const totalPages = pagination.totalPages;
+  const activePage = pagination.page;
+
+  const isDirectoryInitialLoad = (directoryStatus === "loading" && !directory) || isPageChanging;
+  const isDirectoryUnavailable = directoryStatus === "error" && !directory;
+  const hasDirectoryRefreshError = directoryStatus === "error" && Boolean(directory);
+
+  const httpPageRows = useMemo(() => {
+    if (pagination.httpLimit === 0) return [];
+    return matchingHttpRows.slice(pagination.httpOffset, pagination.httpOffset + pagination.httpLimit);
+  }, [matchingHttpRows, pagination.httpOffset, pagination.httpLimit]);
+
+  const sessionRows = useMemo(() => {
+    if (protocolFilter === "http") {
+      return httpPageRows;
+    }
+    if (protocolFilter === "ssh") {
+      return buildSessionDirectoryRows(directoryItems, [], "ssh", queryInput, attackerTypeFilter);
+    }
+    const sshRows = buildSessionDirectoryRows(directoryItems, [], "ssh", queryInput, attackerTypeFilter);
+    const combined = [...httpPageRows, ...sshRows];
+    return combined
+      .sort((a, b) => b.sortTimestamp - a.sortTimestamp || a.key.localeCompare(b.key))
+      .slice(0, pageSize);
+  }, [directoryItems, httpPageRows, protocolFilter, queryInput, attackerTypeFilter, pageSize]);
+
   const loadDirectory = useCallback(
     async (background = false) => {
+      if (protocolFilter === "http" && directoryRef.current) {
+        setIsPageChanging(false);
+        return;
+      }
+
       const requestId = directoryRequest.current + 1;
       directoryRequest.current = requestId;
       if (background || directoryRef.current) setDirectoryRefreshing(true);
       else setDirectoryStatus("loading");
       try {
-        const params = new URLSearchParams({ page: String(currentPage), pageSize: String(pageSize) });
+        const params = new URLSearchParams({
+          page: String(pagination.page),
+          pageSize: String(pageSize),
+          offset: String(pagination.sshOffset),
+          limit: String(pagination.sshLimit),
+        });
         if (query) params.set("query", query);
         const attackerType = attackerTypeQueryValue(protocolFilter, attackerTypeFilter);
         if (attackerType) params.set("attackerType", attackerType);
@@ -97,7 +159,6 @@ export default function ThreatIntelPage() {
         if (!isThreatDirectoryPage(data) || directoryRequest.current !== requestId) return;
         setDirectory(data);
         setDirectoryStatus("ready");
-        if (data.page !== currentPage) setCurrentPage(data.page);
       } catch {
         if (directoryRequest.current === requestId) setDirectoryStatus("error");
       } finally {
@@ -107,33 +168,13 @@ export default function ThreatIntelPage() {
         }
       }
     },
-    [attackerTypeFilter, currentPage, pageSize, protocolFilter, query]
+    [attackerTypeFilter, pagination.page, pagination.sshOffset, pagination.sshLimit, pageSize, protocolFilter, query]
   );
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadDirectory(), 0);
     return () => window.clearTimeout(timer);
   }, [loadDirectory]);
-
-  const directoryItems = useMemo(() => directory?.items ?? [], [directory?.items]);
-  const directoryTotal = directory?.total ?? 0;
-  const directoryTotalPages = directory?.totalPages ?? 1;
-  const isDirectoryInitialLoad = (directoryStatus === "loading" && !directory) || isPageChanging;
-  const isDirectoryUnavailable = directoryStatus === "error" && !directory;
-  const hasDirectoryRefreshError = directoryStatus === "error" && Boolean(directory);
-
-  const httpSessions = useMemo(
-    () => (httpItems ? groupWebHttpSessions(httpItems).filter((item): item is WebHttpSession & { id: string } => typeof item.id === "string") : []),
-    [httpItems],
-  );
-  const sessionRows = useMemo(
-    () => buildSessionDirectoryRows(directoryItems, httpSessions, protocolFilter, queryInput),
-    [directoryItems, httpSessions, protocolFilter, queryInput],
-  );
-  const matchingHttpCount = useMemo(
-    () => buildSessionDirectoryRows([], httpSessions, "http", queryInput).length,
-    [httpSessions, queryInput],
-  );
 
   const stats = useMemo(() => {
     return {
@@ -145,8 +186,8 @@ export default function ThreatIntelPage() {
   }, [directoryTotal, feedThreats, httpSessions.length]);
 
   const getPageNumbers = () => {
-    let start = Math.max(1, currentPage - 2);
-    const end = Math.min(directoryTotalPages, start + 4);
+    let start = Math.max(1, activePage - 2);
+    const end = Math.min(totalPages, start + 4);
     if (end - start < 4) start = Math.max(1, end - 4);
     return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => start + index);
   };
@@ -260,7 +301,7 @@ export default function ThreatIntelPage() {
                     title={tab.title}
                     onClick={() => {
                       setProtocolFilter(tab.id);
-                      if (tab.id !== "ssh") setAttackerTypeFilter("All");
+                      if (tab.id === "http") setAttackerTypeFilter("All");
                       if (currentPage !== 1) {
                         setIsPageChanging(true);
                         setCurrentPage(1);
@@ -308,12 +349,12 @@ export default function ThreatIntelPage() {
                     </button>
                   )}
                 </div>
-                {protocolFilter === "ssh" && (
+                {protocolFilter !== "http" && (
                   <div className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5">
                     <label htmlFor="session-attacker-type" className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-text-muted">Attacker type</label>
                     <select
                       id="session-attacker-type"
-                      aria-label="Filter SSH sessions by attacker type"
+                      aria-label="Filter sessions by attacker type"
                       value={attackerTypeFilter}
                       onChange={(event) => {
                         setAttackerTypeFilter(event.target.value as SessionAttackerTypeFilter);
@@ -329,15 +370,15 @@ export default function ThreatIntelPage() {
                   </div>
                 )}
                 <Link href="/http-activity" className="ui-button h-8 min-h-8 px-2.5 text-xs">Request activity</Link>
-                {protocolFilter === "ssh" && (
+                {protocolFilter !== "http" && (
                   <button
                     onClick={() => void handleExport()}
                     disabled={!directoryTotal || isExporting}
                     className="ui-button h-8 min-h-8 px-2.5 text-xs"
-                    title={exportStatus || "Export matching SSH session records to CSV"}
+                    title={exportStatus || (protocolFilter === "all" ? "Export matching session records to CSV" : "Export matching SSH session records to CSV")}
                   >
                     <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                    {isExporting ? "Exporting..." : "Export SSH"}
+                    {isExporting ? "Exporting..." : (protocolFilter === "all" ? "Export sessions" : "Export SSH")}
                   </button>
                 )}
               </div>
@@ -345,7 +386,7 @@ export default function ThreatIntelPage() {
 
             <p className="text-xs leading-5 text-text-muted">
               {protocolFilter === "all"
-                ? "All combines each paginated SSH result page with HTTP sessions represented in the latest 50 request events. The recent HTTP window stays pinned while you browse SSH history."
+                ? "Unified view of honeypot interactions across SSH and HTTP services. Filter by protocol or attacker type, search across all sessions, or select a session to inspect detailed forensics."
                 : protocolFilter === "ssh"
                   ? "SSH sessions are server-searched and paginated. Command counts are shown only where session-bound data is available."
                   : "HTTP sessions are grouped by browser-cookie continuity and cover the latest 50 stored events; this does not verify attacker identity."}
@@ -400,23 +441,25 @@ export default function ThreatIntelPage() {
           )}
         </div>
 
-        {/* SSH history keeps its existing server-backed pagination in All and SSH views. */}
-        {protocolFilter !== "http" && directoryTotal > 0 && directoryTotalPages > 1 && (
+        {/* Unified session directory pagination across All, SSH, and HTTP views. */}
+        {totalSessionsCount > 0 && (
           <nav aria-label="Session directory pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-subtle/50 px-5 py-2.5 text-xs">
             <div className="flex items-center gap-3">
               <p className="text-text-muted">
-                SSH page <strong className="text-text">{currentPage}</strong> of <strong className="text-text">{directoryTotalPages}</strong> ({directoryTotal.toLocaleString()} sessions)
-                {protocolFilter === "all" && <span className="ml-1">· {matchingHttpCount} recent HTTP session{matchingHttpCount === 1 ? "" : "s"} included</span>}
+                Page <strong className="text-text">{activePage}</strong> of <strong className="text-text">{totalPages}</strong> ({totalSessionsCount.toLocaleString()} sessions)
+                {protocolFilter === "all" && matchingHttpCount > 0 && (
+                  <span className="ml-1 text-text-subtle">· includes {matchingHttpCount} HTTP interaction{matchingHttpCount === 1 ? "" : "s"}</span>
+                )}
               </p>
               {(directoryRefreshing || isPageChanging) && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-primary-border bg-primary-subtle px-2.5 py-0.5 font-mono text-[11px] font-semibold text-primary">
                   <RefreshCw className="h-3 w-3 animate-spin text-primary" aria-hidden="true" />
-                  Loading page {currentPage}…
+                  Loading page {activePage}…
                 </span>
               )}
               
               <div className="hidden sm:flex items-center gap-2 border-l border-border pl-4">
-                <label htmlFor="rows-per-page" className="text-text-muted">SSH rows:</label>
+                <label htmlFor="rows-per-page" className="text-text-muted">Rows per page:</label>
                 <select
                   id="rows-per-page"
                   value={pageSize}
@@ -439,7 +482,7 @@ export default function ThreatIntelPage() {
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                disabled={currentPage === 1 || directoryRefreshing || isPageChanging}
+                disabled={activePage === 1 || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
                   setCurrentPage(1);
@@ -451,10 +494,10 @@ export default function ThreatIntelPage() {
               </button>
               <button
                 type="button"
-                disabled={currentPage === 1 || directoryRefreshing || isPageChanging}
+                disabled={activePage === 1 || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
-                  setCurrentPage((page) => page - 1);
+                  setCurrentPage((page) => Math.max(1, page - 1));
                 }}
                 className="ui-button h-7 min-h-7 px-2 text-xs"
                 aria-label="Previous page"
@@ -470,10 +513,10 @@ export default function ThreatIntelPage() {
                     setIsPageChanging(true);
                     setCurrentPage(pageNumber);
                   }}
-                  aria-current={currentPage === pageNumber ? "page" : undefined}
+                  aria-current={activePage === pageNumber ? "page" : undefined}
                   className={cn(
                     "ui-button h-7 min-h-7 min-w-7 px-1.5 text-xs",
-                    currentPage === pageNumber && "bg-primary text-surface font-semibold"
+                    activePage === pageNumber && "bg-primary text-surface font-semibold"
                   )}
                 >
                   {pageNumber}
@@ -481,10 +524,10 @@ export default function ThreatIntelPage() {
               ))}
               <button
                 type="button"
-                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging}
+                disabled={activePage === totalPages || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
-                  setCurrentPage((page) => page + 1);
+                  setCurrentPage((page) => Math.min(totalPages, page + 1));
                 }}
                 className="ui-button h-7 min-h-7 px-2 text-xs"
                 aria-label="Next page"
@@ -493,10 +536,10 @@ export default function ThreatIntelPage() {
               </button>
               <button
                 type="button"
-                disabled={currentPage === directoryTotalPages || directoryRefreshing || isPageChanging}
+                disabled={activePage === totalPages || directoryRefreshing || isPageChanging}
                 onClick={() => {
                   setIsPageChanging(true);
-                  setCurrentPage(directoryTotalPages);
+                  setCurrentPage(totalPages);
                 }}
                 className="ui-button h-7 min-h-7 px-2 text-xs"
                 aria-label="Last page"
@@ -630,9 +673,15 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
                   </td>
                   <td className="whitespace-nowrap py-3 px-5 text-text-muted" title={row.startedAt || undefined}>{row.startedLabel}</td>
                   <td className="py-3 px-5 text-text">
-                    {row.protocol === "SSH"
-                      ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} />
-                      : <>{row.activity}{row.activity.includes("injection hint") && <span className="ml-1 text-[10px] text-warning">· review only</span>}</>}
+                    <span className="inline-flex items-center gap-2 flex-wrap">
+                      <AttackerTypeBadge type={row.attackerType ?? "Unknown"} />
+                      {row.protocol === "HTTP" && (
+                        <span className="text-[11px] text-text-muted">
+                          {row.activity}
+                          {row.activity.includes("injection hint") && <span className="ml-1 text-[10px] text-warning">· review only</span>}
+                        </span>
+                      )}
+                    </span>
                   </td>
                   <td className="whitespace-nowrap py-3 px-5 text-right font-mono text-text-muted">{row.dwellTime}</td>
                   <td className="py-3 px-5 text-right">
@@ -663,7 +712,18 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
               <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Origin</span><span className="font-mono text-text">{row.origin}</span><span className="block text-[10px] text-text-muted">{row.originDetail}</span></div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Started</span><span className="text-text">{row.startedLabel}</span></div>
-                <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">{row.protocol === "SSH" ? "Attacker type" : "Activity"}</span>{row.protocol === "SSH" ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} /> : <><span className="text-text">{row.activity}</span>{row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}</>}</div>
+                <div>
+                  <span className="block text-[10px] uppercase tracking-wide text-text-subtle">Activity / Attacker type</span>
+                  <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <AttackerTypeBadge type={row.attackerType ?? "Unknown"} />
+                    {row.protocol === "HTTP" && (
+                      <span className="text-[11px] text-text-muted">
+                        {row.activity}
+                        {row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Dwell time</span><span className="font-mono text-text-muted">{row.dwellTime}</span></div>
               </div>
             </Link>

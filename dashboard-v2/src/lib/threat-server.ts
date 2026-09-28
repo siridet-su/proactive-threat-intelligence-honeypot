@@ -69,6 +69,8 @@ export interface ThreatDirectoryFilters {
   attackerType?: string;
   page?: number;
   pageSize?: number;
+  offset?: number;
+  limit?: number;
 }
 
 function normalizeDirectoryFilters(filters: ThreatDirectoryFilters) {
@@ -77,7 +79,7 @@ function normalizeDirectoryFilters(filters: ThreatDirectoryFilters) {
     ? filters.severity as ThreatSeverityFilter
     : "All";
     
-  const attackerType: string = filters.attackerType && ["APT", "Bot", "ScriptKiddie"].includes(filters.attackerType)
+  const attackerType: string = filters.attackerType && ["APT", "Bot", "ScriptKiddie", "Unknown"].includes(filters.attackerType)
     ? filters.attackerType
     : "All";
 
@@ -86,7 +88,12 @@ function normalizeDirectoryFilters(filters: ThreatDirectoryFilters) {
     ? Math.min(MAX_DIRECTORY_PAGE_SIZE, Math.max(1, Math.floor(filters.pageSize ?? DEFAULT_DIRECTORY_PAGE_SIZE)))
     : DEFAULT_DIRECTORY_PAGE_SIZE;
 
-  return { query, severity, attackerType, page, pageSize };
+  const offset = Number.isFinite(filters.offset) ? Math.max(0, Math.floor(filters.offset!)) : undefined;
+  const limit = Number.isFinite(filters.limit)
+    ? Math.min(MAX_DIRECTORY_PAGE_SIZE, Math.max(0, Math.floor(filters.limit!)))
+    : undefined;
+
+  return { query, severity, attackerType, page, pageSize, offset, limit };
 }
 
 function escapeRegex(value: string) {
@@ -133,14 +140,14 @@ async function applyAttackerTypeFilter(client: MongoClient, baseQuery: Filter<Do
   const deceptionDb = client.db("honeypot_db").collection("deception_decisions");
   let condition: Filter<Document> | null = null;
 
-  if (attackerType === "ScriptKiddie") {
-    const nonKiddieDocs = await deceptionDb.find(
-       { attacker_type: { $in: ["APT", "Bot"] } },
+  if (attackerType === "Unknown") {
+    const knownDocs = await deceptionDb.find(
+       { attacker_type: { $in: ["APT", "Bot", "ScriptKiddie"] } },
        { projection: { ip: 1, session_id: 1 } }
     ).toArray();
 
-    const excludeIps = nonKiddieDocs.map(d => d.ip).filter(Boolean);
-    const excludeSessions = nonKiddieDocs.map(d => d.session_id).filter(Boolean);
+    const excludeIps = knownDocs.map(d => d.ip).filter(Boolean);
+    const excludeSessions = knownDocs.map(d => d.session_id).filter(Boolean);
 
     if (excludeIps.length > 0 || excludeSessions.length > 0) {
        condition = {
@@ -182,7 +189,12 @@ async function injectAttackerType(client: MongoClient, sessions: Document[]) {
   const ips = [...new Set(sessions.map(s => s.src_ip))].filter(Boolean);
   const sIds = [...new Set(sessions.map(s => s.session_id))].filter(Boolean);
 
-  if (ips.length === 0 && sIds.length === 0) return;
+  if (ips.length === 0 && sIds.length === 0) {
+    sessions.forEach(s => {
+      s.computed_attacker_type = s.computed_attacker_type || "Unknown";
+    });
+    return;
+  }
 
   const deceptionDb = client.db("honeypot_db").collection("deception_decisions");
   const deceptions = await deceptionDb.find({
@@ -196,7 +208,7 @@ async function injectAttackerType(client: MongoClient, sessions: Document[]) {
   });
 
   sessions.forEach(s => {
-    s.computed_attacker_type = deceptionMap.get(`sid:${s.session_id}`) || deceptionMap.get(`ip:${s.src_ip}`) || "ScriptKiddie";
+    s.computed_attacker_type = deceptionMap.get(`sid:${s.session_id}`) || deceptionMap.get(`ip:${s.src_ip}`) || "Unknown";
   });
 }
 
@@ -230,9 +242,19 @@ function normalizeThreat(
     }
   }
 
+  let parsedPayload: Record<string, unknown> | null = null;
+  if (typeof session.payload_json === "string" && session.payload_json.trim()) {
+    try {
+      parsedPayload = JSON.parse(session.payload_json);
+    } catch {
+      parsedPayload = null;
+    }
+  }
+
+  const rawStartTime = session.start_time ?? parsedPayload?.start_time ?? null;
   let dateObj = new Date();
-  if (session.start_time) {
-    const parsed = new Date(String(session.start_time));
+  if (rawStartTime) {
+    const parsed = new Date(String(rawStartTime));
     if (!Number.isNaN(parsed.getTime())) dateObj = parsed;
   }
 
@@ -240,8 +262,8 @@ function normalizeThreat(
     ? session.max_confirmed_severity
     : "Medium";
     
-  const classification = session.computed_attacker_type || "ScriptKiddie";
-  let typeColor = "bg-amber-950/40 text-amber-400 border-amber-900/50";
+  const classification = session.computed_attacker_type || "Unknown";
+  let typeColor = "bg-slate-800/40 text-slate-400 border-slate-700/50";
 
   if (classification === "APT") {
     typeColor = "bg-red-950/40 text-red-400 border-red-900/50";
@@ -251,15 +273,40 @@ function normalizeThreat(
     typeColor = "bg-amber-950/40 text-amber-400 border-amber-900/50";
   }
 
-  const lifecycle = session.lifecycle;
+  const lifecycle = session.lifecycle ?? parsedPayload?.lifecycle;
   const lifecycleStatus = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
-    ? String((lifecycle as Document).status ?? "").trim().toLowerCase()
+    ? String((lifecycle as Record<string, unknown>).status ?? "").trim().toLowerCase()
     : "";
-  const endTime = session.end_time ?? session.ended_at ?? session.closed_at ?? null;
+  const rawEndTime = session.end_time ?? session.ended_at ?? session.closed_at ?? parsedPayload?.end_time ?? parsedPayload?.ended_at ?? parsedPayload?.closed_at ?? null;
+  const endTime = rawEndTime ? String(rawEndTime) : null;
   const isEnded = session.is_ended === true
     || session.ended === true
+    || parsedPayload?.is_ended === true
+    || parsedPayload?.ended === true
     || Boolean(endTime)
-    || ["closed", "ended", "complete", "completed", "terminated", "disconnected"].includes(lifecycleStatus);
+    || ["closed", "ended", "complete", "completed", "terminated", "disconnected"].includes(lifecycleStatus)
+    || String(session.status ?? parsedPayload?.status ?? "").trim().toLowerCase() === "closed";
+
+  let duration = isEnded ? "Closed" : "Active";
+  if (isEnded) {
+    const candidateDuration = session.duration ?? parsedPayload?.duration ?? session.duration_seconds ?? parsedPayload?.duration_seconds;
+    if (typeof candidateDuration === "number" && Number.isFinite(candidateDuration) && candidateDuration >= 0) {
+      duration = `${Math.round(candidateDuration)}s`;
+    } else if (typeof candidateDuration === "string" && candidateDuration.trim() !== "" && !["Active", "Closed", "Unknown"].includes(candidateDuration)) {
+      if (!Number.isNaN(Number(candidateDuration))) {
+        duration = `${Math.round(Number(candidateDuration))}s`;
+      } else {
+        duration = candidateDuration;
+      }
+    } else if (endTime && rawStartTime) {
+      const startMs = Date.parse(String(rawStartTime));
+      const endMs = Date.parse(String(endTime));
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs) {
+        const diffSeconds = Math.max(0, Math.round((endMs - startMs) / 1000));
+        duration = `${diffSeconds}s`;
+      }
+    }
+  }
 
   return {
     id: typeof session.session_id === "string" && session.session_id
@@ -274,7 +321,7 @@ function normalizeThreat(
     severity,
     classification,
     typeColor,
-    duration: isEnded ? "Closed" : "Active",
+    duration,
     geo: { lat, lon, country, city },
     is_ended: isEnded,
     ended: isEnded,
@@ -331,20 +378,27 @@ export async function getThreatDirectory(filters: ThreatDirectoryFilters = {}): 
   const total = await collection.countDocuments(finalQuery);
   const totalPages = Math.max(1, Math.ceil(total / normalized.pageSize));
   const page = Math.min(normalized.page, totalPages);
-  const sessionDocs = await collection
-    .find(finalQuery)
-    .sort({ start_time: -1 })
-    .skip((page - 1) * normalized.pageSize)
-    .limit(normalized.pageSize)
-    .allowDiskUse(true)
-    .toArray();
 
-  await injectAttackerType(client, sessionDocs);
+  const skip = normalized.offset !== undefined ? normalized.offset : (page - 1) * normalized.pageSize;
+  const take = normalized.limit !== undefined ? normalized.limit : normalized.pageSize;
+
+  let sessionDocs: Document[] = [];
+  if (take > 0 && skip < total) {
+    sessionDocs = await collection
+      .find(finalQuery)
+      .sort({ start_time: -1 })
+      .skip(skip)
+      .limit(take)
+      .allowDiskUse(true)
+      .toArray();
+
+    await injectAttackerType(client, sessionDocs);
+  }
 
   return {
     items: normalizeThreats(sessionDocs),
-    page,
-    pageSize: normalized.pageSize,
+    page: normalized.offset !== undefined ? normalized.page : page,
+    pageSize: normalized.limit !== undefined ? normalized.limit : normalized.pageSize,
     total,
     totalPages,
   };
