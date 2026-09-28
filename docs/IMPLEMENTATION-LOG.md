@@ -3201,3 +3201,17 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Related ADR/runbook: [ADR-0015](adr/ADR-0015-fresh-pi-local-decoys.md), [fresh Pi installation](../deploy/ansible/README.md), and [validation record](validation/2026-09-28-fresh-high-port-defaults.md).
 
 Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/2223 produced source and destination filter terms for both ports. The temporary file was removed; no service was started or changed.
+
+### 2026-09-29 — Recheck manifest bytes in fresh installer preparation
+
+- Status: repository fix prepared during a clean Azure ARM64 VM installation rehearsal; full installation remains in progress.
+- Scope and intent: make the second manifest integrity check operate on the exact file bytes rather than a Jinja-loaded text value.
+- Repository changes: use delegated `stat` with SHA-256 on the controller's `manifest.json`, require a regular non-symlink file and the approved digest, then load the JSON metadata. The prior Python release verification and target-side installed-file audit remain in place.
+- Host/environment changes actually applied: on the newly reimaged disposable VM, cloned repository commit `1086c6d`, refreshed apt indexes, installed Ubuntu `ansible-core`, and built a reviewed ARM64 Go release plus Cowrie and decoy source bundles outside Git. The first full installer attempt stopped at the manifest assertion before any Ansible host mutation. No Pi or production host was changed.
+- Runtime/exposure state: VM administrator SSH remains on TCP 22; no Cowrie, Zeek, Docker decoy, Redis, Go agent, or B2 backup service was activated by the failed attempt.
+- Validation performed and outcome: the approved release passed the Python verifier, but Ansible 2.16's Jinja text hash assertion rejected the same manifest. Syntax and repeated installation checks follow in a dated addendum.
+- Not performed / deferred: full prepared-state audit, blank-env pause, service activation, and end-to-end telemetry remain untested at this point.
+- Risks and data handling: the manifest contains release metadata but no runtime secrets. Build artifacts and reviewed non-secret vars are outside the repository; no credential value was copied into logs or documentation.
+- Rollback: revert the repository assertion change if necessary; no host rollback applies to the failed preparation attempt.
+- Follow-up: pull the fix into the VM checkout and rerun the same approved release and vars.
+- Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md) and [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md).

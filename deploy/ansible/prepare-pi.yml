@@ -55,16 +55,26 @@
       become: false
       changed_when: false
 
+    - name: Recheck the local manifest file after release verification
+      ansible.builtin.stat:
+        path: "{{ pti_release_source }}/manifest.json"
+        checksum_algorithm: sha256
+      delegate_to: localhost
+      become: false
+      register: pti_manifest_local_stat
+
+    - name: Confirm the manifest file did not change after verification
+      ansible.builtin.assert:
+        that:
+          - pti_manifest_local_stat.stat.isreg | default(false)
+          - not (pti_manifest_local_stat.stat.islnk | default(false))
+          - pti_manifest_local_stat.stat.checksum == pti_manifest_sha256
+        fail_msg: Release manifest changed after local verification.
+
     - name: Load approved non-secret manifest metadata
       ansible.builtin.set_fact:
         pti_manifest_raw: "{{ lookup('ansible.builtin.file', pti_release_source + '/manifest.json', rstrip=False) }}"
       no_log: true
-
-    - name: Confirm the manifest did not change after verification
-      ansible.builtin.assert:
-        that:
-          - pti_manifest_raw | hash('sha256') == pti_manifest_sha256
-        fail_msg: Release manifest changed after local verification.
 
     - name: Require one reviewed exact version for every host package
       ansible.builtin.assert:
