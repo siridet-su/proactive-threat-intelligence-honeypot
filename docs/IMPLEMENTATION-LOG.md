@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Restore Model1 ATT&CK names and SSH dwell time
+
+- Status: repository Dashboard correction prepared; staging deployment pending push and CI/CD verification.
+- Scope and intent: replace missing Model1 technique labels with names from the frozen 38-label ATT&CK vocabulary and calculate closed SSH-session dwell time from the canonical session payload when the MongoDB summary fields do not carry `end_time`.
+- Repository branch and commit/PR: `staging-release`, based on deployed-candidate staging commit `d9b53fd85`; correction commit follows this entry.
+- Repository changes: add the 38 Model1 technique ID/name mappings from the repository Enterprise ATT&CK v14.1 cache; use that bounded mapping only when the session evidence does not already carry a name. Parse `payload_json` defensively in the Dashboard server and project only canonical lifecycle timestamps/status needed by the existing directory row. Add regression coverage for T1005/T1078 names and a 24-second payload-bound dwell interval. No recommendation, model, Rule authority, or ensemble formula changes.
+- Host/environment changes actually applied: none. No GCP service, model, worker, database row, or configuration was changed manually.
+- Runtime/exposure state: not deployed at the time of this entry. Existing staging can still show `Technique name not recorded` and `Not recorded` dwell times until its Dashboard artifact is replaced.
+- Validation performed and outcome: focused lifecycle, directory, advisory, and model-ranking tests passed with the repository's two expected-failure semantic guards retained; TypeScript and scoped ESLint passed; `npx next build --webpack` completed successfully.
+- Not performed / deferred: authenticated staging browser verification and CI/CD completion remain pending.
+- Risks and data handling: the Dashboard parses the existing canonical payload only to recover bounded lifecycle fields and does not return raw payload contents. ATT&CK names are presentation metadata and do not change predictions or trusted findings.
+- Rollback: revert this Dashboard correction; no backend, model, or data rollback is required.
+- Follow-up: push to staging, verify T1005/T1078 names, and confirm recently closed Cowrie rows show calculated dwell time when canonical `end_time` is present.
+- Related ADR/runbook: unified Threat Intelligence session directory and Model1 advisory presentation.
+
 ### 2026-09-28 — Show SSH attacker category in the unified session directory
 
 - Status: repository Dashboard change prepared; staging deployment pending verification after push.

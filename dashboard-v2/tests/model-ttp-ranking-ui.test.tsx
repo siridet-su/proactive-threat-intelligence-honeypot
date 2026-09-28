@@ -1,8 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { model1TechniqueName } from "../src/lib/model-ttp-ranking";
 
 describe("Model1 + Model2 advisory panel", () => {
+  it("resolves names for the Model1 candidates observed in the live session", () => {
+    expect(model1TechniqueName("T1005")).toBe("Data from Local System");
+    expect(model1TechniqueName("T1078")).toBe("Valid Accounts");
+  });
+
   it("shows one recommended TTP and the other candidates without a visible priority order", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-a",
@@ -46,6 +52,9 @@ describe("Model1 + Model2 advisory panel", () => {
     expect(html.match(/>Recommend<\/span>/g)).toHaveLength(1);
     expect(html).toContain("TTP candidates");
     expect(html).toContain("T1110");
+    expect(html).toContain("Ingress Tool Transfer");
+    expect(html).toContain("Brute Force");
+    expect(html).not.toContain("Technique name not recorded");
     expect(html).not.toContain("TTP review order");
     expect(html).not.toContain("Review first");
     expect(html).not.toContain("Weighted vote score");

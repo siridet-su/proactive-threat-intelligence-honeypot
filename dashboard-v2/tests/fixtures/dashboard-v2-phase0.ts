@@ -10,6 +10,7 @@ export interface Phase0SessionDocument {
   end_time?: string;
   ended_at?: string;
   closed_at?: string;
+  payload_json?: string;
 }
 
 export function sessionFixture(
