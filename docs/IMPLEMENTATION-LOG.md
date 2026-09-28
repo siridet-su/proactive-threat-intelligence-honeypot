@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Add selected Source IP copy control to Filesystem Activity
+
+- Status: repository UI change prepared on a staging-based branch; deployment not yet verified.
+- Scope and intent: let an operator copy the Source IP of the currently selected audited session directly from the session selector.
+- Repository branch and commit/PR: `feature/filesystem-copy-source-ip-20260928` from `origin/staging` at `5524c30`; commit pending at entry time.
+- Repository changes: add a separate accessible Copy IP button beside the session selector, clipboard success/failure feedback, and an `FS-027` working-state item. The session option and selection behavior remain as before.
+- Host/environment changes actually applied: none. No Dashboard service, Railway variable, Pi service, MongoDB record, or credential was changed by this UI edit.
+- Runtime/exposure state: the existing deployed Dashboard has no new copy control until the UI revision deploys. An operator screenshot shows hosted Command events rows, but does not verify the deployment revision or the earlier `FS-026` role/cache checks.
+- Validation performed and outcome: source review confirmed that the copy control is a sibling of the combobox trigger, uses the selected session's Source IP, and handles clipboard rejection; `git diff --check` passed.
+- Not performed / deferred: automated tests, interactive keyboard/mobile review, staging deployment confirmation, and production deployment.
+- Risks and data handling: copying places the already displayed Source IP on the operator's clipboard; no event payload, command input, credential, or token is copied or added to the repository.
+- Rollback: revert this UI commit; no host data rollback is needed.
+- Follow-up: push staging and review the selected-session copy behavior after its Dashboard deploy.
+- Related ADR/runbook: [Filesystem Activity working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md) and [Audit session selector](../dashboard-v2/src/components/filesystem/AuditSessionSelect.tsx).
+
 ### 2026-09-28 — Integrate hosted command evidence source into staging
 
 - Status: staging repository change prepared; staging service deployment not verified.
