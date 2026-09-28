@@ -370,8 +370,8 @@ export function useAuditReplay(options: UseAuditReplayOptions): UseAuditReplayRe
   useEffect(() => {
     if (!isPlaying) return;
     if (viewMode !== "audit" || isAnchoredSelected || displayedHistory.length <= 1) {
-      setIsPlaying(false);
-      return;
+      const timer = window.setTimeout(() => setIsPlaying(false), 0);
+      return () => window.clearTimeout(timer);
     }
 
     if (selectedHistoryIndex >= displayedHistory.length - 1) {

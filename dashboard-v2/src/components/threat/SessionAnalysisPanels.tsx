@@ -1933,6 +1933,9 @@ export function SessionAnalysisPanels({
   useEffect(() => {
     let cancelled = false;
     let pollTimer: number | undefined;
+    let analysisPollTimer: number | undefined;
+    let analysisPollInFlight = false;
+    let analysisPollAttempts = 0;
     let tiPollTimer: number | undefined;
     let tiPollInFlight = false;
     let tiPollAttempts = 0;
@@ -1954,6 +1957,16 @@ export function SessionAnalysisPanels({
     ] as const;
     const primaryCapabilities = ["detail", "commands", "next-distinct", "session-ti"] as const;
     const pollCapabilities = ["detail", "commands", "next-distinct"] as const;
+
+    const analysisComplete = (detail: JsonRecord, ai: CapabilityResult): boolean => (
+      list(detail.reports).length > 0 &&
+      ai.state === "ready" &&
+      label(ai.data.status, "").toLowerCase() === "accepted"
+    );
+    const stopAnalysisPoll = () => {
+      if (analysisPollTimer !== undefined) window.clearInterval(analysisPollTimer);
+      analysisPollTimer = undefined;
+    };
 
     const stopTiPoll = () => {
       if (tiPollTimer !== undefined) window.clearInterval(tiPollTimer);
@@ -2035,6 +2048,35 @@ export function SessionAnalysisPanels({
       pollInFlight = false;
     };
 
+    const startAnalysisPoll = (detail: JsonRecord, ai: CapabilityResult) => {
+      if (analysisComplete(detail, ai)) return;
+      // Reports and AI are produced after the session closes. Keep checking for a
+      // bounded period so an already-open page does not freeze its initial snapshot.
+      analysisPollTimer = window.setInterval(async () => {
+        if (cancelled || analysisPollInFlight) return;
+        analysisPollInFlight = true;
+        try {
+          const [detailResult, aiResult] = await Promise.all([
+            fetchCapability("detail", sessionId),
+            fetchCapability("ai-advisory", sessionId),
+          ]);
+          if (cancelled) return;
+          apply([["detail", detailResult]]);
+          if (detailResult.state === "ready") {
+            apply(derivedEntries(detailResult).filter(([capability]) => capability !== "ai-advisory"));
+          }
+          apply([["ai-advisory", aiResult]]);
+          analysisPollAttempts += 1;
+          if (
+            (detailResult.state === "ready" && analysisComplete(detailResult.data, aiResult)) ||
+            analysisPollAttempts >= 24
+          ) stopAnalysisPoll();
+        } finally {
+          analysisPollInFlight = false;
+        }
+      }, 5_000);
+    };
+
     const load = async () => {
       const settled = await Promise.allSettled(
         primaryCapabilities.map(async (capability) => [capability, await fetchCapability(capability, sessionId)] as const),
@@ -2058,6 +2100,16 @@ export function SessionAnalysisPanels({
 
       apply(derivedEntries(detailEntry[1]));
       const detail = detailEntry[1].data;
+      // Independent context must not wait for the optional source-IP/TI lookups.
+      const aiRequest = fetchCapability("ai-advisory", sessionId).then((aiResult) => {
+        apply([["ai-advisory", aiResult]]);
+        if (!cancelled) startAnalysisPoll(detail, aiResult);
+      });
+      if (!cancelled && sessionIsActive(detail)) {
+        pollTimer = window.setInterval(() => {
+          void poll();
+        }, 1_000);
+      }
       const overview = record(detail.overview);
       const sourceIp = label(overview.src_ip || record(detail.session).src_ip, "");
       const observables = list(detail.observables).filter(isRecord);
@@ -2090,19 +2142,14 @@ export function SessionAnalysisPanels({
           ["observable-ti", firstSupported ? unavailable("Observable-TI request was not started") : notApplicable("No supported IP or hash observable is stored for this exact session.")] as const,
         ]);
       }
-      const aiResult = await fetchCapability("ai-advisory", sessionId);
-      apply([["ai-advisory", aiResult]]);
-      if (!cancelled && sessionIsActive(detailEntry[1].data)) {
-        pollTimer = window.setInterval(() => {
-          void poll();
-        }, 1_000);
-      }
+      await aiRequest;
     };
 
     void load();
     return () => {
       cancelled = true;
       if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      stopAnalysisPoll();
       stopTiPoll();
     };
   }, [sessionId, onDetail, onLiveInteraction, onNextDistinct]);

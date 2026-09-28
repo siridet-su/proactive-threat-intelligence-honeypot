@@ -3220,3 +3220,14 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Host/environment changes actually applied: none. GCP still runs the prior backend release; no service, release pointer, policy, model, MongoDB record, provider call, or Pi path was changed by this test run.
 - Not performed / deferred: clean-commit source package and manifest build, private-model identity verification, rollback-bound activation, live session, authenticated API/UI/PDF consistency checks.
 - Follow-up: verify the immutable candidate and rollback path, then perform a bounded backend deployment and post-deploy smoke. Do not equate the successful test exit code with a successful production rollout.
+
+### 2026-09-28 — Refresh late Session Analysis results on an already-open page
+
+- Status: Dashboard staging candidate; deployment outcome to be verified separately.
+- Scope and intent: the exact session could already have a report, hypotheses, response guidance and accepted AI advisory in the GCP monitor while an open browser tab continued to show its earlier snapshot. This is a frontend refresh issue, not evidence that backend analysis failed.
+- Repository changes: start the AI advisory request independently of optional source-IP/observable lookups; refresh exact-session detail, derived hypothesis/guidance/report projections and AI advisory every five seconds while analysis is incomplete, stopping on completion or after 24 attempts. Preserve the existing active-session command poll and backend contracts. Clear an unrelated pre-existing staging lint blocker in the Filesystem Activity replay effect by scheduling its pause state change outside the effect body, with timer cleanup.
+- Host/environment changes actually applied: none at the time of this entry. No backend service, model, policy, database record, or Pi configuration was changed by this source edit.
+- Runtime/exposure state: the public Cloudflare URL was observed to route to the staging Dashboard; its GCP monitor contained one completed report and an accepted AI advisory for the investigated exact session. The updated browser behavior is not active until staging CI/CD deploys this change.
+- Validation performed and outcome: TypeScript, full lint, and a local production Webpack build passed. A new late-result frontend test verifies that a closed session refreshes after its first snapshot and stops once report and AI are ready. The full Dashboard test suite passed with 847 passed, two expected failures and 14 skipped. Full lint initially failed on the pre-existing replay effect and passed after its narrow correction. Authenticated browser behavior has not yet been verified.
+- Not performed / deferred: no production Dashboard deployment or backend restart. A future live session is still needed to verify the end-to-end timing in an authenticated browser.
+- Rollback: revert only this Dashboard frontend change on staging; no host data rollback is required.
