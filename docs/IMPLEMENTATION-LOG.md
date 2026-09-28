@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-28 — Narrow MongoDB developer handoff after Dashboard auth review
+
+- Status: repository guidance correction prepared; no Atlas account or host changed.
+- Scope and intent: prevent a general read-only developer account from exposing Dashboard operator password hashes and session metadata while still allowing selected telemetry inspection.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: update the MongoDB handoff guide to require collection-level read grants for approved telemetry, identify `honeypot_db.users` and `honeypot_db.auth_sessions` as excluded live-auth data, and direct interactive login testing to a separate synthetic test database.
+- Host/environment changes actually applied: none. No Atlas user, IP access entry, collection, credential, Pi service, or Dashboard deployment was changed.
+- Runtime/exposure state: existing production data and users are unchanged; this entry corrects the future handoff procedure only.
+- Validation performed and outcome: repository source review confirmed `users` stores bcrypt password hashes and that Dashboard sessions are written to `auth_sessions`; the guide was checked against those code paths. No live database read was performed.
+- Not performed / deferred: creating or editing the successor's Atlas user, selecting the final collection whitelist, sanitized export generation, and a dev login test.
+- Risks and data handling: collection read access still reveals every permitted field, including attacker-submitted telemetry. The prior database-wide read recommendation would expose auth collections; correct any pending Atlas form before submitting it. No secret or raw document was recorded.
+- Rollback: revert the guidance change if the data-access contract is later redesigned; no host rollback is applicable.
+- Follow-up: approve the exact telemetry collection list with the successor, then verify read succeeds only for those collections and is denied for `users` and `auth_sessions`.
+- Related ADR/runbook: [MongoDB developer handoff](MONGODB-DEV-HANDOFF.md) and [Dashboard auth implementation](../dashboard-v2/src/lib/auth/session.ts).
+
 ### 2026-09-28 — Keep fresh-host B2 backup disabled until owner opt-in
 
 - Status: repository change prepared; not applied to a host.
