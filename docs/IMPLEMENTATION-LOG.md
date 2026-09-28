@@ -3228,3 +3228,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert this mapping-aware expression if it causes a compatibility regression; the failed VM attempt made no project host change.
 - Follow-up: pull the fix to the VM and rerun the same approved release and vars.
 - Related ADR/runbook: [fresh installation runbook](../deploy/ansible/README.md).
+
+### 2026-09-29 — Rehearse fresh installer on reimaged Azure ARM64 VM
+
+- Status: full-stack preparation installed on a disposable VM; activation paused for operator credentials.
+- Scope and intent: follow the documented clone, artifact build, reviewed vars, and one-command installation flow on a newly reimaged host.
+- Repository branch and commit/PR: `main`; this validation and runbook addendum follows compatibility fixes `bb7cf7e` and `a6bba68`.
+- Repository changes: add same-host VM controller prerequisites and private credential pause instructions to the fresh-install runbook; add a bounded validation record and index links. No runtime behavior changed in this addendum.
+- Host/environment changes actually applied: cloned the repository, refreshed apt indexes, installed `ansible-core` and the installer-approved packages, built reviewed ARM64 Go/Cowrie/sanitizer/decoy artifacts outside Git, staged release files and blank private env files, and staged Cowrie, Zeek, and Docker/Compose on the disposable VM. The existing Pi, Droplet, Dashboard, Atlas, and B2 were untouched.
+- Runtime/exposure state: VM administrator SSH remained on TCP 22. Cowrie had no listener; Redis, Zeek, Docker, and all five Go units were inactive. The B2 backup unit remained disabled. The installer stopped before any fresh service activation.
+- Validation performed and outcome: read-only host preflight/package audit/plan passed; approved release and source bundle checks passed. The full wrapper passed preparation/audit and exited with pause code 2 because `MONGO_URI` was absent. A same-command retry reported `FRESH_ENV_UNCHANGED` and paused at the same gate. Six actual private env files were root-owned and mode `0600`; a socket check showed no new project listener. The installer suite passed 39 tests and five subtests before this VM run.
+- Not performed / deferred: filling private credentials, activation, synthetic event delivery, Atlas write/read, Dashboard login, Wi-Fi capture, and B2 upload/restore. The decoy password gate was not reached after the first env failure.
+- Risks and data handling: the VM used isolated loopback capture in place of Wi-Fi and does not prove external decoy reachability. No private env content or credential value was printed, stored in Git, or included in the validation record.
+- Rollback: stop the disposable VM or reimage it; no production rollback is involved. The staged project units are inactive and disabled.
+- Follow-up: operator supplies test-scoped write-capable Mongo and PostgreSQL credentials in the VM's private env files, then rerun the same command and verify end-to-end telemetry. Keep B2 disabled until a new write-capable destination is provisioned.
+- Related ADR/runbook: [ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md), [fresh installation runbook](../deploy/ansible/README.md), and [VM evidence](validation/2026-09-29-azure-arm64-fresh-installer.md).

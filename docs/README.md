@@ -48,10 +48,13 @@ and historical material inherited from the previous team.
 
 The first [Ansible Pi preparation slice](../deploy/ansible/README.md) has
 [partial ARM64 VM validation](validation/2026-09-28-azure-arm64-installer-first-run.md)
-through the blank-configuration pause and same-release retry; activation and
-the full installer remain unqualified. Separate Cowrie source and Zeek staging
+through the blank-configuration pause and same-release retry; activation
+remains unqualified. Separate Cowrie source and Zeek staging
 were also tested on that VM; see the
 [dependency evidence](validation/2026-09-28-azure-arm64-cowrie-zeek-staging.md).
+The [reimaged ARM64 VM rehearsal](validation/2026-09-29-azure-arm64-fresh-installer.md)
+ran the full fresh wrapper through all preparation stages and an unchanged
+retry; it paused at missing operator credentials before service activation.
 Its [VM test target](INSTALLER-VM-TEST-TARGET.md)
 and the [Thai](INSTALLATION-MANUAL-WORD-TH.md) and
 [English](INSTALLATION-MANUAL-WORD.md) manual drafts remain incomplete.

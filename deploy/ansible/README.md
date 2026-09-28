@@ -13,8 +13,31 @@ Use one clean Ubuntu 24.04 ARM64 Pi. Leave administrator SSH on TCP 22 during
 installation. The reviewed Wi-Fi example starts Cowrie on TCP 2222/2223 and
 sets Zeek to capture those same ports, so the installer does not move SSH.
 It checks the chosen Cowrie ports for collisions before activation. The
-disposable VM profile uses `lo` and TCP 2223/2323 for its bounded tests. No
+disposable VM uses `lo` with the reviewed matching port pair; the latest
+reimaged rehearsal used TCP 2222/2223. No
 existing `pi-t` service is changed by this fresh-host procedure.
+
+For a disposable ARM64 VM where the same account is both build controller and
+target, start from a clean guest with administrator SSH and sudo access:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends git ansible-core
+git clone https://github.com/siridet-su/proactive-threat-intelligence-honeypot.git
+cd proactive-threat-intelligence-honeypot
+python3 scripts/pti_install.py preflight --profile deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json
+python3 scripts/pti_install.py package-audit --profile deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json
+python3 scripts/pti_install.py plan --profile deploy/profiles/pi-host-foundation-ubuntu-2404-arm64.json
+```
+
+Build and review the artifacts below, keeping them and the inventory outside
+Git. A local test inventory can use `[pi_sensors]` followed by
+`vm ansible_connection=local ansible_python_interpreter=/usr/bin/python3`.
+Set both reviewed interfaces to `lo` for an isolated VM test, and keep the
+Cowrie and Zeek port pair identical. Run the wrapper with
+`--passwordless-sudo` only when `sudo -n true` succeeds. On a real Pi, use
+`wlan0` and a separate build controller; loopback testing does not prove Wi-Fi
+capture or external decoy reachability.
 
 Build the Go release and the reviewed Cowrie source archive as described below.
 After this repository is committed, build the fresh sanitizer package from
@@ -50,7 +73,15 @@ port, hostname, and localhost values in actual private env files. Existing
 nonblank operator values are preserved. It pauses before starting any fresh
 service while required secrets or settings are missing. Fill the actual files
 on the Pi with `sudoedit` or an approved private upload, then run the **same
-command**. It starts Cowrie with its manifest-bound sanitizer, Zeek with a
+command**. For the default backup-disabled profile, the shared
+`/etc/honeypot-agent.env` needs a write-capable, test-scoped `MONGO_URI` for
+the processor and TI worker; `/etc/honeypot/decoy.env` needs an
+operator-chosen `POSTGRES_PASSWORD`. A read-only Atlas handoff URI cannot
+support the live pipeline. Keep these values out of Git, the reviewed vars,
+and terminal output. The installer checks presence and file safety before
+activation; it does not prove credential validity.
+
+It starts Cowrie with its manifest-bound sanitizer, Zeek with a
 generated TCP 2222/2223 BPF filter on `wlan0`, PostgreSQL/Core/Web-corp on
 `127.0.0.1`, Redis, and the four core Go services. The B2 backup control unit
 stays stopped and disabled. It never installs the legacy GCP
