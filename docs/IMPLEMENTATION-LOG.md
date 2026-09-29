@@ -3435,3 +3435,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert this presentation change and redeploy the previous Dashboard artifact; no worker rollback applies.
 - Follow-up: inspect status contrast in both Dashboard themes with live data.
 - Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
+### 2026-09-29 — Activate stronger archive calendar colors on staging
+
+- Status: active on Dashboard staging; Railway production revision not verified.
+- Scope and intent: publish clearer status fills and matching dots in the shared three-source calendar.
+- Repository branch and commit/PR: main UI commit `fb63409`; staging release `a6f63b3`; GitHub Actions run `36523409674`.
+- Repository changes: append this deployment record only. The UI and API-guide edits are in the preceding entry.
+- Host/environment changes actually applied: staging CI/CD switched the immutable staging release and restarted `honeypot-dashboard-v2-staging.service`. No Pi worker, MongoDB record, or B2 object was changed by this deployment.
+- Runtime/exposure state: the staging deploy wrapper reported service success for release `a6f63b3`, with `rollback:false`; its post-switch health check passed. The previous staging release was `0491ff3`. Railway production deployment state was not observed.
+- Validation performed and outcome: focused local Dashboard tests, TypeScript, targeted ESLint, full staging CI, artifact identity verification, and staging deploy job passed.
+- Not performed / deferred: authenticated browser review in light/dark themes and verification of the Railway production revision.
+- Risks and data handling: this changes only UI color and status markers. No archive contents, credentials, or private configuration were copied into this record.
+- Rollback: restore the previous immutable staging release through the reviewed staging deployment procedure if a visual regression is found.
+- Follow-up: inspect calendar status contrast in an authenticated browser and verify the production revision independently.
+- Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
