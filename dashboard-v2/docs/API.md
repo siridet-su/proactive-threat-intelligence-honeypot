@@ -154,29 +154,32 @@ capacity values, root-disk percentage and capacity values, temperature, and
 collector fields are kept outside this browser-facing live ring. Older v2
 documents remain readable during the rolling deployment.
 
-## Hardware backup history
+## Backup target history
 
 `GET /api/backup/targets` includes a `days` array for each source in the
-current eligible UTC window. Each row in Archive sources uses only its own
-target's manifests and active bucket to show daily archived, empty, running,
-missing, or failed states. The percentage beside that strip measures completed
-manifest checks; B2 archived days remain a separate count.
-The Backup & Retention page shows these three rows by default. Hardware actions
-and longer history, plus activity/recovery/policy detail, open from controls
-below the same overview; closing them does not alter a schedule or backup run.
+current eligible UTC window. Archive sources uses each target's manifests and
+active bucket in one aligned, three-row daily calendar. The percentage in each
+summary row measures completed manifest checks; B2 archived days remain a
+separate count. Hardware actions/destination and activity/recovery/policy
+open from controls below the calendar; closing them does not alter a schedule
+or backup run.
 
-`GET /api/hardware/backup` remains the live hardware backup status and control
-view. `GET /api/hardware/backup/history?period=N` is an authenticated,
-read-only history view. `N` is an integer from 1 through 36; period 1 is the
-29 eligible UTC days immediately before the live window. Each later period
-moves back by another 29 days, so the windows do not overlap. The response
-contains `period`, `expected_window`, 29 daily manifest states, and
-`has_older`. Both routes use `Cache-Control: no-store`.
+`GET /api/backup/targets/history?period=N` is the authenticated, read-only
+history for all three source rows. `N` is 1 through 36, each page covers the
+29 eligible UTC days immediately before the preceding page, and the response
+contains `period`, `expected_window`, a `targets` array of per-source `days`,
+and `has_older`. The calendar changes all three rows together. The endpoint
+uses `Cache-Control: no-store`.
+
+`GET /api/hardware/backup` remains the live hardware control view. The
+existing `GET /api/hardware/backup/history?period=N` remains available for
+legacy API callers; the page uses the shared target-history route. Both routes
+use `Cache-Control: no-store`.
 
 The Dashboard labels a successful zero-record day as **Empty** and counts it
 as a completed manifest check, not as a B2 archive. The archived-day count
 requires an archive object name. Historical navigation changes only the
-calendar and its counts; the Pi controls, latest request, and storage snapshot
+calendar; the Pi controls, latest request, and storage snapshot
 continue to show live state. Days before a target was activated can appear as
 missing in historical windows and are not queued by navigating history.
 

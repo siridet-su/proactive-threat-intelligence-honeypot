@@ -14,6 +14,7 @@ import type {
   HardwareBackupStatus,
   BackupActivityEntry,
   BackupTargetCoverage,
+  BackupTargetHistory,
   BackupDestinationStatus,
   BackupException,
   BackupPolicy,
@@ -704,6 +705,42 @@ export async function getHardwareBackupHistory(period: number): Promise<Hardware
     period,
     expected_window: { from: window.from.toISOString(), to: window.to.toISOString(), days: window.days },
     days,
+    has_older: olderManifest !== null,
+  };
+}
+
+export async function getBackupTargetHistory(period: number): Promise<BackupTargetHistory> {
+  const window = getHardwareBackupHistoryWindow(period, await getBackupCoverageAnchor());
+  const client = await getMongoClient();
+  const database = client.db(getMongoDatabaseName());
+  const targetIds = BACKUP_TARGET_CATALOG.map((target) => target.target_id);
+  const statusDocuments = await database.collection(TARGET_STATUS_COLLECTION).find({
+    target_id: { $in: targetIds }, enabled: true,
+  }).project({ target_id: 1, bucket: 1, enabled: 1 }).toArray();
+  const bucket = activeBackupBucket(statusDocuments);
+  const legacyBucket = legacyManifestBucket();
+  const scope: Document[] = [
+    { $or: [{ target_id: { $in: targetIds } }, { collection: { $in: targetIds } }] },
+    manifestBucketQuery(bucket, legacyBucket),
+  ];
+  const collection = database.collection(BACKUP_COLLECTION);
+  const [documents, olderManifest] = await Promise.all([
+    collection.find({ $and: [...scope, { day_start: { $gte: window.from, $lte: window.to } }] })
+      .project({ target_id: 1, collection: 1, day_start: 1, bucket: 1, status: 1, document_count: 1,
+        archive_bytes: 1, started_at: 1, completed_at: 1, object_name: 1, error: 1 })
+      .sort({ day_start: 1 }).limit(MAX_MANIFESTS * targetIds.length).toArray(),
+    period < MAX_BACKUP_HISTORY_PERIOD
+      ? collection.findOne({ $and: [...scope, { day_start: { $lt: window.from } }] },
+        { projection: { _id: 1 }, sort: { day_start: -1 } })
+      : Promise.resolve(null),
+  ]);
+  return {
+    period,
+    expected_window: { from: window.from.toISOString(), to: window.to.toISOString(), days: window.days },
+    targets: BACKUP_TARGET_CATALOG.map((target) => ({
+      target_id: target.target_id,
+      days: buildBackupTargetDays(documents, target.target_id, window, bucket, legacyBucket),
+    })),
     has_older: olderManifest !== null,
   };
 }
