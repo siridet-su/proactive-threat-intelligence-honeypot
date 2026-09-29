@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBackupTargetCoverage, buildBackupTargetExceptions, getHardwareBackupHistoryWindow, getHardwareBackupWindow } from "@/lib/hardware-backup";
+import { buildBackupTargetCoverage, buildBackupTargetDays, buildBackupTargetExceptions, getHardwareBackupHistoryWindow, getHardwareBackupWindow } from "@/lib/hardware-backup";
 import { isBackupTargetOverview, isHardwareBackupHistory, isHardwareBackupStatus } from "@/lib/dashboardTypes";
 
 describe("hardware backup dashboard status", () => {
@@ -186,6 +186,21 @@ describe("hardware backup dashboard status", () => {
       detail: "temporary upload failure",
       action_supported: false,
     });
+  });
+
+  it("keeps the daily status of each archive source separate", () => {
+    const window = getHardwareBackupWindow(new Date("2026-09-23T12:00:00.000Z"));
+    const documents = [
+      { target_id: "hardware_metrics_1m", day_start: new Date("2026-09-21"), status: "success", document_count: 2, object_name: "hardware/21.gz" },
+      { target_id: "threat_events", day_start: new Date("2026-09-21"), status: "success", document_count: 0, object_name: null },
+      { target_id: "filesystem_audit", day_start: new Date("2026-09-21"), status: "failed" },
+    ];
+    const last = (target: "hardware_metrics_1m" | "threat_events" | "filesystem_audit") =>
+      buildBackupTargetDays(documents, target, window).at(-1);
+
+    expect(last("hardware_metrics_1m")).toMatchObject({ status: "success", document_count: 2, object_name: "hardware/21.gz" });
+    expect(last("threat_events")).toMatchObject({ status: "success", document_count: 0, object_name: null });
+    expect(last("filesystem_audit")).toMatchObject({ status: "failed" });
   });
 
   it("does not count an old bucket's success during a bucket rollover", () => {

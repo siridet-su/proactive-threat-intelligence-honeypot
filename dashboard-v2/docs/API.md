@@ -146,6 +146,12 @@ documents remain readable during the rolling deployment.
 
 ## Hardware backup history
 
+`GET /api/backup/targets` includes a `days` array for each source in the
+current eligible UTC window. Each row in Archive sources uses only its own
+target's manifests and active bucket to show daily archived, empty, running,
+missing, or failed states. The percentage beside that strip measures completed
+manifest checks; B2 archived days remain a separate count.
+
 `GET /api/hardware/backup` remains the live hardware backup status and control
 view. `GET /api/hardware/backup/history?period=N` is an authenticated,
 read-only history view. `N` is an integer from 1 through 36; period 1 is the

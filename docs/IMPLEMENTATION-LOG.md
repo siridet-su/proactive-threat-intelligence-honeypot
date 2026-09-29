@@ -3301,3 +3301,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Validation performed and outcome: staging CI/deploy succeeded, full local Dashboard lint, TypeScript, 847 passing tests with two expected failures and 14 skipped, and a local production Webpack build passed. The investigated monitor session had a completed report, available guidance, hypothesis set, and accepted AI advisory when checked read-only.
 - Not performed / deferred: no fresh post-release session was created to time the browser's automatic late-result transition, and no authenticated browser visual assertion was made. Production Dashboard remains on its prior release.
 - Rollback: staging can return to its previous immutable release if the new UI refresh causes a regression; do not change the GCP backend for this frontend-only fix.
+
+### 2026-09-29 — Compare daily backup coverage across all archive sources
+
+- Status: repository change prepared; no host deployment.
+- Scope and intent: make daily archive health comparable for hardware, threat events, and filesystem audit in one overview before the hardware-specific controls and longer history.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: include each target's current eligible-day manifest states in the backup targets API, show an aligned daily status strip in every active source row, count completed manifest checks separately from archived B2 days, and place the cross-source overview before the hardware detail card. Update the Dashboard API contract and targeted coverage test. No worker or schedule logic changed.
+- Host/environment changes actually applied: none. No Dashboard deployment, Pi service, MongoDB data, schedule revision, or B2 object was changed.
+- Runtime/exposure state: the existing Pi backup worker and stored schedule are unchanged. The new comparison appears only where this Dashboard code is run.
+- Validation performed and outcome: TypeScript check and targeted hardware-backup tests passed locally; no authenticated browser review was performed.
+- Not performed / deferred: production Dashboard deployment, browser visual review, and live Pi or B2 verification.
+- Risks and data handling: only bounded manifest metadata already used by the overview is returned; no archive contents or credentials are added. The detailed older-history pager remains hardware-specific.
+- Rollback: revert this Dashboard/API presentation change; no host rollback applies.
+- Follow-up: review the three aligned strips with live data in a browser and decide whether older-history navigation should be offered for the other targets.
+- Related ADR/runbook: [Dashboard API contract](../dashboard-v2/docs/API.md) and [backup schedule decision](adr/ADR-0008-dashboard-backup-daily-schedule.md).

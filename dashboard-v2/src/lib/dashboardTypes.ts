@@ -240,6 +240,7 @@ export interface BackupTargetStatus {
   last_seen_at: string | null;
   last_completed_at: string | null;
   coverage: BackupTargetCoverage;
+  days?: HardwareBackupDay[];
 }
 
 export interface BackupWorkerStatus {
@@ -408,7 +409,8 @@ function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {
     typeof value.sensitive === "boolean" &&
     isNullableString(value.last_seen_at) &&
     isNullableString(value.last_completed_at) &&
-    isBackupTargetCoverage(value.coverage);
+    isBackupTargetCoverage(value.coverage) &&
+    (value.days === undefined || (Array.isArray(value.days) && value.days.every(isHardwareBackupDay)));
 }
 
 function isBackupWorkerStatus(value: unknown): value is BackupWorkerStatus {
