@@ -209,6 +209,13 @@ export interface HardwareBackupHistory {
   has_older: boolean;
 }
 
+export interface BackupTargetHistory {
+  period: number;
+  expected_window: { from: string; to: string; days: number };
+  targets: Array<{ target_id: BackupTargetId; days: HardwareBackupDay[] }>;
+  has_older: boolean;
+}
+
 export type BackupTargetId = "hardware_metrics_1m" | "threat_events" | "filesystem_audit";
 export type BackupTargetState = "active" | "planned";
 export type BackupWorkerState = "healthy" | "stale" | "offline" | "scheduled" | "unknown";
@@ -399,6 +406,15 @@ export function isHardwareBackupHistory(value: unknown): value is HardwareBackup
   return typeof value.expected_window.from === "string" && typeof value.expected_window.to === "string" &&
     typeof value.expected_window.days === "number" && Number.isFinite(value.expected_window.days) &&
     value.days.every(isHardwareBackupDay);
+}
+
+export function isBackupTargetHistory(value: unknown): value is BackupTargetHistory {
+  if (!isRecord(value) || !Number.isInteger(value.period) || !isRecord(value.expected_window) || !Array.isArray(value.targets) || typeof value.has_older !== "boolean") return false;
+  return typeof value.expected_window.from === "string" && typeof value.expected_window.to === "string" &&
+    typeof value.expected_window.days === "number" && Number.isFinite(value.expected_window.days) &&
+    value.targets.every((target) => isRecord(target) &&
+      (target.target_id === "hardware_metrics_1m" || target.target_id === "threat_events" || target.target_id === "filesystem_audit") &&
+      Array.isArray(target.days) && target.days.every(isHardwareBackupDay));
 }
 
 function isBackupTargetStatus(value: unknown): value is BackupTargetStatus {

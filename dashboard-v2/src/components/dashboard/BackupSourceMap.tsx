@@ -6,8 +6,11 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   CircleDashed,
   Clock3,
   Cloud,
@@ -28,6 +31,8 @@ import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatu
 
 import {
   isBackupTargetOverview,
+  isBackupTargetHistory,
+  type BackupTargetHistory,
   type BackupTargetCoverage,
   type HardwareBackupDay,
   type BackupTargetId,
@@ -348,7 +353,6 @@ export function BackupSourceMap() {
                         <span className={`text-xs ${coverageState.className}`}>{coverage ? `${coverage.successful_days}/${coverage.expected_days} checked` : coverageState.label}</span>
                       </div>
                       <CoverageRail coverage={coverage} />
-                      {target?.state === "active" && <DailyManifestStrip days={target.days} title={title} />}
                       {coverage?.failed_days ? <p className="mt-1 text-xs text-danger">{coverage.failed_days} failed</p> : null}
                       {coverage?.missing_days ? <p className="mt-1 text-xs text-warning">{coverage.missing_days} missing</p> : null}
                     </td>
@@ -366,6 +370,7 @@ export function BackupSourceMap() {
             </tbody>
           </table>
         </div>
+        <BackupCalendar overview={overview} />
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3 sm:px-5">
           <button
             type="button"
@@ -374,7 +379,7 @@ export function BackupSourceMap() {
             onClick={() => setShowHardwareDetails((value) => !value)}
           >
             <Archive className="h-3.5 w-3.5" aria-hidden="true" />
-            Hardware actions &amp; history
+            Hardware actions &amp; destination
             <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showHardwareDetails ? "rotate-180" : ""}`} aria-hidden="true" />
           </button>
           <button
@@ -500,27 +505,101 @@ function CoverageRail({ coverage }: { coverage: BackupTargetCoverage | undefined
   );
 }
 
-function DailyManifestStrip({ days, title }: { days: HardwareBackupDay[] | undefined; title: string }) {
-  if (!days?.length) return null;
-  const tone = (day: HardwareBackupDay) => {
-    if (day.status === "failed") return "bg-danger";
-    if (day.status === "running") return "bg-info";
-    if (day.status === "missing") return "bg-warning";
-    return day.object_name ? "bg-success" : "bg-text-subtle/50";
+function calendarDayLabel(day: HardwareBackupDay) {
+  if (day.status === "failed") return "Failed";
+  if (day.status === "running") return "Running";
+  if (day.status === "missing") return "Missing manifest";
+  if (!day.object_name) return day.document_count === 0
+    ? "Empty check · no source records or B2 object"
+    : "Completed check · no B2 object reported";
+  return `Archived · ${formatNumber(day.document_count)} records`;
+}
+
+function calendarDayTone(day: HardwareBackupDay | undefined) {
+  if (!day) return "border-border bg-surface-subtle text-text-subtle";
+  if (day.status === "failed") return "border-danger-border bg-danger-subtle text-danger";
+  if (day.status === "running") return "border-info-border bg-info-subtle text-info";
+  if (day.status === "missing") return "border-warning-border bg-warning-subtle text-warning";
+  return day.object_name
+    ? "border-success-border bg-success-subtle text-success"
+    : "border-border bg-surface-subtle text-text-subtle";
+}
+
+function BackupCalendar({ overview }: { overview: BackupTargetOverview | null }) {
+  const [period, setPeriod] = useState(0);
+  const [history, setHistory] = useState<BackupTargetHistory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [retry, setRetry] = useState(0);
+
+  useEffect(() => {
+    if (period === 0) return;
+    const controller = new AbortController();
+    fetch(`/api/backup/targets/history?period=${period}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        const payload: unknown = await response.json();
+        if (!response.ok || !isBackupTargetHistory(payload) || payload.period !== period) throw new Error("Invalid backup history");
+        setHistory(payload);
+        setError(false);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [period, retry]);
+
+  const targets = period === 0 ? overview?.targets : history?.targets;
+  const days = targets?.find((target) => target.days?.length)?.days ?? [];
+  const changePeriod = (next: number) => {
+    setPeriod(next);
+    setHistory(null);
+    setError(false);
+    setLoading(next > 0);
   };
-  const label = (day: HardwareBackupDay) => {
-    if (day.status !== "success") return day.status;
-    return day.object_name ? "archived" : "empty check";
-  };
+
   return (
-    <div
-      className="mt-2 grid gap-0.5"
-      style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}
-      role="list"
-      aria-label={`${title}: daily manifest status from ${days[0].day} to ${days.at(-1)?.day}`}
-    >
-      {days.map((day) => <span key={day.day} role="listitem" aria-label={`${day.day}: ${label(day)}`} className={`h-3 rounded-[2px] ${tone(day)}`} title={`${day.day}: ${label(day)}`} />)}
-    </div>
+    <section className="border-t border-border px-4 py-4 sm:px-5" aria-labelledby="backup-calendar-title">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h4 id="backup-calendar-title" className="flex items-center gap-2 text-sm font-semibold"><CalendarDays className="h-4 w-4 text-primary" aria-hidden="true" />Daily archive calendar</h4>
+          <p className="mt-1 text-xs text-text-muted">{days.length ? `${formatDay(days[0].day)} – ${formatDay(days.at(-1)?.day ?? null)} · UTC · ${period === 0 ? "latest" : `earlier page ${period}`}` : "Eligible UTC days across all archive sources"}</p>
+        </div>
+        <div className="flex items-center gap-2" aria-label="Navigate archive calendar">
+          {period > 0 && <button type="button" className="ui-button min-h-8 px-2.5 text-xs" onClick={() => changePeriod(0)}>Latest</button>}
+          <button type="button" className="ui-button min-h-8 gap-1 px-2.5 text-xs" disabled={period === 0 || loading} onClick={() => changePeriod(period - 1)}><ChevronLeft className="h-3.5 w-3.5" aria-hidden="true" />Newer</button>
+          <button type="button" className="ui-button min-h-8 gap-1 px-2.5 text-xs" disabled={!overview || loading || period >= 36 || (period > 0 && !history?.has_older)} onClick={() => changePeriod(period + 1)}>Older<ChevronRight className="h-3.5 w-3.5" aria-hidden="true" /></button>
+        </div>
+      </div>
+      {loading ? <p role="status" className="py-6 text-sm text-text-muted">Loading archive history…</p> : error ? (
+        <div role="alert" className="flex items-center gap-3 py-6 text-sm text-danger">Archive history unavailable.<button type="button" className="ui-button min-h-8 px-2.5 text-xs" onClick={() => { setLoading(true); setRetry((value) => value + 1); }}>Retry</button></div>
+      ) : days.length ? (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+          <div className="min-w-[900px] p-3" role="table" aria-label="Daily manifest status by archive source">
+            <div className="grid items-center gap-1" style={{ gridTemplateColumns: `10rem repeat(${days.length}, minmax(0, 1fr))` }} role="row">
+              <span className="text-xs text-text-subtle" role="columnheader">Source / UTC day</span>
+              {days.map((day) => <span key={day.day} className="text-center font-mono text-[10px] text-text-subtle" role="columnheader" title={day.day}>{day.day.slice(8)}</span>)}
+            </div>
+            {SOURCE_CARDS.map(({ targetId, title }) => {
+              const target = targets?.find((item) => item.target_id === targetId);
+              const planned = period === 0 && overview?.targets.find((item) => item.target_id === targetId)?.state !== "active";
+              const dayMap = new Map(target?.days?.map((day) => [day.day, day]));
+              return <div key={targetId} className="mt-1 grid items-center gap-1" style={{ gridTemplateColumns: `10rem repeat(${days.length}, minmax(0, 1fr))` }} role="row">
+                <span className="truncate pr-2 text-xs font-medium text-text" role="rowheader" title={title}>{title}</span>
+                {days.map((day) => {
+                  const sourceDay = planned ? undefined : dayMap.get(day.day);
+                  const status = planned ? "Planned target" : sourceDay ? calendarDayLabel(sourceDay) : "No status";
+                  return <span key={day.day} role="cell" aria-label={`${title}, ${day.day}: ${status}`} title={`${title} · ${day.day} · ${status}`} className={`h-7 rounded border ${calendarDayTone(sourceDay)}`} />;
+                })}
+              </div>;
+            })}
+          </div>
+        </div>
+      ) : <p className="py-4 text-xs text-text-muted">Waiting for daily manifest status.</p>}
+      <p className="mt-2 text-xs text-text-subtle">Green: archived · Gray: checked but empty · Blue: running · Amber: missing · Red: failed. Earlier dates are read-only; gaps may predate target activation.</p>
+    </section>
   );
 }
 

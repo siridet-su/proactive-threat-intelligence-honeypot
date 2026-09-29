@@ -3361,3 +3361,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: restore the prior immutable staging release through the reviewed staging deployment procedure if a browser regression is found.
 - Follow-up: inspect the collapsed page, reopen Hardware actions/history, and confirm the operational detail panel in an authenticated staging browser.
 - Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
+
+### 2026-09-29 — Unify archive calendar across three backup sources
+
+- Status: repository change prepared; no host deployment in this entry.
+- Scope and intent: show hardware rollups, threat events, and filesystem audit on the same UTC date grid instead of leaving the full calendar and older-history navigation tied to hardware only.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: add authenticated, bounded all-target backup history; move daily archive calendar and older/newer navigation into Archive sources; remove the duplicate hardware-only calendar and summary from the expandable hardware controls. Update the Dashboard API guide and focused tests.
+- Host/environment changes actually applied: none. No Dashboard service, Pi worker, MongoDB records, schedule, or B2 object was changed by this repository edit.
+- Runtime/exposure state: existing Dashboard deployments retain their previous UI until a release includes this change. Backup execution and stored manifests remain unchanged.
+- Validation performed and outcome: TypeScript and targeted ESLint passed; focused test outcome is recorded with the commit.
+- Not performed / deferred: authenticated browser visual inspection, live Pi/B2 checks, and production Dashboard deployment.
+- Risks and data handling: historical gaps before source activation remain labeled missing; navigation is read-only and does not queue work. The API returns bounded manifest metadata and no archive contents or credentials.
+- Rollback: revert the shared calendar UI and history endpoint, then redeploy the previous Dashboard artifact; no Pi rollback applies.
+- Follow-up: inspect the three aligned rows with live staging data and verify older/newer navigation in an authenticated browser.
+- Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
