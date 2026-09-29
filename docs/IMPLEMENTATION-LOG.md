@@ -48,6 +48,21 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 
 ## Entries
 
+### 2026-09-29 — Remove unassessed risk labels from System Health Source activity
+
+- Status: repository UI and documentation change prepared on staging; deployment not verified.
+- Scope and intent: remove a source risk label that was often based on a default Medium session severity rather than a measured per-source assessment, and describe the displayed counts accurately.
+- Repository branch and commit/PR: `fix/system-health-source-risk-20260929` from `origin/staging` at `ad2baf0`; commit pending at entry time.
+- Repository changes: remove the Risk column, its loading placeholder, and severity aggregation from Source activity; relabel the ranked counts as recent sessions; document the feed-window limit in the Dashboard runbook.
+- Host/environment changes actually applied: none. No Railway deployment, Pi service, or database was changed.
+- Runtime/exposure state: the hosted Dashboard still shows the previous table until a deployment includes this change. The updated table shows up to 50 source IPs grouped from at most 100 recent session rows in the shared threat feed; it does not display a risk rating.
+- Validation performed and outcome: source inspection traced each displayed row to a canonical session feed entry and identified the server's default Medium severity used when no confirmed severity exists. The source changes were reviewed locally; no automated or live UI test was run.
+- Not performed / deferred: hosted deployment and browser verification after deployment.
+- Risks and data handling: removing the label prevents an unmeasured value from appearing as an assessed risk. No credentials or attacker payloads were added to the repository.
+- Rollback: revert the Source activity component and runbook changes, then redeploy if the presentation contract is revised; no host rollback applies.
+- Follow-up: if a future per-source risk assessment is required, define its evidence, calculation, and missing-value behavior before restoring a risk column.
+- Related ADR/runbook: [Dashboard runbook](../dashboard-v2/README.md).
+
 ### 2026-09-29 — Add per-event command copy action in Filesystem Evidence
 
 - Status: repository UI change prepared on a staging-based branch; deployment not verified.

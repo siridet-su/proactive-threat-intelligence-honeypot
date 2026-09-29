@@ -29,6 +29,12 @@ is required. MongoDB credentials remain server-only and are never exposed
 through a `NEXT_PUBLIC_*` variable. The sensitive monitor command-detail route
 remains excluded from generic browser APIs and is not a control channel.
 
+The System Health Source activity table groups source IPs from the recent
+session rows in the shared threat feed (up to 100 rows) and displays the number
+of sessions per source in that window. It does not calculate or display a risk
+rating. A source's session count and position are not an all-time total or a
+measured risk score.
+
 ## Hosted production command evidence
 
 The Admin-only Filesystem Activity Command events panel defaults to the

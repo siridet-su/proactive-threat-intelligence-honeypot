@@ -2,24 +2,17 @@ import { useMemo, useState } from "react";
 import { Activity, MapPin, Radio, Search, X } from "lucide-react";
 
 import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
-import { SeverityBadge } from "./SeverityBadge";
 import { RegionState } from "@/components/ui/RegionState";
 import { cn } from "@/lib/utils";
-import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 
 type SourceSummary = {
   ip: string;
   country: string;
   city: string;
   latestTechnique: string;
-  eventCount: number;
-  severity: DashboardThreatEvent["severity"];
+  sessionCount: number;
   latestTimestamp: number;
 };
-
-function severityRank(severity: string) {
-  return { Critical: 4, High: 3, Medium: 2, Low: 1 }[severity] ?? 0;
-}
 
 function feedPresentation(status: string) {
   if (status === "ready") return { label: "Live feed", className: "border-success-border bg-success-subtle text-success", Icon: Radio };
@@ -41,13 +34,12 @@ export function AttackerTable() {
     const summaries = new Map<string, SourceSummary>();
     for (const threat of threats) {
       if (!threat.src_ip) continue;
-      const eventTimestamp = new Date(threat.timestamp).getTime();
+      const sessionTimestamp = new Date(threat.timestamp).getTime();
       const existing = summaries.get(threat.src_ip);
       if (existing) {
-        existing.eventCount += 1;
-        if (severityRank(threat.severity) > severityRank(existing.severity)) existing.severity = threat.severity;
-        if (eventTimestamp >= existing.latestTimestamp) {
-          existing.latestTimestamp = eventTimestamp;
+        existing.sessionCount += 1;
+        if (sessionTimestamp >= existing.latestTimestamp) {
+          existing.latestTimestamp = sessionTimestamp;
           existing.latestTechnique = threat.event_type || threat.classification || "Unknown";
           existing.country = threat.geo.country || "Unknown";
           existing.city = threat.geo.city || "Unknown";
@@ -59,22 +51,21 @@ export function AttackerTable() {
         country: threat.geo.country || "Unknown",
         city: threat.geo.city || "Unknown",
         latestTechnique: threat.event_type || threat.classification || "Unknown",
-        eventCount: 1,
-        severity: threat.severity,
-        latestTimestamp: Number.isFinite(eventTimestamp) ? eventTimestamp : 0,
+        sessionCount: 1,
+        latestTimestamp: Number.isFinite(sessionTimestamp) ? sessionTimestamp : 0,
       });
     }
-    return Array.from(summaries.values()).sort((left, right) => right.eventCount - left.eventCount).slice(0, 50);
+    return Array.from(summaries.values()).sort((left, right) => right.sessionCount - left.sessionCount).slice(0, 50);
   }, [threats]);
 
   const filteredSources = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return sources;
-    return sources.filter((source) => [source.ip, source.country, source.city, source.latestTechnique, source.severity]
+    return sources.filter((source) => [source.ip, source.country, source.city, source.latestTechnique]
       .some((value) => value.toLowerCase().includes(normalizedQuery)));
   }, [query, sources]);
 
-  const maxEvents = sources[0]?.eventCount ?? 1;
+  const maxSessions = sources[0]?.sessionCount ?? 1;
 
   return (
       <section className="ui-panel flex min-h-[320px] flex-col overflow-hidden p-4 sm:p-5" aria-labelledby="source-activity-title">
@@ -92,7 +83,7 @@ export function AttackerTable() {
                   {presentation.label}
                 </span>
               </div>
-              <p className="mt-1 text-xs text-text-muted">Ranked by events in the shared threat feed.</p>
+              <p className="mt-1 text-xs text-text-muted">Ranked by recent sessions in the shared threat feed.</p>
             </div>
           </div>
           <span className="shrink-0 rounded-full bg-surface-subtle px-2 py-1 font-mono text-[10px] tabular-nums text-text-subtle">{sources.length} sources</span>
@@ -121,13 +112,12 @@ export function AttackerTable() {
       </div>
 
       <div className="mt-2 max-h-[420px] min-h-0 flex-1 overflow-auto rounded-lg border border-border/70">
-        <table className={cn("ui-table min-w-[500px] transition-opacity duration-200", status === "refreshing" && "opacity-50")}>
+        <table className={cn("ui-table min-w-[400px] transition-opacity duration-200", status === "refreshing" && "opacity-50")}>
           <thead className="sticky top-0 z-10">
             <tr>
               <th className="w-10 px-3 py-2.5 text-center text-[10px] uppercase tracking-wider">#</th>
               <th className="px-3 py-2.5 text-[10px] uppercase tracking-wider">Source</th>
-              <th className="w-36 px-3 py-2.5 text-[10px] uppercase tracking-wider">Activity</th>
-              <th className="w-28 px-3 py-2.5 text-[10px] uppercase tracking-wider">Risk</th>
+              <th className="w-36 px-3 py-2.5 text-[10px] uppercase tracking-wider">Sessions</th>
             </tr>
           </thead>
           <tbody aria-busy={loading || status === "refreshing"}>
@@ -156,21 +146,16 @@ export function AttackerTable() {
                       <div className="h-full w-12 rounded-full bg-primary/30 animate-pulse" />
                     </div>
                     <span className="mt-1.5 block font-mono text-[11px] tabular-nums text-text-subtle/70">
-                      -- events
+                      -- sessions
                     </span>
                   </div>
                 </td>
-                <td className="px-3 py-3">
-                  <span className="inline-flex items-center rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[10px] font-semibold text-text-subtle/70 animate-pulse">
-                    Evaluating
-                  </span>
-                </td>
               </tr>
             ))}
-            {!loading && fetchFailed && <tr><td colSpan={4} className="p-4"><RegionState kind="error" title="Source activity unavailable" description="The live threat feed could not be loaded." /></td></tr>}
-            {!loading && !fetchFailed && filteredSources.length === 0 && <tr><td colSpan={4} className="p-4"><RegionState kind="empty" title={query ? "No matching sources" : "No source activity"} description={query ? "Try a different search term." : "No source IPs were returned in the current live feed."} /></td></tr>}
+            {!loading && fetchFailed && <tr><td colSpan={3} className="p-4"><RegionState kind="error" title="Source activity unavailable" description="The live threat feed could not be loaded." /></td></tr>}
+            {!loading && !fetchFailed && filteredSources.length === 0 && <tr><td colSpan={3} className="p-4"><RegionState kind="empty" title={query ? "No matching sources" : "No source activity"} description={query ? "Try a different search term." : "No source IPs were returned in the current live feed."} /></td></tr>}
             {!loading && !fetchFailed && filteredSources.map((source, index) => {
-              const activityPercent = Math.max(7, Math.round((source.eventCount / maxEvents) * 100));
+              const activityPercent = Math.max(7, Math.round((source.sessionCount / maxSessions) * 100));
               return (
                 <tr key={source.ip}>
                   <td className="px-3 py-3 text-center font-mono text-[11px] text-text-subtle">{String(index + 1).padStart(2, "0")}</td>
@@ -183,13 +168,12 @@ export function AttackerTable() {
                   </td>
                   <td className="px-3 py-3">
                     <div className="min-w-0">
-                      <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover" role="meter" aria-label={`${source.ip} activity`} aria-valuemin={0} aria-valuemax={maxEvents} aria-valuenow={source.eventCount}>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover" role="meter" aria-label={`${source.ip} sessions`} aria-valuemin={0} aria-valuemax={maxSessions} aria-valuenow={source.sessionCount}>
                         <span className="block h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${activityPercent}%` }} />
                       </div>
-                      <span className="mt-1.5 block font-mono text-[11px] tabular-nums text-text">{source.eventCount.toLocaleString()} event{source.eventCount === 1 ? "" : "s"}</span>
+                      <span className="mt-1.5 block font-mono text-[11px] tabular-nums text-text">{source.sessionCount.toLocaleString()} session{source.sessionCount === 1 ? "" : "s"}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-3"><SeverityBadge severity={source.severity} className="text-[10px]" /></td>
                 </tr>
               );
             })}
