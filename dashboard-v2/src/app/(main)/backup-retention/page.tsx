@@ -9,7 +9,6 @@ import {
 
 import { BackupSourceMap } from "@/components/dashboard/BackupSourceMap";
 import { BackupScheduleSettings } from "@/components/dashboard/BackupScheduleSettings";
-import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
 
 export default function BackupRetentionPage() {
   const reduceMotion = useReducedMotion();
@@ -43,8 +42,6 @@ export default function BackupRetentionPage() {
       <BackupScheduleSettings />
 
       <BackupSourceMap />
-
-      <HardwareBackupStatus />
     </div>
   );
 }

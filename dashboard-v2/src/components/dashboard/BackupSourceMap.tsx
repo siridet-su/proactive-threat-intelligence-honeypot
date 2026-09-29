@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
   Archive,
   CheckCircle2,
+  ChevronDown,
   CircleDashed,
   Clock3,
   Cloud,
@@ -22,6 +23,8 @@ import {
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
+import { HardwareBackupStatus } from "@/components/dashboard/HardwareBackupStatus";
 
 import {
   isBackupTargetOverview,
@@ -235,6 +238,8 @@ export function BackupSourceMap() {
   const [overview, setOverview] = useState<BackupTargetOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [showHardwareDetails, setShowHardwareDetails] = useState(false);
+  const [showOperationalDetails, setShowOperationalDetails] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -361,8 +366,45 @@ export function BackupSourceMap() {
             </tbody>
           </table>
         </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-3 sm:px-5">
+          <button
+            type="button"
+            className="ui-button min-h-9 gap-2 px-3 text-xs"
+            aria-expanded={showHardwareDetails}
+            onClick={() => setShowHardwareDetails((value) => !value)}
+          >
+            <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+            Hardware actions &amp; history
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showHardwareDetails ? "rotate-180" : ""}`} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="ui-button min-h-9 gap-2 px-3 text-xs"
+            aria-expanded={showOperationalDetails}
+            onClick={() => setShowOperationalDetails((value) => !value)}
+          >
+            <Activity className="h-3.5 w-3.5" aria-hidden="true" />
+            Activity, recovery &amp; policy
+            {overview && overview.worker.attention_count > 0 && <span className="ui-badge border-warning-border bg-warning-subtle text-warning">{overview.worker.attention_count} open</span>}
+            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showOperationalDetails ? "rotate-180" : ""}`} aria-hidden="true" />
+          </button>
+        </div>
       </section>
-      <BackupIntelligence overview={overview} loading={loading} />
+      <AnimatePresence initial={false}>
+        {showHardwareDetails && (
+          <motion.div key="hardware-details" initial={reduceMotion ? false : { opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
+            <HardwareBackupStatus />
+          </motion.div>
+        )}
+        {showOperationalDetails && (
+          <motion.div key="operational-details" initial={reduceMotion ? false : { opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }} transition={{ duration: 0.18 }}>
+            <BackupIntelligence overview={overview} loading={loading} onOpenHardware={() => {
+              setShowHardwareDetails(true);
+              setShowOperationalDetails(false);
+            }} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.section>
   );
 }
@@ -482,7 +524,7 @@ function DailyManifestStrip({ days, title }: { days: HardwareBackupDay[] | undef
   );
 }
 
-function BackupIntelligence({ overview, loading }: { overview: BackupTargetOverview | null; loading: boolean }) {
+function BackupIntelligence({ overview, loading, onOpenHardware }: { overview: BackupTargetOverview | null; loading: boolean; onOpenHardware: () => void }) {
   if (loading && !overview) {
     return (
       <div className="grid gap-4 pt-1 lg:grid-cols-2" aria-busy="true" aria-label="Loading backup details">
@@ -540,7 +582,7 @@ function BackupIntelligence({ overview, loading }: { overview: BackupTargetOverv
                       {exception.status === "failed" && <p className="mt-1 truncate text-xs text-text-muted" title={exception.detail}>{exception.detail}</p>}
                     </div>
                     {exception.action_supported ? (
-                      <a href="#hardware-backup-title" className={`ui-badge shrink-0 text-xs ${presentation.className}`}>{presentation.label}</a>
+                      <button type="button" onClick={onOpenHardware} className={`ui-badge shrink-0 text-xs ${presentation.className}`} title="Open hardware actions and history">{presentation.label}</button>
                     ) : (
                       <span className={`ui-badge shrink-0 text-xs ${presentation.className}`}>{presentation.label}</span>
                     )}
