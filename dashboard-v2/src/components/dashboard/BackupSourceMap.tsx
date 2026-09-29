@@ -26,6 +26,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   isBackupTargetOverview,
   type BackupTargetCoverage,
+  type HardwareBackupDay,
   type BackupTargetId,
   type BackupTargetOverview,
   type BackupTargetStatus,
@@ -274,7 +275,7 @@ export function BackupSourceMap() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 id="backup-sources-title" className="text-lg font-semibold tracking-tight">Archive sources</h2>
-          <p className="mt-1 text-sm text-text-muted">Compare backup coverage and data volume across collections.</p>
+          <p className="mt-1 text-sm text-text-muted">Compare daily checks, archived days, and data volume across all three sources.</p>
         </div>
         <span className="ui-badge w-fit text-xs" aria-live="polite">
           {error ? <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" /> : <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -286,7 +287,7 @@ export function BackupSourceMap() {
         <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div>
             <h3 id="source-coverage-title" className="text-sm font-semibold">Current archive coverage</h3>
-            <p className="mt-0.5 text-xs text-text-muted">29 eligible UTC days after the two-day safety hold. A completed empty check creates no archive object.</p>
+            <p className="mt-0.5 text-xs text-text-muted">29 eligible UTC days after the two-day safety hold. Each row shows its own daily manifest status.</p>
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-text-muted" aria-label="Coverage status legend">
             <LegendDot className="bg-success" label="Archived" />
@@ -314,7 +315,7 @@ export function BackupSourceMap() {
                 const coverage = target?.state === "active" ? target.coverage : undefined;
                 const coverageState = coveragePresentation(target);
                 const checkedPercent = coverage && coverage.expected_days > 0
-                  ? Math.round((coverage.archived_days / coverage.expected_days) * 100)
+                  ? Math.round((coverage.successful_days / coverage.expected_days) * 100)
                   : 0;
                 return (
                   <tr key={targetId} className="align-middle transition-colors hover:bg-surface-subtle/45">
@@ -339,9 +340,10 @@ export function BackupSourceMap() {
                     <td className="px-3 py-3">
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="font-mono text-base font-semibold text-text">{coverage ? `${checkedPercent}%` : "—"}</span>
-                        <span className={`text-xs ${coverageState.className}`}>{coverage ? `${coverage.archived_days}/${coverage.expected_days} days` : coverageState.label}</span>
+                        <span className={`text-xs ${coverageState.className}`}>{coverage ? `${coverage.successful_days}/${coverage.expected_days} checked` : coverageState.label}</span>
                       </div>
                       <CoverageRail coverage={coverage} />
+                      {target?.state === "active" && <DailyManifestStrip days={target.days} title={title} />}
                       {coverage?.failed_days ? <p className="mt-1 text-xs text-danger">{coverage.failed_days} failed</p> : null}
                       {coverage?.missing_days ? <p className="mt-1 text-xs text-warning">{coverage.missing_days} missing</p> : null}
                     </td>
@@ -452,6 +454,30 @@ function CoverageRail({ coverage }: { coverage: BackupTargetCoverage | undefined
       <span className="bg-danger" style={{ width: width(coverage.failed_days) }} title={`${coverage.failed_days} failed`} />
       <span className="bg-info" style={{ width: width(coverage.running_days) }} title={`${coverage.running_days} running`} />
       <span className="bg-warning" style={{ width: width(coverage.missing_days) }} title={`${coverage.missing_days} missing`} />
+    </div>
+  );
+}
+
+function DailyManifestStrip({ days, title }: { days: HardwareBackupDay[] | undefined; title: string }) {
+  if (!days?.length) return null;
+  const tone = (day: HardwareBackupDay) => {
+    if (day.status === "failed") return "bg-danger";
+    if (day.status === "running") return "bg-info";
+    if (day.status === "missing") return "bg-warning";
+    return day.object_name ? "bg-success" : "bg-text-subtle/50";
+  };
+  const label = (day: HardwareBackupDay) => {
+    if (day.status !== "success") return day.status;
+    return day.object_name ? "archived" : "empty check";
+  };
+  return (
+    <div
+      className="mt-2 grid gap-0.5"
+      style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}
+      role="list"
+      aria-label={`${title}: daily manifest status from ${days[0].day} to ${days.at(-1)?.day}`}
+    >
+      {days.map((day) => <span key={day.day} role="listitem" aria-label={`${day.day}: ${label(day)}`} className={`h-3 rounded-[2px] ${tone(day)}`} title={`${day.day}: ${label(day)}`} />)}
     </div>
   );
 }

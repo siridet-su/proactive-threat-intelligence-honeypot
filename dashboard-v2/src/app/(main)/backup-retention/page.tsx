@@ -42,9 +42,9 @@ export default function BackupRetentionPage() {
 
       <BackupScheduleSettings />
 
-      <HardwareBackupStatus />
-
       <BackupSourceMap />
+
+      <HardwareBackupStatus />
     </div>
   );
 }

@@ -364,18 +364,7 @@ export function buildBackupTargetCoverage(
   bucket: string | null = null,
   legacyBucket: string | null = null,
 ): BackupTargetCoverage {
-  const manifests = new Map<string, HardwareBackupDay>();
-  for (const document of documents) {
-    if (manifestTargetId(document) !== targetId || !manifestBelongsToBucket(document, bucket, legacyBucket)) continue;
-    const day = manifestDay(document);
-    if (day && (!manifests.has(day.day) || bucketName(document.bucket))) manifests.set(day.day, day);
-  }
-
-  const days: HardwareBackupDay[] = [];
-  for (let day = window.from; day <= window.to; day = addUtcDays(day, 1)) {
-    days.push(expectedDay(day, manifests.get(dayKey(day))));
-  }
-
+  const days = buildBackupTargetDays(documents, targetId, window, bucket, legacyBucket);
   const successfulDays = days.filter((day) => day.status === "success");
   const archivedDays = successfulDays.filter((day) => day.object_name !== null);
   const failedDays = days.filter((day) => day.status === "failed");
@@ -406,6 +395,27 @@ export function buildBackupTargetCoverage(
     last_completed_at: latestDate(days, "completed_at"),
     latest_run_status: latestRun?.status ?? null,
   };
+}
+
+export function buildBackupTargetDays(
+  documents: Document[],
+  targetId: BackupTargetId,
+  window = getHardwareBackupWindow(),
+  bucket: string | null = null,
+  legacyBucket: string | null = null,
+): HardwareBackupDay[] {
+  const manifests = new Map<string, HardwareBackupDay>();
+  for (const document of documents) {
+    if (manifestTargetId(document) !== targetId || !manifestBelongsToBucket(document, bucket, legacyBucket)) continue;
+    const day = manifestDay(document);
+    if (day && (!manifests.has(day.day) || bucketName(document.bucket))) manifests.set(day.day, day);
+  }
+
+  const days: HardwareBackupDay[] = [];
+  for (let day = window.from; day <= window.to; day = addUtcDays(day, 1)) {
+    days.push(expectedDay(day, manifests.get(dayKey(day))));
+  }
+  return days;
 }
 
 export function buildBackupTargetExceptions(
@@ -775,6 +785,7 @@ export async function getBackupTargetOverview(): Promise<BackupTargetOverview> {
       last_seen_at: dateValue(statusDocument?.last_seen_at),
       last_completed_at: coverage.last_completed_at,
       coverage,
+      days: buildBackupTargetDays(manifestDocuments, target.target_id, window, bucket, legacyBucket),
     };
   });
 
