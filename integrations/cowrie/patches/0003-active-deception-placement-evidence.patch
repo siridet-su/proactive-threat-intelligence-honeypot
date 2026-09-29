@@ -1,0 +1,64 @@
+diff --git a/src/cowrie/shell/phase_adaptive.py b/src/cowrie/shell/phase_adaptive.py
+--- a/src/cowrie/shell/phase_adaptive.py
++++ b/src/cowrie/shell/phase_adaptive.py
+@@ -100,7 +100,7 @@
+ 
+ 
+ def on_track_response(fs, client_ip: str, username: str, uid: int, gid: int,
+-                       phase: str | None) -> None:
++                       phase: str | None, protocol=None) -> None:
+     """เรียกจาก callback ของ `/v1/track` response (ดู cat.py/psql.py::_report_command()) —
+     ไม่ยก exception ออกไปเด็ดขาด (ต้องไม่ทำให้คำสั่งปัจจุบันพัง — เหมือนเจตนาเดิมของ fire-and-forget)
+ 
+@@ -136,12 +136,13 @@
+             if p in fs._phase2_inflight_phases:  # type: ignore[attr-defined]
+                 continue  # phase นี้กำลังรอ response รอบก่อนอยู่แล้ว ไม่ยิงซ้อน
+             fs._phase2_inflight_phases.add(p)  # type: ignore[attr-defined]
+-            _fetch_and_place(fs, client_ip, username, uid, gid, p)
++            _fetch_and_place(fs, client_ip, username, uid, gid, p, protocol)
+     except Exception as e:
+         tlog.msg(f"phase_adaptive: on_track_response failed: {e}")
+ 
+ 
+-def _fetch_and_place(fs, client_ip: str, username: str, uid: int, gid: int, phase: str) -> None:
++def _fetch_and_place(fs, client_ip: str, username: str, uid: int, gid: int,
++                     phase: str, protocol=None) -> None:
+     def _on_data(data: dict) -> None:
+         fs._phase2_inflight_phases.discard(phase)  # type: ignore[attr-defined]
+         for p in data.get("placements", []):
+@@ -157,6 +158,23 @@
+                 _place_one(fs, p, uid, gid, username)
+                 fs._phase2_placed_paths.add(path)  # type: ignore[attr-defined]
++                # Durable, content-free proof that this exact Cowrie session
++                # received the placement. Prepared phase_content alone is
++                # not evidence that a session received the decoy.
++                event = {
++                    "eventid": "cowrie.deception.decoy_placed",
++                    "path": path,
++                    "phase": phase,
++                    "content_type": p.get("content_type") or p.get("door") or "",
++                    "placement_type": p.get("type") or "file",
++                    "format": "Placed deception content at %(path)s",
++                }
++                # The async callback must dispatch through the active protocol
++                # so Cowrie supplies exact session/source binding.
++                if protocol is not None:
++                    protocol.logDispatch(**event)
++                else:
++                    tlog.msg(**event)
+             except Exception as e:
+                 tlog.msg(f"phase_adaptive: place failed for {path}: {e}")
+         if data.get("all_ready"):
+             fs._phase2_done_phases.add(phase)  # type: ignore[attr-defined]
+diff --git a/src/cowrie/shell/track_helper.py b/src/cowrie/shell/track_helper.py
+--- a/src/cowrie/shell/track_helper.py
++++ b/src/cowrie/shell/track_helper.py
+@@ -85,7 +85,7 @@
+         except Exception:
+             pass
+         phase_adaptive.on_track_response(
+             protocol.fs, client_ip, protocol.user.username,
+-            protocol.user.uid, protocol.user.gid, data.get("phase"),
++            protocol.user.uid, protocol.user.gid, data.get("phase"), protocol,
+         )
+         extra_delay_ms = data.get("extra_delay_ms") or 0

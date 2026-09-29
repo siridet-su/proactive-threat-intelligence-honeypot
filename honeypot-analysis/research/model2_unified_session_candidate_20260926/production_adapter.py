@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 CAPTURE_CONTRACT = "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"
+SESSION_SOCKET_CAPTURE_CONTRACT = "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2"
 
 
 class ProductionAdapterError(ValueError):
@@ -42,7 +43,7 @@ def build_envelope(
     identity: Mapping[str, str],
     capture_contract: str,
 ) -> dict[str, Any]:
-    if capture_contract != CAPTURE_CONTRACT:
+    if capture_contract not in {CAPTURE_CONTRACT, SESSION_SOCKET_CAPTURE_CONTRACT}:
         raise ProductionAdapterError("outcome_independent_capture_required")
     if len(events) != len(event_hashes) or not events:
         raise ProductionAdapterError("event_hash_cardinality_mismatch")

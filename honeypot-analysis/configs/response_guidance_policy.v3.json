@@ -1,8 +1,8 @@
 {
   "schema_version": "response_guidance_policy.v3",
   "policy_id": "cowrie-observed-evidence-response-guidance",
-  "version": "3.7.0",
-  "updated_at": "2026-09-16",
+  "version": "4.0.0",
+  "updated_at": "2026-09-29",
   "review_expires_at": "2027-07-16",
   "owner": "honeypot-production",
   "automatic_execution": false,
@@ -165,6 +165,58 @@
     "correlate-observed-execution-attempt": {
       "supports": ["manual correlation of an observed execution-attempt event"],
       "does_not_support": ["proof of execution success", "compromise, persistence, or automatic execution"]
+    },
+    "review-same-path-file-change": {
+      "supports": ["manual review of reported successful file-write or permission-change commands grouped by one resolved path"],
+      "does_not_support": ["proof of a real-host change", "automatic file modification or response"]
+    },
+    "review-observed-file-change": {
+      "supports": ["human-led file audit and change-record corroboration"],
+      "does_not_support": ["proof of compromise or intent", "automatic action"]
+    },
+    "review-same-path-execution-delete": {
+      "supports": ["manual review of a supported same-path execution-attempt then deletion-command sequence"],
+      "does_not_support": ["proof of cleanup intent", "proof of real-host execution or deletion"]
+    },
+    "review-observed-file-lifecycle": {
+      "supports": ["human-led process and file audit corroboration"],
+      "does_not_support": ["automatic containment", "proof that a file was executed or deleted on a real host"]
+    },
+    "review-failed-login-then-success": {
+      "supports": ["manual authentication-log review for repeated Cowrie failures followed by success"],
+      "does_not_support": ["proof of brute force", "automatic account or network action"]
+    },
+    "review-authentication-sequence": {
+      "supports": ["human-led SSH, VPN, and authentication-log correlation"],
+      "does_not_support": ["proof of credential compromise", "automatic blocking"]
+    },
+    "review-unverified-remote-content": {
+      "supports": ["manual proxy and HTTP-log review for an observed URL request without confirmed receipt"],
+      "does_not_support": ["proof that a download succeeded or failed", "automatic URL blocking"]
+    },
+    "review-requested-url-delivery": {
+      "supports": ["human-led URL and session-window correlation"],
+      "does_not_support": ["proof of file receipt", "automatic response"]
+    },
+    "review-download-execution-attempt": {
+      "supports": ["manual process and audit correlation for a downloaded artifact path or hash followed by an execution attempt"],
+      "does_not_support": ["proof of completed execution", "automatic containment"]
+    },
+    "review-downloaded-artifact-execution": {
+      "supports": ["human-led artifact path and hash correlation"],
+      "does_not_support": ["proof of execution effects", "automatic action"]
+    },
+    "review-file-change-then-remove": {
+      "supports": ["manual file-audit review for a same-path change followed by deletion or movement"],
+      "does_not_support": ["proof of trace-removal intent", "automatic file action"]
+    },
+    "review-changed-artifact-removal": {
+      "supports": ["human-led file audit and approved change-record correlation"],
+      "does_not_support": ["proof of resulting real-host state", "automatic response"]
+    },
+    "review-deception-path-interaction": {
+      "supports": ["manual review of an exact-session decoy placement followed by an exact-path Cowrie command"],
+      "does_not_support": ["proof of successful access or deception", "attacker intent", "automatic response"]
     }
   },
   "finding_rules": [
@@ -520,6 +572,112 @@
           }
         }
       ]
+    },
+    {
+      "rule_id": "review-same-path-file-change",
+      "semantic_family": "filesystem",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"activated_semantic_families": ["filesystem"], "any_operation_types": ["file_write", "permission_modify"], "required_outcome_statuses": ["reported_success"], "resolved_path_group": true},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["G1 text approved on 2026-09-28", "One linkable resolved path and reported successful Cowrie facts are required"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-28", "last_reviewed": "2026-09-28", "review_expires_at": "2027-09-28", "version": "3.8.0"},
+      "actions": [{
+        "action_id": "review-observed-file-change", "priority": 18,
+        "action": "Review authorized file audit, file permissions, and approved change records for the observed path and session time window.",
+        "rationale": "Cowrie reported a file write or permission change on a resolved path; effects on a real host are not established.",
+        "source_type": "trusted_control_guidance", "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["G1 review only; no host action", "Path-scoped fact grouping prevents duplicate actions"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-28", "last_reviewed": "2026-09-28", "review_expires_at": "2027-09-28", "version": "3.8.0"}
+      }]
+    },
+    {
+      "rule_id": "review-same-path-execution-delete",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"same_path_operation_sequence": ["execution_attempt", "file_delete"], "required_outcome_statuses": ["reported_success"]},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["G2 text approved on 2026-09-28", "Supported same-path chronological relationship is required"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-28", "last_reviewed": "2026-09-28", "review_expires_at": "2027-09-28", "version": "3.8.0"},
+      "actions": [{
+        "action_id": "review-observed-file-lifecycle", "priority": 19,
+        "action": "Review authorized process and file audit with approved change records for the same path and time window.",
+        "rationale": "Cowrie observed a supported execution-attempt then deletion-command sequence on one path; cleanup intent and real-host effects are not established.",
+        "source_type": "trusted_control_guidance", "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["G2 review only; no host action", "Canonical same-path relationship and chronology are mandatory"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-28", "last_reviewed": "2026-09-28", "review_expires_at": "2027-09-28", "version": "3.8.0"}
+      }]
+    },
+    {
+      "rule_id": "review-failed-login-then-success",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"hypothesis_scopes": ["bounded_cowrie_failed_login_then_success"]},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["At least two linked login failures must precede a success", "A Cowrie authentication sequence does not prove brute force"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"},
+      "actions": [{
+        "action_id": "review-authentication-sequence", "priority": 14,
+        "action": "Check authorized SSH, VPN, and authentication logs for source {src_ip} in the Cowrie session time window.",
+        "rationale": "Repeated Cowrie login failures followed by success support a bounded authentication review; they do not by themselves establish brute-force activity or credential compromise.",
+        "source_type": "trusted_control_guidance", "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["Review only; no automatic account or network action", "Single failures cannot select this action"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"}
+      }]
+    },
+    {
+      "rule_id": "review-unverified-remote-content",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "cisa-small-business"],
+      "applies_when": {"hypothesis_scopes": ["bounded_cowrie_unverified_remote_content"]},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["A parseable remote-content request is present without a bound direct download event", "Missing receipt evidence does not prove failure"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"},
+      "actions": [{
+        "action_id": "review-requested-url-delivery", "priority": 15,
+        "action": "Review authorized proxy and HTTP logs for the observed URL and Cowrie session time window: {urls}.",
+        "rationale": "No bound direct download event confirms receipt of the requested content; absence of that event does not prove the request failed.",
+        "source_type": "trusted_control_guidance", "references": ["mitre-t1105", "cisa-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["URL-scoped manual review", "No transfer success or failure claim"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"}
+      }]
+    },
+    {
+      "rule_id": "review-download-execution-attempt",
+      "source_type": "trusted_control_guidance",
+      "references": ["mitre-t1105", "mitre-t1059", "cisa-small-business"],
+      "applies_when": {"hypothesis_scopes": ["bounded_cowrie_download_then_execution_attempt"]},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["A direct download observation and later same-path execution attempt are required", "Cowrie chronology does not prove completed execution"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"},
+      "actions": [{
+        "action_id": "review-downloaded-artifact-execution", "priority": 16,
+        "action": "Review authorized process and audit telemetry for the observed artifact hash or path and Cowrie session time window: {artifact_hashes}; {executed_paths}.",
+        "rationale": "A bound download-to-execution-attempt sequence supports manual correlation only; completed execution and effects on a real host are not established.",
+        "source_type": "trusted_control_guidance", "references": ["mitre-t1105", "mitre-t1059", "cisa-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["Hash/path-scoped review only", "No automatic containment"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"}
+      }]
+    },
+    {
+      "rule_id": "review-file-change-then-remove",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"hypothesis_scopes": ["bounded_cowrie_file_change_then_remove"]},
+      "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["An exact same-path change followed by deletion or movement is required", "The sequence does not prove trace-removal intent"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"},
+      "actions": [{
+        "action_id": "review-changed-artifact-removal", "priority": 17,
+        "action": "Review authorized file audit and approved change records for the observed path and Cowrie session time window: {modified_paths}; {deleted_paths}.",
+        "rationale": "A same-path change followed by deletion or movement supports a bounded file-lifecycle review; trace-removal intent and resulting real-host state are not established.",
+        "source_type": "trusted_control_guidance", "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_approved_bounded_guidance", "basis": ["Path-scoped manual review only", "No automatic file action"], "author": "project-policy-maintainer", "reviewer": "project-owner-approved-text", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "3.9.0"}
+      }]
+    },
+    {
+      "rule_id": "review-deception-path-interaction",
+      "source_type": "trusted_control_guidance",
+      "references": ["cisa-small-business", "nist-small-business"],
+      "applies_when": {"hypothesis_scopes": ["bounded_cowrie_deception_path_interaction"]},
+      "provenance": {"method": "project_owner_requested_deception_integration", "basis": ["A durable Cowrie decoy-placement event must precede a later exact-path command in the same canonical session", "Prepared deception content alone cannot select this action"], "author": "project-policy-maintainer", "reviewer": "project-owner-requested-feature", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "4.0.0"},
+      "actions": [{
+        "action_id": "review-deception-path-interaction", "priority": 13,
+        "action": "Review the exact Cowrie command and outcome together with the Active Deception placement record for the same session, path, and time window.",
+        "rationale": "A command referenced an exact path that Cowrie had recorded as placed deception content; successful access, execution, disclosure, intent, and resulting effects remain unverified unless separately observed.",
+        "source_type": "trusted_control_guidance", "references": ["cisa-small-business", "nist-small-business"],
+        "requires_manual_approval": true, "safe_to_auto_execute": false, "execution_integration": "not_implemented",
+        "provenance": {"method": "project_owner_requested_deception_integration", "basis": ["Exact-session placement and exact-path command linkage", "Manual review only; no automatic response"], "author": "project-policy-maintainer", "reviewer": "project-owner-requested-feature", "reviewed": true, "generated": false, "created": "2026-09-29", "last_reviewed": "2026-09-29", "review_expires_at": "2027-09-29", "version": "4.0.0"}
+      }]
     }
   ]
 }

@@ -16,6 +16,7 @@ from production.ai_advisory.contracts import (
     validate_provider_output,
 )
 from production.ai_advisory.projection import (
+    POLICY_RULE_IDS,
     SEMANTIC_FAMILIES,
     build_ai_advisory_projection,
     validate_ai_advisory_projection,
@@ -39,6 +40,20 @@ RECONCILIATION_CUTOFF = {
     "received_at": "2026-08-08T00:00:00.000000+00:00",
     "event_id": "event-cutoff",
 }
+
+
+def test_ai_projection_allowlist_covers_every_reviewed_guidance_action_rule() -> None:
+    guidance_policy = json.loads(
+        (ROOT / "configs" / "response_guidance_policy.v3.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    action_rule_ids = {
+        str(rule["rule_id"])
+        for rule in guidance_policy["finding_rules"]
+        if rule.get("actions")
+    }
+    assert action_rule_ids <= POLICY_RULE_IDS
 
 
 def _report(*, command: str = "uname -a") -> dict:

@@ -2664,7 +2664,7 @@ def write_pdf_report(
         "ASN, geolocation, service exposure, and reputation are contextual attributes. They do not by themselves establish malicious intent or actor identity.",
         small,
     ))
-    story.append(_p("3.2 Provider Findings", h2))
+    story.append(_p("3.2 Provider Context", h2))
     if isinstance(external_context, dict) and external_context:
         freshness = (
             external_context.get("freshness")
@@ -2686,7 +2686,7 @@ def write_pdf_report(
         cache_count = _ti_count("source_ip_cache_records_found", "source_ip_cache_records")
         story.append(_p(
             f"Provider context: {cache_count if cache_count is not None else 'no'} source-IP lookup results; "
-            f"{_ti_count('evidence_returned', 'evidence_returned') or 0} separately linked findings. "
+            f"{_ti_count('evidence_returned', 'evidence_returned') or 0} stored provider evidence records. "
             f"{ti_status_reason_text}",
             body,
         ))
@@ -2696,7 +2696,7 @@ def write_pdf_report(
             ["Freshness", _ti_display_status(freshness.get("state"))],
             ["Last checked", _format_timestamp(latest_ti_retrieval)],
             ["Eligible observables", _ti_count("eligible_observable_count", "eligible_observables")],
-            ["Provider results", cache_count],
+            ["Source-IP provider results", cache_count],
         ]
         if external_context.get("ok") is False:
             ti_rows.append(["Projection status", "Projection unavailable"])
@@ -2709,7 +2709,7 @@ def write_pdf_report(
                 small,
             ))
 
-        provider_rows = [["Provider", "Status", "Lookup / finding", "Records", "Freshness"]]
+        provider_rows = [["Provider", "Status", "Lookup / evidence", "Records", "Freshness"]]
         provider_status = external_context.get("provider_status")
         if isinstance(provider_status, dict):
             for provider, provider_item in sorted(provider_status.items()):

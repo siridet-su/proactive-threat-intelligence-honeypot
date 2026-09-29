@@ -5,11 +5,53 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import production.api.monitor_web as monitor_web
-from production.api.security import _compact_session_guidance, session_detail_view
+from production.api.security import (
+    _compact_hypothesis_sets,
+    _compact_session_guidance,
+    session_detail_view,
+)
 import production.prediction_next_distinct_poc.dashboard_adapter as next_distinct_adapter
 
 
 SESSION_ID = "session-detail-contract"
+
+
+def test_public_hypothesis_projection_keeps_all_sets_up_to_contract_bound() -> None:
+    source = [
+        {
+            "hypothesis_set_id": f"set-{index}",
+            "question": f"question-{index}",
+            "scope": "bounded_test_scope",
+            "hypotheses": [{
+                "hypothesis_id": f"hypothesis-{index}",
+                "statement": f"statement-{index}",
+                "status": "active",
+            }],
+        }
+        for index in range(51)
+    ]
+
+    public = _compact_hypothesis_sets(source)
+
+    assert len(public) == 50
+    assert public[12]["hypothesis_set_id"] == "set-12"
+    assert public[-1]["hypothesis_set_id"] == "set-49"
+
+
+def test_hypothesis_projection_preserves_validated_explicit_deception_path() -> None:
+    paths = monitor_web._hypothesis_artifact_paths(
+        {
+            "artifact_paths": [
+                "/var/www/legacy-erp/config.php",
+                "relative/path",
+                "/tmp/bad\npath",
+            ],
+            "supporting_evidence_refs": ["placed-1", "command-1"],
+        },
+        {"entities": []},
+    )
+
+    assert paths == ["/var/www/legacy-erp/config.php"]
 
 
 class DetailStorage:

@@ -2138,8 +2138,15 @@ def _hypothesis_artifact_paths(
 ) -> List[str]:
     """Project only resolved canonical paths that bind to this hypothesis."""
 
+    explicit_paths = {
+        _text(value)
+        for value in hypothesis.get("artifact_paths") or []
+        if _text(value).startswith("/")
+        and all(ord(char) >= 32 for char in _text(value))
+        and len(_text(value)) <= 512
+    }
     if not isinstance(canonical_evidence, dict):
-        return []
+        return sorted(explicit_paths)
     evidence_refs = {
         _text(value)
         for value in hypothesis.get("supporting_evidence_refs") or []
@@ -2147,7 +2154,7 @@ def _hypothesis_artifact_paths(
     }
     if not evidence_refs:
         return []
-    paths = set()
+    paths = set(explicit_paths)
     for entity in canonical_evidence.get("entities") or []:
         if not isinstance(entity, dict):
             continue

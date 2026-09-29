@@ -46,7 +46,11 @@ def run(
     low, high = float(request["window_start_epoch"]), float(request["window_end_epoch"])
     if high <= low or high - low > 3600:
         raise V7BoundaryError("offline_window_invalid")
-    episode_mode = request.get("capture_selection") == "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"
+    capture_selection = request.get("capture_selection")
+    episode_mode = capture_selection in {
+        "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+        "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2",
+    }
     tuple_field = "episode_tuples" if episode_mode else "transfer_tuples"
     transfer_tuples = [exact_tuple(value, tuple_field[:-1]) for value in request.get(tuple_field, [])]
     if any(not transfer_tuple_allowed(value) for value in transfer_tuples):
@@ -118,7 +122,6 @@ def run(
             "flows": selected,
             "transfer_packet_count": len(transfer_packets),
             "capture_selection": (
-                "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"
-                if episode_mode else "FILE_DOWNLOAD_BOUND_COMPATIBILITY_V1"
+                capture_selection if episode_mode else "FILE_DOWNLOAD_BOUND_COMPATIBILITY_V1"
             ),
         }

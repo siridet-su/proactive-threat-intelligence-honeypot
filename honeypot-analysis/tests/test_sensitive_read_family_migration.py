@@ -205,7 +205,16 @@ def test_resolved_successful_read_commands_select_the_family(
         finding["finding_type"]
         for finding in report["behavioral_findings"]
     }
-    assert report["hypothesis_sets"] == []
+    assert len(report["hypothesis_sets"]) == 1
+    hypothesis_set = report["hypothesis_sets"][0]
+    assert hypothesis_set["scope"] == "bounded_cowrie_credential_path_access"
+    assert hypothesis_set["question"] == (
+        "What explains the credential-related path access observed in this session?"
+    )
+    assert hypothesis_set["basis_finding_ids"]
+    assert hypothesis_set["basis_fact_ids"] == []
+    assert hypothesis_set["outcome_status"] == "reported_success"
+    assert len(hypothesis_set["hypotheses"]) == 2
     assert "review-credential-exposure-and-reuse" in {
         action["action_id"]
         for action in report["response_guidance_v3"]["advisory_actions"]

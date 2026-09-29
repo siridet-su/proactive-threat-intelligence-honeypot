@@ -43,6 +43,29 @@ class V7SanitizerRegressionTests(unittest.TestCase):
         self.assertIn('re.fullmatch(r"[0-9a-f]{64}", digest)', source)
         self.assertIn('event["eventid"] == "cowrie.session.file_download"', source)
 
+    def test_episode_window_has_bounded_six_minute_limit(self):
+        tree = ast.parse(RUNTIME.read_text(encoding="utf-8"))
+        limits = [
+            node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "MAX_EPISODE_WINDOW_SECONDS" for target in node.targets)
+            and isinstance(node.value, ast.Constant)
+        ]
+        self.assertEqual(limits, [360.0])
+        comparisons = [
+            node for node in ast.walk(tree)
+            if isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.BinOp)
+            and isinstance(node.left.op, ast.Sub)
+            and isinstance(node.left.left, ast.Name) and node.left.left.id == "window_end"
+            and isinstance(node.left.right, ast.Name) and node.left.right.id == "window_start"
+        ]
+        self.assertEqual(len(comparisons), 1)
+        self.assertEqual([type(op) for op in comparisons[0].ops], [ast.Gt])
+        self.assertIsInstance(comparisons[0].comparators[0], ast.Name)
+        self.assertEqual(comparisons[0].comparators[0].id, "MAX_EPISODE_WINDOW_SECONDS")
+
 
 if __name__ == "__main__":
     unittest.main()

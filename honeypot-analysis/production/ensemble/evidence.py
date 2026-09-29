@@ -37,6 +37,10 @@ MODEL2_UNIFIED54_RESULT_SCHEMA = "model2_unified_54f_experimental_shadow_result.
 MODEL2_UNIFIED54_ARTIFACT_SHA256 = "fb56940ba2ca90c0942813168d9f5a85cb80a58da5c62e2dd7e343da5f71d5fa"
 MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256 = "28cc1a43e59259c5939dacdb889cdbe4e13fbdaa71b197264e27907a071d13c1"
 MODEL2_UNIFIED54_VERSION = "MODEL2_UNIFIED_54F_CONTROLLED_SYNTHETIC_POC_20260927_V3"
+MODEL2_UNIFIED54_CAPTURE_CONTRACTS = frozenset({
+    "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+    "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2",
+})
 
 
 def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
@@ -47,7 +51,7 @@ def expected_v5_artifact_sha256(value: Mapping[str, Any]) -> str:
         if (actual != MODEL2_UNIFIED54_ARTIFACT_SHA256
                 or value.get("quality_status") != "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY"
                 or value.get("source_feature_contract_sha256") != MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256
-                or value.get("capture_selection") != "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"):
+                or value.get("capture_selection") not in MODEL2_UNIFIED54_CAPTURE_CONTRACTS):
             raise EnsembleContractError("unified 54F Model2 identity/capture mismatch")
         return MODEL2_UNIFIED54_ARTIFACT_SHA256
     if version == MODEL2_BACKEND_POC_VERSION:

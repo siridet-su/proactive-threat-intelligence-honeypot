@@ -41,7 +41,7 @@ from v7_direct_ingress import (  # noqa: E402
     DIRECT_PI_INGRESS, PROXY_INGRESS, ingress_profile, select_direct_packets,
     validate_direct_metadata,
 )
-from v7_transfer_binding import transfer_tuple_allowed  # noqa: E402
+from v7_transfer_binding import model_feature_events, transfer_tuple_allowed  # noqa: E402
 from v7_sensor_binding import bound_scan_observation, select_bound_sensor_tuples, unbound_sensor_context_present  # noqa: E402
 from model2_backend_poc_runtime import load_backend_poc, infer_backend_poc  # noqa: E402
 from model2_unified_session_candidate_20260926.production_adapter import (  # noqa: E402
@@ -68,6 +68,10 @@ BACKEND_PORT = 2298
 SENSOR_PORTS = frozenset({80, 443, 445, 3306})
 TRANSFER_SOURCE = "192.168.89.112"
 MAX_OFFLINE_RESPONSE = 512 * 1024
+# Allow a bounded six-minute interactive episode without truncating evidence.
+# Missing/overwritten packet evidence and longer episodes remain unavailable.
+MAX_EPISODE_WINDOW_SECONDS = 360.0
+SESSION_SOCKET_CAPTURE_CONTRACT = "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2"
 UNIFIED54_ROOT = HERE.parents[2] / "research" / "model2_unified_session_candidate_20260926"
 UNIFIED54_ARTIFACT = UNIFIED54_ROOT / "controlled_poc_output" / "MODEL2_UNIFIED_CONTROLLED_POC_ARTIFACT.v1.json"
 UNIFIED54_SCHEMA = UNIFIED54_ROOT / "FEATURE_SCHEMA.v1.json"
@@ -102,6 +106,21 @@ def sanitized_v7_event(raw: Mapping[str, Any]) -> dict[str, Any]:
         if not re.fullmatch(r"[0-9a-f]{64}", digest):
             raise V7BoundaryError("download_request_projection_invalid")
         event["download_request_sha256"] = digest
+    if event["eventid"] == "cowrie.session.outbound_connection" and "outbound_src_ip" in raw:
+        candidate = exact_tuple({
+            "src_ip": raw.get("outbound_src_ip"),
+            "src_port": raw.get("outbound_src_port"),
+            "dst_ip": raw.get("outbound_dst_ip"),
+            "dst_port": raw.get("outbound_dst_port"),
+        }, "outbound_socket")
+        if not transfer_tuple_allowed(candidate):
+            raise V7BoundaryError("outbound_socket_boundary_invalid")
+        event.update({
+            "outbound_src_ip": candidate["src_ip"],
+            "outbound_src_port": candidate["src_port"],
+            "outbound_dst_ip": candidate["dst_ip"],
+            "outbound_dst_port": candidate["dst_port"],
+        })
     return event
 
 
@@ -267,7 +286,7 @@ class Coordinator(v6.Coordinator):
         return candidates
 
     def _episode_tuples(self, raw_candidates: Any, contract: Any) -> list[dict[str, Any]]:
-        if contract != "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1":
+        if contract not in {UNIFIED54_CAPTURE_CONTRACT, SESSION_SOCKET_CAPTURE_CONTRACT}:
             raise V7BoundaryError("episode_capture_contract_invalid")
         if not isinstance(raw_candidates, list):
             raise V7BoundaryError("episode_packet_candidates_invalid")
@@ -320,7 +339,7 @@ class Coordinator(v6.Coordinator):
     def _offline(
         self, connection: socket.socket, pcap_path: pathlib.Path, *, backend: Mapping[str, Any],
         sensor_tuples: list[dict[str, Any]], episode_tuples: list[dict[str, Any]],
-        low: float, high: float,
+        low: float, high: float, capture_selection: str,
     ) -> dict[str, Any]:
         pcap = pcap_path.read_bytes()
         request_id = sha256_bytes(canonical({"pcap": sha256_bytes(pcap), "backend": dict(backend), "sensor": sensor_tuples, "episode": episode_tuples, "low": low, "high": high}))
@@ -329,7 +348,7 @@ class Coordinator(v6.Coordinator):
             "capstone_pcap_sha256": sha256_bytes(pcap), "capstone_pcap_bytes": len(pcap),
             "backend_tuple": dict(backend), "sensor_tuples": sensor_tuples,
             "episode_tuples": episode_tuples,
-            "capture_selection": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+            "capture_selection": capture_selection,
             "window_start_epoch": low, "window_end_epoch": high,
         }
         connection.settimeout(40.0)
@@ -412,9 +431,24 @@ class Coordinator(v6.Coordinator):
             if not isinstance(raw_flows, list) or len(raw_flows) > v6.MAX_FLOW_ROWS:
                 raise V7BoundaryError("live_flow_candidates_invalid")
             live_flows = [sanitize_flow(item) for item in raw_flows]
-            episode_tuples = self._episode_tuples(
-                body.get("episode_packet_tuples"), body.get("episode_capture_contract")
-            )
+            episode_contract = body.get("episode_capture_contract")
+            if episode_contract == SESSION_SOCKET_CAPTURE_CONTRACT and body.get("completion_status") != "READY":
+                raise V7BoundaryError("session_socket_capture_incomplete")
+            episode_tuples = self._episode_tuples(body.get("episode_packet_tuples"), episode_contract)
+            if episode_contract == SESSION_SOCKET_CAPTURE_CONTRACT:
+                receipt_tuples = [
+                    exact_tuple({
+                        "src_ip": event.get("outbound_src_ip"),
+                        "src_port": event.get("outbound_src_port"),
+                        "dst_ip": event.get("outbound_dst_ip"),
+                        "dst_port": event.get("outbound_dst_port"),
+                    }, "outbound_socket")
+                    for event in events_raw
+                    if event.get("eventid") == "cowrie.session.outbound_connection"
+                    and "outbound_src_ip" in event
+                ]
+                if sorted(receipt_tuples, key=lambda value: (value["src_ip"], value["src_port"], value["dst_ip"], value["dst_port"])) != episode_tuples:
+                    raise V7BoundaryError("session_socket_receipt_tuple_mismatch")
             pcap_path = self.root / "pcap" / f"{run_id}.capstone.pcap"
             if profile == PROXY_INGRESS:
                 sensor_tuples, unbound_sensor_context = self._sensor_tuples(
@@ -447,6 +481,7 @@ class Coordinator(v6.Coordinator):
                 connection, pcap_path, backend=base["backend"],
                 sensor_tuples=sensor_tuples, episode_tuples=episode_tuples,
                 low=capture_low, high=capture_high,
+                capture_selection=episode_contract,
             )
             pcap_evidence, zeek_evidence = dict(offline["pcap"]), dict(offline["zeek"])
             flows = [sanitize_flow(item) for item in offline["flows"]]
@@ -460,7 +495,7 @@ class Coordinator(v6.Coordinator):
             flow_starts = [float(item["ts"]) for item in flows]
             flow_ends = [float(item["ts"]) + float(item["duration"]) for item in flows]
             window_start, window_end = min([*event_epochs, *flow_starts]), max([*event_epochs, *flow_ends])
-            if window_end <= window_start or window_end - window_start > 60.0:
+            if window_end <= window_start or window_end - window_start > MAX_EPISODE_WINDOW_SECONDS:
                 raise V7BoundaryError("episode_window_invalid")
             pcap_evidence.update({
                 "source": (
@@ -472,7 +507,7 @@ class Coordinator(v6.Coordinator):
                     "ens4+ztxoocdlsi+wlan0" if profile == PROXY_INGRESS else "pi:any"
                 ),
                 "capstone_component_sha256": pcap_meta["sha256"],
-                "capture_selection": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+                "capture_selection": episode_contract,
                 "drop_count": 0,
             })
             zeek_evidence.update({"source": "pi_offline_zeek_exact_retained_pcap"})
@@ -519,8 +554,10 @@ class Coordinator(v6.Coordinator):
                 if self.model is None or self.unified54_model is None:
                     raise V7BoundaryError("shadow_model_not_loaded")
                 event_hashes = body.get("event_hashes")
-                if not isinstance(event_hashes, list):
+                if not isinstance(event_hashes, list) or len(event_hashes) != len(events_raw):
                     raise V7BoundaryError("source_event_hashes_missing")
+                # Socket receipts prove ownership but are not 54F features.
+                model_events, model_event_hashes = model_feature_events(events_raw, event_hashes)
                 identity = {
                     "source_session_id": session_id,
                     "run_id": run_id,
@@ -528,13 +565,13 @@ class Coordinator(v6.Coordinator):
                     "episode_id": episode_id,
                 }
                 unified54_envelope = build_unified54_envelope(
-                    events=events_raw,
-                    event_hashes=event_hashes,
+                    events=model_events,
+                    event_hashes=model_event_hashes,
                     flows=flows,
                     pcap_evidence=pcap_evidence,
                     zeek_evidence=zeek_evidence,
                     identity=identity,
-                    capture_contract=UNIFIED54_CAPTURE_CONTRACT,
+                    capture_contract=episode_contract,
                 )
                 candidate_result = infer_unified54_shadow(
                     unified54_envelope,
@@ -620,7 +657,7 @@ class Coordinator(v6.Coordinator):
                 "t1046_observation": t1046_observation,
                 "transfer_flow_count": len(episode_tuples),
                 "episode_flow_count": len(episode_tuples),
-                "capture_selection": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+                "capture_selection": episode_contract,
                 "binding_contract_sha256": BINDING_SHA256,
                 "canonical_write_authority": False,
             })

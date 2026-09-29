@@ -5,6 +5,7 @@ import unittest
 from model2_unified_session_candidate_20260926.pipeline import extract_features
 from model2_unified_session_candidate_20260926.production_adapter import (
     CAPTURE_CONTRACT,
+    SESSION_SOCKET_CAPTURE_CONTRACT,
     ProductionAdapterError,
     build_envelope,
 )
@@ -58,6 +59,17 @@ class ProductionAdapterTests(unittest.TestCase):
                 pcap_evidence=pcap, zeek_evidence=zeek,
                 identity=IDENTITY, capture_contract="FILE_DOWNLOAD_BOUND",
             )
+
+    def test_pre_outcome_session_socket_capture_materializes_same_feature_schema(self):
+        events, hashes, flows, pcap, zeek = inputs()
+        envelope = build_envelope(
+            events=events, event_hashes=hashes, flows=flows,
+            pcap_evidence=pcap, zeek_evidence=zeek,
+            identity=IDENTITY, capture_contract=SESSION_SOCKET_CAPTURE_CONTRACT,
+        )
+        result = extract_features(envelope, expected_identity=IDENTITY)
+        self.assertEqual(result["status"], "AVAILABLE")
+        self.assertEqual(len(result["feature_vector"]), 54)
 
     def test_missing_or_mismatched_receipts_are_rejected(self):
         events, hashes, flows, pcap, zeek = inputs()

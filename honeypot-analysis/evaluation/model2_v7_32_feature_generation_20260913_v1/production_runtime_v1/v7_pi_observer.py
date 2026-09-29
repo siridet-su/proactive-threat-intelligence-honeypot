@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shlex
 import socket
 import sys
+import threading
 import time
 from typing import Any, Mapping
 from urllib.parse import urlsplit
@@ -26,7 +28,7 @@ for candidate in (
 
 import v6_pi_observer as v6  # noqa: E402
 from v7_common import (  # noqa: E402
-    V7BoundaryError, canonical, read_rings, sanitize_flow, write_raw_pcap,
+    V7BoundaryError, canonical, exact_tuple, read_rings, sanitize_flow, write_raw_pcap,
 )
 from v7_direct_ingress import (  # noqa: E402
     DIRECT_PI_INGRESS, PROXY_INGRESS, direct_pcap_id, ingress_profile,
@@ -35,8 +37,9 @@ from v7_direct_ingress import (  # noqa: E402
 from v7_offline_zeek import SCHEMA as OFFLINE_SCHEMA, run as run_offline  # noqa: E402
 from v7_transfer_binding import (  # noqa: E402
     request_digest,
-    select_episode_tuples,
+    select_session_bound_tuples,
     select_transfer_tuples,
+    transfer_tuple_allowed,
 )
 
 
@@ -45,6 +48,7 @@ BACKEND_SOURCE = "10.58.33.6"
 BACKEND_HOST = "10.58.33.42"
 BACKEND_PORT = 2298
 MAX_RESPONSE = 256 * 1024
+SESSION_SOCKET_CAPTURE_CONTRACT = "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2"
 
 
 _v6_sanitize_event = v6.sanitize_event
@@ -170,6 +174,20 @@ def sanitize_v7_event(raw: Mapping[str, Any]) -> dict[str, Any]:
         digest = request_digest(raw)
         if digest is not None:
             event["download_request_sha256"] = digest
+    elif event["eventid"] == "cowrie.session.outbound_connection":
+        candidate = exact_tuple({
+            "src_ip": raw.get("outbound_src_ip"),
+            "src_port": raw.get("outbound_src_port"),
+            "dst_ip": raw.get("outbound_dst_ip"),
+            "dst_port": raw.get("outbound_dst_port"),
+        }, "outbound_socket")
+        if transfer_tuple_allowed(candidate):
+            event.update({
+                "outbound_src_ip": candidate["src_ip"],
+                "outbound_src_port": candidate["src_port"],
+                "outbound_dst_ip": candidate["dst_ip"],
+                "outbound_dst_port": candidate["dst_port"],
+            })
     elif event["eventid"] == COMMAND_INPUT:
         event["command_projection"] = _command_projection(raw.get("input"))
     elif event["eventid"] in AUTH_EVENTS:
@@ -215,6 +233,105 @@ class Observer(v6.Observer):
         self.work_dir = self.state_dir / "offline"
         self.zeek_bin = str(config.get("zeek_bin", "/usr/local/bin/zeek"))
 
+    def _ingest_line(self, line: bytes) -> None:
+        """Undo the base observer's in-memory append if durable enqueue fails."""
+        try:
+            super()._ingest_line(line)
+        except (v6.ObserverError, OSError) as exc:
+            if isinstance(exc, OSError) or str(exc) == "observer_queue_pressure":
+                try:
+                    event = v6.sanitize_event(json.loads(line))
+                    entries = self.state["sessions"][event["session"]]["events"]
+                    if entries and entries[-1].get("event_key") == v6.digest(event):
+                        entries.pop()
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError, v6.ObserverError):
+                    pass
+            raise
+
+    def _tail_once(self, handle):
+        """Keep the log cursor on an event until it is durably queued."""
+        if handle is None or handle.closed:
+            handle = self._open_current_log()
+        descriptor_stat = os.fstat(handle.fileno())
+        descriptor_inode = int(descriptor_stat.st_ino)
+        offset = int(self.state.get("offset", 0))
+        if int(self.state.get("inode", 0)) != descriptor_inode or offset > descriptor_stat.st_size:
+            offset = 0
+            with self.lock:
+                self.state["offset"] = 0
+                self.state["inode"] = descriptor_inode
+                self._persist_state()
+        handle.seek(offset)
+        progressed = False
+        while True:
+            line_start = handle.tell()
+            line = handle.readline(v6.MAX_LINE_BYTES + 2)
+            if not line:
+                break
+            if not line.endswith(b"\n"):
+                handle.seek(line_start)
+                break
+            with self.lock:
+                try:
+                    self._ingest_line(line)
+                except v6.ObserverError as exc:
+                    if str(exc) == "observer_queue_pressure":
+                        self.state["offset"] = line_start
+                        handle.seek(line_start)
+                        self._persist_state()
+                        return handle
+                    # Invalid complete records cannot be used as evidence.
+                except OSError:
+                    self.state["offset"] = line_start
+                    handle.seek(line_start)
+                    self._persist_state()
+                    return handle
+                self.state["offset"] = handle.tell()
+                progressed = True
+                if int(self.state["sequence"]) % v6.EVENT_PERSIST_INTERVAL == 0:
+                    self._persist_state()
+        if progressed:
+            with self.lock:
+                self._persist_state()
+        # Do not switch to a rotated pathname while the old descriptor has
+        # an unqueued event. That case returns above with its cursor intact.
+        path_stat = self.log_path.stat()
+        if int(path_stat.st_ino) != descriptor_inode:
+            handle.close()
+            handle = self.log_path.open("rb")
+            new_stat = os.fstat(handle.fileno())
+            with self.lock:
+                self.state["inode"] = int(new_stat.st_ino)
+                self.state["offset"] = 0
+                self._persist_state()
+        return handle
+
+    def _enqueue_completion(self, body: Mapping[str, Any]) -> bool:
+        """Wait for queue capacity, retaining the closed session on shutdown."""
+        while not self.stop.is_set():
+            try:
+                self._enqueue("session_complete", body)
+                return True
+            except v6.ObserverError as exc:
+                if str(exc) != "observer_queue_pressure":
+                    raise
+                self.stop.wait(1.0)
+        return False
+
+    def run(self) -> None:
+        # Rehydrate closed sessions after a restart during queue pressure.
+        with self.lock:
+            pending = [
+                (session_id, [item["event"] for item in value.get("events", [])])
+                for session_id, value in self.state["sessions"].items()
+                if isinstance(value, dict) and value.get("closed")
+            ]
+        for session_id, events in pending:
+            threading.Thread(
+                target=self._complete_session, args=(session_id, events), daemon=True
+            ).start()
+        super().run()
+
     def _flow_candidates(self, connect: Mapping[str, Any], close: Mapping[str, Any]) -> list[dict[str, Any]]:
         low = v6.parse_timestamp(connect["timestamp"]).timestamp() - 5.0
         high = v6.parse_timestamp(close["timestamp"]).timestamp() + 12.0
@@ -236,7 +353,7 @@ class Observer(v6.Observer):
         low = min(v6.parse_timestamp(item["timestamp"]).timestamp() for item in events) - 5.0
         high = max(v6.parse_timestamp(item["timestamp"]).timestamp() for item in events) + 5.0
         packets = read_rings(self.transfer_rings, low, high)
-        return select_episode_tuples(packets, low, high)
+        return select_session_bound_tuples(events, packets, v6.parse_timestamp, low, high)
 
     def _direct_ingress_pcap(
         self, session_id: str, original: Mapping[str, Any], events: list[dict[str, Any]],
@@ -263,7 +380,7 @@ class Observer(v6.Observer):
                 "zeek_flows": [],
                 "transfer_packet_tuples": [],
                 "episode_packet_tuples": [],
-                "episode_capture_contract": "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1",
+                "episode_capture_contract": SESSION_SOCKET_CAPTURE_CONTRACT,
                 "completion_status": "INCOMPLETE",
             }
             if len(connects) != 1 or len(closes) != 1:
@@ -286,17 +403,24 @@ class Observer(v6.Observer):
                         if profile == PROXY_INGRESS else []
                     )
                     body["transfer_packet_tuples"] = self._transfer_packet_tuples(events)
-                    body["episode_packet_tuples"] = self._episode_packet_tuples(events)
+                    try:
+                        body["episode_packet_tuples"] = self._episode_packet_tuples(events)
+                    except V7BoundaryError as exc:
+                        # Keep an explicit unavailable envelope rather than
+                        # dropping this session when a socket cannot be bound.
+                        body["failure_reason"] = str(exc)
                     if profile == DIRECT_PI_INGRESS:
                         body["direct_ingress_pcap"] = self._direct_ingress_pcap(
                             session_id, original, events
                         )
                     body["completion_status"] = "READY" if (
-                        body["zeek_flows"] or profile == DIRECT_PI_INGRESS
+                        not body.get("failure_reason")
+                        and (body["zeek_flows"] or profile == DIRECT_PI_INGRESS)
                     ) else "INCOMPLETE"
-                    if profile == PROXY_INGRESS and not body["zeek_flows"]:
+                    if profile == PROXY_INGRESS and not body["zeek_flows"] and not body.get("failure_reason"):
                         body["failure_reason"] = "exact_backend_zeek_flow_not_observed"
-            self._enqueue("session_complete", body)
+            if not self._enqueue_completion(body):
+                return
             with self.lock:
                 self.state["sessions"].pop(session_id, None)
                 self._persist_state()

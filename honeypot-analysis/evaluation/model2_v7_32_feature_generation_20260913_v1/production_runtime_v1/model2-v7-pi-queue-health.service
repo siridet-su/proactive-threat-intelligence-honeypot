@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Pi Model2 observer delivery queue age and capacity
+After=model2-v7-pi-observer.service
+
+[Service]
+Type=oneshot
+User=cowrie
+Group=cowrie
+ExecStart=/usr/bin/python3 /opt/model2-v7/production_runtime_v1/model2_queue_health.py --config /etc/model2-v7/observer.json --stall-seconds 120
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/opt/model2-v7/production_runtime_v1 /etc/model2-v7/observer.json /var/lib/model2-v7-observer

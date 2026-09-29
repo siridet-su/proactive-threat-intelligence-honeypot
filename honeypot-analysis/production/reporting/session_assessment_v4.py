@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -49,6 +50,7 @@ from production.reporting.typed_semantic_facts import (
     validate_typed_semantic_fact_set,
 )
 from production.reporting.typed_semantic_family_selection import (
+    INSPECTION_OPERATIONS,
     select_activated_semantic_family,
     validate_policy_output_trace,
 )
@@ -290,7 +292,41 @@ def build_canonical_evidence_snapshot(
         ),
         "direct_cowrie_events": deepcopy(
             authoritative.get("cowrie_event_evidence") or []
-        ),
+        ) + [
+            {
+                "evidence_id": stable_id("cowrie", {
+                    "session_id": source["session_id"],
+                    "index": index,
+                    "eventid": event.get("eventid"),
+                    "timestamp": event.get("timestamp"),
+                    "shasum": event.get("shasum"),
+                }),
+                "eventid": _clean(event.get("eventid")),
+                "timestamp": _clean(event.get("timestamp")),
+                "evidence_type": "direct_cowrie_event",
+                **(
+                    {
+                        "path": _clean(event.get("path")),
+                        "phase": _clean(event.get("phase")),
+                        "content_type": _clean(event.get("content_type")),
+                        "placement_type": _clean(event.get("placement_type")),
+                    }
+                    if event.get("eventid") == "cowrie.deception.decoy_placed"
+                    else {}
+                ),
+            }
+            for index, event in enumerate(source.get("raw_events") or [])
+            if isinstance(event, dict)
+            and event.get("eventid") in {
+                "cowrie.login.failed", "cowrie.login.success",
+                "cowrie.deception.decoy_placed",
+            }
+            and _clean(event.get("timestamp"))
+            and (
+                event.get("eventid") != "cowrie.deception.decoy_placed"
+                or _clean(event.get("path"))
+            )
+        ],
         "entities": deepcopy(observed.get("normalized_entities") or []),
         "relationships": deepcopy(
             authoritative.get("behavior_relationships") or []
@@ -680,15 +716,17 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
                 ],
             },
             {
-                "statement": (
+                "statement": _clean(claim.get("alternative_text")) or (
                     "No linked follow-on execution is observable in this evidence snapshot; "
                     "the activity may have failed, stopped, or continued outside Cowrie visibility."
                 ),
                 "status": "active",
                 "supporting_evidence_refs": [],
-                "falsification_conditions": [
-                    "A linked execution observation in the same evidence scope disconfirms this alternative."
-                ],
+                "falsification_conditions": (
+                    ["A bound direct transfer event or proof of a pre-existing file changes this alternative."]
+                    if _clean(claim.get("alternative_text")) else
+                    ["A linked execution observation in the same evidence scope disconfirms this alternative."]
+                ),
             },
         ]
         hypotheses = []
@@ -704,7 +742,11 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
         set_content = {"chain_id": chain_id, "hypothesis_ids": [item["hypothesis_id"] for item in hypotheses]}
         output.append({
             "hypothesis_set_id": stable_id("hypothesis_set", set_content),
-            "question": "What explains the incomplete artifact-related behavior visible in this session?",
+            "question": (
+                "What explains this bounded artifact-related sequence?"
+                if _clean(claim.get("alternative_text")) else
+                "What explains the incomplete artifact-related behavior visible in this session?"
+            ),
             "scope": "bounded_cowrie_observable_behavior",
             "relationship_refs": [chain_id] if chain_id else [],
             "alternatives_are_exhaustive": False,
@@ -712,6 +754,852 @@ def _hypothesis_sets(follow_on: Dict[str, Any]) -> List[Dict[str, Any]]:
             "hypotheses": hypotheses,
         })
     return sorted(output, key=lambda item: item["hypothesis_set_id"])
+
+
+def _credential_access_hypothesis_sets(
+    findings: List[Dict[str, Any]],
+    authority_decisions: List[Dict[str, Any]],
+    typed_fact_set: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Build one bounded credential-access question from typed observations.
+
+    A trusted sensitive-read finding supports observed-read wording.  Cowrie
+    commonly emits only ``cowrie.command.input`` for a successful shell read,
+    however, so a parsed credential-path read with an unknown outcome may
+    support a separate *attempt* hypothesis.  The latter never becomes a
+    canonical finding and never claims credential acquisition or disclosure.
+    """
+
+    trusted_ids = {
+        _clean(item.get("candidate_id"))
+        for item in authority_decisions
+        if isinstance(item, dict) and item.get("decision") == "trusted"
+    }
+    selected_findings = [
+        item
+        for item in findings
+        if isinstance(item, dict)
+        and item.get("semantic_family") == "sensitive_read"
+        and _clean(item.get("finding_id")) in trusted_ids
+    ]
+    selected_facts: List[Dict[str, Any]] = []
+    if not selected_findings:
+        for fact in typed_fact_set.get("facts") or []:
+            if not isinstance(fact, dict):
+                continue
+            operation_types = {
+                _clean(operation.get("operation_type"))
+                for operation in fact.get("operations") or []
+                if isinstance(operation, dict)
+            }
+            credential_paths = [
+                item
+                for item in (fact.get("entities") or {}).get(
+                    "credential_paths"
+                ) or []
+                if isinstance(item, dict)
+                and item.get("linkable") is True
+                and not item.get("uncertain")
+                and _clean(item.get("normalized_value"))
+            ]
+            resolved_credential_paths = [
+                item
+                for item in fact.get("path_resolutions") or []
+                if isinstance(item, dict)
+                and item.get("role") == "credential_paths"
+                and item.get("resolution_status") in {
+                    "recorded_resolved", "context_resolved"
+                }
+            ]
+            outcome_status = _clean((fact.get("outcome") or {}).get("status"))
+            if (
+                operation_types.issuperset({
+                    "credential_material_read", "file_read"
+                })
+                and (fact.get("parse") or {}).get("status") == "parsed"
+                and credential_paths
+                and resolved_credential_paths
+                and outcome_status == "outcome_unknown"
+            ):
+                selected_facts.append(fact)
+    if not selected_findings and not selected_facts:
+        return []
+
+    evidence_refs = sorted({
+        _clean(ref)
+        for item in selected_findings
+        for ref in item.get("evidence_refs") or []
+        if _clean(ref)
+    } | {
+        _clean(ref)
+        for fact in selected_facts
+        for ref in fact.get("supporting_evidence_refs") or []
+        if _clean(ref)
+    })
+    finding_ids = sorted({
+        _clean(item.get("finding_id")) for item in selected_findings
+        if _clean(item.get("finding_id"))
+    })
+    fact_ids = sorted({
+        _clean(item.get("fact_id")) for item in selected_facts
+        if _clean(item.get("fact_id"))
+    })
+    confirmed_read = bool(selected_findings)
+    alternatives = [
+        {
+            "statement": (
+                "The observed read of a credential-related path may represent "
+                "credential discovery or access preparation within the Cowrie session."
+                if confirmed_read else
+                "The observed command attempted to read a credential-related path "
+                "within the Cowrie session; command completion and access to content "
+                "are not established."
+            ),
+            "status": "active",
+            "supporting_evidence_refs": evidence_refs,
+            "falsification_conditions": [
+                "Evidence that the resolved path was not credential-related weakens this alternative.",
+                (
+                    "A Cowrie-reported failed read weakens this alternative."
+                    if confirmed_read else
+                    "A Cowrie-reported failed read disconfirms successful access but preserves the observed attempt."
+                ),
+            ],
+        },
+        {
+            "statement": (
+                "The command may be inspection of decoy filesystem content; "
+                "credential acquisition, disclosure, or subsequent use is not established."
+            ),
+            "status": "active",
+            "supporting_evidence_refs": [],
+            "falsification_conditions": [
+                "A separately linked credential-use observation in the same evidence scope disconfirms this alternative."
+            ],
+        },
+    ]
+    hypotheses = []
+    for alternative in alternatives:
+        hypotheses.append({
+            "hypothesis_id": stable_id("hypothesis", {
+                "chain_id": "",
+                "statement": alternative["statement"],
+                "evidence_refs": alternative["supporting_evidence_refs"],
+            }),
+            **alternative,
+        })
+    set_content = {
+        "chain_id": "",
+        "hypothesis_ids": [item["hypothesis_id"] for item in hypotheses],
+    }
+    return [{
+        "hypothesis_set_id": stable_id("hypothesis_set", set_content),
+        "question": (
+            "What explains the credential-related path access observed in this session?"
+            if confirmed_read else
+            "What explains the credential-related path access attempt in this session?"
+        ),
+        "scope": "bounded_cowrie_credential_path_access",
+        "relationship_refs": [],
+        "basis_finding_ids": finding_ids,
+        "basis_fact_ids": fact_ids,
+        "outcome_status": (
+            "reported_success" if confirmed_read else "outcome_unknown"
+        ),
+        "alternatives_are_exhaustive": False,
+        "alternatives_are_mutually_exclusive": False,
+        "hypotheses": hypotheses,
+    }]
+
+
+def _inspection_before_transfer_hypothesis_sets(
+    findings: List[Dict[str, Any]],
+    authority_decisions: List[Dict[str, Any]],
+    typed_fact_set: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Describe a bounded observed order, never infer preparation or intent."""
+
+    trusted_ids = {
+        _clean(item.get("candidate_id"))
+        for item in authority_decisions
+        if isinstance(item, dict) and item.get("decision") == "trusted"
+    }
+    trusted_transfer_refs = {
+        _clean(ref)
+        for item in findings
+        if isinstance(item, dict)
+        and item.get("semantic_family") == "transfer"
+        and _clean(item.get("finding_id")) in trusted_ids
+        for ref in item.get("evidence_refs") or []
+        if _clean(ref)
+    }
+    if not trusted_transfer_refs:
+        return []
+
+    def order(fact: Dict[str, Any]) -> Optional[Tuple[datetime, int]]:
+        sequence = fact.get("sequence_index")
+        timestamp = _clean(fact.get("timestamp"))
+        if type(sequence) is not int or not timestamp:
+            return None
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return (parsed, sequence) if parsed.tzinfo is not None else None
+
+    facts = [
+        item for item in typed_fact_set.get("facts") or []
+        if isinstance(item, dict) and order(item) is not None
+    ]
+    transfers = sorted(
+        (
+            fact for fact in facts
+            if fact.get("cowrie_eventid") == "cowrie.session.file_download"
+            and (fact.get("outcome") or {}).get("status") == "event_observed"
+            and any(
+                operation.get("operation_type") == "transfer_observed"
+                for operation in fact.get("operations") or []
+                if isinstance(operation, dict)
+            )
+            and trusted_transfer_refs.intersection(
+                {_clean(ref) for ref in fact.get("supporting_evidence_refs") or []}
+            )
+        ),
+        key=lambda fact: order(fact),
+    )
+    for transfer in transfers:
+        transfer_time, transfer_sequence = order(transfer)
+        preceding: Dict[str, Dict[str, Any]] = {}
+        for fact in sorted(facts, key=lambda item: order(item)):
+            fact_time, fact_sequence = order(fact)
+            if fact_time >= transfer_time or fact_sequence >= transfer_sequence:
+                continue
+            if (fact.get("parse") or {}).get("status") != "parsed":
+                continue
+            if (fact.get("outcome") or {}).get("status") not in {
+                "outcome_unknown", "reported_success"
+            }:
+                continue
+            operations = [
+                _clean(item.get("operation_type"))
+                for item in fact.get("operations") or []
+                if isinstance(item, dict)
+            ]
+            if len(operations) != 1 or operations[0] not in INSPECTION_OPERATIONS:
+                continue
+            if not fact.get("supporting_evidence_refs"):
+                continue
+            preceding.setdefault(operations[0], fact)
+        if len(preceding) < 2:
+            continue
+
+        inspection_facts = list(preceding.values())[:2]
+        evidence_refs = sorted({
+            _clean(ref)
+            for fact in [*inspection_facts, transfer]
+            for ref in fact.get("supporting_evidence_refs") or []
+            if _clean(ref)
+        })
+        alternatives = [
+            {
+                "statement": (
+                    "Two different system-inspection commands were observed before a "
+                    "session-bound Cowrie file-download event; whether those inspections "
+                    "informed the transfer is not established."
+                ),
+                "status": "active",
+                "supporting_evidence_refs": evidence_refs,
+                "falsification_conditions": [
+                    "A corrected event order or session binding that separates these observations disconfirms this sequence."
+                ],
+            },
+            {
+                "statement": (
+                    "The inspection commands and later download may be unrelated "
+                    "activities in the same Cowrie session; intent is unknown."
+                ),
+                "status": "active",
+                "supporting_evidence_refs": [],
+                "falsification_conditions": [
+                    "Independent, session-bound evidence connecting an inspection result to this download weakens this alternative."
+                ],
+            },
+        ]
+        hypotheses = [{
+            "hypothesis_id": stable_id("hypothesis", {
+                "chain_id": "",
+                "statement": item["statement"],
+                "evidence_refs": item["supporting_evidence_refs"],
+            }),
+            **item,
+        } for item in alternatives]
+        return [{
+            "hypothesis_set_id": stable_id("hypothesis_set", {
+                "chain_id": "",
+                "hypothesis_ids": [item["hypothesis_id"] for item in hypotheses],
+            }),
+            "question": "How should the inspection-before-download sequence be interpreted?",
+            "scope": "bounded_cowrie_inspection_before_transfer",
+            "relationship_refs": [],
+            "basis_fact_ids": [
+                _clean(item.get("fact_id")) for item in [*inspection_facts, transfer]
+            ],
+            "alternatives_are_exhaustive": False,
+            "alternatives_are_mutually_exclusive": False,
+            "hypotheses": hypotheses,
+        }]
+    return []
+
+
+def _fact_order(fact: Dict[str, Any]) -> Optional[Tuple[datetime, int]]:
+    # source_index orders all Cowrie events, including transfer events between
+    # command inputs; sequence_index counts commands and can therefore tie.
+    sequence = fact.get("source_index")
+    timestamp = _clean(fact.get("timestamp"))
+    if type(sequence) is not int or not timestamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return (parsed, sequence) if parsed.tzinfo is not None else None
+
+
+def _bounded_question(
+    *, question: str, scope: str, basis_fact_ids: List[str],
+    evidence_refs: List[str], alternatives: List[Tuple[str, str]],
+    artifact_paths: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    hypotheses = [{
+        "hypothesis_id": stable_id("hypothesis", {
+            "chain_id": "", "statement": statement,
+            "evidence_refs": evidence_refs if index == 0 else [],
+        }),
+        "statement": statement,
+        "status": "active",
+        "supporting_evidence_refs": evidence_refs if index == 0 else [],
+        "artifact_paths": sorted({
+            _clean(path) for path in (artifact_paths or [])
+            if _clean(path).startswith("/")
+            and all(ord(char) >= 32 for char in _clean(path))
+            and len(_clean(path)) <= 512
+        }) if index == 0 else [],
+        "falsification_conditions": [falsifier],
+    } for index, (statement, falsifier) in enumerate(alternatives)]
+    return {
+        "hypothesis_set_id": stable_id("hypothesis_set", {
+            "chain_id": "",
+            "hypothesis_ids": [item["hypothesis_id"] for item in hypotheses],
+        }),
+        "question": question,
+        "scope": scope,
+        "relationship_refs": [],
+        "basis_fact_ids": basis_fact_ids,
+        "alternatives_are_exhaustive": False,
+        "alternatives_are_mutually_exclusive": False,
+        "hypotheses": hypotheses,
+    }
+
+
+def _unverified_remote_content_hypothesis_sets(
+    typed_fact_set: Dict[str, Any],
+    existing_sets: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """A command without same-URL direct proof never establishes failure."""
+
+    facts = [
+        item for item in typed_fact_set.get("facts") or []
+        if isinstance(item, dict)
+    ]
+    direct_urls = {
+        _clean(entity.get("normalized_value"))
+        for fact in facts
+        if fact.get("cowrie_eventid") == "cowrie.session.file_download"
+        and (fact.get("outcome") or {}).get("status") == "event_observed"
+        for entity in (fact.get("entities") or {}).get("urls") or []
+        if isinstance(entity, dict) and entity.get("linkable") is True
+        and entity.get("uncertain") is False
+        and _clean(entity.get("normalized_value"))
+    }
+    selected: Dict[str, Dict[str, Any]] = {}
+    for fact in facts:
+        operation_types = {
+            _clean(item.get("operation_type"))
+            for item in fact.get("operations") or []
+            if isinstance(item, dict)
+        }
+        if not {"remote_content_access", "transfer_attempt"}.issubset(operation_types):
+            continue
+        if (fact.get("parse") or {}).get("status") != "parsed":
+            continue
+        if (fact.get("outcome") or {}).get("status") not in {
+            "outcome_unknown", "reported_success"
+        }:
+            continue
+        urls = [
+            _clean(item.get("normalized_value"))
+            for item in (fact.get("entities") or {}).get("urls") or []
+            if isinstance(item, dict) and item.get("linkable") is True
+            and item.get("uncertain") is False
+            and _clean(item.get("normalized_value"))
+        ]
+        refs = sorted({_clean(ref) for ref in fact.get("supporting_evidence_refs") or [] if _clean(ref)})
+        if len(set(urls)) != 1 or urls[0] in direct_urls or not refs:
+            continue
+        if any(
+            item.get("scope") == "bounded_cowrie_observable_behavior"
+            and set(refs).intersection({
+                _clean(ref)
+                for hypothesis in item.get("hypotheses") or []
+                if isinstance(hypothesis, dict)
+                for ref in hypothesis.get("supporting_evidence_refs") or []
+            })
+            for item in existing_sets
+        ):
+            continue
+        selected.setdefault(urls[0], fact)
+    if len(selected) < 2:
+        return []
+    basis = list(selected.values())[:2]
+    evidence_refs = sorted({
+        _clean(ref)
+        for fact in basis
+        for ref in fact.get("supporting_evidence_refs") or []
+        if _clean(ref)
+    })
+    return [_bounded_question(
+            question="What can be concluded from repeated remote-content requests without bound download events?",
+            scope="bounded_cowrie_unverified_remote_content",
+            basis_fact_ids=[_clean(fact.get("fact_id")) for fact in basis],
+            evidence_refs=evidence_refs,
+            alternatives=[
+                (
+                    "Two distinct remote-content request commands were observed, but no same-URL direct Cowrie download events are in this evidence snapshot; completion is unverified.",
+                    "Verified direct Cowrie download events for these URLs in the same session change the evidence status.",
+                ),
+                (
+                    "The transfer may have completed without a retained direct event, or the request may not have completed; neither outcome is established.",
+                    "A bound response and artifact receipt can distinguish these alternatives.",
+                ),
+            ],
+        )]
+
+
+def _download_then_execution_hypothesis_sets(
+    findings: List[Dict[str, Any]],
+    authority_decisions: List[Dict[str, Any]],
+    typed_fact_set: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Link a direct download and later execution command by exact path only.
+
+    Cowrie's direct download event may expose its internal hash-store path
+    instead of the command's ``-O`` destination.  In that case, bind the
+    event to the nearest preceding parsed transfer command with the exact same
+    URL, then use that command's resolved destination path.  Ambiguous or
+    incomplete URL/path evidence still abstains.
+    """
+
+    trusted_ids = {
+        _clean(item.get("candidate_id"))
+        for item in authority_decisions
+        if isinstance(item, dict) and item.get("decision") == "trusted"
+    }
+    trusted_refs = {
+        _clean(ref)
+        for finding in findings
+        if isinstance(finding, dict)
+        and finding.get("semantic_family") == "transfer"
+        and _clean(finding.get("finding_id")) in trusted_ids
+        for ref in finding.get("evidence_refs") or []
+        if _clean(ref)
+    }
+    facts = [
+        item for item in typed_fact_set.get("facts") or []
+        if isinstance(item, dict) and _fact_order(item) is not None
+    ]
+
+    def resolved_paths(fact: Dict[str, Any], role: str) -> set[str]:
+        resolutions = {
+            _clean(item.get("entity_ref"))
+            for item in fact.get("path_resolutions") or []
+            if isinstance(item, dict) and item.get("role") == role
+            and item.get("resolution_status") in {"recorded_resolved", "context_resolved"}
+        }
+        return {
+            _clean(item.get("normalized_value"))
+            for item in (fact.get("entities") or {}).get(role) or []
+            if isinstance(item, dict) and item.get("entity_id") in resolutions
+            and item.get("linkable") is True and item.get("uncertain") is False
+            and _clean(item.get("normalized_value"))
+        }
+
+    def normalized_values(fact: Dict[str, Any], role: str) -> set[str]:
+        return {
+            _clean(item.get("normalized_value"))
+            for item in (fact.get("entities") or {}).get(role) or []
+            if isinstance(item, dict) and item.get("linkable") is True
+            and item.get("uncertain") is False
+            and _clean(item.get("normalized_value"))
+        }
+
+    def command_bound_paths(
+        transfer: Dict[str, Any],
+    ) -> Tuple[set[str], Optional[Dict[str, Any]]]:
+        direct_paths = resolved_paths(transfer, "destination_paths")
+        if len(direct_paths) == 1:
+            return direct_paths, None
+        transfer_urls = normalized_values(transfer, "urls")
+        if len(transfer_urls) != 1:
+            return set(), None
+        candidates: List[Dict[str, Any]] = []
+        for fact in facts:
+            if _fact_order(fact) >= _fact_order(transfer):
+                continue
+            operation_types = {
+                _clean(item.get("operation_type"))
+                for item in fact.get("operations") or []
+                if isinstance(item, dict)
+            }
+            if not {"remote_content_access", "transfer_attempt"}.issubset(
+                operation_types
+            ):
+                continue
+            if normalized_values(fact, "urls") != transfer_urls:
+                continue
+            if len(resolved_paths(fact, "destination_paths")) != 1:
+                continue
+            candidates.append(fact)
+        if not candidates:
+            return set(), None
+        command_fact = max(candidates, key=_fact_order)
+        return resolved_paths(command_fact, "destination_paths"), command_fact
+
+    for transfer in sorted(facts, key=_fact_order):
+        refs = {_clean(ref) for ref in transfer.get("supporting_evidence_refs") or []}
+        if (
+            transfer.get("cowrie_eventid") != "cowrie.session.file_download"
+            or not refs.intersection(trusted_refs)
+        ):
+            continue
+        paths, transfer_command = command_bound_paths(transfer)
+        if len(paths) != 1:
+            continue
+        for execution in sorted(facts, key=_fact_order):
+            if _fact_order(execution) <= _fact_order(transfer):
+                continue
+            if (execution.get("parse") or {}).get("status") != "parsed":
+                continue
+            if (execution.get("outcome") or {}).get("status") not in {
+                "outcome_unknown", "reported_success"
+            }:
+                continue
+            operation_types = {
+                _clean(item.get("operation_type"))
+                for item in execution.get("operations") or []
+                if isinstance(item, dict)
+            }
+            if operation_types != {"execution_attempt"}:
+                continue
+            if resolved_paths(execution, "executed_paths") != paths:
+                continue
+            command_refs = {
+                _clean(ref)
+                for ref in (
+                    transfer_command.get("supporting_evidence_refs")
+                    if transfer_command else []
+                ) or []
+                if _clean(ref)
+            }
+            evidence_refs = sorted(refs | command_refs | {
+                _clean(ref) for ref in execution.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            basis_fact_ids = [
+                _clean(transfer.get("fact_id")),
+                *(
+                    [_clean(transfer_command.get("fact_id"))]
+                    if transfer_command else []
+                ),
+                _clean(execution.get("fact_id")),
+            ]
+            return [_bounded_question(
+                question="What does the attempt to run the downloaded artifact establish?",
+                scope="bounded_cowrie_download_then_execution_attempt",
+                basis_fact_ids=basis_fact_ids,
+                evidence_refs=evidence_refs,
+                alternatives=[
+                    (
+                        "A command targeting the exact downloaded path was observed after a direct Cowrie download; program completion and effects are not established.",
+                        "A corrected path identity, session binding, or event order disconfirms this linked attempt.",
+                    ),
+                    (
+                        "The command may have failed or stopped inside the Cowrie simulation; no real-host execution is implied.",
+                        "A separately bound execution result can clarify the simulated command outcome.",
+                    ),
+                ],
+            )]
+    return []
+
+
+def _failed_login_then_success_hypothesis_sets(
+    snapshot: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Describe repeated failed authentication followed by success."""
+
+    events = [
+        item for item in snapshot.get("direct_cowrie_events") or []
+        if isinstance(item, dict)
+        and item.get("eventid") in {
+            "cowrie.login.failed", "cowrie.login.success"
+        }
+        and _clean(item.get("evidence_id"))
+        and _clean(item.get("timestamp"))
+    ]
+    events.sort(key=lambda item: _clean(item.get("timestamp")))
+    for success_index, success in enumerate(events):
+        if success.get("eventid") != "cowrie.login.success":
+            continue
+        failures = [
+            item for item in events[:success_index]
+            if item.get("eventid") == "cowrie.login.failed"
+        ]
+        if len(failures) < 2:
+            continue
+        basis = [*failures, success]
+        refs = [_clean(item.get("evidence_id")) for item in basis]
+        return [_bounded_question(
+            question="How should repeated failed logins followed by a successful login be interpreted?",
+            scope="bounded_cowrie_failed_login_then_success",
+            basis_fact_ids=[],
+            evidence_refs=refs,
+            alternatives=[
+                (
+                    "Multiple failed Cowrie login observations were followed by a successful login in the same session; whether this represents password guessing is not established.",
+                    "Corrected session identity or event chronology that separates the failures from the success disconfirms this sequence.",
+                ),
+                (
+                    "The failures may be typing mistakes, automated retries, or another authentication pattern; one sequence does not establish brute-force activity.",
+                    "Additional authorized authentication telemetry can distinguish repeated guessing from benign failure patterns.",
+                ),
+            ],
+        )]
+    return []
+
+
+def _file_change_then_remove_hypothesis_sets(
+    typed_fact_set: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Link a file change to a later delete or move by exact path."""
+
+    facts = [
+        item for item in typed_fact_set.get("facts") or []
+        if isinstance(item, dict) and _fact_order(item) is not None
+        and (item.get("parse") or {}).get("status") == "parsed"
+        and (item.get("outcome") or {}).get("status") in {
+            "outcome_unknown", "reported_success"
+        }
+    ]
+
+    def resolved_paths(fact: Dict[str, Any], roles: set[str]) -> set[str]:
+        resolved = {
+            (_clean(item.get("role")), _clean(item.get("entity_ref")))
+            for item in fact.get("path_resolutions") or []
+            if isinstance(item, dict) and item.get("role") in roles
+            and item.get("resolution_status") in {
+                "recorded_resolved", "context_resolved"
+            }
+        }
+        return {
+            _clean(entity.get("normalized_value"))
+            for role in roles
+            for entity in (fact.get("entities") or {}).get(role) or []
+            if isinstance(entity, dict)
+            and (role, _clean(entity.get("entity_id"))) in resolved
+            and entity.get("linkable") is True
+            and entity.get("uncertain") is False
+            and _clean(entity.get("normalized_value"))
+        }
+
+    for change in sorted(facts, key=_fact_order):
+        change_ops = {
+            _clean(item.get("operation_type"))
+            for item in change.get("operations") or []
+            if isinstance(item, dict)
+        }
+        if not change_ops.intersection({
+            "file_write", "permission_modify", "ownership_modify"
+        }):
+            continue
+        changed_paths = resolved_paths(
+            change, {"modified_paths", "destination_paths"}
+        )
+        if len(changed_paths) != 1:
+            continue
+        for removal in sorted(facts, key=_fact_order):
+            if _fact_order(removal) <= _fact_order(change):
+                continue
+            removal_ops = {
+                _clean(item.get("operation_type"))
+                for item in removal.get("operations") or []
+                if isinstance(item, dict)
+            }
+            if removal_ops == {"file_delete"}:
+                removal_paths = resolved_paths(removal, {"deleted_paths"})
+                action = "delete"
+            elif removal_ops == {"file_move"}:
+                removal_paths = resolved_paths(removal, {"source_paths"})
+                action = "move"
+            else:
+                continue
+            if removal_paths != changed_paths:
+                continue
+            refs = sorted({
+                _clean(ref)
+                for fact in (change, removal)
+                for ref in fact.get("supporting_evidence_refs") or []
+                if _clean(ref)
+            })
+            return [_bounded_question(
+                question="What does the later removal or relocation of the changed file establish?",
+                scope="bounded_cowrie_file_change_then_remove",
+                basis_fact_ids=[
+                    _clean(change.get("fact_id")),
+                    _clean(removal.get("fact_id")),
+                ],
+                evidence_refs=refs,
+                alternatives=[
+                    (
+                        f"A file-change command was followed by a command to {action} the exact same resolved path; resulting filesystem state and intent are not established.",
+                        "A corrected path identity or event order disconfirms this linked sequence.",
+                    ),
+                    (
+                        "The later command may be ordinary file handling or cleanup inside the Cowrie simulation; evidence does not establish trace removal.",
+                        "Authorized file-audit and change records can clarify the resulting state and operational context.",
+                    ),
+                ],
+            )]
+    return []
+
+
+def _deception_path_interaction_hypothesis_sets(
+    snapshot: Dict[str, Any],
+    typed_fact_set: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    """Link a durable decoy-placement event to a later exact-path command.
+
+    Prepared content from the deception database is intentionally insufficient:
+    the placement event and command must both belong to this canonical Cowrie
+    session.  A command reference establishes neither successful access nor the
+    resulting filesystem/process effect.
+    """
+
+    placements: Dict[str, List[Dict[str, Any]]] = {}
+    for event in snapshot.get("direct_cowrie_events") or []:
+        if (
+            not isinstance(event, dict)
+            or event.get("eventid") != "cowrie.deception.decoy_placed"
+        ):
+            continue
+        path = _clean(event.get("path"))
+        timestamp = _clean(event.get("timestamp"))
+        evidence_id = _clean(event.get("evidence_id"))
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if path and evidence_id and parsed.tzinfo is not None:
+            placements.setdefault(path, []).append({**event, "_time": parsed})
+
+    interaction_names = {
+        "credential_material_read": "credential-related read",
+        "file_read": "read",
+        "execution_attempt": "execution attempt",
+        "file_write": "content change",
+        "permission_modify": "permission change",
+        "ownership_modify": "ownership change",
+        "file_delete": "deletion",
+        "file_move": "move",
+        "file_copy": "copy",
+    }
+    output: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+    for fact in sorted(
+        (
+            item for item in typed_fact_set.get("facts") or []
+            if isinstance(item, dict) and _fact_order(item) is not None
+        ),
+        key=_fact_order,
+    ):
+        fact_time, _sequence = _fact_order(fact)
+        operation_types = {
+            _clean(item.get("operation_type"))
+            for item in fact.get("operations") or []
+            if isinstance(item, dict)
+            and _clean(item.get("operation_type")) in interaction_names
+        }
+        if not operation_types:
+            continue
+        resolved_paths = {
+            _clean(item.get("recorded_normalized_value"))
+            for item in fact.get("path_resolutions") or []
+            if isinstance(item, dict)
+            and item.get("resolution_status") in {
+                "recorded_resolved", "context_resolved"
+            }
+            and item.get("recorded_linkable") is True
+            and item.get("recorded_uncertain") is False
+            and _clean(item.get("recorded_normalized_value"))
+        }
+        for path in sorted(resolved_paths.intersection(placements)):
+            eligible = [
+                item for item in placements[path]
+                if item["_time"] <= fact_time
+            ]
+            if not eligible:
+                continue
+            placement = sorted(eligible, key=lambda item: item["_time"])[-1]
+            operation_key = ",".join(sorted(operation_types))
+            if (path, operation_key) in seen:
+                continue
+            seen.add((path, operation_key))
+            interaction_text = ", ".join(
+                interaction_names[item] for item in sorted(operation_types)
+            )
+            refs = sorted({
+                _clean(placement.get("evidence_id")),
+                *(
+                    _clean(ref)
+                    for ref in fact.get("supporting_evidence_refs") or []
+                ),
+            } - {""})
+            output.append(_bounded_question(
+                question=(
+                    "What does the command interaction with a placed deception "
+                    "path establish?"
+                ),
+                scope="bounded_cowrie_deception_path_interaction",
+                basis_fact_ids=[_clean(fact.get("fact_id"))],
+                evidence_refs=refs,
+                artifact_paths=[path],
+                alternatives=[
+                    (
+                        f"After Cowrie recorded placement of deception content at {path}, "
+                        f"a later command in the same session referenced that exact path "
+                        f"for {interaction_text}; command completion and resulting effects "
+                        "are not established.",
+                        "A corrected placement record, path identity, session binding, or event order disconfirms this linkage.",
+                    ),
+                    (
+                        "The exact-path reference may be inspection or manipulation of "
+                        "honeypot content; it does not by itself establish attacker intent, "
+                        "successful deception, execution, disclosure, or trace removal.",
+                        "A direct Cowrie outcome plus independently bound telemetry can clarify the observed effect.",
+                    ),
+                ],
+            ))
+            if len(output) >= 20:
+                return output
+    return output
 
 
 def _session_hypothesis_assessment(
@@ -918,9 +1806,13 @@ def _session_hypothesis_assessment(
         item for item in observed.get("trusted_attck_candidates") or []
         if isinstance(item, dict)
     ]
+    follow_on_sets = [
+        item for item in hypothesis_sets
+        if item.get("scope") == "bounded_cowrie_observable_behavior"
+    ]
     follow_on_status = (
         "selected"
-        if hypothesis_sets
+        if follow_on_sets
         else "abstained"
         if follow_on.get("abstained")
         else "insufficient_evidence"
@@ -1282,6 +2174,40 @@ def build_session_assessment_v4(
                 {_clean(ref) for ref in item.get("relationship_refs") or []}
             )
         ]
+    hypothesis_sets.extend(
+        _credential_access_hypothesis_sets(
+            findings, authority_decisions, typed_fact_set
+        )
+    )
+    hypothesis_sets.extend(
+        _inspection_before_transfer_hypothesis_sets(
+            findings, authority_decisions, typed_fact_set
+        )
+    )
+    hypothesis_sets.extend(
+        _unverified_remote_content_hypothesis_sets(
+            typed_fact_set, hypothesis_sets
+        )
+    )
+    hypothesis_sets.extend(
+        _download_then_execution_hypothesis_sets(
+            findings, authority_decisions, typed_fact_set
+        )
+    )
+    hypothesis_sets.extend(
+        _failed_login_then_success_hypothesis_sets(base_snapshot)
+    )
+    hypothesis_sets.extend(
+        _file_change_then_remove_hypothesis_sets(typed_fact_set)
+    )
+    hypothesis_sets.extend(
+        _deception_path_interaction_hypothesis_sets(
+            base_snapshot, typed_fact_set
+        )
+    )
+    hypothesis_sets = sorted(
+        hypothesis_sets, key=lambda item: item["hypothesis_set_id"]
+    )
     graph = build_canonical_semantic_graph(
         base_snapshot,
         typed_fact_set=typed_fact_set,
@@ -1467,6 +2393,7 @@ def build_session_assessment_v4(
             if item.get("decision") == "audit_only"
             and _clean(item.get("policy_rule_id"))
         },
+        hypothesis_sets=hypothesis_sets,
     )
     record["response_guidance_v3"] = guidance
     record["assessment_id"] = canonical_assessment_id(record)

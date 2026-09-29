@@ -1,0 +1,29 @@
+diff --git a/src/cowrie/commands/wget.py b/src/cowrie/commands/wget.py
+--- a/src/cowrie/commands/wget.py
++++ b/src/cowrie/commands/wget.py
+@@ -22,2 +22,3 @@
+ from cowrie.shell.command import HoneyPotCommand
+ from cowrie.shell import track_helper
++from cowrie.shell.outbound_socket_receipt import make_recording_agent
+@@ -185,2 +186,3 @@
+-        deferred = treq.get(url=url, allow_redirects=True, headers=headers, timeout=10)
++        deferred = treq.get(url=url, allow_redirects=True, headers=headers, timeout=10,
++                            agent=make_recording_agent(self.protocol))
+         return deferred
+diff --git a/src/cowrie/commands/curl.py b/src/cowrie/commands/curl.py
+--- a/src/cowrie/commands/curl.py
++++ b/src/cowrie/commands/curl.py
+@@ -20,2 +20,3 @@
+ from cowrie.shell.command import HoneyPotCommand
+ from cowrie.shell import track_helper
++from cowrie.shell.outbound_socket_receipt import make_recording_agent
+@@ -312,5 +313,7 @@
+         if self.head_request:
+-            deferred = treq.head(url=url, allow_redirects=False, headers=headers, timeout=10)
++            deferred = treq.head(url=url, allow_redirects=False, headers=headers, timeout=10,
++                                 agent=make_recording_agent(self.protocol))
+         else:
+-            deferred = treq.get(url=url, allow_redirects=False, headers=headers, timeout=10)
++            deferred = treq.get(url=url, allow_redirects=False, headers=headers, timeout=10,
++                                agent=make_recording_agent(self.protocol))
+         return deferred

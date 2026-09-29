@@ -640,3 +640,16 @@ def test_model2_poc_registry_requires_projection_and_quality_marker() -> None:
 def test_model2_artifact_registry_rejects_unknown_digest() -> None:
     with pytest.raises(EnsembleContractError):
         evidence_module.expected_v5_artifact_sha256({"model_version": "unknown", "model_artifact_sha256": "f" * 64})
+
+
+def test_unified54_capture_contracts_are_versioned_and_bounded() -> None:
+    base = {
+        "model_version": evidence_module.MODEL2_UNIFIED54_VERSION,
+        "model_artifact_sha256": evidence_module.MODEL2_UNIFIED54_ARTIFACT_SHA256,
+        "quality_status": "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY",
+        "source_feature_contract_sha256": evidence_module.MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256,
+    }
+    for contract in evidence_module.MODEL2_UNIFIED54_CAPTURE_CONTRACTS:
+        assert evidence_module.expected_v5_artifact_sha256({**base, "capture_selection": contract}) == evidence_module.MODEL2_UNIFIED54_ARTIFACT_SHA256
+    with pytest.raises(EnsembleContractError):
+        evidence_module.expected_v5_artifact_sha256({**base, "capture_selection": "UNKNOWN_CAPTURE"})

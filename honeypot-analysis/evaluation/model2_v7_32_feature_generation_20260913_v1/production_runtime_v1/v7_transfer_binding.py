@@ -11,9 +11,25 @@ import hashlib
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
 
+try:
+    from v7_common import V7BoundaryError, exact_tuple
+except ImportError:  # package-import path used by local tests
+    from .v7_common import V7BoundaryError, exact_tuple
+
 
 TRANSFER_SOURCE = "192.168.89.112"
 MAX_HTTP_HEADER = 8192
+
+
+def model_feature_events(events: list[Mapping[str, Any]], hashes: list[str]) -> tuple[list[Mapping[str, Any]], list[str]]:
+    """Keep socket receipts as provenance, not extra model event features."""
+    if len(events) != len(hashes):
+        raise V7BoundaryError("source_event_hashes_missing")
+    pairs = [
+        (event, digest) for event, digest in zip(events, hashes)
+        if event.get("eventid") != "cowrie.session.outbound_connection"
+    ]
+    return [event for event, _ in pairs], [digest for _, digest in pairs]
 
 
 def transfer_tuple_allowed(value: Mapping[str, Any]) -> bool:
@@ -170,6 +186,59 @@ def select_episode_tuples(
         if len(syns) != 1:
             return []
         selected.append(expected)
+    return selected
+
+
+def select_session_bound_tuples(
+    events: Iterable[Mapping[str, Any]], packets: Iterable[Any],
+    parse_timestamp: Any, low: float, high: float,
+) -> list[dict[str, Any]]:
+    """Select pre-outcome Cowrie socket receipts, not all Pi HTTP traffic.
+
+    Each receipt must match one exact client SYN in the retained PCAP.  A
+    missing or ambiguous socket cannot be turned into a session flow by time
+    or source-IP coincidence.
+    """
+    if high <= low or high - low > 3600:
+        raise V7BoundaryError("session_socket_window_invalid")
+    event_list = list(events)
+    if not event_list:
+        return []
+    sessions = {event.get("session") for event in event_list}
+    if len(sessions) != 1 or not next(iter(sessions)):
+        raise V7BoundaryError("session_socket_event_session_mismatch")
+    receipts = [
+        event for event in event_list
+        if event.get("eventid") == "cowrie.session.outbound_connection"
+        and "outbound_src_ip" in event
+    ]
+    if len(receipts) > 63:
+        raise V7BoundaryError("session_socket_receipt_bound_exceeded")
+    packet_list = [packet for packet in packets if low <= packet.timestamp <= high]
+    selected: list[dict[str, Any]] = []
+    seen: set[tuple[str, int, str, int]] = set()
+    for receipt in receipts:
+        expected = exact_tuple({
+            "src_ip": receipt.get("outbound_src_ip"),
+            "src_port": receipt.get("outbound_src_port"),
+            "dst_ip": receipt.get("outbound_dst_ip"),
+            "dst_port": receipt.get("outbound_dst_port"),
+        }, "outbound_socket")
+        if not transfer_tuple_allowed(expected):
+            raise V7BoundaryError("session_socket_boundary_invalid")
+        key = (expected["src_ip"], expected["src_port"], expected["dst_ip"], expected["dst_port"])
+        if key in seen:
+            raise V7BoundaryError("session_socket_receipt_duplicate")
+        seen.add(key)
+        receipt_epoch = parse_timestamp(receipt["timestamp"]).timestamp()
+        syns = [
+            packet for packet in packet_list
+            if packet.tuple == expected and packet.flags & 0x02 and not packet.flags & 0x10
+        ]
+        if len(syns) != 1 or not 0 <= receipt_epoch - syns[0].timestamp <= 5.0:
+            raise V7BoundaryError("session_socket_syn_binding_invalid")
+        selected.append(expected)
+    selected.sort(key=lambda value: (value["src_ip"], value["src_port"], value["dst_ip"], value["dst_port"]))
     return selected
 
 

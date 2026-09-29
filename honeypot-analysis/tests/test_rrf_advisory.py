@@ -57,6 +57,20 @@ class RrfTests(unittest.TestCase):
         self.assertEqual(result["candidate_set_source"], "MODEL1_ONLY")
         self.assertFalse(next(x for x in result["rows"] if x["technique_id"] == "T1110")["model2_support_added"])
 
+    def test_session_socket_capture_contract_is_accepted(self):
+        value = ensemble()
+        value["model2"]["capture_selection"] = "OUTCOME_INDEPENDENT_SESSION_SOCKET_V2"
+        result = module.build_weighted_voting_advisory(advisory(), value, session_id="s1", session_ended=True)
+        self.assertEqual(result["recommendation_order"][0], "T1105")
+        self.assertTrue(next(row for row in result["rows"] if row["technique_id"] == "T1105")["model2_support_added"])
+
+    def test_unknown_capture_contract_falls_back_to_model1(self):
+        value = ensemble()
+        value["model2"]["capture_selection"] = "UNKNOWN_CAPTURE"
+        result = module.build_weighted_voting_advisory(advisory(), value, session_id="s1", session_ended=True)
+        self.assertEqual(result["recommendation_order"], ["T1082", "T1105", "T1110"])
+        self.assertFalse(result["ordering_changed"])
+
     def test_missing_transfer_gate_is_exact_model1_order(self):
         value = ensemble()
         value["model2"]["t1105_transfer_observed"] = False

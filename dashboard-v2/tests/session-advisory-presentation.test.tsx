@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { AiAdvisorySummary, ExternalTiSummary, HypothesisSummary, Model2EnsembleSummary, ProvenanceSummary, shouldPollExternalTi } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("session assessment presentation", () => {
   it("shows normalized public-source provider results, including nested OTX pulses, without double-counting cache", () => {
@@ -24,6 +24,43 @@ describe("session assessment presentation", () => {
     expect(html).not.toContain("abuseipdb cache");
     expect(html).not.toContain("normalized context:");
     expect(html).not.toContain("6 source-IP provider lookup results");
+  });
+
+  it("labels disabled provider records as evidence records rather than findings", () => {
+    const html = renderToStaticMarkup(<ExternalTiSummary
+      sessionData={{
+        status: "TI_PENDING",
+        status_reason: "POLICY_BLOCKED",
+        status_reason_text: "Provider lookup blocked by policy.",
+        enrichment_job_summary: { pending: false },
+        evidence: [{ provider: "virustotal", lookup_status: "DISABLED", finding_state: "PENDING" }],
+      }}
+      observableData={{}}
+    />);
+    expect(html).toContain("1 provider evidence record");
+    expect(html).toContain("0 usable provider results");
+    expect(html).toContain("Provider evidence records");
+    expect(html).toContain("Provider lookup blocked by policy.");
+    expect(html).not.toContain("Linked findings");
+    expect(html).not.toContain("separately linked finding");
+  });
+
+  it("polls external TI only while a provider-result job is genuinely pending", () => {
+    expect(shouldPollExternalTi({
+      status: "TI_PENDING",
+      status_reason: "PROVIDER_RESULT_PENDING",
+      enrichment_job_summary: { pending: true },
+    })).toBe(true);
+    expect(shouldPollExternalTi({
+      status: "TI_PENDING",
+      status_reason: "POLICY_BLOCKED",
+      enrichment_job_summary: { pending: false },
+    })).toBe(false);
+    expect(shouldPollExternalTi({
+      status: "TI_PENDING",
+      status_reason: "PROVIDER_RESULT_PENDING",
+      enrichment_job_summary: { pending: false },
+    })).toBe(false);
   });
 
   it("shows the actual AI-selected response finding and manual action, not just the provider", () => {
@@ -70,6 +107,23 @@ describe("session assessment presentation", () => {
     expect(html).toContain("no rendered narrative was recorded");
   });
 
+  it("explains an accepted AI abstention without claiming selected data", () => {
+    const html = renderToStaticMarkup(<AiAdvisorySummary
+      data={{ status: "accepted", advisory: {
+        validated_advisory: {
+          abstained: true,
+          selected_finding_ids: [],
+          selected_relationship_ids: [],
+          ranked_action_ids: [],
+        },
+        rendered_advisory: { status: "rendered", paragraphs: [] },
+      } }}
+      guidanceData={{ response_guidance: { findings: [], advisory_actions: [] } }}
+    />);
+    expect(html).toContain("accepted and validated, but it abstained");
+    expect(html).not.toContain("AI selected 1");
+  });
+
   it("does not imply that an unavailable Model2 corroborated the session", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-v1",
@@ -110,6 +164,40 @@ describe("session assessment presentation", () => {
     expect(html).toContain("Why no hypothesis was established");
     expect(html).toContain("did not confirm the required effect");
     expect(html).toContain("not proof that its effect succeeded");
+  });
+
+  it("shows outcomes from each active behavior family without creating extra hypotheses", () => {
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: [{ question: "What explains the credential-related path access attempt?", hypotheses: [] }],
+      correlated_ttp_hypotheses: [],
+      session_hypothesis_assessment: { semantic_families: [
+        { semantic_family: "transfer", status: "canonical_finding", observed_fact_count: 1, trusted_finding_ids: ["finding-transfer"] },
+        { semantic_family: "filesystem", status: "canonical_finding", observed_fact_count: 1, trusted_finding_ids: ["finding-file"] },
+        { semantic_family: "sensitive_read", status: "insufficient_evidence", observed_fact_count: 1, missing_evidence: ["outcome_not_eligible"] },
+        { semantic_family: "execution", status: "not_observed", observed_fact_count: 0 },
+      ] },
+    }} />);
+    expect(html).toContain("Behavior family results");
+    expect(html).toContain("File transfer");
+    expect(html).toContain("File changes");
+    expect(html).toContain("Credential-related read");
+    expect(html).toContain("Evidence incomplete");
+    expect(html).toContain("1 evidence-bounded hypothesis set recorded");
+    expect(html).toContain("1 other behavior check");
+  });
+
+  it("renders more than ten bounded hypothesis sets without silently truncating them", () => {
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: Array.from({ length: 13 }, (_, index) => ({
+        hypothesis_set_id: `set-${index}`,
+        question: `Bounded question ${index}`,
+        hypotheses: [{ hypothesis_id: `hypothesis-${index}`, statement: `Bounded statement ${index}` }],
+      })),
+      correlated_ttp_hypotheses: [],
+    }} />);
+    expect(html).toContain("13 evidence-bounded hypothesis sets recorded");
+    expect(html).toContain("Bounded question 12");
+    expect(html).toContain("Bounded statement 12");
   });
 
   it("explains exactly which Model2 head makes a bound result partial", () => {

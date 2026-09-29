@@ -289,6 +289,29 @@ function normalizePanelResult(capability: string, result: CapabilityResult): Cap
         && data.next_distinct_tactic !== undefined;
       break;
     case "session-ti":
+      {
+        const evidence = list(data.evidence).map(record);
+        const cache = list(data.source_ip_cache).map(record);
+        const usable = evidence.some((item) => ["OK", "NOT_FOUND"].includes(label(item.lookup_status || item.status, "").toUpperCase()))
+          || cache.some((item) => ["OK", "NOT_FOUND"].includes(label(item.lookup_status || item.status, "").toUpperCase()));
+        const reason = label(data.status_reason, "").toUpperCase();
+        if (!usable && reason === "POLICY_BLOCKED") {
+          return terminalResult(
+            "limited",
+            summaryValue(data.status_reason_text, "Provider lookup is blocked by policy; stored status records are shown for audit only."),
+            data,
+            result.status,
+          );
+        }
+        if (!usable && reason === "NO_ELIGIBLE_OBSERVABLE") {
+          return terminalResult(
+            "not_applicable",
+            summaryValue(data.status_reason_text, "No policy-eligible observable is available for provider lookup."),
+            data,
+            result.status,
+          );
+        }
+      }
       hasEvidence = hasItems(data, ["evidence", "shared_entities", "source_ip_cache"])
         || Number(record(data.counts).evidence_returned || 0) > 0
         || Number(record(data.counts).records_found || 0) > 0;
@@ -331,11 +354,20 @@ function normalizePanelResult(capability: string, result: CapabilityResult): Cap
     case "ai-advisory":
       {
         const advisory = record(data.advisory);
+        const validated = record(advisory.validated_advisory);
         const status = label(data.status, "").toLowerCase();
         if (["unavailable", "not_available", "failed", "superseded"].includes(status)) {
           return terminalResult(
             "empty",
             "No accepted provider advisory is stored for this exact session.",
+            data,
+            result.status,
+          );
+        }
+        if (status === "accepted" && validated.abstained === true) {
+          return terminalResult(
+            "limited",
+            "The AI provider response was accepted and validated, but it abstained from selecting evidence or actions.",
             data,
             result.status,
           );
@@ -1228,6 +1260,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   const summary = { ...record(sessionData.external_ti_summary), ...record(observableData.external_ti_summary) };
   const entities = list(sessionData.shared_entities).map(record);
   const evidence = [...list(sessionData.evidence), ...list(observableData.evidence)].map(record);
+  const usableEvidence = evidence.filter((item) => ["OK", "NOT_FOUND"].includes(label(item.lookup_status || item.status, "").toUpperCase()));
   const cache = Array.from(new Map(
     [...list(sessionData.source_ip_cache), ...list(observableData.source_ip_cache)]
       .map(record)
@@ -1238,6 +1271,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   const jobStatusCounts = record(jobSummary.status_counts);
   const freshness = record(sessionData.freshness);
   const observable = record(observableData.observable);
+  const terminalReason = label(sessionData.status_reason, "").toUpperCase();
   const [asOf, setAsOf] = useState<number | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => setAsOf(Date.now()), 0);
@@ -1259,16 +1293,22 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
   return (
     <>
       <Insight title="External threat intelligence" tone={tiState.state === "FRESH" && (evidence.length > 0 || cache.length > 0) ? "primary" : "warning"}>
-        {evidence.length || cache.length ? `${cache.length} source-IP provider lookup result${cache.length === 1 ? "" : "s"} and ${evidence.length} separately linked finding${evidence.length === 1 ? "" : "s"} are stored. The provider values appear below; check each result's freshness.` : summaryValue(sessionData.status_reason_text, "No provider finding is linked to this session; no external intelligence is inferred.")}
+        {evidence.length || cache.length ? `${cache.length} source-IP provider lookup result${cache.length === 1 ? "" : "s"} and ${evidence.length} provider evidence record${evidence.length === 1 ? "" : "s"} are stored; ${usableEvidence.length} usable provider result${usableEvidence.length === 1 ? "" : "s"} are available. Check each record's status and freshness below.` : summaryValue(sessionData.status_reason_text, "No usable provider result is linked to this session; no external intelligence is inferred.")}
       </Insight>
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full border px-3 py-1.5 text-xs font-semibold ${tiState.state === "FRESH" ? "border-primary-border bg-primary-subtle text-primary" : "border-warning-border bg-warning-subtle text-warning"}`}>{readableCode(tiState.state)}</span>
         <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Observable: {summaryValue(observable.value, "Not available")}</span>
         <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-text-muted">Last lookup: {tiTimestampLabel(tiState.latestRetrievedAt)}</span>
       </div>
+      {["POLICY_BLOCKED", "NO_ELIGIBLE_OBSERVABLE"].includes(terminalReason) && (
+        <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-text-muted">
+          {summaryValue(sessionData.status_reason_text, terminalReason === "POLICY_BLOCKED" ? "Provider lookup is blocked by policy; stored status records are audit context only." : "No policy-eligible observable is available for provider lookup.")}
+        </p>
+      )}
       <MetricStrip fields={[
         ["Eligible observables", countOf(sessionCounts.eligible_observables)],
-        ["Linked findings", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Provider evidence records", countOf(evidence.length || Number(sessionCounts.evidence_returned || 0) + Number(observableCounts.evidence_returned || 0))],
+        ["Usable provider results", countOf(usableEvidence.length)],
         ["Provider lookups", countOf(cache.length)],
         ["Sightings examined", countOf(observableCounts.sightings_examined || sessionCounts.sightings_examined)],
       ]} />
@@ -1288,7 +1328,7 @@ export function ExternalTiSummary({ sessionData, observableData }: { sessionData
         <ProviderContextRows evidence={evidence} cache={cache} providerStatus={providerStatus} observable={observable} asOf={asOf} />
       </ScrollPanel>
       {entities.length === 0 && evidence.length === 0 && cache.length === 0 && (
-        <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider finding is linked to this session. Read state: {readableCode(summary.uncertainty || sessionData.status || "context only")}.</p>
+        <p className="rounded-lg border border-border bg-surface-subtle p-3 text-xs text-text-muted">No provider evidence record is linked to this session. Read state: {readableCode(summary.uncertainty || sessionData.status || "context only")}.</p>
       )}
       <p className="text-xs text-text-subtle">Provider results are attributed context; they do not establish classification or authorize response.</p>
     </>
@@ -1308,6 +1348,25 @@ function hypothesisGateExplanation(value: unknown): string {
   } as Record<string, string>)[code] || readableCode(code);
 }
 
+const BEHAVIOR_FAMILY_LABELS: Record<string, string> = {
+  sensitive_read: "Credential-related read",
+  transfer: "File transfer",
+  transfer_attempt: "Remote content request",
+  inspection: "System inspection",
+  filesystem: "File changes",
+  execution: "Execution attempt",
+};
+
+function behaviorFamilyOutcome(value: unknown): string {
+  switch (String(value || "")) {
+    case "canonical_finding": return "Trusted observation";
+    case "rejected_by_policy": return "Did not pass policy";
+    case "insufficient_evidence": return "Evidence incomplete";
+    case "not_observed": return "Not observed";
+    default: return "Unavailable";
+  }
+}
+
 export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const counts = record(data.counts);
   const reportSummary = record(data.report_summary);
@@ -1316,6 +1375,8 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const hypothesisSets = list(data.hypothesis_sets).map(record);
   const sessionAssessment = record(data.session_hypothesis_assessment);
   const sessionFamilies = list(sessionAssessment.semantic_families).map(record);
+  const observedFamilies = sessionFamilies.filter((family) => Number(family.observed_fact_count || 0) > 0 || list(family.trusted_finding_ids).length > 0);
+  const unobservedFamilies = sessionFamilies.filter((family) => !observedFamilies.includes(family));
   const sessionGraph = record(sessionAssessment.evidence_graph);
   const followOnAssessment = record(sessionAssessment.follow_on_hypothesis);
   const reports = list(data.reports);
@@ -1338,21 +1399,42 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
         <p className="mt-2 text-xs text-text-muted">These are assessment gates, not missing classification records. An observed command is not proof that its effect succeeded.</p>
       </div>}
       {sessionFamilies.length > 0 && (
-        <ScrollPanel title="Behavior checks across this session" count={sessionFamilies.length} height="max-h-80">
-          <p className="mb-2 px-1 text-[11px] text-text-muted">Each behavior family shows whether observed evidence passed its review gate.</p>
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {sessionFamilies.map((family, index) => (
-              <li key={`${summaryValue(family.semantic_family, "family")}-${index}`} className="rounded-lg border border-border bg-surface p-3 text-xs transition-colors hover:border-primary-border">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold capitalize text-text">{readableCode(family.semantic_family || "behavior not recorded")}</span>
-                  <span className={`ui-badge ${list(family.finding_ids).length ? "border-primary-border bg-primary-subtle text-primary" : ""}`}>{readableCode(family.status || "not evaluated")}</span>
-                </div>
-                <div className="mt-2 flex gap-3 text-text-muted"><span>{countOf(family.observed_fact_count)} observations</span><span>{countOf(list(family.finding_ids).length)} findings</span></div>
-                {list(family.missing_evidence).length > 0 && <p className="mt-2 rounded-md bg-warning-subtle px-2.5 py-1.5 text-warning">Gate: {list(family.missing_evidence).map(hypothesisGateExplanation).join(" ")}</p>}
-              </li>
-            ))}
-          </ul>
-        </ScrollPanel>
+        <section className="rounded-xl border border-border bg-surface p-3" aria-label="Behavior family results">
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-text">Behavior family results</h3>
+            <span className="ui-badge text-[10px]">{observedFamilies.length} with activity</span>
+          </div>
+          <p className="mt-1 text-xs text-text-muted">These checks describe recorded behavior. The hypothesis sets below explain bounded patterns that need analyst review.</p>
+          {observedFamilies.length > 0 ? (
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {observedFamilies.map((family, index) => (
+                <li key={`${summaryValue(family.semantic_family, "family")}-${index}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-text">{BEHAVIOR_FAMILY_LABELS[String(family.semantic_family || "")] || readableCode(family.semantic_family)}</span>
+                    <span className={`ui-badge ${family.status === "canonical_finding" ? "border-primary-border bg-primary-subtle text-primary" : ""}`}>{behaviorFamilyOutcome(family.status)}</span>
+                  </div>
+                  <p className="mt-2 text-text-muted">{countOf(family.observed_fact_count)} recorded facts · {countOf(list(family.trusted_finding_ids).length)} trusted findings</p>
+                  {family.status !== "canonical_finding" && list(family.missing_evidence).length > 0 && (
+                    <p className="mt-2 text-warning">{hypothesisGateExplanation(list(family.missing_evidence)[0])}</p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : <p className="mt-3 text-xs text-text-muted">No behavior family has a matching observation in this session.</p>}
+          {unobservedFamilies.length > 0 && (
+            <div className="mt-3">
+              <MoreDetails title={`${unobservedFamilies.length} other behavior check${unobservedFamilies.length === 1 ? "" : "s"}`}>
+                <ul className="grid gap-2 text-xs sm:grid-cols-2">
+                  {unobservedFamilies.map((family, index) => (
+                    <li key={`${summaryValue(family.semantic_family, "family")}-${index}`} className="rounded-lg border border-border bg-surface-subtle p-2">
+                      {BEHAVIOR_FAMILY_LABELS[String(family.semantic_family || "")] || readableCode(family.semantic_family)} · {behaviorFamilyOutcome(family.status)}
+                    </li>
+                  ))}
+                </ul>
+              </MoreDetails>
+            </div>
+          )}
+        </section>
       )}
       {contextualHypotheses.length > 0 && (
         <section className="rounded-xl border border-warning-border bg-warning-subtle/30 p-3" aria-label="Related ATT&CK context">
@@ -1378,7 +1460,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
       {hypothesisSets.length > 0 && (
         <ScrollPanel title="Evidence-bounded hypothesis sets" count={hypothesisSets.length} height="max-h-80">
         <ol className="space-y-2">
-          {hypothesisSets.slice(0, 10).map((hypothesisSet, index) => (
+          {hypothesisSets.slice(0, 50).map((hypothesisSet, index) => (
             <li key={`${index}-${summaryValue(hypothesisSet.hypothesis_set_id, "hypothesis-set")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <p className="font-semibold text-text">{summaryValue(hypothesisSet.question, "Bounded hypothesis set")}</p>
               {list(hypothesisSet.hypotheses).map(record).slice(0, 8).map((hypothesis, hypothesisIndex) => (
@@ -1585,6 +1667,12 @@ export function hasBoundAvailableModel2(data: JsonRecord): boolean {
   return hasBoundModel2(data);
 }
 
+export function shouldPollExternalTi(data: JsonRecord): boolean {
+  return label(data.status, "").toUpperCase() === "TI_PENDING"
+    && label(data.status_reason, "").toUpperCase() === "PROVIDER_RESULT_PENDING"
+    && record(data.enrichment_job_summary).pending === true;
+}
+
 export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; guidanceData: JsonRecord }) {
   const advisory = record(data.advisory);
   const validation = record(advisory.validation);
@@ -1614,10 +1702,11 @@ export function AiAdvisorySummary({ data, guidanceData }: { data: JsonRecord; gu
   const selectedActions = guidanceActions.filter((item) => selectedActionIds.has(label(item.action_id, "")));
   const inaccurateStoredNarrative = selectedFindings.length > 0 && storedParagraphs.some((item) => label(item.text, "").includes("canonical finding"));
   const hasSelection = selectedFindingIds.size > 0 || selectedActionIds.size > 0;
+  const abstained = validated.abstained === true;
   return (
     <div className="space-y-3">
       <Insight title="What AI actually did" tone={hasSelection ? "primary" : "warning"}>
-        {hasSelection ? `AI selected ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for review${selectedRelationshipCount ? `, with ${selectedRelationshipCount} relationship${selectedRelationshipCount === 1 ? "" : "s"}` : ""}.` : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
+        {hasSelection ? `AI selected ${selectedFindingIds.size} existing evidence item${selectedFindingIds.size === 1 ? "" : "s"} and ${selectedActionIds.size} existing manual action${selectedActionIds.size === 1 ? "" : "s"} for review${selectedRelationshipCount ? `, with ${selectedRelationshipCount} relationship${selectedRelationshipCount === 1 ? "" : "s"}` : ""}.` : abstained ? "The AI response was accepted and validated, but it abstained from selecting evidence or actions." : "No selected evidence or action is recorded in this advisory."} It did not create a trusted finding or execute a response.
       </Insight>
       {hasSelection && paragraphs.length === 0 && <p className="rounded-lg border border-warning-border bg-warning-subtle p-3 text-xs text-warning">The AI selection is stored, but no rendered narrative was recorded. The linked evidence and actions below come from the verified guidance record.</p>}
       {hasSelection && <ScrollPanel title="Evidence and advice AI selected" count={selectedFindingIds.size + selectedActionIds.size} height="max-h-72">
@@ -1776,7 +1865,7 @@ export function SessionAnalysisPanels({
       tiPollTimer = undefined;
     };
     const startTiPoll = (initial: CapabilityResult | undefined) => {
-      if (label(initial?.data.status, "").toUpperCase() !== "TI_PENDING") return;
+      if (!shouldPollExternalTi(initial?.data || {})) return;
       tiPollTimer = window.setInterval(async () => {
         if (cancelled || tiPollInFlight) return;
         tiPollInFlight = true;
@@ -1785,7 +1874,7 @@ export function SessionAnalysisPanels({
           if (cancelled) return;
           apply([["session-ti", refreshed]]);
           tiPollAttempts += 1;
-          if (label(refreshed.data.status, "").toUpperCase() !== "TI_PENDING" || tiPollAttempts >= 12) {
+          if (!shouldPollExternalTi(refreshed.data) || tiPollAttempts >= 12) {
             stopTiPoll();
           }
         } finally {

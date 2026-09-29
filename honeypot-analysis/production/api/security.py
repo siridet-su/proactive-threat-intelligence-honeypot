@@ -1134,7 +1134,11 @@ def _compact_hypothesis_sets(value: Any) -> list[Dict[str, Any]]:
             "scope": str(raw_set.get("scope") or "")[:160],
             "hypotheses": hypotheses,
         })
-        if len(output) >= 10:
+        # Keep the public projection bounded without silently hiding valid
+        # hypothesis sets from sessions where several policy families (and
+        # several exact deception-path interactions) coexist.  This matches
+        # the assessment-side bound used for hypothesis_set_ids.
+        if len(output) >= 50:
             break
     return output
 

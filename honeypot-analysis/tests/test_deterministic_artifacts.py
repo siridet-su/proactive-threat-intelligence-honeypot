@@ -420,6 +420,42 @@ def test_pdf_uses_exact_external_ti_api_status_vocabulary(tmp_path: Path) -> Non
     or importlib.util.find_spec("pypdf") is None,
     reason="optional PDF renderer/parser unavailable",
 )
+def test_pdf_does_not_call_provider_status_records_findings(tmp_path: Path) -> None:
+    from pypdf import PdfReader
+
+    report, session = _report_and_session()
+    external_ti = {
+        "ok": True,
+        "status": "TI_PENDING",
+        "status_reason": "POLICY_BLOCKED",
+        "status_reason_text": "Provider lookup was blocked by policy.",
+        "freshness": {"state": "TI_PENDING"},
+        "counts": {"evidence_returned": 2, "source_ip_cache_records": 0},
+        "external_ti_summary": {
+            "status": "TI_PENDING",
+            "status_reason": "POLICY_BLOCKED",
+            "evidence_returned": 2,
+        },
+    }
+    output_dir = tmp_path / "provider-record-wording-pdf"
+    output_dir.mkdir(mode=0o700)
+    path = Path(write_pdf_report(
+        report,
+        session,
+        output_dir,
+        external_ti_projection=external_ti,
+    ))
+    text = "\n".join(page.extract_text() or "" for page in PdfReader(path).pages)
+
+    assert "2 stored provider evidence records" in text
+    assert "separately linked findings" not in text
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("reportlab") is None
+    or importlib.util.find_spec("pypdf") is None,
+    reason="optional PDF renderer/parser unavailable",
+)
 def test_pdf_shows_reviewed_legacy_source_ip_provider_context(tmp_path: Path) -> None:
     from pypdf import PdfReader
 

@@ -15,6 +15,7 @@ from production.ensemble.evidence import (
     MODEL2_UNIFIED54_ARTIFACT_SHA256,
     MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256,
     MODEL2_UNIFIED54_VERSION,
+    MODEL2_UNIFIED54_CAPTURE_CONTRACTS,
     MODEL2_V5_SHADOW_STATUS,
 )
 
@@ -25,7 +26,6 @@ MODEL1_WEIGHT = 1.0
 MODEL2_WEIGHT = 0.25
 TECHNIQUE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 SUPPORTED_HEADS = frozenset({"T1105", "T1046", "T1110"})
-CAPTURE_CONTRACT = "OUTCOME_INDEPENDENT_FIXED_SESSION_WINDOW_V1"
 
 
 def _text(value: Any) -> str:
@@ -60,7 +60,7 @@ def _model2_gate(
         or model2.get("artifact_sha256") != MODEL2_UNIFIED54_ARTIFACT_SHA256
         or model2.get("feature_contract_sha256") != MODEL2_UNIFIED54_FEATURE_CONTRACT_SHA256
         or model2.get("quality_status") != "CONTROLLED_SYNTHETIC_POC_NOT_REAL_WORLD_ACCURACY"
-        or model2.get("capture_selection") != CAPTURE_CONTRACT
+        or model2.get("capture_selection") not in MODEL2_UNIFIED54_CAPTURE_CONTRACTS
     ):
         return "model2_identity_or_capture_unqualified"
     if (

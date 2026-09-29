@@ -1,7 +1,7 @@
 ---
 title: Current honeypot architecture
 status: current
-last_verified: 2026-09-25
+last_verified: 2026-09-29 (Model2 delivery addendum only)
 ---
 
 # Current honeypot architecture
@@ -58,6 +58,7 @@ separate, verified change once the Go pipeline and cloud receiver have parity.
 | Dashboard Filesystem Activity | Source retirement prepared; production deployment pending | The current branch removes session termination and keeps Route Replay/Evidence, but the production Dashboard has not been redeployed and may still serve its earlier UI/API. The Pi agent is unavailable. Tailnet ACL cleanup and the next Cowrie restart are pending; see [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md) and the [retirement runbook](RESPONSE-CONTROL-PLANE.md). |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
 | Post-session/cloud analysis | Target workstream | Under active development. |
+| Model2 V7 Pi-to-GCP shadow delivery (2026-09-29 addendum) | Active for qualifying bounded Cowrie sessions | Pi observer sends exact-session V2 socket-bound envelopes through the private ZeroTier receiver; queue-health timer reports local queue age/depth. GCP receiver permits an episode window up to 360 seconds, subject to bounded PCAP retention and exact binding; longer or incomplete episodes return unavailable. Model2-only output does not create trusted findings or response authority. See [delivery recovery](MODEL2_DELIVERY_RECOVERY.md). |
 | Hailo/Ollama runtime | Experimental candidate | Not the current Cowrie execution path. |
 
 Real administrative SSH listens on port 2222 but host-firewall access is limited to the Tailscale and ZeroTier interfaces. Password and root authentication are disabled.
