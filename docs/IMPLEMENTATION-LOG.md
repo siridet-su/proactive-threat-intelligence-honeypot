@@ -3331,3 +3331,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: use the staging deployment wrapper's reviewed rollback procedure to restore the previous immutable release if a browser regression is found.
 - Follow-up: inspect Backup & Retention in an authenticated staging browser and compare the three per-source day strips with manifest counts.
 - Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API contract](../dashboard-v2/docs/API.md).
+
+### 2026-09-29 — Consolidate Backup & Retention details under the source overview
+
+- Status: repository UI change prepared; no host deployment in this entry.
+- Scope and intent: reduce repeated hardware data and page length while keeping backup actions, older history, and operational evidence available on demand.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: render only schedule and three-source overview by default. Move the existing Hardware actions/history component into an expandable section under Archive sources, and put activity, recovery, and policy behind a second control. Preserve both existing APIs and the hardware exception path to its controls. Document the new page behavior in the Dashboard API guide.
+- Host/environment changes actually applied: none. No staging or production Dashboard, Pi worker, MongoDB schedule, manifest, or B2 object was changed by this repository edit.
+- Runtime/exposure state: the deployed staging Dashboard remains on the previous layout until its next release. Backup scheduling and archive execution remain unchanged.
+- Validation performed and outcome: local TypeScript, targeted ESLint, and 10 focused Dashboard tests passed. Staging CI and browser review follow separately.
+- Not performed / deferred: authenticated browser layout review, staging deployment, production Dashboard deployment, and live Pi/B2 interaction.
+- Risks and data handling: controls and history now load only when opened; operators must expand that section to queue hardware actions. The overview still exposes attention count and per-target daily status. No protected data or credentials entered the repository.
+- Rollback: revert this UI change and redeploy the prior Dashboard artifact; no Pi rollback applies.
+- Follow-up: deploy to staging, verify controls and detail transitions in a browser, then assess whether production should receive this layout.
+- Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
