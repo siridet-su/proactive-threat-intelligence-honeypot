@@ -3405,3 +3405,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert the shared calendar UI and history endpoint, then redeploy the previous Dashboard artifact; no Pi rollback applies.
 - Follow-up: inspect the three aligned rows with live staging data and verify older/newer navigation in an authenticated browser.
 - Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
+### 2026-09-29 — Activate shared three-source archive calendar on staging
+
+- Status: active on Dashboard staging; production Dashboard unchanged.
+- Scope and intent: publish a single date-aligned archive calendar and shared older-history navigation for hardware, threat events, and filesystem audit.
+- Repository branch and commit/PR: main UI commit `ffead62`; staging release `0491ff3`; GitHub Actions run `36522587608`.
+- Repository changes: append this deployment record only. The UI, API, and test changes are in the preceding entry.
+- Host/environment changes actually applied: staging CI/CD switched the immutable staging release and restarted `honeypot-dashboard-v2-staging.service`. The Pi worker, MongoDB data, B2 objects, and production Dashboard were not changed.
+- Runtime/exposure state: the deploy wrapper reported service success for release `0491ff3`, with `rollback:false`; its post-switch health check passed. The previous staging release was `1c7fad6`.
+- Validation performed and outcome: 11 focused local tests, TypeScript, targeted ESLint, full staging CI, artifact identity verification, and deploy job passed.
+- Not performed / deferred: authenticated browser visual inspection and production Dashboard deployment.
+- Risks and data handling: calendar history is read-only and bounded to 36 earlier periods; target activation may leave earlier gaps. No archive contents or credentials were copied into this record.
+- Rollback: restore the prior immutable staging release through the reviewed staging deployment procedure if a browser regression is found.
+- Follow-up: inspect the aligned calendar and older/newer behavior in an authenticated staging browser.
+- Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
