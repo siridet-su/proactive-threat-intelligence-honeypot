@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Folder, Loader2, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, Copy, Folder, Loader2, RotateCcw } from "lucide-react";
 import React, {
   useCallback,
   useEffect,
@@ -212,6 +212,16 @@ export function AuditSessionSelect({
         targetPathFilter,
       }),
   );
+  const [copyFeedback, setCopyFeedback] = useState<{
+    sessionId: string;
+    status: "copied" | "failed";
+  } | null>(null);
+
+  useEffect(() => {
+    if (!copyFeedback) return;
+    const timeout = window.setTimeout(() => setCopyFeedback(null), 1_800);
+    return () => window.clearTimeout(timeout);
+  }, [copyFeedback]);
 
   // Keep manager options fresh with latest props to prevent stale closures
   useIsomorphicLayoutEffect(() => {
@@ -347,6 +357,20 @@ export function AuditSessionSelect({
     return "lifecycle" in selectedSession && Boolean(selectedSession.lifecycle);
   }, [selectedSession]);
 
+  const copySelectedSourceIp = useCallback(async () => {
+    if (!selectedSession) return;
+    try {
+      await navigator.clipboard.writeText(selectedSession.sourceIp);
+      setCopyFeedback({ sessionId: selectedSession.sessionId, status: "copied" });
+    } catch {
+      setCopyFeedback({ sessionId: selectedSession.sessionId, status: "failed" });
+    }
+  }, [selectedSession]);
+
+  const currentCopyFeedback = copyFeedback?.sessionId === selectedSessionId
+    ? copyFeedback.status
+    : null;
+
   const retainedGroupLabel = useMemo(() => {
     const loaded = isSearchActive ? filteredClosedSessions.length : (retainedLoadedCount ?? filteredClosedSessions.length);
     if (isSearchActive) {
@@ -435,7 +459,7 @@ export function AuditSessionSelect({
   }, [open, closeMenu, manager, openWithFocus]);
 
   return (
-    <div className={`relative inline-block text-left ${className ?? ""}`}>
+    <div className={`relative inline-flex max-w-full items-center gap-1.5 text-left ${className ?? ""}`}>
       {/* Trigger Button */}
       <button
         ref={triggerRef}
@@ -500,6 +524,30 @@ export function AuditSessionSelect({
           aria-hidden="true"
         />
       </button>
+
+      {selectedSession && (
+        <button
+          type="button"
+          onClick={() => void copySelectedSourceIp()}
+          aria-label={`Copy source IP ${selectedSession.sourceIp}`}
+          title={currentCopyFeedback === "failed" ? "Could not copy source IP" : `Copy source IP ${selectedSession.sourceIp}`}
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-1 rounded-lg border border-border bg-surface px-2 text-xs font-medium text-text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          {currentCopyFeedback === "copied" ? (
+            <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+          ) : (
+            <Copy className={`h-3.5 w-3.5 ${currentCopyFeedback === "failed" ? "text-danger" : ""}`} aria-hidden="true" />
+          )}
+          <span className="hidden sm:inline">{currentCopyFeedback === "copied" ? "Copied" : "Copy IP"}</span>
+        </button>
+      )}
+      <span role="status" className="sr-only">
+        {currentCopyFeedback === "copied"
+          ? "Source IP copied"
+          : currentCopyFeedback === "failed"
+            ? "Could not copy source IP"
+            : ""}
+      </span>
 
       {/* Popover Menu using ComboboxPopover */}
       <ComboboxPopover

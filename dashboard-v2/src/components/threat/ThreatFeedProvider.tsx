@@ -41,14 +41,22 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const hasSnapshot = useRef(false);
   const streamConnected = useRef(false);
+  const lastStreamDataAt = useRef(0);
 
   const fetchSnapshot = useCallback(async () => {
+    const startedAt = Date.now();
     setStatus(hasSnapshot.current ? "refreshing" : "loading");
     try {
       const response = await fetch("/api/threats", { cache: "no-store" });
       if (!response.ok) throw new Error("Threat request failed");
       const data: unknown = await response.json();
       if (!Array.isArray(data)) throw new Error("Threat response unavailable");
+
+      // Do not let a slower REST response replace a newer SSE update.
+      if (lastStreamDataAt.current > startedAt) {
+        setStatus("ready");
+        return;
+      }
 
       setThreats(sortThreats(data.filter(isDashboardThreatEvent)));
       hasSnapshot.current = true;
@@ -64,6 +72,7 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let fallbackTimer: number | null = null;
+    let reconciliationTimer: number | null = null;
 
     const stopFallback = () => {
       if (fallbackTimer === null) return;
@@ -91,6 +100,7 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
         if (!message) return;
 
         if (message.type === "snapshot") {
+          lastStreamDataAt.current = Date.now();
           setThreats(sortThreats(message.data));
           hasSnapshot.current = true;
           setLastUpdated(Date.now());
@@ -99,6 +109,7 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
         }
 
         if (message.type === "threat.upsert") {
+          lastStreamDataAt.current = Date.now();
           setThreats((current) => upsertThreat(current, message.data));
           hasSnapshot.current = true;
           setLastUpdated(Date.now());
@@ -120,6 +131,7 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
       connection.onopen = () => {
         if (disposed) return;
         streamConnected.current = true;
+        lastStreamDataAt.current = Date.now();
         stopFallback();
         if (hasSnapshot.current) setStatus("ready");
       };
@@ -136,12 +148,18 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
 
     void fetchSnapshot();
     connect();
+    reconciliationTimer = window.setInterval(() => {
+      if (streamConnected.current && Date.now() - lastStreamDataAt.current >= 20_000) {
+        void fetchSnapshot();
+      }
+    }, 15_000);
 
     return () => {
       disposed = true;
       streamConnected.current = false;
       source?.close();
       stopFallback();
+      if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, [fetchSnapshot]);

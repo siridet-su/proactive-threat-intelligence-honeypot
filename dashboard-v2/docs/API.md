@@ -23,7 +23,7 @@ All `GET /api/...` requests require a valid `dashboard_v2_session` cookie before
 
 The BFF forwards only `GET`, sends `Accept: application/json`, disables caching, rejects redirects, applies a 15-second timeout, and caps response bodies at 8 MiB. Unknown query keys and overlong values are dropped. `limit` is capped at 1000 by the BFF, `offset` at 5000, and the upstream applies route-specific bounds. The backend generic table handlers use `limit` only; `offset` and `filter` are accepted by the BFF allowlist but have no generic-table effect. `session_id` is consumed by session-specific routes. `filter` is consumed by feedback review.
 
-Every public backend JSON response passes through a redaction projection. Raw command detail remains excluded from public session views. A separate same-origin Admin route may request a bounded sensitive projection through the loopback-only `/api/internal/session-commands` endpoint; neither route is part of the generic BFF.
+Every public backend JSON response passes through a redaction projection. Raw command detail remains excluded from public session views. A separate same-origin Admin route requests a bounded sensitive projection from the loopback-only `/api/internal/session-commands` endpoint by default, or from canonical MongoDB when the hosted production source is explicitly selected. Neither source is part of the generic BFF.
 
 ## Sensitive Admin command evidence
 
@@ -34,20 +34,88 @@ Activity. For a sensor-local ID, the Next server resolves exactly one
 canonical ID from `honeypot_canonical_v1.events` only after verifying the
 authenticated sensor/session binding and its canonical hash; missing or
 ambiguous bindings fail closed. It does not infer identity from IP or time.
-The production server reads `MONITOR_RAW_COMMANDS_TOKEN_FILE` from an
-owner-only regular file and forwards only the verified canonical ID to
-`http://127.0.0.1:8090/api/internal/session-commands`. Explicit local
-development review instead reads `honeypot_canonical_v1.events` on loopback.
-The monitor additionally requires `LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a
-loopback bind/client, and the dedicated bearer token. The browser never
-receives this token. Responses are bounded and `no-store`; the v2 response
+Colocated production deployments read `MONITOR_RAW_COMMANDS_TOKEN_FILE` from
+an owner-only regular file and forward only the verified canonical ID to
+`http://127.0.0.1:8090/api/internal/session-commands`. A separately hosted
+production Dashboard may instead set the server-only
+`PTI_ADMIN_COMMANDS_SOURCE=mongo` value to read exact-session submissions from
+`honeypot_canonical_v1.events` using its existing server-side MongoDB
+connection. This is an explicit source selection, not a fallback after monitor
+failure. An absent or different value keeps the monitor path. Explicit local
+development review uses the same canonical projection only on loopback when
+`PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO=true` and the Next server runs in
+development mode. Both Mongo paths return command submissions only, matching
+the monitor route. The monitor path additionally requires
+`LOCAL_DASHBOARD_COMMANDS_ENABLED=true`, a loopback bind/client, and the
+dedicated bearer token. The browser receives neither token nor MongoDB URI.
+Responses are bounded and `no-store`; the v2 response
 returns the canonical ID as `session_id` and the selected ID as
 `requested_session_id` so the client can reject stale or mismatched results.
 Command input is
 sensitive and may contain attacker-entered credentials. The UI excludes it
 from print/PDF, exports, STIX, webhooks, logs, and prediction snapshots.
 Invalid/missing credentials or mismatched canonical sensor/session identity
-fail closed. Text already redacted before persistence cannot be recovered.
+fail closed. The hosted Mongo setting does not bypass the Admin or identity
+checks. Text already redacted before persistence cannot be recovered. See
+[ADR-0016](../../docs/adr/ADR-0016-hosted-dashboard-command-evidence.md) for
+the hosted source decision.
+
+`GET /api/sessions/{id}/file-downloads` uses the same Admin check and verified
+canonical session binding. It reads at most 101 canonical
+`cowrie.session.file_download` rows and returns at most 100 newest events with
+event ID, timestamp, and valid SHA-256 (or `null`). The response includes the
+requested and canonical session IDs, a truncation flag, and private/no-store
+headers. Raw payloads, URLs, paths, and bytes are excluded. The Evidence UI
+links the hash to `/malware-vault?q={sha256}`. Exact hash search checks observed
+events when no enrichment record matches that hash, even when other hashes
+already have threat intel. A download event alone does not establish file
+execution or virtual filesystem read/write activity.
+
+## Backup daily schedule endpoints
+
+The schedule is a single daily `Asia/Bangkok` time with a permanent base
+(default `03:30`) and an optional temporary override. It applies to all
+enabled backup targets. All responses use `Cache-Control: no-store`; the
+Dashboard never sends a systemd command or B2 credential.
+
+- `GET /api/backup/schedule` requires a dashboard session. It returns the
+  current revision, permanent and temporary settings, today's local scheduler
+  state, worker readiness, next run, and automatic return time. Only Admins
+  receive `can_edit: true`.
+- `POST /api/backup/schedule/preview` requires Admin. The body is one of
+  `{mode:"permanent",time:"HH:mm"}`,
+  `{mode:"temporary",time:"HH:mm",start_date:"YYYY-MM-DD",days:1..90}`,
+  or `{mode:"clear_override"}`. It validates the edit and returns the next
+  run, catch-up indication, return time, and `unchanged` flag without changing
+  the schedule. The Dashboard disables Save when `unchanged` is true.
+- `POST /api/backup/schedule` requires Admin. Its body is
+  `{edit:<the previewed edit>,expected_revision:<revision>}`. It appends a
+  complete schedule revision with the operator ID and timestamp only when the
+  proposed permanent time and temporary override differ from the latest
+  settings. The server checks this again on every POST. A matching request
+  returns `200` with `unchanged:true` and creates no revision; an applied edit
+  returns `unchanged:false`. A stale revision or concurrent edit returns `409`;
+  a worker without a recent scheduler heartbeat rejects actual edits.
+  Temporary starts may be today through
+  365 days ahead and last 1–90 days. The permanent base remains intact while
+  a temporary override is active.
+
+The Dashboard temporary form lets Admins choose the first and last backup
+dates as an inclusive range. It calculates `days` from that range before
+calling the existing preview and save endpoints; the API contract remains
+`start_date` plus `days`.
+
+After an Admin selects Save, the Dashboard waits three seconds and shows an
+Undo action. Undo cancels the pending browser timer before the save endpoint is
+called. The Dashboard reports success only after the server confirms the write.
+This grace period belongs to the open page: leaving it before the request starts
+cancels the pending change, while a request already sent cannot be undone by
+the browser. The server's revision check still handles concurrent edits.
+
+The Pi control worker claims at most one scheduled run per Bangkok date. A
+time moved into the past causes one catch-up run if today's run has not
+completed. Manual hardware actions retain their separate request contract.
+See [ADR-0008](../../docs/adr/ADR-0008-dashboard-backup-daily-schedule.md).
 
 ## Dedicated hardware endpoints
 
@@ -76,6 +144,23 @@ capacity values, root-disk percentage and capacity values, temperature, and
 collector fields are kept outside this browser-facing live ring. Older v2
 documents remain readable during the rolling deployment.
 
+## Hardware backup history
+
+`GET /api/hardware/backup` remains the live hardware backup status and control
+view. `GET /api/hardware/backup/history?period=N` is an authenticated,
+read-only history view. `N` is an integer from 1 through 36; period 1 is the
+29 eligible UTC days immediately before the live window. Each later period
+moves back by another 29 days, so the windows do not overlap. The response
+contains `period`, `expected_window`, 29 daily manifest states, and
+`has_older`. Both routes use `Cache-Control: no-store`.
+
+The Dashboard labels a successful zero-record day as **Empty** and counts it
+as a completed manifest check, not as a B2 archive. The archived-day count
+requires an archive object name. Historical navigation changes only the
+calendar and its counts; the Pi controls, latest request, and storage snapshot
+continue to show live state. Days before a target was activated can appear as
+missing in historical windows and are not queued by navigating history.
+
 ## Error contract
 
 The BFF returns `401` for a missing/invalid dashboard session, `404` for an unknown allowlist key, `503` for an unsafe origin or unavailable upstream, and `502` for a non-JSON or oversized upstream response. An upstream `401`/`403` is normalized to `dashboard backend authorization failed`; an upstream `404` is normalized to `dashboard data was not found`; other upstream status codes are preserved with `dashboard backend request failed`. Backend route-specific errors below are therefore visible only after the BFF has admitted the request.
@@ -93,7 +178,7 @@ Authentication errors are `503` when server auth configuration is incomplete, `4
 | GET | `/api/ready` | `/ready` | Readiness alias | `monitor_web` health check; `{ok,service,timestamp}` | None |
 | GET | `/api/sessions` | `/api/sessions` | Bounded session snapshot | `sessions`, plus bounded jobs/reports/events/evidence joins; `{ok,timestamp,summary,sessions,selected_session_id,error}` | Dashboard, Threat Intel |
 | GET | `/api/session` | `/api/session-detail` | One-session detail | Exact `sessions` lookup plus bounded session-scoped `events`, `analysis_jobs`, `reports`, and `prediction_snapshots`; `session_detail_view` projection | Threat Intel session detail |
-| GET | `/api/sessions/{id}/commands` | Loopback `/api/internal/session-commands?session_id={verified_canonical_id}` (production) | Sensitive raw Cowrie command input for Admin review | Canonical ID or exact sensor-local alias resolved through an authenticated canonical event binding; bounded exact-session command-only projection | Filesystem Activity Evidence and Threat Intel session detail (Admin only; no-store; excluded from print/PDF) |
+| GET | `/api/sessions/{id}/commands` | Loopback monitor by default; canonical MongoDB with `PTI_ADMIN_COMMANDS_SOURCE=mongo` in hosted production | Sensitive raw Cowrie command input for Admin review | Canonical ID or exact sensor-local alias resolved through an authenticated canonical event binding; bounded exact-session command-only projection | Filesystem Activity Evidence and Threat Intel session detail (Admin only; no-store; excluded from print/PDF) |
 | GET | `/api/events` | `/api/events` | Global or session event view | `events`; `{ok,timestamp,events,error}` | Dashboard freshness/activity |
 | GET | `/api/ai-advisory` | `/api/ai-advisory` | Stored advisory status/detail | advisory/outbox/report records; `{ok,status,advisory,metrics,...}` | Threat Intel session detail |
 | GET | `/api/predictions/current` | `/predictions/current` | Current model snapshot and guidance | `prediction_snapshots` plus feedback; `{item,current_prediction,response_guidance,...}` | Threat Intel session detail |

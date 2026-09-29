@@ -31,9 +31,24 @@ owners:
 หากเอกสารนี้ขัดกับเอกสารสถานะจริง ให้ยึดเอกสารสถานะจริงก่อนและเปิด ADR
 เพื่ออนุมัติการเปลี่ยนสถาปัตยกรรม
 
+## Installation manual handoff — 2026-09-28
+
+The installation manual is the next documentation workstream after the accepted
+Filesystem Activity round. Define whether each procedure targets a fresh
+customer appliance or the existing managed Pi, and verify it against the
+current architecture and service runbooks before presenting any step as
+runnable. Keep prerequisites, version pins, validation, rollback, and secret
+handling explicit. The disconnect/action architecture in sections 1.1, 1.3,
+2, and 3.1 below is historical after ADR-0007; it must not become an installer
+dependency. This blueprint remains proposed and no one-line customer installer
+has been accepted or deployed.
+
 ## 1. ข้อสรุปทางสถาปัตยกรรม
 
-### 1.1 สิ่งที่พิสูจน์แล้วในระบบปัจจุบัน
+### 1.1 หลักฐานย้อนหลังของ control path ที่เลิกใช้แล้ว
+
+รายการต่อไปนี้อธิบายการทดลองก่อน ADR-0007 ไม่ใช่สถานะปัจจุบันหรือขั้นตอน
+ติดตั้งที่ยังใช้ได้
 
 - Dashboard ส่งคำสั่ง terminate session ไปยัง Pi ผ่าน Tailscale ได้
 - Go response agent รับเฉพาะ session ID ที่ผ่าน validation
@@ -70,7 +85,10 @@ Admin browser
   -> Cowrie Unix control socket
 ```
 
-### 1.3 การตัดสินใจสำคัญ
+### 1.3 ข้อเสนอเดิมที่ต้องตรวจใหม่ก่อนใช้
+
+รายการที่อาศัย Dashboard-to-Pi action path ถูกยกเลิกตาม ADR-0007;
+ข้อจำกัดด้าน least privilege ที่ไม่อาศัย path นี้ยังใช้ประกอบการออกแบบใหม่ได้
 
 1. ใช้ Tailscale direct control เป็น development และ managed-deployment path ต่อไป
 2. ใช้ outbound WSS บน TCP 443 สำหรับ customer appliance ที่ไม่ควรรับ inbound
@@ -81,7 +99,7 @@ Admin browser
 6. ห้าม mount `/var/run/docker.sock` เข้า management agent แม้จะใช้ `:ro`
 7. การ containerize Cowrie ปัจจุบันเป็น migration แยก ไม่ใช่ผลข้างเคียงของ installer
 
-## 2. ขอบเขตของ Control Plane
+## 2. ขอบเขต Control Plane เดิม (ข้อมูลย้อนหลัง)
 
 ### 2.1 Phase 1 operations
 
@@ -108,9 +126,10 @@ authorization, audit fields และ executor ที่เจาะจงกั
 
 ## 3. Transport Strategy
 
-### 3.1 Phase A: Tailscale direct control
+### 3.1 Phase A: Tailscale direct control (ยกเลิกแล้ว)
 
-ใช้กับ local development, staging และ deployment ที่ทีม PTI ดูแลเอง:
+แผนเดิมสำหรับ local development, staging และ deployment ที่ทีม PTI ดูแลเอง
+ถูกยกเลิกตาม ADR-0007; diagram ต่อไปนี้เป็นข้อมูลย้อนหลัง ไม่ใช่ขั้นตอนติดตั้ง:
 
 ```mermaid
 flowchart LR
@@ -308,6 +327,13 @@ requested -> queued -> delivered -> verified
 - **Fresh appliance:** ใช้ versioned package และ deployment layout ที่ผ่าน test matrix
 - **Existing PTI Pi:** ใช้ migration runbook, staging transcript และ rollback receipt
 
+สำหรับรุ่นแรก ขอบเขตที่ยอมรับตาม
+[ADR-0009](adr/ADR-0009-installer-operator-managed-credentials.md) คือ installer
+ลง dependency, release artifact, service unit และ config ที่ไม่มี secret เท่านั้น
+ปล่อย application service ในสถานะ stopped/disabled ผู้ดูแลเป็นผู้สร้างไฟล์ `.env`
+และใส่ credential บนโฮสต์ที่ถูกต้องเอง จากนั้นจึงตรวจและ activate เป็นอีกขั้น
+installer ห้ามสร้างหรือแก้ไข private env file และห้ามเก็บค่า credential ใน receipt
+
 ### 6.2 Target package layout
 
 ```text
@@ -426,13 +452,14 @@ Installer ต้อง:
 1. ดาวน์โหลด release ลง temporary directory
 2. verify manifest, signature และทุก checksum
 3. extract ไปยัง versioned release directory เช่น `/opt/pti/releases/<version>`
-4. สร้าง config/secrets นอก immutable release directory
-5. validate Compose และ systemd unit ก่อน enable
-6. start บน staging/non-public trap port
-7. รัน readiness และ synthetic-session smoke test
-8. สลับ symlink `current` แบบ atomic เมื่อทุก check ผ่าน
-9. apply firewall/exposure change เป็นขั้นสุดท้าย
-10. เขียน installation receipt ที่ไม่มี secret
+4. ลงเฉพาะ non-secret config นอก immutable release directory; ไม่สร้างหรือแตะ `.env`
+5. validate Compose และ systemd unit แล้วจบ preparation โดยยังไม่ enable application service
+6. ให้ผู้ดูแลเพิ่ม private env/credential เอง และตรวจ path, owner, mode, key names โดยไม่แสดงค่า
+7. เมื่อผู้ดูแลสั่ง activate จึง start บน staging/non-public trap port
+8. รัน readiness และ synthetic-session smoke test
+9. สลับ symlink `current` แบบ atomic เมื่อทุก check ผ่าน
+10. apply firewall/exposure change เป็นขั้นสุดท้าย
+11. เขียน installation receipt ที่ไม่มี secret
 
 หากขั้นใดล้มเหลว ต้องคืน service, firewall และ SSH config จาก backup เดิม ไม่ทิ้ง
 deployment ครึ่งทาง

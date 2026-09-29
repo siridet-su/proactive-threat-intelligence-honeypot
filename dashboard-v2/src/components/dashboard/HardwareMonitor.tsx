@@ -179,6 +179,9 @@ export function HardwareMonitor() {
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let fallbackTimer: number | null = null;
+    let reconciliationTimer: number | null = null;
+    let streamConnected = false;
+    let lastStreamDataAt = 0;
     let hasSnapshot = false;
 
     const receiveSnapshot = (incoming: HardwareTelemetry[]) => {
@@ -194,11 +197,13 @@ export function HardwareMonitor() {
       setLoading(false);
     };
     const fetchSnapshot = async () => {
+      const startedAt = Date.now();
       try {
         const response = await fetch("/api/hardware", { cache: "no-store" });
         if (!response.ok) throw new Error("Hardware request failed");
         const data: unknown = await response.json();
         if (!Array.isArray(data)) throw new Error("Hardware response unavailable");
+        if (lastStreamDataAt > startedAt) return;
         receiveSnapshot(data.filter(isHardwareTelemetry));
       } catch {
         if (!hasSnapshot) {
@@ -240,6 +245,7 @@ export function HardwareMonitor() {
         try {
           const message = parseHardwareStreamMessage(JSON.parse(event.data));
           if (!message) return;
+          lastStreamDataAt = Date.now();
           if (message.type === "initial") receiveSnapshot(message.data);
           else receiveUpdate(message.data);
         } catch {
@@ -248,12 +254,15 @@ export function HardwareMonitor() {
       };
       connection.onopen = () => {
         if (!disposed) {
+          streamConnected = true;
+          lastStreamDataAt = Date.now();
           stopFallback();
           setConnectionState("live");
         }
       };
       connection.onerror = () => {
         if (disposed || source !== connection) return;
+        streamConnected = false;
         connection.close();
         source = null;
         startFallback();
@@ -262,10 +271,16 @@ export function HardwareMonitor() {
     };
 
     connect();
+    reconciliationTimer = window.setInterval(() => {
+      if (streamConnected && Date.now() - lastStreamDataAt >= 20_000) {
+        void fetchSnapshot();
+      }
+    }, 15_000);
     return () => {
       disposed = true;
       source?.close();
       stopFallback();
+      if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, []);
@@ -350,7 +365,7 @@ export function HardwareMonitor() {
             <MetricCard index={1} icon={MemoryStick} label="Memory pressure" value={formatPercent(memoryPercent(latest))} detail={`${formatBytes(memoryUsedBytes(latest))} used · ${formatBytes(latest?.mem_available_bytes)} free`} delta={formatDelta(memoryPercent(latest), memoryPercent(previous))} tone={pressureTone(memoryPercent(latest))} reduceMotion={Boolean(shouldReduceMotion)} />
             <MetricCard index={2} icon={HardDrive} label="Storage" value={formatPercent(latest?.disk_percent)} detail={`${formatBytes(diskUsedBytes(latest))} used · ${formatBytes(latest?.disk_free_bytes)} free`} delta={formatDelta(latest?.disk_percent, previous?.disk_percent)} tone={pressureTone(latest?.disk_percent)} reduceMotion={Boolean(shouldReduceMotion)} />
             <MetricCard index={3} icon={Thermometer} label="Temperature" value={formatTemperature(latest?.temperature)} detail="Thermal probe" delta={formatDelta(latest?.temperature, previous?.temperature)} tone={temperatureTone(latest?.temperature)} reduceMotion={Boolean(shouldReduceMotion)} />
-            <MetricCard index={4} icon={Wifi} label="wlan0 throughput" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} unit="RX / TX Mbps" detail="Virtual network interface" delta={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps`} tone="neutral" reduceMotion={Boolean(shouldReduceMotion)} />
+            <MetricCard index={4} icon={Wifi} label="wlan0 throughput" value={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)}`} unit="RX / TX Mbps" detail="Primary uplink interface" delta={`${formatThroughput(latest?.net_wlan0_rx_mbps)} / ${formatThroughput(latest?.net_wlan0_tx_mbps)} Mbps`} tone="neutral" reduceMotion={Boolean(shouldReduceMotion)} />
           </div>
 
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(230px,0.65fr)] lg:grid-rows-2">
@@ -450,7 +465,7 @@ const METRIC_SKELETON_SPECS = [
     label: "wlan0 throughput",
     placeholder: "—.—— / —.——",
     unit: "RX / TX Mbps",
-    detail: "Virtual interface",
+    detail: "Primary uplink interface",
     delta: "Awaiting telemetry",
   },
 ];

@@ -21,6 +21,7 @@ from production.correlation.session_ttp_knowledge import main_ttp_id
 from production.correlation.session_behavior_relationships import (
     build_session_behavior_relationships,
 )
+from production.utils.cowrie_transfer import is_cowrie_network_transfer
 
 
 SCHEMA_VERSION = "session_evidence_graph.v2"
@@ -501,8 +502,8 @@ def build_session_evidence_graph(
             "has_commands": bool(commands),
             "has_login_success": bool(session_payload.get("login_success")),
             "has_login_failures": login_failures > 0,
-            "has_file_transfer_event": any(eventid == "cowrie.session.file_download" for eventid in eventids),
-            "has_upload_event": any(eventid == "cowrie.session.file_upload" for eventid in eventids),
+            "has_file_transfer_event": any(is_cowrie_network_transfer(event) and event.get("eventid") == "cowrie.session.file_download" for event in raw_events if isinstance(event, dict)),
+            "has_upload_event": any(is_cowrie_network_transfer(event) and event.get("eventid") == "cowrie.session.file_upload" for event in raw_events if isinstance(event, dict)),
             "has_command_and_control_tactic": "command-and-control" in tactic_sequence,
             "has_execution_tactic": "execution" in tactic_sequence,
             "has_credential_access_tactic": "credential-access" in tactic_sequence,

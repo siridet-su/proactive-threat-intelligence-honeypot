@@ -290,6 +290,10 @@ export function FilesystemActivity() {
     selectedHistoryEventId,
     onSelectHistoryEventId: handleSelectHistoryEventId,
   });
+  const canReplayRoute = displayedHistory.length > 1 && !replayPresentation.isAnchoredSelected;
+  const unavailableReplayLabel = displayedHistory.length <= 1
+    ? "No route steps to replay"
+    : "Replay paused across unloaded gap";
 
   const handleSnapshotApplied = useCallback((data: FilesystemTopologySnapshot) => {
     const resolution = processSnapshotSessionResolution({
@@ -1114,11 +1118,12 @@ export function FilesystemActivity() {
                           <button
                             type="button"
                             onClick={handleTogglePlay}
+                            disabled={!canReplayRoute}
                             className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
                               isPlaying ? "border-primary bg-primary text-surface" : ""
                             }`}
-                            title={isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
-                            aria-label={isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
+                            title={!canReplayRoute ? unavailableReplayLabel : isPlaying ? "Pause auto-playback (Space)" : "Play route trajectory automatically (Space)"}
+                            aria-label={!canReplayRoute ? unavailableReplayLabel : isPlaying ? "Pause auto-playback" : "Play route trajectory automatically"}
                           >
                             {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
                             <span>{isPlaying ? "Pause" : "Play"}</span>
@@ -1285,11 +1290,12 @@ export function FilesystemActivity() {
                   <button
                     type="button"
                     onClick={handleTogglePlay}
+                    disabled={!canReplayRoute}
                     className={`ui-button h-9 min-h-9 px-2.5 text-xs flex items-center gap-1 ${
                       isPlaying ? "border-primary bg-primary text-surface" : ""
                     }`}
-                    title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-                    aria-label={isPlaying ? "Pause" : "Play"}
+                    title={!canReplayRoute ? unavailableReplayLabel : isPlaying ? "Pause (Space)" : "Play (Space)"}
+                    aria-label={!canReplayRoute ? unavailableReplayLabel : isPlaying ? "Pause" : "Play"}
                   >
                     {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
                     <span>{isPlaying ? "Pause" : "Play"}</span>

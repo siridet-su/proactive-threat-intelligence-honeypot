@@ -13,6 +13,9 @@
   --border: #CBD5E1;
   --border-strong: #94A3B8;
   --primary: #B45309;
+  --color-primary-navy: #18227A;
+  --color-primary-navy-soft: color-mix(in srgb, var(--color-primary-navy) 4%, var(--surface));
+  --color-primary-navy-line: color-mix(in srgb, var(--color-primary-navy) 30%, var(--border));
   --primary-action: #D97706;
   --primary-action-hover: #B45309;
   --on-primary: #FFFFFF;
@@ -54,6 +57,9 @@
   --border: #334155;
   --border-strong: #475569;
   --primary: #FBBF24;
+  --color-primary-navy: #A5B4FC;
+  --color-primary-navy-soft: color-mix(in srgb, var(--color-primary-navy) 7%, var(--surface));
+  --color-primary-navy-line: color-mix(in srgb, var(--color-primary-navy) 34%, var(--border));
   --primary-action: #F59E0B;
   --primary-action-hover: #D97706;
   --on-primary: #FFFFFF;
@@ -204,6 +210,10 @@
 
 @layer components {
   .ui-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-card); transition: background-color 150ms, border-color 150ms, box-shadow 150ms, transform 150ms; }
+  .text-primary-navy { color: var(--color-primary-navy); }
+  .bg-primary-navy-soft { background-color: var(--color-primary-navy-soft); }
+  .border-primary-navy-line { border-color: var(--color-primary-navy-line); }
+  .bg-primary-navy-line { background-color: var(--color-primary-navy-line); }
   .ui-panel-interactive:hover { border-color: var(--border-strong); box-shadow: var(--shadow-raised); transform: translateY(-2px); }
   .ui-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 14px; border: 1px solid var(--control-border); border-radius: 8px; background: var(--surface); color: var(--text-muted); font-size: 14px; font-weight: 500; white-space: nowrap; transition: all 150ms ease; }
   .ui-button:hover:not(:disabled) { background: var(--surface-hover); color: var(--text); box-shadow: var(--shadow-card); transform: translateY(-1px); }
@@ -309,18 +319,34 @@
 }
 
 .pti-live-radar {
-  --pti-radar-canvas-radius: 12px;
   --pti-radar-bg: var(--surface);
   --pti-radar-text: var(--text);
   --pti-radar-accent: var(--primary);
   --pti-radar-line: color-mix(in srgb, var(--primary) 16%, transparent);
-  --pti-radar-stroke-width: 1.5px;
   --pti-radar-hub-glow: color-mix(in srgb, var(--primary) 12%, transparent);
   --pti-radar-edge-glow: color-mix(in srgb, var(--primary) 48%, transparent);
   --pti-radar-wave-glow: color-mix(in srgb, var(--primary) 72%, transparent);
   --pti-radar-control-bg: color-mix(in srgb, var(--surface) 94%, var(--primary));
   color: var(--pti-radar-text);
   background: var(--pti-radar-bg);
+}
+
+@keyframes pti-live-radar-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pti-live-radar-standby {
+  animation: pti-live-radar-reveal 240ms ease-out both;
+}
+
+.pti-live-topology-enter {
+  animation: pti-live-radar-reveal 220ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pti-live-radar-standby,
+  .pti-live-topology-enter { animation: none; }
 }
 
 .pti-live-radar-grid {
@@ -343,46 +369,6 @@
   opacity: 0.5;
 }
 
-.pti-live-radar-diagonals {
-  pointer-events: none;
-}
-
-.pti-live-radar-diagonal {
-  fill: none;
-  stroke: var(--pti-radar-accent);
-  stroke-opacity: 0.2;
-  stroke-width: 1.5;
-  vector-effect: non-scaling-stroke;
-}
-
-.pti-live-radar-crosshair::before,
-.pti-live-radar-crosshair::after {
-  position: absolute;
-  display: block;
-  content: "";
-  opacity: 0.2;
-  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
-  pointer-events: none;
-}
-
-.pti-live-radar-crosshair::before {
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: var(--pti-radar-stroke-width);
-  background: var(--pti-radar-accent);
-  transform: translateX(-50%);
-}
-
-.pti-live-radar-crosshair::after {
-  right: 0;
-  left: 0;
-  top: 50%;
-  height: var(--pti-radar-stroke-width);
-  background: var(--pti-radar-accent);
-  transform: translateY(-50%);
-}
-
 .pti-live-radar-wave-shell {
   transform-box: fill-box;
   transform-origin: center;
@@ -399,50 +385,11 @@
   animation: pti-radar-wave-energy 7s cubic-bezier(0.18, 0.78, 0.25, 1) infinite both;
 }
 
-.pti-live-radar-corner-tick {
-  position: absolute;
-  z-index: 1;
-  display: block;
-  width: 2rem;
-  height: var(--pti-radar-stroke-width);
-  background: var(--pti-radar-accent);
-  opacity: 0.72;
-  box-shadow: 0 0 6px var(--pti-radar-edge-glow);
-}
-
-.pti-live-radar-corner-tick.is-top-left {
-  top: -1px;
-  left: 0;
-  transform: rotate(var(--pti-radar-corner-angle-positive));
-  transform-origin: left center;
-}
-
-.pti-live-radar-corner-tick.is-top-right {
-  top: -1px;
-  right: 0;
-  transform: rotate(var(--pti-radar-corner-angle-negative));
-  transform-origin: right center;
-}
-
-.pti-live-radar-corner-tick.is-bottom-right {
-  right: 0;
-  bottom: -1px;
-  transform: rotate(var(--pti-radar-corner-angle-positive));
-  transform-origin: right center;
-}
-
-.pti-live-radar-corner-tick.is-bottom-left {
-  bottom: -1px;
-  left: 0;
-  transform: rotate(var(--pti-radar-corner-angle-negative));
-  transform-origin: left center;
-}
-
 .pti-live-radar-edge-tick {
   position: absolute;
   z-index: 1;
   display: block;
-  width: var(--pti-radar-stroke-width);
+  width: 1.5px;
   height: 2rem;
   background: var(--pti-radar-accent);
   opacity: 0.72;
@@ -459,7 +406,7 @@
   top: 50%;
   right: 0;
   width: 2rem;
-  height: var(--pti-radar-stroke-width);
+  height: 1.5px;
   transform: translateY(-50%);
 }
 
@@ -473,7 +420,7 @@
   top: 50%;
   left: 0;
   width: 2rem;
-  height: var(--pti-radar-stroke-width);
+  height: 1.5px;
   transform: translateY(-50%);
 }
 
@@ -487,10 +434,13 @@
 }
 
 .pti-live-radar-status-line {
-  color: var(--pti-radar-accent);
+  color: var(--success);
 }
 
-.pti-live-radar-status-line.is-loading,
+.pti-live-radar-status-line.is-connecting {
+  color: var(--text-muted);
+}
+
 .pti-live-radar-status-line.is-reconnecting {
   color: var(--warning);
 }
@@ -508,10 +458,13 @@
   border-radius: 50%;
   color: var(--surface);
   background: var(--pti-radar-hub-emitter);
-  box-shadow: 0 0 1.25rem var(--pti-radar-hub-glow);
+  box-shadow: 0 0 1rem var(--pti-radar-hub-glow);
 }
 
-.pti-live-radar-hub.is-loading,
+.pti-live-radar-hub.is-connecting {
+  --pti-radar-hub-emitter: var(--text-muted);
+}
+
 .pti-live-radar-hub.is-reconnecting {
   --pti-radar-hub-emitter: var(--warning);
   --pti-radar-hub-glow: color-mix(in srgb, var(--warning) 12%, transparent);
@@ -558,50 +511,27 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pti-live-radar-status-line .pti-listening-status-dot {
-    animation: none;
-  }
-
+  .pti-live-radar-status-line .pti-listening-status-dot,
   .pti-live-radar-wave-shell,
   .pti-live-radar-wave {
     animation: none;
-    stroke-opacity: 0;
   }
-
 }
 
 @keyframes pti-radar-wave-expand {
-  0% {
-    transform: scale(0.012);
-  }
-  80%, 100% {
-    transform: scale(1);
-  }
+  0% { transform: scale(0.012); }
+  80%, 100% { transform: scale(1); }
 }
 
-/* The wave clears the corners at 80%, then leaves a 0.63-second quiet gap. */
 @keyframes pti-radar-wave-energy {
-  0% {
-    stroke-opacity: 0.78;
-  }
-  80% {
-    stroke-opacity: 0.14;
-    animation-timing-function: ease-out;
-  }
-  91%, 100% {
-    stroke-opacity: 0;
-  }
+  0% { stroke-opacity: 0.78; }
+  80% { stroke-opacity: 0.14; animation-timing-function: ease-out; }
+  91%, 100% { stroke-opacity: 0; }
 }
 
 @keyframes pti-listening-status {
-  0%, 100% {
-    opacity: 0.55;
-    box-shadow: 0 0 0 0 currentColor;
-  }
-  50% {
-    opacity: 1;
-    box-shadow: 0 0 0 0.25rem transparent;
-  }
+  0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 currentColor; }
+  50% { opacity: 1; box-shadow: 0 0 0 0.25rem transparent; }
 }
 
 @keyframes pti-laser-scan {

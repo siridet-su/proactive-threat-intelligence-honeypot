@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from types import SimpleNamespace
 
 from production.classification.classification_pipeline import NotebookParityClassifier
+from production.classification.s1_advisory_classifier import S1AdvisoryClassifier
 from production.classification.trust import is_trusted_classification_event
 from production.utils.config import ProductionConfig
 from production.workers import analysis_worker as analysis_worker_module
@@ -14,7 +13,6 @@ from production.workers.session_worker import SessionWorker
 
 ROOT = Path(__file__).resolve().parents[1]
 RULE_POLICY = str(ROOT / "configs" / "classification_rules.trusted.json")
-S1_MANIFEST = ROOT / "models" / "command_ttp_s1" / "20260831_cclr2" / "FINAL_MODEL_MANIFEST.json"
 
 
 def test_final_config_disables_securebert_without_reinterpreting_historical_threshold() -> None:
@@ -25,40 +23,14 @@ def test_final_config_disables_securebert_without_reinterpreting_historical_thre
     assert config.classification_policy["s1_advisory_enabled"] is False
 
 
-def test_final_workers_do_not_call_securebert_loader_when_disabled(monkeypatch) -> None:
-    config = SimpleNamespace(enable_securebert=False)
-    environment = {}
-
-    def unexpected_loader(*_args, **_kwargs):
-        raise AssertionError("SecureBERT loader must not be called when disabled")
-
-    monkeypatch.setattr(
-        session_worker_module,
-        "load_securebert_classifier",
-        unexpected_loader,
-    )
-    monkeypatch.setattr(
-        analysis_worker_module,
-        "load_securebert_classifier",
-        unexpected_loader,
-    )
-
-    assert session_worker_module._load_securebert_for_final_runtime(config, environment) is None
-    assert analysis_worker_module._load_securebert_for_replay(config, environment) is None
+def test_current_workers_do_not_expose_a_securebert_loader() -> None:
+    assert not hasattr(session_worker_module, "load_securebert_classifier")
+    assert not hasattr(analysis_worker_module, "load_securebert_classifier")
 
 
-def test_securebert_loading_is_an_explicit_compatibility_opt_in(monkeypatch) -> None:
-    config = SimpleNamespace(enable_securebert=True)
-    environment = {}
-    sentinel = object()
-
-    monkeypatch.setattr(
-        session_worker_module,
-        "load_securebert_classifier",
-        lambda *_args, **_kwargs: sentinel,
-    )
-
-    assert session_worker_module._load_securebert_for_final_runtime(config, environment) is sentinel
+def test_current_workers_do_not_expose_the_retired_securebert_opt_in() -> None:
+    assert not hasattr(session_worker_module, "_load_securebert_for_final_runtime")
+    assert not hasattr(analysis_worker_module, "_load_securebert_for_replay")
 
 
 def test_historical_securebert_threshold_has_no_effect_without_model() -> None:
@@ -117,11 +89,9 @@ def test_s1_disagreement_remains_advisory_and_preserves_trusted_rule() -> None:
     assert event["s1_advisory"]["response_authority"] is False
 
 
-def test_final_s1_manifest_declares_raw_margins_and_advisory_authority() -> None:
-    manifest = json.loads(S1_MANIFEST.read_text(encoding="utf-8"))
-    recipe = manifest["recipe"]
-
-    assert recipe["model_family"] == "S1_TFIDF_CHAR_WORD_LINEARSVC"
-    assert recipe["score_type"] == "linear_svc_decision_margin"
-    assert recipe["calibrated_probability"] is None
-    assert recipe["authority"] == "advisory_only"
+def test_s1_runtime_contract_declares_raw_margins_and_advisory_authority() -> None:
+    # Private artifact bytes are verified by the package loader and the
+    # manifest-bound release gate, not copied into a clean source checkout.
+    assert S1AdvisoryClassifier.score_type == "linear_svc_decision_margin"
+    assert S1AdvisoryClassifier.calibrated_probability is None
+    assert S1AdvisoryClassifier.authority == "advisory_only"

@@ -1,0 +1,18 @@
+[Unit]
+Description=PTI Zeek standalone network sensor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+PIDFile=/opt/zeek/spool/zeek/.pid
+ExecStartPre=/opt/zeek/bin/zeekctl check
+ExecStart=/opt/zeek/bin/zeekctl start
+ExecStop=/opt/zeek/bin/zeekctl stop
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=120
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

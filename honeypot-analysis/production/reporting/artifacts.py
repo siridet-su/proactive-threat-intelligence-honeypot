@@ -2408,16 +2408,19 @@ def write_pdf_report(
             body,
         ))
 
-    story.append(_p("Advisory recommendation ranking (two retained late-fusion candidates)", h2))
+    story.append(_p("Advisory recommendation ranking (weighted voting; reciprocal-rank comparator)", h2))
     rrf = model1_advisory.get("rrf_recommendation") if isinstance(model1_advisory, dict) else None
     rrf = rrf if isinstance(rrf, dict) else {}
+    weighted = model1_advisory.get("weighted_voting_recommendation") if isinstance(model1_advisory, dict) else None
+    weighted = weighted if isinstance(weighted, dict) else {}
     if (
-        rrf.get("schema_version") == "session_ttp_rrf_advisory.v1"
-        and str(rrf.get("session_id") or "") == str(session_id)
+        weighted.get("schema_version") == "session_ttp_weighted_voting_advisory.v1"
+        and str(weighted.get("session_id") or "") == str(session_id)
     ):
         story.append(_p(
-            "Model2 does not run RRF internally. The downstream advisory layer retains both "
-            "gated weighted voting and gated weighted reciprocal-rank for comparison. Both start "
+            "Model2 does not run either ensemble formula internally. The downstream advisory layer "
+            "selects gated weighted voting for the PoC review order and retains gated reciprocal-rank "
+            "as an experimental comparator. Both start "
             "with Model1 candidates and may add support only when the matching "
             "exact-session Model2 head reports PRESENT and passes its evidence gate. Model2 cannot "
             "add a new candidate, an ABSENT result never subtracts, and either score is not a "
@@ -2425,31 +2428,32 @@ def write_pdf_report(
             "newer than the immutable report snapshot.",
             body,
         ))
-        story.append(_p(f"Formula: {_value(rrf.get('formula'), limit=180)}", small))
-        rrf_rows = [["Review rank", "Technique", "Model1 rank", "Model2 support", "RRF score"]]
-        for item in (rrf.get("rows") or [])[:20]:
+        story.append(_p(f"Weighted-voting formula: {_value(weighted.get('formula'), limit=180)}", small))
+        weighted_rows = [["Review rank", "Technique", "Model1 rank", "Model2 support", "Vote score"]]
+        for item in (weighted.get("rows") or [])[:20]:
             if not isinstance(item, dict):
                 continue
-            rrf_rows.append([
+            weighted_rows.append([
                 _value(item.get("recommendation_rank"), limit=8),
                 _value(item.get("technique_id"), limit=24),
                 _value(item.get("baseline_rank"), limit=8),
-                "PRESENT bonus" if item.get("model2_support_added") is True else "No bonus",
-                f"{float(item.get('rrf_score') or 0):.6f}",
+                "PRESENT vote" if item.get("model2_support_added") is True else "No vote",
+                f"{float(item.get('weighted_vote_score') or 0):.2f}",
             ])
-        if len(rrf_rows) > 1:
-            story.append(_table(rrf_rows, [2.4 * cm, 3.0 * cm, 2.6 * cm, 4.2 * cm, 3.2 * cm]))
-        weighted = model1_advisory.get("weighted_voting_recommendation")
-        if isinstance(weighted, dict) and weighted.get("schema_version") == "session_ttp_weighted_voting_advisory.v1":
-            story.append(_p(f"Weighted-voting formula: {_value(weighted.get('formula'), limit=180)}", small))
+        if len(weighted_rows) > 1:
+            story.append(_table(weighted_rows, [2.4 * cm, 3.0 * cm, 2.6 * cm, 4.2 * cm, 3.2 * cm]))
+        if rrf.get("schema_version") == "session_ttp_rrf_advisory.v1" and str(rrf.get("session_id") or "") == str(session_id):
             story.append(_p(
-                "Controlled synthetic comparison currently favors weighted voting, but both methods "
-                "remain experimental and no field-performance winner is claimed.",
+                "Reciprocal-rank comparator order: " + ", ".join(str(item) for item in (rrf.get("recommendation_order") or [])[:20]),
                 small,
             ))
+        story.append(_p(
+            "Weighted voting led the controlled synthetic comparison and is selected for this PoC. "
+            "Field accuracy and superiority over the comparator are not established.", small,
+        ))
     else:
         story.append(_p(
-            "No qualified current RRF projection is available. Model1 review order remains unchanged; "
+            "No qualified current weighted-voting projection is available. Model1 review order remains unchanged; "
             "no Model2 ranking contribution is claimed.",
             body,
         ))

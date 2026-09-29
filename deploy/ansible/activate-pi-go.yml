@@ -1,0 +1,135 @@
+---
+# Activation of the prepared five-agent slice only. Cowrie and Zeek must
+# already be installed and running by their separate accepted procedures.
+- name: Activate prepared Pi Go services after operator configuration
+  hosts: pi_sensors
+  become: true
+  gather_facts: true
+  vars:
+    pti_release_id: ""
+    pti_manifest_sha256: ""
+    pti_units:
+      - honeypot-collector.service
+      - honeypot-processor.service
+      - honeypot-ti-worker.service
+      - honeypot-hardware.service
+      - honeypot-hardware-backup-control.service
+  pre_tasks:
+    - name: Require one supported ARM64 target and explicit release identity
+      ansible.builtin.assert:
+        that:
+          - groups['pi_sensors'] | length == 1
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'arm64']
+          - pti_release_id is match('^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+          - pti_manifest_sha256 is match('^[0-9a-f]{64}$')
+        fail_msg: Activation requires one reviewed Ubuntu 24.04 ARM64 Pi and an approved release.
+
+    - name: Inspect installed preparation marker
+      ansible.builtin.stat:
+        path: /var/lib/pti-installer/prepared-release
+      register: pti_marker
+
+    - name: Require safe prepared marker before reading it
+      ansible.builtin.assert:
+        that:
+          - pti_marker.stat.isreg | default(false)
+          - not (pti_marker.stat.islnk | default(false))
+          - pti_marker.stat.uid == 0
+          - pti_marker.stat.mode == '0644'
+
+    - name: Read installed preparation marker
+      ansible.builtin.slurp:
+        src: /var/lib/pti-installer/prepared-release
+      register: pti_marker_file
+
+    - name: Require the prepared approved release
+      ansible.builtin.assert:
+        that:
+          - (pti_marker_file.content | b64decode | from_json).schema == 'pti.prepare.v1'
+          - (pti_marker_file.content | b64decode | from_json).state == 'prepared'
+          - (pti_marker_file.content | b64decode | from_json).release_id == pti_release_id
+          - (pti_marker_file.content | b64decode | from_json).manifest_sha256 == pti_manifest_sha256
+
+    - name: Check operator-uploaded env paths and required names without printing values
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_env.py --service all"
+      changed_when: false
+
+    - name: Check Redis binds only to loopback before starting it
+      ansible.builtin.script: "{{ playbook_dir }}/../../scripts/check_pi_runtime.py"
+      changed_when: false
+
+    - name: Read prerequisite and Go service states
+      ansible.builtin.service_facts:
+
+    - name: Require Cowrie and Zeek to be running before Go activation
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.services
+          - ansible_facts.services[item].state == 'running'
+        fail_msg: Cowrie and Zeek must be installed and running before Go activation.
+      loop:
+        - cowrie.service
+        - zeek.service
+
+    - name: Require Redis and every prepared Go unit to exist
+      ansible.builtin.assert:
+        that:
+          - item in ansible_facts.services
+        fail_msg: A prepared service is missing; rerun preparation for the same release.
+      loop: "{{ pti_units + ['redis-server.service'] }}"
+
+    - name: Keep initial service states for rollback of this attempt
+      ansible.builtin.set_fact:
+        pti_initial_services: "{{ ansible_facts.services }}"
+
+  tasks:
+    - name: Start the approved Go slice
+      block:
+        - name: Start local Redis
+          ansible.builtin.systemd_service:
+            name: redis-server.service
+            state: started
+            enabled: true
+
+        - name: Start prepared Go units
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: started
+            enabled: true
+          loop: "{{ pti_units }}"
+
+        - name: Allow immediate startup failures to appear
+          ansible.builtin.pause:
+            seconds: 3
+
+        - name: Read activated service states
+          ansible.builtin.service_facts:
+
+        - name: Require Redis and Go units to be running and enabled
+          ansible.builtin.assert:
+            that:
+              - ansible_facts.services[item].state == 'running'
+              - ansible_facts.services[item].status == 'enabled'
+            fail_msg: A unit failed to stay running; this activation attempt will roll back newly started units.
+          loop: "{{ pti_units + ['redis-server.service'] }}"
+      rescue:
+        - name: Stop Go units that were inactive before this attempt
+          ansible.builtin.systemd_service:
+            name: "{{ item }}"
+            state: stopped
+            enabled: false
+          loop: "{{ pti_units | reverse | list }}"
+          when: pti_initial_services[item].state != 'running'
+
+        - name: Stop Redis if it was inactive before this attempt
+          ansible.builtin.systemd_service:
+            name: redis-server.service
+            state: stopped
+            enabled: false
+          when: pti_initial_services['redis-server.service'].state != 'running'
+
+        - name: Report unsuccessful activation
+          ansible.builtin.fail:
+            msg: Go activation failed; units started by this attempt were stopped and disabled. Review service logs without copying credentials.

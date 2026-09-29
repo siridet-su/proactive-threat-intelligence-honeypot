@@ -1,0 +1,19 @@
+[Unit]
+Description=PTI Go processor
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User={{ pti_agent_user }}
+Group={{ pti_agent_group }}
+WorkingDirectory={{ pti_release_root }}/{{ pti_release_id }}
+EnvironmentFile=/etc/honeypot-agent.env
+EnvironmentFile=/etc/honeypot/processor.env
+ExecStart={{ pti_release_root }}/{{ pti_release_id }}/bin/pti-processor
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

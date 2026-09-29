@@ -546,7 +546,7 @@ describe("FSV-005 failed-change visualization", () => {
         handleTogglePlay: () => {},
         isPlaying: false,
         onToggleSpeed: () => {},
-        playbackSpeed: 1400,
+        playbackSpeed: 3000,
         onTogglePacingMode: () => {},
         pacingMode: "realistic",
         failedCount: 1,
@@ -580,9 +580,8 @@ describe("FSV-005 failed-change visualization", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Selected CWD context");
-    expect(container.textContent).toContain(VERIFIED_ORIGIN);
-    expect(container.textContent).toContain("attempted destination unavailable or unverified");
+    expect(container.textContent).toContain("Session-scoped command evidence");
+    expect(container.textContent).toContain("not automatically linked to the selected CWD hop");
     assertHostileDestinationAbsent(container);
   });
 
@@ -684,7 +683,7 @@ describe("FSV-005 failed-change visualization", () => {
           handleTogglePlay: () => {},
           isPlaying: false,
           onToggleSpeed: () => {},
-          playbackSpeed: 1400,
+          playbackSpeed: 3000,
           onTogglePacingMode: () => {},
           pacingMode: "realistic",
           failedCount: 0,

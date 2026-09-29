@@ -275,16 +275,15 @@ export async function loadAdminCowrieCommands(sessionId: string): Promise<AdminC
   }
 }
 
-/** Local development only: exact-session, Admin-gated command review from canonical Mongo. */
-export async function loadLocalAdminCowrieCommands(sessionId: string): Promise<AdminCowrieCommandProjection> {
+/** Exact-session command projection from canonical Mongo; callers enforce the source gate. */
+async function loadCanonicalMongoAdminCowrieCommands(sessionId: string): Promise<AdminCowrieCommandProjection> {
   if (!CANONICAL_SESSION_ID_PATTERN.test(sessionId)) throw new TypeError("invalid canonical session identifier");
-  if (process.env.NODE_ENV !== "development" || process.env.PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO !== "true") {
-    throw new Error("local command review is disabled");
-  }
   const client = await getMongoClient();
   const rows = await client.db("honeypot_canonical_v1").collection("events")
     .find(
-      { session_id: sessionId, eventid: { $in: [...COMMAND_EVENT_IDS] } },
+      // The monitor returns submitted commands only. Success/failure events can
+      // repeat the same input and must not become duplicate Evidence rows.
+      { session_id: sessionId, eventid: "cowrie.command.input" },
       { projection: { _id: 0, event_id: 1, eventid: 1, timestamp: 1, payload_json: 1 } },
     )
     .sort({ timestamp: 1, event_id: 1 })
@@ -319,4 +318,20 @@ export async function loadLocalAdminCowrieCommands(sessionId: string): Promise<A
     commands,
     truncated: rows.length > MAX_COMMANDS,
   });
+}
+
+/** Local development review remains opt-in and loopback-gated by the route. */
+export async function loadLocalAdminCowrieCommands(sessionId: string): Promise<AdminCowrieCommandProjection> {
+  if (process.env.NODE_ENV !== "development" || process.env.PTI_LOCAL_ADMIN_COMMANDS_FROM_MONGO !== "true") {
+    throw new Error("local command review is disabled");
+  }
+  return loadCanonicalMongoAdminCowrieCommands(sessionId);
+}
+
+/** Hosted production review requires an explicit server-only source selection. */
+export async function loadProductionMongoAdminCowrieCommands(sessionId: string): Promise<AdminCowrieCommandProjection> {
+  if (process.env.NODE_ENV !== "production" || process.env.PTI_ADMIN_COMMANDS_SOURCE !== "mongo") {
+    throw new Error("production Mongo command review is disabled");
+  }
+  return loadCanonicalMongoAdminCowrieCommands(sessionId);
 }

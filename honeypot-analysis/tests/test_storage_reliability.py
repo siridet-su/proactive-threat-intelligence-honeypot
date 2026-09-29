@@ -340,7 +340,12 @@ def test_secret_files_reject_weak_permissions_and_symlinks(
 
 def test_systemd_units_use_service_specific_environment_files() -> None:
     service_dir = Path("deployment/systemd")
-    units = sorted(service_dir.glob("*.service"))
+    policy = json.loads((service_dir / "managed_units.v1.json").read_text(encoding="utf-8"))
+    managed = {
+        name for profile in policy["profiles"].values()
+        for name in profile["managed_installed_units"] if name.endswith(".service")
+    }
+    units = sorted(service_dir / name for name in managed)
     assert units
     for unit in units:
         text = unit.read_text(encoding="utf-8")

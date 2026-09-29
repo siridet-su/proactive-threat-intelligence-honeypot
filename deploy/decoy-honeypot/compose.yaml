@@ -1,0 +1,64 @@
+name: decoy-honeypot
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: odoo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the operator-managed environment}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - internal
+
+  deception-core:
+    build:
+      context: ../../integrations/deception-core
+      dockerfile: core/Dockerfile
+    restart: unless-stopped
+    environment:
+      DECEPTION_DB_PATH: /data/deception.db
+      DECEPTION_EVENTS_PATH: /data/events.jsonl
+      MODEL_ENDPOINT_URL: ${MODEL_ENDPOINT_URL:-}
+      MODEL_TIMEOUT_S: "20"
+      MODEL_ENDPOINT_URL_BASH_HAILO: ${MODEL_ENDPOINT_URL_BASH_HAILO:-}
+      MODEL_TIMEOUT_S_HAILO: ${MODEL_TIMEOUT_S_HAILO:-30}
+      HAILO_OLLAMA_URL: ${HAILO_OLLAMA_URL:-}
+      ABUSEIPDB_API_KEY: ${ABUSEIPDB_API_KEY:-}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the operator-managed environment}
+    volumes:
+      - deception-data:/data
+      - ${ZEEK_LOG_DIR:-/usr/local/zeek/spool/logger-1}:/zeek-logs:ro
+    ports:
+      - "127.0.0.1:9000:9000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - internal
+
+  web-corp:
+    build:
+      context: ../../integrations/web-corp
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      WEB_LOGIN_SPOOL_DIR: /var/spool/web-corp-login/pending
+      WEB_LOGIN_SPOOL_MAX_BYTES: "67108864"
+    volumes:
+      - /var/lib/decoy-honeypot/web-login-spool:/var/spool/web-corp-login:rw
+    ports:
+      - "${WEB_CORP_BIND_IP:-127.0.0.1}:80:8080"
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  deception-data:

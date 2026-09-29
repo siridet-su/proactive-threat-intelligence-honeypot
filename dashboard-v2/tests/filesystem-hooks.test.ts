@@ -144,9 +144,9 @@ describe("useAuditReplay pure replay helpers (FS-016)", () => {
     expect(mapReplayTimelineKeyToIndex("End", 2, 3)).toBeNull();
   });
 
-  it("toggles playback speed between 1400ms and 700ms", () => {
-    expect(getNextPlaybackSpeed(1400)).toBe(700);
-    expect(getNextPlaybackSpeed(700)).toBe(1400);
+  it("toggles playback speed between 3000ms and 1500ms", () => {
+    expect(getNextPlaybackSpeed(3000)).toBe(1500);
+    expect(getNextPlaybackSpeed(1500)).toBe(3000);
   });
 });
 
@@ -459,27 +459,27 @@ describe("time-based replay scrubber pure helpers (FS-019)", () => {
 
   it("calculates realistic vs uniform playback delay", () => {
     // Uniform mode always returns playbackSpeed
-    expect(calculateReplayPacingDelay(500, 1400, "uniform")).toBe(1400);
-    expect(calculateReplayPacingDelay(60000, 1400, "uniform")).toBe(1400);
-    expect(calculateReplayPacingDelay(60000, 700, "uniform")).toBe(700);
+    expect(calculateReplayPacingDelay(500, 3000, "uniform")).toBe(3000);
+    expect(calculateReplayPacingDelay(60000, 3000, "uniform")).toBe(3000);
+    expect(calculateReplayPacingDelay(60000, 1500, "uniform")).toBe(1500);
 
-    // Realistic mode: fast dwell (<1s) -> fast snappy transition
-    const quick1x = calculateReplayPacingDelay(400, 1400, "realistic");
-    expect(quick1x).toBe(600);
+    // Realistic mode: fast dwell (<1s) remains readable
+    const quick1x = calculateReplayPacingDelay(400, 3000, "realistic");
+    expect(quick1x).toBe(2000);
 
     // Realistic mode: 2x speed cuts delay in half
-    const quick2x = calculateReplayPacingDelay(400, 700, "realistic");
-    expect(quick2x).toBe(300);
+    const quick2x = calculateReplayPacingDelay(400, 1500, "realistic");
+    expect(quick2x).toBe(1000);
 
     // Realistic mode: medium dwell (5s) -> noticeable hesitation
-    const med1x = calculateReplayPacingDelay(5000, 1400, "realistic");
+    const med1x = calculateReplayPacingDelay(5000, 3000, "realistic");
     expect(med1x).toBeGreaterThan(quick1x);
-    expect(med1x).toBeLessThan(1500);
+    expect(med1x).toBeLessThan(4000);
 
     // Realistic mode: huge pause (15m) -> clamped to reasonable max (never stalls browser)
-    const long1x = calculateReplayPacingDelay(900000, 1400, "realistic");
-    expect(long1x).toBeGreaterThanOrEqual(2500);
-    expect(long1x).toBeLessThanOrEqual(3200);
+    const long1x = calculateReplayPacingDelay(900000, 3000, "realistic");
+    expect(long1x).toBeGreaterThanOrEqual(6000);
+    expect(long1x).toBeLessThanOrEqual(8000);
   });
 
   it("toggles replay pacing mode between realistic and uniform", () => {

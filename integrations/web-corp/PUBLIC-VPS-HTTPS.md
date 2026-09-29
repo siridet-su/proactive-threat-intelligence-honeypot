@@ -1,20 +1,20 @@
 ---
 title: Public-VPS HTTPS edge for web-corp (IP-only certificate)
-status: target runbook; not deployed
-last_reviewed: 2026-09-24
+status: current on existing Pi and Droplet
+last_reviewed: 2026-09-28
 ---
 
 # Public-VPS HTTPS edge for web-corp
 
 ## Status and purpose
 
-This is a target runbook for serving the existing web-corp login decoy over
+This is the active runbook for serving the existing web-corp login decoy over
 publicly trusted HTTPS when clients connect to a **public VPS IPv4 address
 directly**, without a DNS name. It moves the public TLS endpoint to a VPS and
-keeps the Raspberry Pi behind WireGuard. It does not authorize a public
-rollout or imply that any steps below have been applied. The Pi's direct-TLS
-container on `:443` was stopped on 2026-09-25; HTTP `:80` remains the active
-web-corp listener.
+keeps the Raspberry Pi behind WireGuard. The Pi's direct-TLS
+container on `:443` was stopped on 2026-09-25. The Pi now has separate
+ZeroTier and WireGuard HTTP `:80` containers. Public TCP 22 still forwards
+to Cowrie; public TCP 23 remains closed.
 
 The stopped Pi HTTPS service used a self-signed certificate. It is retained
 outside Git for a separately reviewed test, but is not currently served and
@@ -29,7 +29,7 @@ chains to a trusted CA. It does not prove that the fake ERP is a real Odoo
 installation or belongs to a particular company. Use only infrastructure and
 a decoy persona that the operator is authorized to run.
 
-## Target request path
+## Active request path
 
 ```text
 Browser: https://<VPS_PUBLIC_IP>/web/login
@@ -78,7 +78,15 @@ WireGuard keys, or credential-bearing data in this repository.
   firewall rule). Permit access only from the intended VPS peer. Preserve the
   existing ZeroTier listener only if it remains an explicit requirement.
 
-## Deployment procedure
+## Deployment and recovery procedure
+
+The checked-in [edge assets](../../deploy/public-web-edge/README.md) give the
+exact Nginx, renewal, expiry-check, and rollback steps. The existing Pi uses
+its external Compose project with a private override; the tracked
+[`compose.public-web.yaml`](../../deploy/decoy-honeypot/compose.public-web.yaml)
+is the equivalent source for a future cutover. Do not overwrite the Pi's
+external Compose file or its local Web-corp source changes while applying an
+edge update.
 
 1. **Establish the private path first.** Bring up WireGuard between the VPS and
    Pi. From the VPS, verify that the selected Pi backend address and port are
@@ -97,15 +105,20 @@ WireGuard keys, or credential-bearing data in this repository.
    with the VPS public IPv4 and the actual challenge directory:
 
    ```sh
-   sudo certbot certonly --staging \
+   sudo /opt/pti-certbot/bin/certbot certonly --staging \
+     --config-dir /etc/pti-certbot-staging \
+     --work-dir /var/lib/pti-certbot-staging \
+     --logs-dir /var/log/pti-certbot-staging \
      --preferred-profile shortlived \
-     --webroot --webroot-path /var/www/acme \
+     --webroot --webroot-path /var/www/pti-acme \
      --ip-address <VPS_PUBLIC_IPV4>
    ```
 
    A staging certificate is intentionally not browser-trusted. Use it only to
    confirm the challenge/issuance flow. After that succeeds, request the
-   production certificate with the same arguments **without** `--staging`.
+   production certificate with the same profile, webroot, and IP arguments,
+   **without** `--staging` or the staging directory options. Add
+   `--cert-name pti-ip-public` for the reviewed production lineage.
    Keep issuance (`certonly`) separate from proxy configuration so a Certbot
    installer cannot silently change an unrelated web-server configuration.
 
@@ -149,7 +162,11 @@ WireGuard keys, or credential-bearing data in this repository.
    renewal, and alert well before expiry. Run the client's renewal dry-run and
    verify that a renewed certificate is actually loaded by the listener. A
    scheduled renewal without a successful reload does not prevent an expired
-   certificate from being served.
+   certificate from being served. On the current Droplet,
+   `pti-certbot-renew.timer` runs twice daily and
+   `pti-cert-expiry-check.timer` checks for less than 48 hours of validity
+   daily. A failed check sets the service to failed and writes a critical
+   journal entry. No external notification receiver is connected yet.
 
 ## Required validation before public traffic
 
@@ -196,10 +213,13 @@ decoy as an unrelated organization's real login service.
 
 ## Current state and related docs
 
-This target is not deployed. The active Pi web-corp listener is ZeroTier HTTP
-only; direct HTTPS on the Pi is stopped. No public VPS listener, public-IP
-certificate, WireGuard proxy route, or public firewall rule was configured by
-writing this document.
+The existing Droplet serves public TCP 443 with a trusted IP certificate;
+TCP 80 serves ACME HTTP-01 and redirects other requests to HTTPS. The Pi's
+WireGuard backend and ZeroTier container are both active. Synthetic external
+HTTPS login telemetry and Zeek `wg0` ingestion were verified on 2026-09-28.
+Staging and production issuance and `certbot renew --dry-run` succeeded.
+A real renewal, expiry alert outside the host, browser trust test, and
+sustained traffic measurements remain unverified.
 
 - [Current web-corp runbook](README.md)
 - [HTTP decoy current scope and future work](../../docs/design/http-decoy-scope.md)

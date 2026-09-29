@@ -14,6 +14,7 @@ from production.storage import SQLiteStorage, open_storage
 from production.storage.contract import StorageBackend
 from production.utils.config import ProductionConfig
 from production.workers.session_worker import SessionWorker
+from production.workers import session_worker as session_worker_module
 from tests.test_session_worker_event_lifecycle import _config, _event, _event_row
 
 
@@ -250,6 +251,46 @@ def test_closed_session_precedes_jobs_and_event_completion_without_terminal_pred
     assert order.index("closed_session") < order.index("hunt_job")
     assert order.index("analysis_job") < order.index("event_completed")
     assert order.index("hunt_job") < order.index("event_completed")
+
+
+def test_closed_session_does_not_wait_for_unavailable_model2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _config_value, storage, worker = _prepare_worker(tmp_path)
+    storage.store_event(
+        "sensor-a",
+        _event(
+            "session-close", "cowrie.session.closed", 3,
+            src_ip="8.8.8.8", duration=3.0,
+        ),
+    )
+    original_builder = session_worker_module.build_ensemble_from_session_payload
+    calls = 0
+
+    def unavailable_model2(payload: dict[str, Any], *, computed_at: str = "") -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        result = original_builder(payload, computed_at=computed_at)
+        result["model2"] = {"available": False, "status": "UNAVAILABLE"}
+        return result
+
+    def unexpected_sleep(_seconds: float) -> None:
+        raise AssertionError("session worker must not wait for Model2")
+
+    monkeypatch.setattr(session_worker_module, "build_ensemble_from_session_payload", unavailable_model2)
+    monkeypatch.setattr(session_worker_module.time, "sleep", unexpected_sleep)
+    try:
+        assert worker.process_unprocessed() == 1
+    finally:
+        worker.close()
+
+    assert calls == 1
+    session = storage.get_session("session-close")
+    assert session is not None
+    assert session["payload"]["is_ended"] is True
+    assert session["payload"]["ensemble_evidence"]["model2"]["available"] is False
+    assert len(storage.list_rows("analysis_jobs")) == 1
 
 
 def test_close_stage_failure_is_retryable_without_partial_analysis_job(

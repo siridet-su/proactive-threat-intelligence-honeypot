@@ -40,7 +40,7 @@ describe("local-only Admin command projection", () => {
 
     expect(db).toHaveBeenCalledWith("honeypot_canonical_v1");
     expect(find).toHaveBeenCalledWith(
-      { session_id: SESSION_ID, eventid: { $in: expect.arrayContaining(["cowrie.command.input"]) } },
+      { session_id: SESSION_ID, eventid: "cowrie.command.input" },
       { projection: { _id: 0, event_id: 1, eventid: 1, timestamp: 1, payload_json: 1 } },
     );
     expect(limit).toHaveBeenCalledWith(101);

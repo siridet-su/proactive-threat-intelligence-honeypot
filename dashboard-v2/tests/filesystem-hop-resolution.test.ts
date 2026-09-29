@@ -1383,7 +1383,7 @@ describe("FA-005: Authoritative Deep-Hop Resolution & Replay Lifecycle Finalizat
         historyComplete: true,
         replay: {
           isPlaying: false,
-          playbackSpeed: 1400,
+          playbackSpeed: 3000,
           pacingMode: "realistic",
           displayedHistory: [],
           selectedHistoryIndex: -1,

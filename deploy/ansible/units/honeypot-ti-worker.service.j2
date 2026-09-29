@@ -1,0 +1,20 @@
+[Unit]
+Description=PTI threat intelligence worker
+Wants=network-online.target
+After=network-online.target redis-server.service
+
+[Service]
+Type=simple
+User={{ pti_agent_user }}
+Group={{ pti_agent_group }}
+WorkingDirectory={{ pti_release_root }}/{{ pti_release_id }}
+EnvironmentFile=/etc/honeypot-agent.env
+EnvironmentFile=/etc/honeypot/ti-worker.env
+ExecStart={{ pti_release_root }}/{{ pti_release_id }}/bin/pti-ti-worker
+Restart=on-failure
+RestartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

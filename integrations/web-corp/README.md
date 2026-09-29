@@ -8,29 +8,36 @@ executes SQL.
 ## Source and deployment boundary
 
 - This directory is the canonical source and standalone Docker build context.
-- The deployment Compose file remains at the sibling
-  `../../decoy-honeypot/docker-compose.yml` and points its `web-corp` build at
-  `../proactive-threat-intelligence-honeypot/integrations/web-corp` relative to
-  that Compose file.
+- The prepared fresh-install Compose source is tracked at
+  [`deploy/decoy-honeypot/compose.yaml`](../../deploy/decoy-honeypot/compose.yaml)
+  and builds `web-corp` from this directory. The existing Pi still runs the
+  external `/home/cpe27/decoy-honeypot/docker-compose.yml` until a separate
+  cutover; commands for that running project below retain its current path.
 - There is no bind mount from the source tree into the running container.
   Editing files here does not change runtime behavior; a controlled image
   rebuild and service recreation are required.
-- The active HTTP listener is ZeroTier-only at `10.58.33.42:80`, mapped to app
+- The original active HTTP listener is bound only to the Pi ZeroTier address at `:80`, mapped to app
   port `8080`. Port `8080` is internal to the container and is not separately
   published on the Pi; do not open it on the host firewall. The direct-TLS app
-  container formerly bound to `10.58.33.42:443` is stopped on the Pi. Both
-  service definitions remain in the sibling Compose file, outside this repo;
-  a full-stack `docker compose up` can restart stopped services.
+  container formerly bound to the Pi ZeroTier address at `:443` is stopped. Both
+  historical service definitions remain in the Pi's external Compose file;
+  a full-stack `docker compose up` against that old file can restart stopped services.
+- A second active container publishes HTTP only on the Pi WireGuard address
+  at `:80` for the Droplet HTTPS proxy. It shares the restricted login spool
+  but trusts forwarded headers only from the reviewed Droplet WireGuard peer.
+  The direct ZeroTier container does not trust proxy headers. The Pi's external
+  Compose file is paired with a host-local override; see the
+  [public edge runbook](PUBLIC-VPS-HTTPS.md).
 - The stopped Pi TLS certificate/key files are retained outside Git at
   `/var/lib/decoy-honeypot/web-corp-tls/{tls.crt,tls.key}`. The
-  self-signed certificate SAN is `IP:10.58.33.42`, expires 2027-09-24, and is
+  self-signed certificate SAN matches the Pi's ZeroTier address, expires 2027-09-24, and is
   not trusted by browsers by default. The directory is root-only, the private
   key is mode `0400`, and the public certificate is mode `0444`.
 - The legacy Odoo middleware proxy was decommissioned on 2026-09-24. The Odoo
   backend container is stopped and web-corp never proxies login requests to
   it. When the direct-TLS Pi service was active, TLS terminated in Uvicorn; the
-  current Pi listener is HTTP only. The future VPS design terminates TLS at its
-  edge proxy and requires separately verified proxy-header trust.
+  active Pi listeners are HTTP only. The Droplet now terminates public TLS
+  and the forwarded-header trust boundary was verified with synthetic traffic.
 
 ## Behavior and captured data
 
@@ -56,8 +63,7 @@ database, login, password, redirect, and remember values. Values and headers
 are length-bounded. The application does not collect cookies or authorization
 headers. Unrelated POSTs return 404 without creating an event, and Uvicorn
 access logging is disabled. The collector retains scheme-to-port mapping so a
-separately deployed trusted HTTPS edge can record port 443; the current Pi
-HTTP listener records port 80.
+trusted HTTPS edge records port 443; the direct Pi HTTP listener records port 80.
 
 The service adds heuristic SQLi indicators to login events (field and rule
 names only); they are triage hints, not a definitive classifier. Every attempt
@@ -116,11 +122,9 @@ the proxy's upstream socket port. The direct ZeroTier listener should leave
 the proxy CIDR variable unset.
 
 The Pi's direct HTTPS listener is stopped. Its self-signed certificate remains
-deployment-only and is not publicly trusted. The target procedure for serving
-the same decoy through a publicly trusted
-certificate on a public VPS IP—with the backend remaining behind WireGuard—is
-in the [public-VPS HTTPS runbook](PUBLIC-VPS-HTTPS.md). That target has not been
-deployed; writing the runbook did not alter the Pi or VPS.
+deployment-only and is not publicly trusted. The same decoy is served through
+a publicly trusted certificate on the Droplet's public IP, with a separate Pi
+backend behind WireGuard. See the [public-VPS HTTPS runbook](PUBLIC-VPS-HTTPS.md).
 
 The event contract and implementation rationale are documented in
 [`docs/design/web-login-telemetry.md`](../../docs/design/web-login-telemetry.md).
@@ -142,8 +146,10 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
   -s integrations/web-corp/tests -v
 ```
 
-For a future app update, validate the external Compose file and rebuild/recreate
-only the active HTTP service from this repository:
+For an update to the currently running Pi project, validate its external
+Compose file and rebuild/recreate only the active HTTP service from this
+repository. The tracked fresh-install Compose file has not replaced that
+running project:
 
 ```sh
 docker compose -f ../decoy-honeypot/docker-compose.yml config --quiet
@@ -151,14 +157,14 @@ docker compose -f ../decoy-honeypot/docker-compose.yml build web-corp
 docker compose -f ../decoy-honeypot/docker-compose.yml up -d --no-deps web-corp
 ```
 
-The current Pi smoke check is HTTP only. Port `8080` should not appear as a
+The Pi smoke check covers both HTTP backends and the public HTTPS edge. Port `8080` should not appear as a
 host listener; it is the container app port behind the `:80` mapping. The
-planned public-IP certificate and VPS proxy path is documented in the
+public-IP certificate and VPS proxy path is documented in the
 [public-VPS HTTPS runbook](PUBLIC-VPS-HTTPS.md):
 
 ```sh
-curl -fsS -o /dev/null http://10.58.33.42/web/login
-ss -ltnp | rg '10\.58\.33\.42:(80|443)|:8080\b'
+curl -fsS -o /dev/null "http://<PI_ZEROTIER_IP>/web/login"
+ss -ltnp | rg ':80\b|:443\b|:8080\b'
 ```
 
 Use synthetic values only for a login POST. Verify an event in `raw:web-login`
@@ -168,9 +174,9 @@ event pipeline by itself.
 
 ## Rollback and known follow-up
 
-This change affects the web-corp app image only; collector and processor
-services are unchanged. Roll back by restoring the previous reviewed web-corp
-image and its Compose environment/mount, then recreating only `web-corp`. The
+An application-image change affects both Web-corp containers. Roll back by
+restoring the previous reviewed image and its Compose environment/mount, then
+recreating only the affected Web-corp containers. The
 external Compose file is not version-controlled;
 record and preserve its previous web-corp block with the deployment backup.
 Keep already collected spool, Redis, and MongoDB records intact during a code
@@ -181,9 +187,8 @@ in the external Compose file. Do not start the full stack unless reactivating
 that listener is intended. Preserve the protected certificate directory for
 future reviewed deployment. Follow-up work:
 independently verify a MongoDB record and test from an authorized second
-ZeroTier peer; implement the public-VPS HTTPS target only after its network,
-certificate-renewal, proxy-header, and data-path gates are reviewed; migrate
-the sibling Compose file into this repository; verify Atlas role/backup expiry
+ZeroTier peer; monitor public-IP certificate renewal and edge traffic; migrate
+complete a reviewed cutover to the tracked Compose file; verify Atlas role/backup expiry
 for credential-bearing documents; test the authenticated dashboard view with
 synthetic login events; and decide whether to add a rate-based brute-force
 detector.

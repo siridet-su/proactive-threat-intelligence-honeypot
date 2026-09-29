@@ -234,6 +234,7 @@ describe("FSV-007C: density-aware fit, minimap, and endpoint coverage", () => {
       effectiveDensityMode: "detailed" as const,
       densityAnalysisHiddenNodes: 0,
       isTopologyExpanded: false,
+      isEmptyLiveState: false,
       isAuditMode: true,
       transitionDisplayMode: "current" as const,
       setTransitionDisplayMode: () => {},
@@ -261,5 +262,10 @@ describe("FSV-007C: density-aware fit, minimap, and endpoint coverage", () => {
       (Array.from(container.querySelectorAll("button")).find((button) => button.textContent?.trim() === "show") as HTMLButtonElement).click();
     });
     expect(setMinimapPreference).toHaveBeenCalledWith("show");
+
+    await act(async () => root.render(createElement(TopologyToolbar, { ...props, isEmptyLiveState: true })));
+    expect(container.querySelector('[aria-label="View settings"]')?.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => root.render(createElement(TopologyToolbar, props)));
+    expect(container.querySelector('[aria-label="View settings"]')?.getAttribute("aria-expanded")).toBe("false");
   });
 });

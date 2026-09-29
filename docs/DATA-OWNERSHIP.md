@@ -90,6 +90,16 @@ metadata are excluded because the processor rebuilds them from source records.
 The dashboard's target map reads the worker's `backup_target_status` record, so
 repository support is not presented as host activation.
 
+The Backup & Retention dashboard treats the backup control collections as
+operational metadata, not retained evidence: `backup_target_status` supplies
+worker heartbeat and activation state, `hardware_backup_manifests` supplies
+per-target/day coverage and exceptions, `hardware_backup_requests` supplies
+audited action history, and `b2_storage_snapshots` supplies destination
+freshness and usage. Restore readiness is shown as `Not tested` until an
+explicit verification record is written to the optional
+`backup_restore_verifications` collection; an upload manifest alone is not
+restore evidence.
+
 As of 2026-09-25, the Pi explicitly enables `hardware_metrics_1m`,
 `filesystem_audit`, and `threat_events`. The latter remains bounded by the
 same safety window and private upload policy; current events are not archived

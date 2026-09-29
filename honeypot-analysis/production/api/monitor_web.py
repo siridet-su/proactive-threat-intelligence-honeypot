@@ -3072,6 +3072,16 @@ def load_dashboard_session_detail(
             report_payload.get("hypothesis_sets") or [],
             report_payload.get("canonical_evidence") or {},
         ),
+        "behavioral_findings": [
+            {
+                "finding_id": _text(item.get("finding_id"))[:160],
+                "finding_type": _text(item.get("finding_type"))[:100],
+                "statement": _text(item.get("statement"))[:1200],
+                "status": _text(item.get("status"))[:80],
+            }
+            for item in (report_payload.get("behavioral_findings") or [])[:50]
+            if isinstance(item, dict) and item.get("finding_id")
+        ],
         "session_hypothesis_assessment": copy.deepcopy(
             report_payload.get("session_hypothesis_assessment")
             if isinstance(report_payload.get("session_hypothesis_assessment"), dict)

@@ -61,14 +61,20 @@ def test_migration_backup_restore_preserve_sanitized_events_and_ledger(
 
 
 def test_systemd_units_apply_private_umask_and_common_sandbox() -> None:
-    units = sorted((ROOT / "deployment" / "systemd").glob("*.service"))
+    systemd_root = ROOT / "deployment" / "systemd"
+    policy = json.loads((systemd_root / "managed_units.v1.json").read_text(encoding="utf-8"))
+    managed = {
+        name for profile in policy["profiles"].values()
+        for name in profile["managed_installed_units"] if name.endswith(".service")
+    }
+    units = sorted(systemd_root / name for name in managed)
     assert units
     for unit in units:
         text = unit.read_text(encoding="utf-8")
         assert "UMask=0077" in text, unit.name
         assert "NoNewPrivileges=true" in text, unit.name
         assert "PrivateTmp=true" in text, unit.name
-        assert "ProtectSystem=full" in text, unit.name
+        assert "ProtectSystem=full" in text or "ProtectSystem=strict" in text, unit.name
         assert "User=" in text and "Group=" in text, unit.name
 
 

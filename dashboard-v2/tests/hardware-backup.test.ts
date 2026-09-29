@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBackupTargetCoverage, getHardwareBackupWindow } from "@/lib/hardware-backup";
-import { isBackupTargetOverview, isHardwareBackupStatus } from "@/lib/dashboardTypes";
+import { buildBackupTargetCoverage, buildBackupTargetExceptions, getHardwareBackupHistoryWindow, getHardwareBackupWindow } from "@/lib/hardware-backup";
+import { isBackupTargetOverview, isHardwareBackupHistory, isHardwareBackupStatus } from "@/lib/dashboardTypes";
 
 describe("hardware backup dashboard status", () => {
   it("uses the completed-day safety window", () => {
@@ -10,6 +10,32 @@ describe("hardware backup dashboard status", () => {
     expect(window.from.toISOString()).toBe("2026-08-24T00:00:00.000Z");
     expect(window.to.toISOString()).toBe("2026-09-21T00:00:00.000Z");
     expect(window.days).toBe(29);
+  });
+
+  it("pages backward in fixed, non-overlapping eligible-day windows", () => {
+    const anchor = new Date("2026-09-26T18:00:00.000Z");
+    const current = getHardwareBackupWindow(anchor);
+    const previous = getHardwareBackupHistoryWindow(1, anchor);
+    const older = getHardwareBackupHistoryWindow(2, anchor);
+
+    expect(current.from.toISOString()).toBe("2026-08-27T00:00:00.000Z");
+    expect(previous.to.toISOString()).toBe("2026-08-26T00:00:00.000Z");
+    expect(previous.from.toISOString()).toBe("2026-07-29T00:00:00.000Z");
+    expect(older.to.toISOString()).toBe("2026-07-28T00:00:00.000Z");
+    expect(previous.days).toBe(29);
+    expect(() => getHardwareBackupHistoryWindow(37, anchor)).toThrow(RangeError);
+  });
+
+  it("accepts a bounded read-only history response", () => {
+    expect(isHardwareBackupHistory({
+      period: 1,
+      expected_window: { from: "2026-07-29T00:00:00.000Z", to: "2026-08-26T00:00:00.000Z", days: 29 },
+      days: [{
+        day: "2026-08-26", status: "success", document_count: 0, archive_bytes: 0,
+        started_at: null, completed_at: null, object_name: null, error: null,
+      }],
+      has_older: false,
+    })).toBe(true);
   });
 
   it("accepts the API shape used by the coverage panel", () => {
@@ -142,7 +168,42 @@ describe("hardware backup dashboard status", () => {
     expect(coverage.archived_documents).toBe(4);
     expect(coverage.archive_bytes).toBe(100);
     expect(coverage.latest_success_day).toBe("2026-09-20");
+    expect(coverage.lag_days).toBe(1);
     expect(coverage.latest_run_status).toBe("failed");
+
+    const exceptions = buildBackupTargetExceptions([
+      {
+        target_id: "threat_events",
+        day_start: new Date("2026-09-21T00:00:00.000Z"),
+        status: "failed",
+        error: "temporary upload failure",
+      },
+    ], "threat_events", window);
+    expect(exceptions.find((exception) => exception.day === "2026-09-21")).toMatchObject({
+      target_id: "threat_events",
+      day: "2026-09-21",
+      status: "failed",
+      detail: "temporary upload failure",
+      action_supported: false,
+    });
+  });
+
+  it("does not count an old bucket's success during a bucket rollover", () => {
+    const window = getHardwareBackupWindow(new Date("2026-09-23T12:00:00.000Z"));
+    const documents = [
+      { target_id: "hardware_metrics_1m", bucket: "old-bucket", day_start: new Date("2026-09-21"), status: "success", document_count: 10 },
+      { target_id: "hardware_metrics_1m", day_start: new Date("2026-09-20"), status: "success", document_count: 8 },
+      { target_id: "hardware_metrics_1m", bucket: "new-bucket", day_start: new Date("2026-09-19"), status: "success", document_count: 5 },
+    ];
+
+    const rollover = buildBackupTargetCoverage(documents, "hardware_metrics_1m", window, "new-bucket", "old-bucket");
+    expect(rollover.successful_days).toBe(1);
+    expect(rollover.archived_documents).toBe(5);
+    expect(rollover.missing_days).toBe(window.days - 1);
+
+    const sameBucketUpgrade = buildBackupTargetCoverage(documents, "hardware_metrics_1m", window, "new-bucket", "new-bucket");
+    expect(sameBucketUpgrade.successful_days).toBe(2);
+    expect(sameBucketUpgrade.archived_documents).toBe(13);
   });
 
   it("accepts target coverage summaries from the backup overview API", () => {
@@ -168,11 +229,39 @@ describe("hardware backup dashboard status", () => {
           archived_documents: 1_878,
           archive_bytes: 12_345,
           latest_success_day: "2026-09-21",
+          lag_days: 0,
           last_started_at: "2026-09-23T15:00:00.000Z",
           last_completed_at: "2026-09-23T15:02:00.000Z",
           latest_run_status: "success",
         },
       }],
+      worker: {
+        state: "healthy",
+        mode: "control",
+        poll_seconds: 15,
+        last_seen_at: "2026-09-23T15:00:00.000Z",
+        heartbeat_age_seconds: 10,
+        target_count: 2,
+        attention_count: 0,
+      },
+      destination: null,
+      policy: {
+        lookback_days: 30,
+        safety_days: 2,
+        eligible_days: 29,
+        schedule: "Daily systemd timer",
+        archive_format: "gzip Extended JSON Lines",
+        destination_visibility: "Private Backblaze B2",
+        sensitive_target_policy: "Threat events require explicit opt-in",
+      },
+      restore: {
+        status: "not_tested",
+        last_verified_at: null,
+        detail: "No restore rehearsal has been recorded yet.",
+        source: "Read-only restore operator path",
+      },
+      exceptions: [],
+      activity: [],
     })).toBe(true);
   });
 });

@@ -72,8 +72,31 @@ func runControlLoop(
 
 	poll := time.NewTicker(time.Duration(cfg.ControlPollSeconds) * time.Second)
 	defer poll.Stop()
+	heartbeatCtx, stopHeartbeat := context.WithCancel(ctx)
+	defer stopHeartbeat()
+	go func() {
+		heartbeat := time.NewTicker(time.Duration(cfg.ControlPollSeconds) * time.Second)
+		defer heartbeat.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-heartbeat.C:
+				if err := publishConfiguredTargetStatuses(heartbeatCtx, database, cfg, workerID); err != nil {
+					log.Printf("backup target heartbeat failed: %v", err)
+				}
+			}
+		}
+	}()
 
 	for {
+		scheduled, scheduleErr := runDueBackupSchedule(ctx, database, cfg, manifests, snapshots, workerID)
+		if scheduleErr != nil {
+			log.Printf("backup daily schedule failed: %v", scheduleErr)
+		}
+		if scheduled {
+			continue
+		}
 		request, err := claimNextBackupRequest(ctx, requests, backupTargetRequestSources(cfg.Targets), workerID)
 		if err != nil {
 			log.Printf("backup request claim failed: %v", err)
@@ -138,7 +161,12 @@ func processBackupRequest(
 	request backupRequest,
 	snapshots *mongo.Collection,
 ) error {
-	days, err := selectBackupRequestDays(ctx, manifests, target, cfg, request.Action)
+	schedule, err := loadBackupSchedule(ctx, database)
+	if err != nil {
+		return markBackupRequestFailed(ctx, requests, request.ID, err)
+	}
+	anchor := lastScheduledOccurrence(schedule, time.Now().UTC())
+	days, err := selectBackupRequestDays(ctx, manifests, target, cfg, request.Action, anchor)
 	if err != nil {
 		return markBackupRequestFailed(ctx, requests, request.ID, err)
 	}
@@ -179,16 +207,16 @@ func processBackupRequest(
 	return completeBackupRequest(ctx, requests, request.ID, progress, err)
 }
 
-func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, target BackupTarget, cfg Config, action string) ([]time.Time, error) {
+func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, target BackupTarget, cfg Config, action string, anchor time.Time) ([]time.Time, error) {
 	if action != requestActionRunMissing && action != requestActionRetryFailed {
 		return nil, fmt.Errorf("unsupported backup request action %q", action)
 	}
-	days := backupWindow(cfg, time.Now().UTC())
+	days := backupWindow(cfg, anchor)
 	if action == requestActionRunMissing {
 		var existing []struct {
 			DayStart time.Time `bson:"day_start"`
 		}
-		query := manifestTargetFilter(target.ID)
+		query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
 		query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
 		cursor, err := manifests.Find(ctx, query,
 			options.Find().SetProjection(bson.M{"day_start": 1}))
@@ -214,7 +242,7 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, t
 	var failed []struct {
 		DayStart time.Time `bson:"day_start"`
 	}
-	query := manifestTargetFilter(target.ID)
+	query := manifestTargetBucketFilter(target.ID, cfg.B2Bucket, cfg.LegacyManifestBucket)
 	query["status"] = requestStatusFailed
 	query["day_start"] = bson.M{"$gte": days[0], "$lt": days[len(days)-1].Add(24 * time.Hour)}
 	cursor, err := manifests.Find(ctx, query,
@@ -226,8 +254,15 @@ func selectBackupRequestDays(ctx context.Context, manifests *mongo.Collection, t
 		return nil, fmt.Errorf("decode failed backup manifests: %w", err)
 	}
 	retry := make([]time.Time, 0, len(failed))
+	seen := make(map[string]struct{}, len(failed))
 	for _, document := range failed {
-		retry = append(retry, document.DayStart.UTC().Truncate(24*time.Hour))
+		day := document.DayStart.UTC().Truncate(24 * time.Hour)
+		key := day.Format("2006-01-02")
+		if _, duplicate := seen[key]; duplicate {
+			continue
+		}
+		seen[key] = struct{}{}
+		retry = append(retry, day)
 	}
 	return retry, nil
 }

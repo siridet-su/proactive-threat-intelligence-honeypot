@@ -4,6 +4,7 @@ vi.mock("server-only", () => ({}), { virtual: true });
 
 import * as mongo from "@/lib/mongodb";
 import { getThreatDirectory } from "@/lib/threat-server";
+import { buildSessionDirectoryRows } from "@/lib/threat-intel-session-directory";
 import type { DashboardThreatEvent } from "@/lib/dashboardTypes";
 import {
   explicitlyActiveSession,
@@ -72,6 +73,27 @@ describe("Phase 0.1A threat and lifecycle semantic baseline", () => {
       end_time: null,
       session_status: "closed",
     });
+  });
+
+  it("projects the canonical payload end time for directory dwell-time calculation", async () => {
+    const [threat] = await normalizedDirectory([sessionFixture({
+      session_id: "phase0-payload-end-time",
+      start_time: "2026-09-28T08:00:00.000Z",
+      ended: true,
+      payload_json: JSON.stringify({
+        session_id: "phase0-payload-end-time",
+        start_time: "2026-09-28T08:00:00.000Z",
+        end_time: "2026-09-28T08:00:24.000Z",
+        is_ended: true,
+      }),
+    })]);
+
+    expect(threat).toMatchObject({
+      timestamp: "2026-09-28T08:00:00.000Z",
+      end_time: "2026-09-28T08:00:24.000Z",
+      session_status: "closed",
+    });
+    expect(buildSessionDirectoryRows([threat], [], "ssh")[0].dwellTime).toBe("24s");
   });
 
   it("uses explicit lifecycle evidence rather than recency for active and closed state", async () => {

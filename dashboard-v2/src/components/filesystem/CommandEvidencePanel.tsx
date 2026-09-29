@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, Clock3, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
+import { AlertTriangle, Check, Clock3, Copy, RefreshCw, ShieldCheck, Terminal } from "lucide-react";
 
 import { RegionState } from "@/components/ui/RegionState";
 import type { FilesystemTopologySession } from "@/lib/dashboardTypes";
 import { formatTimestamp } from "./filesystemUtils";
+import { FileDownloadEvidencePanel } from "./FileDownloadEvidencePanel";
 
 const COMMAND_EVENT_IDS = new Set([
   "cowrie.command.failed",
@@ -36,6 +37,12 @@ type LoadResult =
   | { sessionId: string; status: "forbidden" }
   | { sessionId: string; status: "unavailable"; message: string }
   | { sessionId: string; status: "error"; message: string };
+
+type CopyFeedback = {
+  sessionId: string;
+  eventId: string;
+  status: "copied" | "failed";
+};
 
 interface CommandEvidencePanelProps {
   selectedSession: FilesystemTopologySession;
@@ -159,8 +166,19 @@ function eventLabel(eventid: CommandEvidenceEvent["eventid"]): string {
 export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelProps) {
   const [result, setResult] = useState<LoadResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState<CopyFeedback | null>(null);
   const sessionId = selectedSession.sessionId;
   const currentResult = result?.sessionId === sessionId ? result : null;
+
+  const copyCommand = async (command: CommandEvidenceEvent) => {
+    if (!command.command_text_available || !command.input || command.input.trim() === "[REDACTED]") return;
+    try {
+      await navigator.clipboard.writeText(command.input);
+      setCopyFeedback({ sessionId, eventId: command.event_id, status: "copied" });
+    } catch {
+      setCopyFeedback({ sessionId, eventId: command.event_id, status: "failed" });
+    }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -227,7 +245,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
   const commands = projection ? sortCommandEvents(projection.commands) : [];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="command-evidence-panel">
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain pr-1 pb-2" data-testid="command-evidence-panel">
       <section className="rounded-xl border border-border bg-surface-subtle p-3" aria-label="Command evidence scope">
         <div className="flex items-center gap-2 text-xs font-semibold text-text">
           <ShieldCheck className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
@@ -245,16 +263,16 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
           </div>
           <div>
             <dt className="text-text-subtle">Evidence source</dt>
-            <dd className="mt-0.5 text-text">Cowrie command events</dd>
+            <dd className="mt-0.5 text-text">Cowrie command and file artifact events</dd>
           </div>
         </dl>
         <div className="mt-2 space-y-1.5 border-t border-border pt-2 text-xs leading-relaxed text-text-muted">
           <p>Command input is session-level evidence. It is not automatically linked to the selected CWD hop and does not prove the command succeeded or that a file was read or written.</p>
-          <p>Command input redacted before persistence cannot be reconstructed. File-operation events are not available in this view.</p>
+          <p>Command input redacted before persistence cannot be reconstructed. Download telemetry is separate from filesystem read/write evidence.</p>
         </div>
       </section>
 
-      <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-border bg-surface p-3" aria-label="Cowrie command events">
+      <section className="flex flex-col rounded-xl border border-border bg-surface p-3" aria-label="Cowrie command events">
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="flex items-center gap-1.5 font-semibold text-text">
             <Terminal className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
@@ -294,10 +312,13 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
         ) : commands.length === 0 ? (
           <div className="mt-3"><RegionState kind="empty" title="No command events returned" description="No Cowrie command events were returned for this session. This result does not establish that the session had no other activity." /></div>
         ) : (
-          <ol className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-1 pb-2" aria-label="Session command evidence">
+          <ol className="mt-3 space-y-2" aria-label="Session command evidence">
             {commands.map((command) => {
               const isRedacted = command.input.trim() === "[REDACTED]";
               const commandTextVisible = command.command_text_available && command.input.length > 0 && !isRedacted;
+              const currentCopyFeedback = copyFeedback?.sessionId === sessionId && copyFeedback.eventId === command.event_id
+                ? copyFeedback.status
+                : null;
               return (
                 <li key={command.event_id}>
                   <article className="rounded-lg border border-border bg-surface-subtle p-2.5">
@@ -316,9 +337,40 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
                       )}
                     </div>
                     {commandTextVisible ? (
-                      <pre dir="ltr" className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-xs leading-relaxed text-text">
-                        {displayInput(command.input)}
-                      </pre>
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-text-subtle">Submitted input</span>
+                          <button
+                            type="button"
+                            onClick={() => void copyCommand(command)}
+                            aria-label={`${command.input_truncated ? "Copy available command input" : "Copy command input"} for event ${command.event_id}`}
+                            className="inline-flex min-h-8 shrink-0 items-center gap-1 rounded-md border border-border bg-surface px-2 text-xs font-medium text-text-muted transition-colors hover:border-border-strong hover:bg-surface-hover hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+                          >
+                            {currentCopyFeedback === "copied" ? (
+                              <Check className="h-3.5 w-3.5 text-success" aria-hidden="true" />
+                            ) : (
+                              <Copy className={`h-3.5 w-3.5 ${currentCopyFeedback === "failed" ? "text-danger" : ""}`} aria-hidden="true" />
+                            )}
+                            {currentCopyFeedback === "copied"
+                              ? "Copied"
+                              : currentCopyFeedback === "failed"
+                                ? "Copy failed"
+                                : command.input_truncated
+                                  ? "Copy available input"
+                                  : "Copy command"}
+                          </button>
+                        </div>
+                        <span role="status" className="sr-only">
+                          {currentCopyFeedback === "copied"
+                            ? `Command input copied for event ${command.event_id}`
+                            : currentCopyFeedback === "failed"
+                              ? `Could not copy command input for event ${command.event_id}`
+                              : ""}
+                        </span>
+                        <pre dir="ltr" className="mt-1.5 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-surface px-2.5 py-2 font-mono text-xs leading-relaxed text-text">
+                          {displayInput(command.input)}
+                        </pre>
+                      </div>
                     ) : (
                       <p className="mt-2 rounded-md border border-border bg-surface px-2.5 py-2 text-xs text-text-muted">
                         {isRedacted
@@ -333,6 +385,7 @@ export function CommandEvidencePanel({ selectedSession }: CommandEvidencePanelPr
           </ol>
         )}
       </section>
+      <FileDownloadEvidencePanel sessionId={sessionId} />
     </div>
   );
 }

@@ -1,9 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
+import { model1TechniqueName } from "../src/lib/model-ttp-ranking";
 
 describe("Model1 + Model2 advisory panel", () => {
-  it("explains the RRF formula without claiming confidence", () => {
+  it("resolves names for the Model1 candidates observed in the live session", () => {
+    expect(model1TechniqueName("T1005")).toBe("Data from Local System");
+    expect(model1TechniqueName("T1078")).toBe("Valid Accounts");
+  });
+
+  it("shows one recommended TTP and the other candidates without a visible priority order", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-a",
       session_ttp_advisory: {
@@ -23,6 +29,17 @@ describe("Model1 + Model2 advisory panel", () => {
             { technique_id: "T1110", baseline_rank: 2, rrf_score: 0.016129, model2_rrf_component: 0, model2_support_added: false, eligible: false, exclusion_reason: "model2_unavailable" },
           ],
         },
+        weighted_voting_recommendation: {
+          schema_version: "session_ttp_weighted_voting_advisory.v1", session_id: "session-a",
+          method: "evidence_gated_weighted_voting", candidate_set_source: "MODEL1_ONLY",
+          score_semantics: "VOTE_SCORE_NOT_PROBABILITY_OR_CONFIDENCE",
+          formula: "0.5*I(Model1 candidate) + 0.5*I(gated Model2 PRESENT)",
+          recommendation_order: ["T1105", "T1110"],
+          rows: [
+            { technique_id: "T1105", baseline_rank: 1, weighted_vote_score: 0.5, model2_vote_component: 0, model2_support_added: false, eligible: false },
+            { technique_id: "T1110", baseline_rank: 2, weighted_vote_score: 0.5, model2_vote_component: 0, model2_support_added: false, eligible: false },
+          ],
+        },
       },
       ensemble_evidence: {
         run_id: "run-a", model1: { applicable: true },
@@ -32,9 +49,19 @@ describe("Model1 + Model2 advisory panel", () => {
     }} />);
     expect(html).toContain("3 of 5 assessed command events");
     expect(html).toContain("Command refs: index:0");
-    expect(html).toContain("Model1 only");
-    expect(html).toContain("RRF rank score");
-    expect(html).toContain("Gated weighted reciprocal-rank");
+    expect(html.match(/>Recommend<\/span>/g)).toHaveLength(1);
+    expect(html).toContain("TTP candidates");
+    expect(html).toContain("T1110");
+    expect(html).toContain("Ingress Tool Transfer");
+    expect(html).toContain("Brute Force");
+    expect(html).not.toContain("Technique name not recorded");
+    expect(html).not.toContain("TTP review order");
+    expect(html).not.toContain("Review first");
+    expect(html).not.toContain("Weighted vote score");
+    expect(html).toContain("0.5*I(Model1 candidate)");
+    expect(html).toContain("Formula used for the PoC recommendation");
+    expect(html).toContain("field accuracy and superiority are not established");
+    expect(html).not.toContain("RRF rank score");
     expect(html).not.toContain("priority score");
     expect(html).not.toContain("Confidence: ");
   });

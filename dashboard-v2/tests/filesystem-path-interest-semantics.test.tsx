@@ -254,7 +254,8 @@ describe("FSV-006 rule-based path interest semantics", () => {
     );
     expect(normalNode).not.toBeUndefined();
     expect(normalNode?.querySelector('[data-testid="rule-based-path-interest"]')).toBeNull();
-    expect(container.querySelector('[data-testid="failed-change-annotation"]')).not.toBeNull();
+    // The failed target is intentionally kept in Route Replay, not duplicated on the canvas.
+    expect(container.querySelector('[data-testid="failed-change-annotation"]')).toBeNull();
     expect(container.querySelector('[data-testid="active-hop-target-badge"]')).toBeNull();
     expect(container.querySelector('[data-active-hop-connector="true"]')).toBeNull();
     expect(container.textContent).not.toContain("/tmp/unverified-destination");

@@ -1140,6 +1140,16 @@ def _derived_raw_events(
                 continue
             active_container_ids.add(event_identity)
             try:
+                event_id = event.get("eventid")
+                structural_fields = (
+                    {"invocation_id", "cwd_status"}
+                    if event_id == "cowrie.command.input"
+                    else (
+                        {"invocation_id", "schema_version", "operation_type", "path", "bytes_written"}
+                        if event_id == "cowrie.fs.operation_result"
+                        else set()
+                    )
+                )
                 projected.append(
                     {
                         field_name: _redact(
@@ -1151,7 +1161,7 @@ def _derived_raw_events(
                         )
                         for field_name, field_value in event.items()
                         if isinstance(field_name, str)
-                        and field_name in _DERIVED_EVENT_FIELDS
+                        and field_name in _DERIVED_EVENT_FIELDS | structural_fields
                     }
                 )
             finally:

@@ -773,6 +773,11 @@ def build_ai_advisory_projection(
         )
 
     hypotheses = []
+    semantic_chain_ids = {
+        _clean(item.get("chain_id"))
+        for item in graph.get("chain_nodes") or []
+        if isinstance(item, Mapping) and _clean(item.get("chain_id"))
+    }
     for hypothesis_set in report_copy.get("hypothesis_sets") or []:
         if not isinstance(hypothesis_set, Mapping):
             continue
@@ -783,7 +788,8 @@ def build_ai_advisory_projection(
         # IDs.  It is not an edge and must not be sent to the provider as one.
         chain_refs = [
             ref for ref in set_relationship_refs
-            if re.fullmatch(r"behavior_chain_[0-9a-f]{32}", ref)
+            if ref in semantic_chain_ids
+            or re.fullmatch(r"behavior_chain_[0-9a-f]{32}", ref)
         ]
         edge_refs = [ref for ref in set_relationship_refs if ref not in chain_refs]
         if len(chain_refs) > 1 or set(edge_refs) - relationship_ids:

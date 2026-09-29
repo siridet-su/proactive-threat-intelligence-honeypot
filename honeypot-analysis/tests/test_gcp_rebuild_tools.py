@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -170,6 +171,7 @@ def test_redacted_inventory_is_owner_only_and_contains_no_addresses(tmp_path: Pa
     encoded = output.read_text(encoding="utf-8")
     assert document["host"] == "<REDACTED>"
     assert document["secrets"] == "not collected; provision separately"
-    assert "100." not in encoded
-    assert "34." not in encoded
+    # A bare "34." can also occur in the fractional seconds of captured_at.
+    # Check complete IPv4-shaped values, regardless of address range.
+    assert re.findall(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])", encoded) == []
     assert "PRIVATE_KEY" not in encoded

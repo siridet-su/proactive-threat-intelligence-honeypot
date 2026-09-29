@@ -1,0 +1,25 @@
+[Unit]
+Description=PTI retained data backup control loop
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ pti_agent_user }}
+Group={{ pti_agent_group }}
+WorkingDirectory={{ pti_release_root }}/{{ pti_release_id }}
+EnvironmentFile=/etc/honeypot-agent.env
+EnvironmentFile=/etc/honeypot/processor.env
+EnvironmentFile=/etc/honeypot/backup.env
+Environment=BACKUP_MODE=control
+ExecStart={{ pti_release_root }}/{{ pti_release_id }}/bin/pti-hardware-backup
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/honeypot/hardware-backups
+
+[Install]
+WantedBy=multi-user.target

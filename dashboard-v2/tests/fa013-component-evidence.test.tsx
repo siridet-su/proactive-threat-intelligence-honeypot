@@ -110,8 +110,9 @@ describe("FA-013 production component evidence", () => {
       staleThresholdMs: 30_000,
       presentationContext: { mode: "live" },
     })));
-    expect(container.textContent).toContain("No active honeypot sessions");
-    expect(container.textContent).toContain("No attacker is currently connected.");
+    expect(container.querySelector('[aria-label="Live honeypot activity"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("No verified working directory data yet");
+    expect(container.textContent).not.toContain("An attacker is connected");
     expect(container.textContent).not.toContain("Offline");
     expect(container.textContent).not.toContain("Stale");
     expect(vi.getTimerCount()).toBe(0);

@@ -8,6 +8,13 @@
 > Historical polling and action-record details below are retained as past
 > implementation evidence, not as current behavior.
 
+> **Replay pacing update prepared — 2026-09-28:** The staging source now uses
+> 3000 ms per hop at 1x and 1500 ms at 2x in Step mode. Real mode still follows
+> recorded CWD-event spacing, compressed to 2000–8000 ms at 1x and 1000–4000 ms
+> at 2x. The older timings in the historical implementation notes below describe
+> the initial release. Browser deployment and review of the new pacing remain
+> unverified.
+
 ## สถานะปัจจุบัน
 
 Dashboard ใช้ CWD ที่ Cowrie อ่านจาก virtual shell โดยตรง ไม่ parse หรือจำลอง

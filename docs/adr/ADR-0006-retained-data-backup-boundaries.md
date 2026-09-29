@@ -39,6 +39,14 @@ policy were ready would report a capability that was not actually deployed.
 - Publish the enabled target set to `backup_target_status`. The dashboard
   reports a target as active only when the worker has published that state (or
   the existing hardware manifest proves the already-deployed hardware path).
+- In control mode, refresh `backup_target_status.last_seen_at` on every control
+  poll and include the configured poll interval so the dashboard can classify
+  healthy, stale, or offline worker state. Scheduled mode is displayed as a
+  last-run report, not as a continuously connected worker.
+- Keep restore readiness separate from upload success. The dashboard may show
+  a verification result from `backup_restore_verifications`, but absence of a
+  verification record must remain `Not tested` and must not be inferred from
+  a successful archive manifest.
 
 ## Consequences
 
@@ -50,6 +58,22 @@ policy were ready would report a capability that was not actually deployed.
   must not be enabled as a side effect of deploying the generic worker.
 - Existing hardware manifests and object names remain readable; newly created
   archives use the versioned target/source envelope.
+
+## 2026-09-27 amendment: bucket rollover provenance
+
+- A successful manifest proves coverage only for the bucket that received the
+  archive. New manifest identities include bucket, target, and UTC day so a
+  new bucket cannot silently inherit another bucket's successful days.
+- Legacy manifests without a bucket remain attributed only when the operator
+  explicitly names their historical bucket. Old records and objects are not
+  rewritten or removed by a rollover.
+- Storage snapshots retain separate identities per bucket and target. The
+  Dashboard scopes manifest coverage, destination usage, and restore
+  verification to the active bucket published by the worker or explicitly
+  configured for the Dashboard.
+- A bucket change remains an operator-controlled deployment with key-scope,
+  archive, and read-only restore verification before the old destination can
+  be retired.
 
 ## Alternatives considered
 

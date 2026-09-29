@@ -206,10 +206,24 @@ function normalizeThreats(sessionDocs: Document[]): DashboardThreatEvent[] {
   return sessionDocs.map((session) => normalizeThreat(session, ipCache));
 }
 
+function storedSessionPayload(session: Document): Document {
+  const raw = session.payload_json;
+  if (typeof raw !== "string" || !raw.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Document
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 function normalizeThreat(
   session: Document,
   ipCache = new Map<string, { lat: number; lon: number; country: string; city: string }>(),
 ): DashboardThreatEvent {
+  const payload = storedSessionPayload(session);
   let lat = 0;
   let lon = 0;
   let country = "Unknown";
@@ -231,8 +245,9 @@ function normalizeThreat(
   }
 
   let dateObj = new Date();
-  if (session.start_time) {
-    const parsed = new Date(String(session.start_time));
+  const storedStartTime = session.start_time ?? payload.start_time;
+  if (storedStartTime) {
+    const parsed = new Date(String(storedStartTime));
     if (!Number.isNaN(parsed.getTime())) dateObj = parsed;
   }
 
@@ -255,9 +270,16 @@ function normalizeThreat(
   const lifecycleStatus = lifecycle && typeof lifecycle === "object" && !Array.isArray(lifecycle)
     ? String((lifecycle as Document).status ?? "").trim().toLowerCase()
     : "";
-  const endTime = session.end_time ?? session.ended_at ?? session.closed_at ?? null;
+  const endTime = session.end_time
+    ?? session.ended_at
+    ?? session.closed_at
+    ?? payload.end_time
+    ?? payload.ended_at
+    ?? payload.closed_at
+    ?? null;
   const isEnded = session.is_ended === true
     || session.ended === true
+    || payload.is_ended === true
     || Boolean(endTime)
     || ["closed", "ended", "complete", "completed", "terminated", "disconnected"].includes(lifecycleStatus);
 

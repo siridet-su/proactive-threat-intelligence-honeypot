@@ -358,6 +358,10 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             "same_entity_required",
             "allow_unconfirmed_incomplete_hypothesis",
             "attempt_incomplete_text",
+            "hypothesis_only",
+            "hypothesis_when_complete",
+            "suppress_when_direct_transfer_observed",
+            "alternative_text",
         }
         if not expected.issubset(set(rule)) or not set(rule).issubset(expected | optional):
             errors.append(f"{path}: typed connected rule shape is invalid")
@@ -381,6 +385,28 @@ def validate_behavior_policy(document: Dict[str, Any]) -> List[str]:
             rule.get("same_entity_required"), bool
         ):
             errors.append(f"{path}.same_entity_required: must be boolean")
+        for key in (
+            "hypothesis_only", "hypothesis_when_complete",
+            "suppress_when_direct_transfer_observed",
+        ):
+            if key in rule and not isinstance(rule[key], bool):
+                errors.append(f"{path}.{key}: must be boolean")
+        if rule.get("hypothesis_when_complete") is True and rule.get("hypothesis_only") is not True:
+            errors.append(f"{path}: complete-chain hypothesis must be hypothesis-only")
+        if rule.get("hypothesis_only") is True and (
+            rule.get("same_entity_required") is not True
+            or not str(rule.get("alternative_text") or "").strip()
+        ):
+            errors.append(f"{path}: hypothesis-only rules require exact entity and an explicit alternative")
+        if rule.get("hypothesis_when_complete") is True and (
+            rule.get("required_operation_types") != ["transfer_attempt", "execution_attempt"]
+            or rule.get("suppress_when_direct_transfer_observed") is not True
+        ):
+            errors.append(f"{path}: complete-chain hypothesis requires unconfirmed transfer then execution")
+        if rule.get("suppress_when_direct_transfer_observed") is True and rule.get("hypothesis_when_complete") is not True:
+            errors.append(f"{path}: transfer-event suppression requires a complete-chain hypothesis")
+        if "alternative_text" in rule and not str(rule["alternative_text"] or "").strip():
+            errors.append(f"{path}.alternative_text: must be non-empty")
         if "allow_unconfirmed_incomplete_hypothesis" in rule and not isinstance(
             rule.get("allow_unconfirmed_incomplete_hypothesis"), bool
         ):

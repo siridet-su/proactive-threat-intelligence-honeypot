@@ -25,6 +25,7 @@ from production.policies.threat_hypothesis_behavior_policy import (
     resolve_behavior_policy,
 )
 from production.utils.serialization import stable_id
+from production.utils.cowrie_transfer import is_cowrie_network_transfer
 from production.semantics.command_operations import parse_command_operation
 
 
@@ -101,6 +102,91 @@ def _command_outcome(event: Dict[str, Any]) -> str:
     if eventid == "cowrie.command.failed" or event.get("success") == 0:
         return "cowrie_reported_failure"
     return "outcome_unknown"
+
+
+def _bound_fs_operation_result(
+    command_event: Dict[str, Any],
+    raw_events: List[Dict[str, Any]],
+    *,
+    session_id: str,
+) -> Optional[Tuple[int, Dict[str, Any]]]:
+    """Accept one exact, post-operation Cowrie result for one simple input.
+
+    An input line alone never proves that a simulated filesystem operation
+    completed.  Results are metadata, not additional commands.  Ambiguous,
+    compound, stale, or cross-session bindings fail closed.
+    """
+    if _clean(command_event.get("eventid")) != "cowrie.command.input":
+        return None
+    invocation = _clean(command_event.get("invocation_id"))
+    if not re.fullmatch(r"[0-9a-f]{32}", invocation):
+        return None
+    if _clean(command_event.get("session")) != session_id:
+        return None
+    matching_inputs = [
+        (index, item) for index, item in enumerate(raw_events)
+        if _clean(item.get("eventid")) == "cowrie.command.input"
+        and _clean(item.get("invocation_id")) == invocation
+    ]
+    if len(matching_inputs) != 1 or matching_inputs[0][1] is not command_event:
+        return None
+    input_index = matching_inputs[0][0]
+    command = _clean(command_event.get("input"))
+    fragments = split_compound_command(command, split_pipes=True)
+    if len(fragments) != 1 or fragments[0].text != command:
+        return None
+    parsed = parse_command_operation(
+        command,
+        working_directory=_clean(command_event.get("cwd")),
+        working_directory_status=_clean(command_event.get("cwd_status")),
+    )
+    if parsed.get("parse_status") != "parsed" or parsed.get("wrappers"):
+        return None
+    candidates = [
+        (index, item) for index, item in enumerate(raw_events)
+        if _clean(item.get("eventid")) == "cowrie.fs.operation_result"
+        and _clean(item.get("invocation_id")) == invocation
+    ]
+    if len(candidates) != 1:
+        return None
+    index, result = candidates[0]
+    if index <= input_index:
+        return None
+    if (
+        _clean(result.get("schema_version")) != "cowrie_fs_operation_result.v1"
+        or _clean(result.get("session")) != session_id
+        or result.get("success") is not True
+    ):
+        return None
+    start = _parse_timestamp(command_event.get("timestamp"))
+    end = _parse_timestamp(result.get("timestamp"))
+    if start is None or end is None or not (0 <= (end - start).total_seconds() <= 300):
+        return None
+    operation = _clean(result.get("operation_type"))
+    path = _clean(result.get("path"))
+    if not path.startswith("/") or posixpath.normpath(path) != path:
+        return None
+    if operation == "file_write":
+        if parsed.get("command_family") not in {"echo", "printf"}:
+            return None
+        redirects = parsed.get("redirections") or []
+        if len(redirects) != 1 or redirects[0].get("operator") not in {">", ">>"}:
+            return None
+        expected = (redirects[0].get("path") or {}).get("normalized_value")
+        if type(result.get("bytes_written")) is not int or result["bytes_written"] <= 0:
+            return None
+    elif operation == "permission_modify":
+        if parsed.get("command_family") != "chmod":
+            return None
+        targets = (parsed.get("entities") or {}).get("modified_paths") or []
+        if len(targets) != 1 or parsed.get("redirections"):
+            return None
+        expected = targets[0].get("normalized_value")
+    else:
+        return None
+    if expected != path:
+        return None
+    return index, result
 
 
 def _safe_url(value: str) -> Optional[Dict[str, Any]]:
@@ -625,6 +711,16 @@ def _build_command_observations(
         outcome = _command_outcome(event)
         outcome_scope = "compound_event" if len(fragments) > 1 else "fragment"
         raw_ref = _event_evidence_id(session_id, source_index, event)
+        operation_result = _bound_fs_operation_result(
+            event, raw_events, session_id=session_id
+        )
+        operation_refs: List[str] = []
+        if operation_result is not None and outcome == "outcome_unknown":
+            result_index, result_event = operation_result
+            outcome = "cowrie_reported_success"
+            operation_refs.append(
+                _event_evidence_id(session_id, result_index, result_event)
+            )
         for fragment in fragments:
             mappings, mapping_refs = _trusted_mappings_for_fragment(
                 classification_events,
@@ -647,7 +743,7 @@ def _build_command_observations(
                 operator_before=fragment.operator_before,
                 operator_after=fragment.operator_after,
                 source_index=source_index,
-                source_refs=[raw_ref] + mapping_refs,
+                source_refs=[raw_ref] + operation_refs + mapping_refs,
                 mappings=mappings,
                 cwd=_clean(event.get("cwd")),
                 policy_document=policy_document,
@@ -766,7 +862,9 @@ def _build_transfer_observations(
         ((_policy_section(policy_document, "extraction").get("patterns") or {}).get("hash")),
     )
     for source_index, event in enumerate(_as_list(session_payload.get("raw_events"))):
-        if not isinstance(event, dict) or _clean(event.get("eventid")) not in transfer_eventids:
+        if (not isinstance(event, dict)
+                or _clean(event.get("eventid")) not in transfer_eventids
+                or not is_cowrie_network_transfer(event)):
             continue
         entities: Dict[str, List[Dict[str, Any]]] = {
             "urls": [], "destination_paths": [], "artifact_hashes": [],
