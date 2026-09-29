@@ -3345,3 +3345,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: revert this Dashboard/API presentation change; no host rollback applies.
 - Follow-up: review the three aligned strips with live data in a browser and decide whether older-history navigation should be offered for the other targets.
 - Related ADR/runbook: [Dashboard API contract](../dashboard-v2/docs/API.md) and [backup schedule decision](adr/ADR-0008-dashboard-backup-daily-schedule.md).
+
+### 2026-09-29 — Activate daily archive comparison on Dashboard staging
+
+- Status: active on Dashboard staging; production Dashboard was not deployed.
+- Scope and intent: publish the three-source daily manifest comparison after its staging CI gate.
+- Repository branch and commit/PR: main change `24ebbc8`; staging release commit `21bf51f`; GitHub Actions run `36519955587`.
+- Repository changes: this dated deployment addendum only. The UI and API changes remain in the preceding implementation entry.
+- Host/environment changes actually applied: the staging workflow transferred the immutable tested artifact, switched `/opt/honeypot-dashboard-v2-staging/current`, and restarted only `honeypot-dashboard-v2-staging.service`. The Pi worker, MongoDB records, B2 objects, and production Dashboard were not changed.
+- Runtime/exposure state: the staging deploy wrapper reported success for release `21bf51f` with `rollback:false`; its post-switch health checks passed. The previous staging release was `d690c6f`.
+- Validation performed and outcome: staging CI passed full Dashboard lint, TypeScript, external TI test, focused Python contracts, server build, artifact packaging, and artifact identity verification. The deploy job completed successfully and reported the exact commit and healthy staging service.
+- Not performed / deferred: authenticated visual inspection of the three source strips, live-data comparison, and production Dashboard deployment.
+- Risks and data handling: only bounded manifest metadata is added to the authenticated target overview. No archive content, private configuration, or credentials were copied into this record.
+- Rollback: use the staging deployment wrapper's reviewed rollback procedure to restore the previous immutable release if a browser regression is found.
+- Follow-up: inspect Backup & Retention in an authenticated staging browser and compare the three per-source day strips with manifest counts.
+- Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API contract](../dashboard-v2/docs/API.md).
