@@ -160,7 +160,8 @@ documents remain readable during the rolling deployment.
 current eligible UTC window. Archive sources uses each target's manifests and
 active bucket in one aligned, three-row daily calendar. The percentage in each
 summary row measures completed manifest checks; B2 archived days remain a
-separate count. Hardware actions/destination and activity/recovery/policy
+separate count. Calendar cells use the shared status colors and matching legend
+dots for archived, empty, running, missing, and failed days. Hardware actions/destination and activity/recovery/policy
 open from controls below the calendar; closing them does not alter a schedule
 or backup run.
 

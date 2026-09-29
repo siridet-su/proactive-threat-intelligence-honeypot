@@ -301,10 +301,10 @@ export function BackupSourceMap() {
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-text-muted" aria-label="Coverage status legend">
             <LegendDot className="bg-success" label="Archived" />
-            <LegendDot className="bg-text-subtle/60" label="Empty" />
-            <LegendDot className="bg-danger" label="Failed" />
+            <LegendDot className="bg-text-subtle" label="Empty" />
             <LegendDot className="bg-info" label="Running" />
             <LegendDot className="bg-warning" label="Missing" />
+            <LegendDot className="bg-danger" label="Failed" />
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -516,13 +516,21 @@ function calendarDayLabel(day: HardwareBackupDay) {
 }
 
 function calendarDayTone(day: HardwareBackupDay | undefined) {
-  if (!day) return "border-border bg-surface-subtle text-text-subtle";
-  if (day.status === "failed") return "border-danger-border bg-danger-subtle text-danger";
-  if (day.status === "running") return "border-info-border bg-info-subtle text-info";
-  if (day.status === "missing") return "border-warning-border bg-warning-subtle text-warning";
+  if (!day) return "border-border bg-surface-subtle";
+  if (day.status === "failed") return "border-danger/60 bg-danger/20";
+  if (day.status === "running") return "border-info/60 bg-info/20";
+  if (day.status === "missing") return "border-warning/60 bg-warning/20";
   return day.object_name
-    ? "border-success-border bg-success-subtle text-success"
-    : "border-border bg-surface-subtle text-text-subtle";
+    ? "border-success/60 bg-success/20"
+    : "border-text-subtle/40 bg-text-subtle/15";
+}
+
+function calendarDayDot(day: HardwareBackupDay | undefined) {
+  if (!day) return null;
+  if (day.status === "failed") return "bg-danger";
+  if (day.status === "running") return "bg-info";
+  if (day.status === "missing") return "bg-warning";
+  return day.object_name ? "bg-success" : "bg-text-subtle";
 }
 
 function BackupCalendar({ overview }: { overview: BackupTargetOverview | null }) {
@@ -591,14 +599,24 @@ function BackupCalendar({ overview }: { overview: BackupTargetOverview | null })
                 {days.map((day) => {
                   const sourceDay = planned ? undefined : dayMap.get(day.day);
                   const status = planned ? "Planned target" : sourceDay ? calendarDayLabel(sourceDay) : "No status";
-                  return <span key={day.day} role="cell" aria-label={`${title}, ${day.day}: ${status}`} title={`${title} · ${day.day} · ${status}`} className={`h-7 rounded border ${calendarDayTone(sourceDay)}`} />;
+                  const dot = calendarDayDot(sourceDay);
+                  return <span key={day.day} role="cell" aria-label={`${title}, ${day.day}: ${status}`} title={`${title} · ${day.day} · ${status}`} className={`flex h-7 items-center justify-center rounded border ${calendarDayTone(sourceDay)}`}>
+                    {dot && <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />}
+                  </span>;
                 })}
               </div>;
             })}
           </div>
         </div>
       ) : <p className="py-4 text-xs text-text-muted">Waiting for daily manifest status.</p>}
-      <p className="mt-2 text-xs text-text-subtle">Green: archived · Gray: checked but empty · Blue: running · Amber: missing · Red: failed. Earlier dates are read-only; gaps may predate target activation.</p>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-text-muted" aria-label="Archive calendar status legend">
+        <LegendDot className="bg-success" label="Archived" />
+        <LegendDot className="bg-text-subtle" label="Empty" />
+        <LegendDot className="bg-info" label="Running" />
+        <LegendDot className="bg-warning" label="Missing" />
+        <LegendDot className="bg-danger" label="Failed" />
+      </div>
+      <p className="mt-2 text-xs text-text-subtle">Earlier dates are read-only; gaps may predate target activation.</p>
     </section>
   );
 }

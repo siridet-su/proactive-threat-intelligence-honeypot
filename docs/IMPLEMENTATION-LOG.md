@@ -3420,3 +3420,18 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: restore the prior immutable staging release through the reviewed staging deployment procedure if a browser regression is found.
 - Follow-up: inspect the aligned calendar and older/newer behavior in an authenticated staging browser.
 - Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
+
+### 2026-09-29 — Restore stronger archive calendar status colors
+
+- Status: repository UI change prepared; host deployment recorded separately if performed.
+- Scope and intent: make each daily status distinguishable at a glance in the shared three-source archive calendar.
+- Repository branch and commit/PR: `main` working tree; commit pending at entry time.
+- Repository changes: use stronger theme status tints and borders for calendar cells, add a matching status dot inside each populated cell, and replace the text-only calendar key with the existing five-color dot legend. Update the Dashboard API description.
+- Host/environment changes actually applied: none in this repository change. No Pi worker, MongoDB manifest, B2 object, or backup schedule was changed.
+- Runtime/exposure state: deployed Dashboards keep the prior colors until their next release; archive status data and classification are unchanged.
+- Validation performed and outcome: targeted Dashboard test, TypeScript, and lint outcomes are recorded with the commit.
+- Not performed / deferred: authenticated browser visual inspection and production Dashboard deployment.
+- Risks and data handling: theme variables keep light/dark colors aligned; planned targets remain neutral without a status dot. No credentials or archive contents were added.
+- Rollback: revert this presentation change and redeploy the previous Dashboard artifact; no worker rollback applies.
+- Follow-up: inspect status contrast in both Dashboard themes with live data.
+- Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
