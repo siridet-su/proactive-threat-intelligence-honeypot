@@ -3346,3 +3346,18 @@ verified fact. Remove fields that do not apply, but retain explicit `N/A` or
 - Rollback: revert this UI change and redeploy the prior Dashboard artifact; no Pi rollback applies.
 - Follow-up: deploy to staging, verify controls and detail transitions in a browser, then assess whether production should receive this layout.
 - Related ADR/runbook: [Dashboard API guide](../dashboard-v2/docs/API.md) and [staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
+### 2026-09-29 — Activate consolidated Backup & Retention layout on staging
+
+- Status: active on Dashboard staging; production Dashboard unchanged.
+- Scope and intent: publish the compact three-source overview with hardware and operational details available on demand.
+- Repository branch and commit/PR: staging release `1c7fad6` (cherry-pick of main `9a6ce76`); GitHub Actions run `36521414728`.
+- Repository changes: append this deployment record only. The UI change and its test are in the preceding entry.
+- Host/environment changes actually applied: staging CI/CD switched the immutable staging release and restarted `honeypot-dashboard-v2-staging.service`. The Pi worker, MongoDB state, B2 objects, and production Dashboard were not changed.
+- Runtime/exposure state: the deploy wrapper reported service success for release `1c7fad6`, with `rollback:false`; its post-switch health check passed. The previous staging release was `21bf51f`.
+- Validation performed and outcome: full staging CI passed lint, TypeScript, external TI test, focused Python contracts, Next.js build, artifact packaging, and artifact identity verification. The deployment job completed successfully.
+- Not performed / deferred: authenticated browser visual inspection and production Dashboard deployment.
+- Risks and data handling: actions require expanding Hardware details; the source overview retains attention count and daily status. No archive contents or credentials were copied into this record.
+- Rollback: restore the prior immutable staging release through the reviewed staging deployment procedure if a browser regression is found.
+- Follow-up: inspect the collapsed page, reopen Hardware actions/history, and confirm the operational detail panel in an authenticated staging browser.
+- Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
