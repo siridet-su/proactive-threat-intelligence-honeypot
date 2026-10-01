@@ -2,8 +2,22 @@
 
 This file identifies the canonical operational target. It is not a substitute
 for release manifests, owner-only migration receipts, or live health checks.
-The values below were re-read from the local repository and from a read-only
-SSH probe on 2026-08-10.
+The detailed table below is the 2026-08-10 snapshot and is **not** the current
+release identity.
+
+## 2026-10-01 verified release status
+
+Read-only verification after a rollback showed `/opt/honeypot` again selecting
+`ad2baf0b2ab931f12b7ad4b6dbb9520d31fac389`; its v7 manifest verified,
+the checked backend units were active, and monitor `/health` returned 200.
+Hotfix `3cf60ae69a1fcc3d60059c65076144c8ae02a58a` was packaged and
+smoke-tested on GCP but is **inactive** because Pi port 22 could not be reached
+for the required live end-to-end gate. The package, isolated release, and
+storage successor receipt are retained for a later qualified attempt. The
+ZeroTier network on GCP was `OK` while the Pi neighbor was `INCOMPLETE`; this
+is not evidence that the honeypot path works. See the dated implementation-log
+addendum for the exact tests and rollback outcome. Do not use the older release
+revision in the historical table below as a deployment target.
 
 ## Active production target
 
