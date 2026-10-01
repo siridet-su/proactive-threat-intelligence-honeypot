@@ -185,7 +185,6 @@ def test_repeated_semantic_label_is_collapsed_without_losing_live_evidence() -> 
     assert realtime_manifest == manifest
 
 
-@pytest.mark.xfail(strict=True, reason="historical retry-aware selector contract; current authoritative selector is v2")
 def test_retry_aware_selection_finds_later_complete_same_path_subsequence() -> None:
     fact_set, report = _build({
         "case_id": "phase2-retry",
@@ -197,8 +196,6 @@ def test_retry_aware_selection_finds_later_complete_same_path_subsequence() -> N
         ],
     })
     selection = select_typed_semantic_chains(fact_set, [CHAIN_RULE])
-    # The current authoritative selector is v2; the former v3 assertion was
-    # a stale representation expectation (REPLAY-03), not a migration target.
     assert selection["schema_version"] == "typed_semantic_chain_selection.v2"
     assert [match["status"] for match in selection["matches"]] == ["complete"]
     assert [finding["finding_type"] for finding in report["behavioral_findings"]] == [
@@ -275,7 +272,6 @@ def test_failed_or_ambiguous_cwd_and_mismatched_paths_abstain() -> None:
         assert select_typed_semantic_chains(fact_set, [CHAIN_RULE])["matches"] == []
 
 
-@pytest.mark.xfail(strict=True, reason="historical retry search was not retained in authoritative selector v2")
 def test_retry_search_is_deterministic_and_bounded_for_long_session() -> None:
     failed = [
         ("wget https://example.invalid/a -O /tmp/a", "failure")

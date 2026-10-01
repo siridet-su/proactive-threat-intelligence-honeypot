@@ -194,6 +194,8 @@ def test_gcp_managed_inventory_matches_repository_templates() -> None:
         "honeypot-next-distinct-shadow.service",
         "honeypot-mongo-retention.service",
         "honeypot-mongo-retention.timer",
+        "honeypot-service-watchdog.service",
+        "honeypot-service-watchdog.timer",
     }
 
 

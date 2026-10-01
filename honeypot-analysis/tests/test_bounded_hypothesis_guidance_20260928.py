@@ -86,7 +86,9 @@ def test_direct_transfer_event_suppresses_unconfirmed_h2() -> None:
             {"kind": "command", "command": "/tmp/demo.sh", "outcome": "success"},
         ],
     })
-    assert report["hypothesis_sets"] == []
+    scopes = {item["scope"] for item in report["hypothesis_sets"]}
+    assert "bounded_cowrie_unverified_remote_content" not in scopes
+    assert "bounded_cowrie_download_then_execution_attempt" in scopes
 
 
 def test_g2_requires_supported_same_path_order_and_success() -> None:

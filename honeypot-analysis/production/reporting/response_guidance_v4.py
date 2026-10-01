@@ -44,6 +44,11 @@ REVIEWED_POLICY_REGISTRY = {
     "60c4e79d4b7eca470ad664594aaf40a1977bbdb26e4b0b636722d0c335651697": (
         "d5c85e26beafee66e107968759928d7285fec6710012aebd314acb2f667d80c2"
     ),
+    # The reviewed v4.0.0 policy added bounded manual-review and deception
+    # actions, but its file/document pair was not registered at release time.
+    "17f06b62ed6ec91936740d0ba42bdc4f1c243248a6fb21fbdd75a0ac68affea9": (
+        "a4776452e8da0e1b46a79f6b901a07fc8833033165935a872f37d6dcbeb7f9f6"
+    ),
 }
 _SAFETY = {
     "automatic_execution": False,

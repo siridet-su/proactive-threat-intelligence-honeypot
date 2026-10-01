@@ -230,7 +230,12 @@ def _metrics(
         assert actual_matches == expected_matches, case["case_id"]
         assert (SPECIAL_FINDING in finding_types) is expected_eligible
         assert (SPECIAL_ACTION in action_ids) is expected_eligible
-        assert report["hypothesis_sets"] == []
+        # The bounded credential-path assessment is independent of the
+        # sensitive-read finding/guidance under evaluation here.
+        assert all(
+            item["scope"] == "bounded_cowrie_credential_path_access"
+            for item in report["hypothesis_sets"]
+        )
         assert all(
             action["requires_manual_approval"] is True
             and action["safe_to_auto_execute"] is False

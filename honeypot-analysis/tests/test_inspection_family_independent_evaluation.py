@@ -347,7 +347,12 @@ def _assert_case(
         "specialized_finding"
     ], case["case_id"]
     assert bool(selection["matches"]) is expected_eligible
-    assert report["hypothesis_sets"] == [], case["case_id"]
+    # Inspection fixtures may also carry the separately scoped credential-path
+    # hypothesis; this evaluation only excludes inspection-derived hypotheses.
+    assert all(
+        item["scope"] == "bounded_cowrie_credential_path_access"
+        for item in report["hypothesis_sets"]
+    ), case["case_id"]
 
     assert not any(
         action.get("semantic_family") == "inspection"
