@@ -1,25 +1,27 @@
 # Current GCP VM architecture and rebuild boundary
 
 This document is the repository-safe description of the GCP backend. The
-canonical active backend is `capstone`: public management address
-`34.142.229.209`, Tailscale application address `100.85.50.74`, and production
-ingest endpoint `http://100.85.50.74:8080/events`. Exact firewall source
-ranges, service-account details, secret paths, and database receipts remain in
-the owner-only migration inventory outside Git.
+canonical active backend hostname is `capstone`; public/private addresses,
+overlay identities, exact endpoint, firewall source ranges, service-account
+details, secret paths, and database receipts remain in the owner-only inventory
+outside Git.
 
 ## Evidence and decision
 
-The current target was verified read-only on 2026-08-10 against the clean
-checkout on branch `professor-approved-poc-evaluation`. The live hostname,
-Tailscale address, active link, and `DEPLOYED_COMMIT` all identify revision
-`c3bd2456e6e4693f669c9e48385a62242209afbc`. The deployment decision is:
+The current VM was verified read-only on 2026-10-08. Its active release is
+`dcaa63b606da637a41b78e6c123a2df62d63de56`; runtime-code candidate
+`d391ccb503520c6a4d9259f4e9e8626b818004fb` on repository `main` is not
+installed. The VM's
+ingest service is bound to a private overlay interface. Exact route identities
+remain in the owner-only inventory. The deployment decision is:
 
 `CAPSTONE_IS_ACTIVE_PRODUCTION`
 
-The former VM at Tailscale IPv4 `100.122.213.37` is preserved solely as a
-rollback/reference host. It must not be selected by normal deployment,
+The owner reported that the former VM was shut down to avoid cost. Its power
+state was not independently checked through the GCP control plane, and it is
+not a verified rollback/reference host. Do not select it for deployment,
 management, validation, monitoring, database, or SSH workflows. Historical
-receipts retain its identity as evidence and are not rewritten.
+receipts remain evidence and are not rewritten.
 
 The exact resource inventory, database backups, integrity receipts, and
 isolated restore results remain in owner-only migration directories. Those
@@ -32,7 +34,7 @@ values, tokens, private keys, or secret environment contents.
 Internet client
   -> approved GCP firewall rule (TCP/2222)
   -> HAProxy TCP frontend with PROXY protocol
-  -> Tailscale backend link
+  -> approved private overlay backend link
   -> Raspberry Pi Cowrie and privacy-boundary forwarder
   -> authenticated ingest API
   -> current canonical storage epoch and session reconstruction
@@ -46,11 +48,11 @@ Cowrie evidence and the canonical evidence snapshot are authoritative.  The
 Transformer, enrichment feeds, correlations, and optional prose are
 non-authoritative context.  `response_guidance.v3` is advisory only,
 requires manual approval, and cannot execute an action, create an alert, or
-create a webhook. A MongoDB epoch, if activated by a separate reviewed
-cutover, contains only post-cutoff canonical data and synchronously mirrors
-each ACK-eligible event to a new SQLite rollback file. The pre-cutoff SQLite
-database remains a distinct read-only historical archive and is not rewritten
-or silently federated into current APIs.
+create a webhook. The active MongoDB epoch contains only post-cutoff canonical
+data and synchronously mirrors each ACK-eligible event to its epoch-bound
+SQLite rollback file. The pre-cutoff SQLite database remains a distinct
+read-only historical archive and is not rewritten or silently federated into
+current APIs.
 
 ## Immutable and mutable boundaries
 
@@ -61,12 +63,13 @@ dependency identity, managed-unit policy, and package hash are verified as a
 single release identity.  The retained recovery release is independently
 manifest-bound.
 
-The frozen Transformer/SecureBERT assets are a separate owner-only,
-content-addressed model bundle under `/opt/honeypot-model-bundles/`.  The
-bundle manifest binds the checkpoint, specification, vocabulary, calibration,
-preprocessing, and classifier artifacts.  A replacement VM must restore this
-bundle from its verified archive; it must not follow a model link into an old
-application release.
+The active VM has a separately managed Model1 artifact bundle; its artifact
+files were mode `0600` and owned by the service account during the 2026-10-08
+check. Next-Distinct and Model2 use independent shadow runtimes and are
+non-authoritative. Their artifact/runtime identities must be checked against
+their own receipts; a model directory's presence is not proof of successful
+inference. Full model-bundle smoke verification was not performed during the
+2026-10-08 host check.
 
 The following are mutable runtime state and are not part of the immutable
 release-tree identity:
@@ -103,19 +106,29 @@ managed units are expected to be enabled, active where applicable, hardened,
 and configured with `UMask=0077`; a managed-unit policy validation is a
 replacement-host gate.
 
-The ingest endpoint is bound to its authorized backend interface.  Dashboard
-and monitor endpoints remain local or management-network endpoints.  HAProxy
-is the only GCP-to-Pi TCP relay; no additional public listener is introduced
-by a rebuild.  The replacement inventory must record the exact firewall rule,
-target tag, route, Tailscale peer, and backend port privately.
+On 2026-10-08 the eight core daemons, Next-Distinct shadow/feeder, and Model2
+receiver/bridge were active with zero failed units. The feed and session-count
+timers were active. A service-watchdog timer and two Dashboard v2 services were
+also active outside the current `main` profile's external-unit allowlist. The
+managed-unit profile has not passed against this live inventory; reconcile the
+units before installing a new release. The AI advisory worker was inactive.
+
+The ingest endpoint is bound to its authorized private overlay interface.
+Dashboard and monitor health endpoints responded locally during the bounded
+check. Exact listening addresses, firewall rule, target tag, overlay peer, and
+backend port remain in the owner-only inventory. This check did not enumerate
+all public listeners or verify the GCP firewall control plane.
 
 ## Capacity boundary
 
 A backup and isolated restore rehearsal remain mandatory before a VM change.
-Every future deployment must recalculate capacity from the live database and
-retain the active release, rollback release, verified backup, WAL/temporary
-margin, and operating safety margin. Current free space is a live operational
-fact and is not inferred from the completed migration or from this document.
+The 2026-10-08 snapshot/restore covered the SQLite rollback mirror only; it did
+not back up canonical MongoDB. A provider-supported MongoDB snapshot and
+restore test remains required for a data-changing cutover. Every future
+deployment must recalculate capacity from live data and retain the active
+release, verified rollback release, backups, WAL/temporary margin, and operating
+safety margin. Current free space is a live operational fact and is not
+inferred from this document.
 
 ## Replacement requirements
 

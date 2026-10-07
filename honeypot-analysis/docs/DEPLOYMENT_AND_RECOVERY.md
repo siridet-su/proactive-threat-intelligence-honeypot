@@ -119,16 +119,27 @@ unverified backend must fail closed.
 
 ## Current repository-recorded production target
 
-The canonical active VM is `capstone`, with public management address
-`34.142.229.209`, Tailscale application address `100.85.50.74`, and active
-release `c3bd2456e6e4693f669c9e48385a62242209afbc`. The production ingest
-endpoint is `http://100.85.50.74:8080/events`. See
-[CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md) for the verified
-SSH identity and verification boundary.
+The active VM hostname is `capstone`. Read-only verification on 2026-10-08
+found release `dcaa63b606da637a41b78e6c123a2df62d63de56`; runtime-code
+candidate `d391ccb503520c6a4d9259f4e9e8626b818004fb` on `main` is not
+installed. The ingest
+service uses a private overlay route. Exact public/private addresses, overlay
+identities, SSH principals, and firewall details belong in the owner-only
+inventory, not this document.
 
-The former VM at `100.122.213.37` is preserved only for rollback/reference.
-Normal deployment, management, validation, monitoring, database, backup, and
-service workflows must not target it.
+The owner reported that the former VM was shut down to avoid cost; this was not
+independently checked through the GCP control plane. It is not a verified
+rollback target. Normal deployment and validation must use the active `capstone`
+VM and must not assume the former VM is available for recovery.
+
+The 2026-10-08 read-only check found the active release manifest does not match
+the preserved Model2 runtime-configuration hash, and the active and alternate
+release directories did not provide a verified manifest-bound rollback target.
+The watchdog timer and two Dashboard v2 services were active outside the current
+`main` managed-unit allowlist. No release pointer, unit, service, firewall, or
+configuration was changed during the check. See
+[CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md) for the current
+verification boundary.
 
 The machine-readable receipt
 `evaluation/next_tactic_final_production_activation_20260802.json` records the
@@ -142,15 +153,20 @@ change.
 ## Safe procedure
 
 1. Verify a clean commit, package hash, manifest hash, release-tree hash, model
-   bundle, policy hashes, capacity, and current marker.
-2. Create a fresh non-overwriting SQLite backup; run integrity/quick checks and
-   an isolated restore before activation.
+   artifacts, policy hashes, capacity, and current marker.
+2. Back up the selected canonical database using its provider-supported method
+   and verify an isolated restore. For the active MongoDB epoch, also create a
+   separate non-overwriting backup/restore of the exact epoch-bound SQLite
+   rollback mirror; the mirror is not a substitute for a MongoDB backup. For a
+   SQLite-only profile, use `production.tools.sqlite_backup_restore`.
 3. Install the immutable release, update the pointer/marker only after hash
    verification, and restart only affected services.
 4. Run health, queue/lease, privacy, v4/v3, artifact, API/monitor, E2E, and
    bounded observation gates.
-5. On any mandatory failure, invoke the guard to restore the retained release,
-   verify services and SQLite, and stop.
+5. On any mandatory failure, invoke the guard to restore the independently
+   verified release and its reviewed units, verify the selected database and
+   services, and stop. If no verified rollback release is available, do not
+   cut over or restart the active release.
 
 The earlier public-connectivity correction and its before/after hashes remain
 historically recorded in
@@ -177,7 +193,10 @@ or automatic VOMM selection during recovery.
 
 ## Verification boundary
 
-This summary is derived from committed receipts and does not SSH to either
-host. Current live deployment state, capacity, and backup existence are
-`NOT_DETERMINABLE_FROM_CURRENT_REPOSITORY` unless a newer signed/hashed receipt
-is committed.
+The repository snapshot was reconciled against a read-only SSH check on
+2026-10-08. The private inventory remains authoritative for addresses,
+credentials, and provider receipts. The mirror snapshot and isolated restore
+passed; a provider-supported backup/restore of canonical MongoDB was not
+performed, and no new release or rollback release was qualified. Live capacity
+and provider control-plane state remain time-sensitive and must be checked
+again before a future cutover.

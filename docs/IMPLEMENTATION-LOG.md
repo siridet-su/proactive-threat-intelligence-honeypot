@@ -3680,6 +3680,61 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   [GCP current architecture](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md),
   and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
 
+### 2026-10-08 — Recheck GCP release gates and snapshot rollback mirror
+
+- Status: backup and isolated restore qualified; source release not deployed.
+- Scope and intent: continue qualification of the pushed `main` runtime-code
+  candidate on the replacement VM without changing Model2 configuration, active
+  release pointer, services, or network exposure.
+- Repository branch and commit/PR: `main`; runtime-code candidate
+  `d391ccb503520c6a4d9259f4e9e8626b818004fb` was already pushed to
+  `origin/main`. This entry and the linked current-state/runbook edits are a
+  documentation-only follow-up, not a new runtime candidate.
+- Repository changes: updated the production-state snapshot, GCP architecture,
+  deployment/recovery procedure, and VM rebuild runbook to match the bounded
+  read-only host check and distinguish canonical MongoDB backup from the
+  epoch-bound SQLite rollback mirror. No runtime code or policy was changed.
+- Host/environment changes actually applied: created a non-overwriting,
+  root-owned mode-0700 backup directory containing a mode-0600 snapshot of the
+  epoch-bound SQLite rollback mirror and an isolated restored copy. Both files
+  remain in the protected backup area; no production database, receipt,
+  service, release, or configuration was modified.
+- Runtime/exposure state: the active release remains the pre-existing VM
+  revision, not the `main` runtime-code candidate. All eight core backend
+  services and the Next-Distinct and Model2 shadow services were active; there
+  were zero failed units. Ingest health returned 200 on its private overlay
+  binding, and local Dashboard API and monitor health returned 200. The
+  watchdog timer and two Dashboard v2 services are also active outside the
+  current `main` unit policy.
+- Validation performed and outcome: backup and isolated restore each reported
+  SQLite `quick_check=ok`, `integrity_check=ok`, schema version 3, and matching
+  table counts; the restore hash matched the backup hash. The repository
+  runtime-code candidate was pushed before this documentation update. Live
+  release verification still fails on the effective Model2 runtime-configuration
+  hash. Neither the active release nor the retained alternate release passed
+  release-manifest verification, so no manifest-bound rollback target is
+  currently qualified.
+- Not performed / deferred: no release archive was uploaded, no pointer or
+  systemd unit was changed, and no service was restarted. No synthetic live
+  session, external TI provider request, authenticated UI/PDF test, or Vertex AI
+  request was made. Deployment remains deferred until the preserved Model2
+  configuration is reviewed and bound without replacement, unit ownership is
+  reconciled, canonical MongoDB backup/restore is qualified, and a verified
+  rollback release is available.
+- Risks and data handling: the extra backup and restore contain production
+  telemetry and remain root-only outside Git. No secret, raw attacker data,
+  private address, or protected configuration content was recorded here.
+- Rollback: no active runtime change to roll back; retain the verified backup
+  and restore copy under the protected host backup directory. The old active
+  release is not yet a verified rollback target.
+- Follow-up: qualify a provider-supported MongoDB backup and isolated restore,
+  create and verify a manifest-bound recovery release, reconcile active
+  watchdog/Dashboard units with the reviewed `main` policy, then repeat release,
+  health, data, and rollback qualification before cutover.
+- Related ADR/runbook: [GCP VM rebuild runbook](../honeypot-analysis/docs/GCP_VM_REBUILD_RUNBOOK.md),
+  [GCP current architecture](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md),
+  and [deployment and recovery](../honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md).
+
 ### 2026-10-07 — Resolve filesystem UI suite mismatches
 
 - Status: prepared on the isolated public-main candidate; not deployed to a

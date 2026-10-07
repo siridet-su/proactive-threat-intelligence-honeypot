@@ -1,100 +1,60 @@
 # Current production state (repository-recorded)
 
-This file identifies the canonical operational target. It is not a substitute
-for release manifests, owner-only migration receipts, or live health checks.
-The values below were re-read from the local repository and from a read-only
-SSH probe on 2026-08-10.
+This is a bounded snapshot, not a substitute for the private resource inventory,
+release manifests, storage receipts, or live health checks. Exact public and
+private addresses, overlay identities, SSH principals/keys, firewall sources,
+and secret locations belong only in the owner-controlled inventory.
 
 ## Active production target
 
-| Boundary | Recorded value |
+Read-only SSH verification on 2026-10-08 confirmed the active VM hostname is
+`capstone`. Its current release and the repository candidate are different:
+
+| Boundary | Verified state |
 | --- | --- |
-| VM name / hostname | `capstone` |
-| Public management address | `34.142.229.209` |
-| Private application address | `100.85.50.74` (Tailscale IPv4) |
-| Production ingest endpoint | `http://100.85.50.74:8080/events` |
-| SSH alias | `honeypot-gcp` |
-| SSH user | `siridet_s_dev` |
-| SSH identity | `/home/rubchek/.ssh/honeypot_gcp_ed25519` |
-| Repository revision | `c3bd2456e6e4693f669c9e48385a62242209afbc` |
-| Active release | `c3bd2456e6e4693f669c9e48385a62242209afbc` |
-| Active release link | `/opt/honeypot-releases/c3bd2456e6e4693f669c9e48385a62242209afbc` |
+| Active release | `dcaa63b606da637a41b78e6c123a2df62d63de56` |
+| Runtime-code candidate on `main` | `d391ccb503520c6a4d9259f4e9e8626b818004fb`; not installed on the VM |
+| Private ingest route | Bound to the private overlay; exact endpoint is in the owner-only inventory |
+| Canonical storage | MongoDB epoch selected by the reviewed 8.0.34 receipt |
+| Report authority | `session_assessment.v4` and `response_guidance.v3`; guidance remains manual-only |
 
-The canonical management command is:
+Do not use historical addresses or SSH examples from old receipts as current
+selectors. The prior VM was reported by the owner as shut down to avoid cost;
+that state was not independently queried through the GCP control plane, and it
+is not a verified rollback target.
 
-```bash
-ssh -i /home/rubchek/.ssh/honeypot_gcp_ed25519 \
-  -o IdentitiesOnly=yes \
-  siridet_s_dev@34.142.229.209
-```
+## Live checks and release boundary
 
-The local operator alias `honeypot-gcp` resolves to that identity. Deployment,
-validation, monitoring, database, backup, and service-management work must use
-capstone unless a change request explicitly invokes a rollback procedure.
+The 2026-10-08 read-only check found all eight core backend services, both
+Next-Distinct shadow services, and both Model2 shadow services active, with no
+failed systemd units. The ingest health endpoint returned 200 on its private
+overlay binding; Dashboard API and monitor health returned 200 locally. This
+was a health check only, not a synthetic session, model-inference, provider, or
+report/PDF acceptance test. AI advisory was inactive. Two Dashboard v2 services
+and the service-watchdog timer were also active outside the current `main`
+managed-unit allowlist, so the host does not yet match that policy's unit
+inventory.
 
-## Preserved rollback/reference VM
+The active release verifier rejects the preserved Model2 runtime-configuration
+hash, and neither the active nor retained alternate release currently verifies
+as a manifest-bound rollback target. The Model2 configuration was not changed.
+The active release must remain in place until a successor release and rollback
+release both verify and the unit inventory is reconciled.
 
-The host at Tailscale IPv4 `100.122.213.37` is retained only as a rollback and
-historical reference VM. It is not the active deployment, management,
-validation, monitoring, database, or default SSH target. The local alias
-`honeypot-gcp-old` makes that exceptional role explicit. Do not modify or
-decommission it without a separately approved procedure.
+A new root-only backup and isolated restore of the epoch-bound SQLite rollback
+mirror passed SHA-256, schema, table-count, `quick_check`, and full integrity
+checks. This is not a backup of the canonical MongoDB data. A separate
+provider-supported MongoDB backup and restore qualification remains required
+before any cutover or database migration.
 
-The earlier activation receipt
-`evaluation/next_tactic_final_production_activation_20260802.json` and the
-connectivity receipt
-`evaluation/cowrie_public_connectivity_root_cause_20260802.json` remain
-immutable historical evidence. Their old addresses and revisions must not be
-interpreted as the current operational target.
+## Authority and operating invariants
 
-## Authority and safety state
+Cowrie evidence and the canonical evidence snapshot remain authoritative.
+Predictions and external enrichment are context only. Model2 and Next-Distinct
+remain shadow/non-authoritative; no model output or response guidance executes
+an action. Exact resource identities, credentials, addresses, database
+receipts, and protected backup paths remain outside Git.
 
-The VM migration did not change analytical authority. Cowrie evidence and the
-canonical evidence snapshot remain authoritative. Predictions and enrichment
-remain non-authoritative; `session_assessment.v4` and
-`response_guidance.v3` retain their existing contracts; guidance remains
-manual-only and non-executable. Hybrid AI advisory remains disabled unless a
-separate reviewed activation explicitly enables it.
-
-## Verification boundary
-
-The 2026-08-10 verification confirmed hostname `capstone`, Tailscale IPv4
-`100.85.50.74`, `/opt/honeypot` resolving to the release shown above, and an
-exactly matching `DEPLOYED_COMMIT`. The eight managed application daemons are
-active and enabled under `multi-user.target`; enabling them did not restart the
-running processes. Both managed timers are active/enabled, and the repository
-managed-unit validator reports `status=valid` for `gcp_backend`.
-
-The same maintenance pass confirmed healthy ingest/dashboard/monitor liveness
-responses and left application configuration, SQLite, models, and services
-otherwise unchanged. A later read-only pre-activation audit found dashboard
-readiness exceeding 15 seconds because the deployed handler repeats SQLite
-schema initialization. The repository candidate contains a read-only readiness
-fix, but it has not been deployed and no production service was restarted.
-
-Immediately before the approved backup cleanup, the root filesystem was
-105,427,566,592 bytes total, 89,255,714,816 bytes used, and 11,759,644,672
-bytes available. `/var/backups/honeypot` accounted for 74,753,236,992 bytes.
-Only the three superseded full database/WAL/SHM payload sets from the failed
-2026-08-09 16:22 cutover were removed; their manifests and diagnostic receipts
-were retained. The successful 17:36 incoming/final/pre-promotion rollback chain
-was retained and its three database hashes were reverified against the
-migration receipts. The latest final backup also passed a fresh read-only
-`quick_check`.
-
-After `sync`, `/var/backups/honeypot` was 55,931,482,112 bytes and the root
-filesystem had 30,578,216,960 bytes available (28.48 GiB). The cleanup reclaimed
-18,821,754,880 bytes (17.53 GiB) from the backup directory and met the 25 GiB
-minimum, but not the preferred 30 GiB target. The retained final backup predates
-subsequent live writes, so a separately authorized fresh current-state backup
-is still required before deployment. No live database/WAL/SHM, release,
-runtime/model evidence, application service, or production configuration was
-changed.
-
-The Pi was audited read-only. The canonical sanitized sensor forwarder is
-active/enabled, but the legacy Redis collector and hardware agents are also
-active/enabled. The legacy processor is enabled and repeatedly failing with
-automatic restarts; Redis is loopback-only and active, while no local
-`mongod.service` is installed. Those services were not stopped or changed.
-Their ownership and data-retention purpose must be resolved before any legacy
-path is retired or any MongoDB environment is reused.
+See [GCP VM architecture](GCP_VM_CURRENT_ARCHITECTURE.md), [deployment and
+recovery](DEPLOYMENT_AND_RECOVERY.md), and the [GCP replacement
+runbook](GCP_VM_REBUILD_RUNBOOK.md) for current constraints and gates.
