@@ -3607,6 +3607,31 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
   [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
 
+### 2026-10-08 — Addendum: report-contract qualification publication
+
+- Status: source commit published; GCP deployment remains deferred.
+- Scope and intent: attach the final repository identity to the
+  `2026-10-08 — Reconcile report contracts and qualify the curated main tree`
+  qualification record without changing its test or deployment findings.
+- Repository branch and commit/PR: `main`, commit `a66abdd3f99c12609dcf5c06ff8aacf7d124e9ce`, pushed to `origin/main`.
+- Repository changes: this addendum records publication of the previously
+  qualified source commit; no implementation files changed in this addendum.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: unchanged; the source commit is not installed on the
+  GCP VM.
+- Validation performed and outcome: `git status` confirmed clean `main`
+  tracking `origin/main`; `git diff --check` passed. GitHub Actions status was
+  not queried because the GitHub CLI is unavailable in this environment.
+- Not performed / deferred: GCP deployment remains blocked by the active
+  manifest/configuration mismatch and missing verified backup-restore and
+  rollback qualifications recorded above.
+- Risks and data handling: none beyond the previously recorded non-active
+  v6/v4 candidate; no protected data was copied to Git.
+- Rollback: revert commit `a66abdd3f99c12609dcf5c06ff8aacf7d124e9ce`; no host rollback applies.
+- Follow-up: complete the qualification gates before creating or activating a
+  GCP release.
+- Related ADR/runbook: [GCP VM rebuild runbook](../honeypot-analysis/docs/GCP_VM_REBUILD_RUNBOOK.md).
+
 ### 2026-10-08 — Reconcile report contracts and qualify the curated main tree
 
 - Status: prepared on `main`; not deployed to a host.
