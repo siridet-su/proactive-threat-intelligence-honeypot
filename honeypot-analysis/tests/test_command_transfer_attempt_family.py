@@ -225,7 +225,17 @@ def _assert_case(
     assert len(selection["matches"]) == case["eligible_matches"]
     assert bool(v4) is expected
     assert bool(v3) is expected
-    assert report["hypothesis_sets"] == []
+    expected_hypothesis_scopes = (
+        ["bounded_cowrie_unverified_remote_content"]
+        if case["expected_operations"]
+        == ["remote_content_access", "transfer_attempt"]
+        and case["outcome"] in {"outcome_unknown", "unknown", "success"}
+        and len(case.get("expected_urls") or []) == 1
+        else []
+    )
+    assert sorted(
+        item["scope"] for item in report["hypothesis_sets"]
+    ) == expected_hypothesis_scopes
     assert not any(
         item.get("semantic_family") == "transfer_attempt"
         for item in report["response_guidance_v3"][

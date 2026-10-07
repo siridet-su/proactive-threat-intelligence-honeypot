@@ -25,40 +25,11 @@ def test_final_config_disables_securebert_without_reinterpreting_historical_thre
     assert config.classification_policy["s1_advisory_enabled"] is False
 
 
-def test_final_workers_do_not_call_securebert_loader_when_disabled(monkeypatch) -> None:
-    config = SimpleNamespace(enable_securebert=False)
-    environment = {}
-
-    def unexpected_loader(*_args, **_kwargs):
-        raise AssertionError("SecureBERT loader must not be called when disabled")
-
-    monkeypatch.setattr(
-        session_worker_module,
-        "load_securebert_classifier",
-        unexpected_loader,
-    )
-    monkeypatch.setattr(
-        analysis_worker_module,
-        "load_securebert_classifier",
-        unexpected_loader,
-    )
-
-    assert session_worker_module._load_securebert_for_final_runtime(config, environment) is None
-    assert analysis_worker_module._load_securebert_for_replay(config, environment) is None
-
-
-def test_securebert_loading_is_an_explicit_compatibility_opt_in(monkeypatch) -> None:
-    config = SimpleNamespace(enable_securebert=True)
-    environment = {}
-    sentinel = object()
-
-    monkeypatch.setattr(
-        session_worker_module,
-        "load_securebert_classifier",
-        lambda *_args, **_kwargs: sentinel,
-    )
-
-    assert session_worker_module._load_securebert_for_final_runtime(config, environment) is sentinel
+def test_active_workers_do_not_expose_retired_securebert_loader_hooks() -> None:
+    assert not hasattr(session_worker_module, "_load_securebert_for_final_runtime")
+    assert not hasattr(analysis_worker_module, "_load_securebert_for_replay")
+    assert not hasattr(session_worker_module, "load_securebert_classifier")
+    assert not hasattr(analysis_worker_module, "load_securebert_classifier")
 
 
 def test_historical_securebert_threshold_has_no_effect_without_model() -> None:

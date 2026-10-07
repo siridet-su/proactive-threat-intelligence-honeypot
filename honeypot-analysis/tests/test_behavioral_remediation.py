@@ -69,7 +69,9 @@ def test_complete_same_path_chain_selects_one_bounded_connected_finding() -> Non
     assert [item["finding_type"] for item in report["behavioral_findings"]] == [
         "connected_transfer_permission_execution"
     ]
-    assert report["hypothesis_sets"] == []
+    assert [item["scope"] for item in report["hypothesis_sets"]] == [
+        "bounded_cowrie_unverified_remote_content"
+    ]
     assert "does not prove transfer completion" in report["behavioral_findings"][0][
         "limitations"
     ][1].lower()
@@ -85,7 +87,9 @@ def test_incomplete_same_path_chain_is_cautious_and_wrong_path_abstains() -> Non
     })
     selection = select_typed_semantic_chains(fact_set, [CHAIN_RULE])
     assert [item["status"] for item in selection["matches"]] == ["incomplete"]
-    assert len(report["hypothesis_sets"]) == 1
+    assert [item["scope"] for item in report["hypothesis_sets"]] == [
+        "bounded_cowrie_observable_behavior"
+    ]
     assert "no supported execution attempt" in report["hypothesis_sets"][0][
         "hypotheses"
     ][0]["statement"].lower()
@@ -100,7 +104,9 @@ def test_incomplete_same_path_chain_is_cautious_and_wrong_path_abstains() -> Non
     })
     wrong_selection = select_typed_semantic_chains(wrong_path_facts, [CHAIN_RULE])
     assert wrong_selection["matches"] == []
-    assert wrong_path_report["hypothesis_sets"] == []
+    assert [item["scope"] for item in wrong_path_report["hypothesis_sets"]] == [
+        "bounded_cowrie_unverified_remote_content"
+    ]
 
 
 def test_entity_normalization_never_renders_internal_mapping() -> None:

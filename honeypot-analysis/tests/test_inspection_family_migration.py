@@ -559,7 +559,9 @@ def test_existing_activated_families_remain_independent() -> None:
             "advisory_actions"
         ]
     )
-    assert report["hypothesis_sets"] == []
+    assert [item["scope"] for item in report["hypothesis_sets"]] == [
+        "bounded_cowrie_credential_path_access"
+    ]
     assert validate_session_assessment_v4(report) == []
 
 

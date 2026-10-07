@@ -16,6 +16,7 @@ from production.reporting.canonical_graph_queries import (
     CanonicalGraphQueryError,
     CanonicalGraphView,
     canonical_graph_view,
+    chronological_graph_view,
 )
 from production.reporting.response_guidance_v3 import (
     load_response_guidance_asset_profile,
@@ -39,6 +40,13 @@ REVIEWED_POLICY_REGISTRY = {
     REVIEWED_POLICY_FILE_SHA256: REVIEWED_POLICY_DOCUMENT_SHA256,
     "9c7804582467068511c19d30850ce092b94b760d8cf380d942af417489435345": (
         "d8123fc287e0ad50517f7e9932a0b88fd00e0a0f5a180fecdc00020797be620b"
+    ),
+    "60c4e79d4b7eca470ad664594aaf40a1977bbdb26e4b0b636722d0c335651697": (
+        "d5c85e26beafee66e107968759928d7285fec6710012aebd314acb2f667d80c2"
+    ),
+    # Reviewed v4 policy with bounded manual-review and deception guidance.
+    "17f06b62ed6ec91936740d0ba42bdc4f1c243248a6fb21fbdd75a0ac68affea9": (
+        "a4776452e8da0e1b46a79f6b901a07fc8833033165935a872f37d6dcbeb7f9f6"
     ),
 }
 _SAFETY = {
@@ -148,6 +156,123 @@ def _rule_match(
     return facts, evidence_refs, trace
 
 
+def _action_match_groups(
+    view: CanonicalGraphView,
+    rule: Mapping[str, Any],
+) -> list[tuple[list[dict[str, Any]], list[str], list[dict[str, Any]], str]]:
+    """Keep path-bound actions separate; legacy rules retain their result."""
+    condition = rule.get("applies_when") or {}
+    if condition.get("resolved_path_group") is True:
+        allowed = set(condition.get("any_operation_types") or [])
+        outcomes = set(condition.get("required_outcome_statuses") or [])
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for fact in view.facts_by_id.values():
+            if fact.get("abstention_reasons"):
+                continue
+            if not allowed.intersection(fact.get("operation_types") or []):
+                continue
+            if outcomes and fact.get("outcome_status") not in outcomes:
+                continue
+            for entity_ref in fact.get("entity_refs") or []:
+                entity = view.entities_by_id.get(_text(entity_ref)) or {}
+                if (
+                    entity.get("entity_type") != "path"
+                    or entity.get("linkable") is not True
+                    or entity.get("uncertain") is not False
+                    or not set(entity.get("roles") or []).intersection(
+                        {"created_paths", "modified_paths", "destination_paths"}
+                    )
+                ):
+                    continue
+                grouped.setdefault(_text(entity_ref), []).append(deepcopy(fact))
+        results = []
+        for entity_ref, facts in sorted(grouped.items()):
+            unique = {item["fact_id"]: item for item in facts}
+            selected = [unique[key] for key in sorted(unique)]
+            refs = sorted({
+                _text(ref)
+                for item in selected
+                for ref in item.get("source_evidence_refs") or []
+                if _text(ref)
+            })
+            if refs:
+                results.append((selected, refs, [{
+                    "predicate": "resolved_path_fact_group",
+                    "expected": sorted(allowed),
+                    "matched": entity_ref,
+                    "result": True,
+                    "fact_refs": sorted(unique),
+                    "evidence_refs": refs,
+                }], entity_ref))
+        return results
+    if condition.get("same_path_operation_sequence") == [
+        "execution_attempt", "file_delete"
+    ]:
+        try:
+            chronology = chronological_graph_view(view.graph)
+        except CanonicalGraphQueryError:
+            return []
+        grouped: dict[str, dict[str, Any]] = {}
+        for edge in view.relationships_by_id.values():
+            if (
+                edge.get("relationship_type") != "same_path_transition"
+                or edge.get("status") != "supported"
+                or edge.get("connects_chain") is not True
+            ):
+                continue
+            source_id = _text(edge.get("source_fact_ref"))
+            target_id = _text(edge.get("target_fact_ref"))
+            source = view.facts_by_id.get(source_id) or {}
+            target = view.facts_by_id.get(target_id) or {}
+            entity_ref = _text(edge.get("entity_ref"))
+            entity = view.entities_by_id.get(entity_ref) or {}
+            if (
+                entity.get("entity_type") != "path"
+                or entity.get("linkable") is not True
+                or entity.get("uncertain") is not False
+                or source.get("abstention_reasons")
+                or target.get("abstention_reasons")
+                or source.get("outcome_status") != "reported_success"
+                or target.get("outcome_status") != "reported_success"
+                or "execution_attempt" not in (source.get("operation_types") or [])
+                or "file_delete" not in (target.get("operation_types") or [])
+                or chronology.fact_sequence_indices.get(source_id, -1)
+                >= chronology.fact_sequence_indices.get(target_id, -1)
+            ):
+                continue
+            group = grouped.setdefault(entity_ref, {"facts": {}, "edges": {}})
+            group["facts"][source_id] = deepcopy(source)
+            group["facts"][target_id] = deepcopy(target)
+            group["edges"][_text(edge.get("relationship_id"))] = deepcopy(edge)
+        results = []
+        for entity_ref, group in sorted(grouped.items()):
+            facts = [group["facts"][key] for key in sorted(group["facts"])]
+            refs = sorted({
+                _text(ref)
+                for item in facts
+                for ref in item.get("source_evidence_refs") or []
+                if _text(ref)
+            })
+            refs = sorted(set(refs).union({
+                _text(ref)
+                for edge in group["edges"].values()
+                for ref in edge.get("evidence_refs") or []
+                if _text(ref)
+            }))
+            if refs:
+                results.append((facts, refs, [{
+                    "predicate": "supported_same_path_execution_delete_sequence",
+                    "expected": ["execution_attempt", "file_delete"],
+                    "matched": sorted(group["edges"]),
+                    "result": True,
+                    "fact_refs": sorted(group["facts"]),
+                    "evidence_refs": refs,
+                }], entity_ref))
+        return results
+    facts, refs, trace = _rule_match(view, rule)
+    return [(facts, refs, trace, "")]
+
+
 def _policy_binding(loaded: Mapping[str, Any]) -> dict[str, Any]:
     document = deepcopy(loaded.get("document") or {})
     return {
@@ -194,32 +319,35 @@ def _build_payload(
         )
         findings.append(item)
     for rule in policy.get("action_playbooks") or []:
-        facts, refs, trace = _rule_match(view, rule)
-        if not refs:
-            continue
-        fact_refs = [_text(item.get("fact_id")) for item in facts]
-        context = _entity_context(view, fact_refs)
-        for action in rule.get("actions") or []:
-            item = {
-                "action_id": _text(action.get("action_id")),
-                "rule_id": _text(rule.get("rule_id")),
-                "semantic_family": _text(rule.get("semantic_family")),
-                "description": _render_policy_text(action.get("action"), context),
-                "rationale": _render_policy_text(action.get("rationale"), context),
-                "policy_order": action.get("priority"),
-                "fact_refs": fact_refs,
-                "evidence_refs": refs,
-                "matched_predicates": trace,
-                "requires_manual_approval": True,
-                "safe_to_auto_execute": False,
-                "execution_integration": "not_implemented",
-                "references": deepcopy(action.get("references") or []),
-                "provenance": {
-                    "rule": deepcopy(rule.get("provenance") or {}),
-                    "action": deepcopy(action.get("provenance") or {}),
-                },
-            }
-            actions.append(item)
+        for facts, refs, trace, group_key in _action_match_groups(view, rule):
+            if not refs:
+                continue
+            fact_refs = [_text(item.get("fact_id")) for item in facts]
+            context = _entity_context(view, fact_refs)
+            for action in rule.get("actions") or []:
+                action_id = _text(action.get("action_id"))
+                if group_key:
+                    action_id = stable_id(action_id, group_key)
+                item = {
+                    "action_id": action_id,
+                    "rule_id": _text(rule.get("rule_id")),
+                    "semantic_family": _text(rule.get("semantic_family")),
+                    "description": _render_policy_text(action.get("action"), context),
+                    "rationale": _render_policy_text(action.get("rationale"), context),
+                    "policy_order": action.get("priority"),
+                    "fact_refs": fact_refs,
+                    "evidence_refs": refs,
+                    "matched_predicates": trace,
+                    "requires_manual_approval": True,
+                    "safe_to_auto_execute": False,
+                    "execution_integration": "not_implemented",
+                    "references": deepcopy(action.get("references") or []),
+                    "provenance": {
+                        "rule": deepcopy(rule.get("provenance") or {}),
+                        "action": deepcopy(action.get("provenance") or {}),
+                    },
+                }
+                actions.append(item)
     severity_order = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
     findings.sort(key=lambda item: (
         -severity_order.get(item["severity"], 0), item["rule_id"], item["finding_id"]

@@ -126,6 +126,10 @@ def build_session_assessment_v6(
         generated_at=_text(record.get("generated_at")),
     )
     record.pop("response_guidance_v3", None)
+    # V6 has a closed graph-derived summary contract.  The V4 aggregate is a
+    # legacy presentation object and its hypothesis-set IDs are not rebuilt
+    # when V5 replaces the hypothesis sets, so it must not leak into V6.
+    record.pop("session_hypothesis_assessment", None)
     record["schema_version"] = SCHEMA_VERSION
     record["response_guidance_v4"] = guidance
     record["compatibility"] = {

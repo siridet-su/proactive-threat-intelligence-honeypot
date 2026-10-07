@@ -205,6 +205,31 @@ def _metrics(
         )
         actual_eligible = bool(actual_matches)
         expected_eligible = expected_matches > 0
+        has_unknown_credential_path_attempt = any(
+            {
+                str(operation.get("operation_type") or "")
+                for operation in fact.get("operations") or []
+                if isinstance(operation, dict)
+            }.issuperset({"credential_material_read", "file_read"})
+            and (fact.get("parse") or {}).get("status") == "parsed"
+            and any(
+                isinstance(path, dict)
+                and path.get("linkable") is True
+                and path.get("uncertain") is not True
+                and bool(str(path.get("normalized_value") or "").strip())
+                for path in (fact.get("entities") or {}).get("credential_paths") or []
+            )
+            and any(
+                isinstance(resolution, dict)
+                and resolution.get("role") == "credential_paths"
+                and resolution.get("resolution_status")
+                in {"recorded_resolved", "context_resolved"}
+                for resolution in fact.get("path_resolutions") or []
+            )
+            and (fact.get("outcome") or {}).get("status") == "outcome_unknown"
+            for fact in fact_set.get("facts") or []
+            if isinstance(fact, dict)
+        )
         typed[
             "tp" if actual_typed and expected_typed
             else "fp" if actual_typed
@@ -226,11 +251,20 @@ def _metrics(
             item["action_id"]
             for item in report["response_guidance_v3"]["advisory_actions"]
         }
+        expected_hypothesis_scopes = (
+            {"bounded_cowrie_credential_path_access"}
+            if expected_eligible or has_unknown_credential_path_attempt
+            else set()
+        )
+        actual_hypothesis_scopes = {
+            str(item.get("scope") or "")
+            for item in report["hypothesis_sets"]
+        }
         assert actual_typed is expected_typed, case["case_id"]
         assert actual_matches == expected_matches, case["case_id"]
         assert (SPECIAL_FINDING in finding_types) is expected_eligible
         assert (SPECIAL_ACTION in action_ids) is expected_eligible
-        assert report["hypothesis_sets"] == []
+        assert actual_hypothesis_scopes == expected_hypothesis_scopes, case["case_id"]
         assert all(
             action["requires_manual_approval"] is True
             and action["safe_to_auto_execute"] is False

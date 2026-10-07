@@ -66,9 +66,18 @@ def test_systemd_units_apply_private_umask_and_common_sandbox() -> None:
     for unit in units:
         text = unit.read_text(encoding="utf-8")
         assert "UMask=0077" in text, unit.name
-        assert "NoNewPrivileges=true" in text, unit.name
-        assert "PrivateTmp=true" in text, unit.name
-        assert "ProtectSystem=full" in text, unit.name
+        assert any(
+            directive in text
+            for directive in ("NoNewPrivileges=true", "NoNewPrivileges=yes")
+        ), unit.name
+        assert any(
+            directive in text
+            for directive in ("PrivateTmp=true", "PrivateTmp=yes")
+        ), unit.name
+        assert any(
+            directive in text
+            for directive in ("ProtectSystem=full", "ProtectSystem=strict")
+        ), unit.name
         assert "User=" in text and "Group=" in text, unit.name
 
 

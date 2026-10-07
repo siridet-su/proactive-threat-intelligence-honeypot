@@ -327,7 +327,7 @@ function normalizePanelResult(capability: string, result: CapabilityResult): Cap
     case "hypothesis":
       {
         const reportSummary = record(data.report_summary);
-        hasEvidence = hasItems(data, ["correlated_ttp_hypotheses", "hypothesis_sets", "session_hypothesis_assessment"])
+        hasEvidence = hasItems(data, ["correlated_ttp_hypotheses", "hypothesis_sets", "behavioral_findings", "session_hypothesis_assessment"])
           || hasMeaningfulValue(reportSummary.hypothesis);
       }
       break;
@@ -442,6 +442,7 @@ function derivedEntries(detailResult: CapabilityResult): Array<readonly [string,
       report_recommendations: detail.report_recommendations || {},
       correlated_ttp_hypotheses: detail.correlated_ttp_hypotheses || [],
       hypothesis_sets: detail.hypothesis_sets || [],
+      behavioral_findings: detail.behavioral_findings || [],
       session_hypothesis_assessment: detail.session_hypothesis_assessment || {},
       reports: detail.reports || [],
       non_claims: [
@@ -1491,7 +1492,8 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const sessionGraph = record(sessionAssessment.evidence_graph);
   const followOnAssessment = record(sessionAssessment.follow_on_hypothesis);
   const reports = list(data.reports);
-  const canonicalCount = list(sessionAssessment.canonical_finding_ids).length;
+  const canonicalCount = list(sessionAssessment.canonical_finding_ids).length
+    || list(data.behavioral_findings).length;
   const relationshipCount = Number(sessionGraph.relationship_edges || 0);
   const missingEvidence = list(sessionAssessment.missing_evidence).slice(0, 4);
   return (

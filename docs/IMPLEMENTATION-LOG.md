@@ -3607,6 +3607,54 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
   [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
 
+### 2026-10-08 — Reconcile report contracts and qualify the curated main tree
+
+- Status: prepared on `main`; not deployed to a host.
+- Scope and intent: finish the focused branch-curation follow-up by aligning
+  regression tests and the Dashboard summary with evidence families currently
+  emitted, while keeping the documented `session_assessment.v4` /
+  `response_guidance.v3` runtime contract distinct from the Final-F v6/v4
+  candidate.
+- Repository branch and commit/PR: `main`, based on `25ce779f8e7e3d4027684aeaaade331d6a980ac3`; commit pending.
+- Repository changes: register the reviewed v4 guidance-policy digests;
+  prevent the experimental v6 builder from carrying stale v4 hypothesis IDs
+  into its closed summary; add the controlled synthetic provenance marker;
+  let the Dashboard hypothesis summary fall back to current behavioral
+  findings; and update stale assertions for bounded hypotheses, retired
+  SecureBERT worker hooks, systemd boolean aliases, and packaged entry-point
+  import isolation. Frozen evaluation labels and metric totals are unchanged.
+- Host/environment changes actually applied: none. No GCP VM, Pi, database,
+  firewall, service, credential, or external endpoint was changed.
+- Runtime/exposure state: unchanged and not updated from this source tree.
+  The live canonical contract remains v4/v3; the v6/v4 candidate is not
+  activated by these repository changes.
+- Validation performed and outcome: backend full suite passed (2,306 passed,
+  79 skipped, 11 xfailed); Dashboard Vitest passed (81 files, 866 passed,
+  1 expected failure, 14 skipped); ESLint, `npx tsc --noEmit`,
+  `npm run build -- --webpack`, and `git diff --check` passed. The default
+  Turbopack build could not bind its worker port in this environment; the
+  Webpack production build completed successfully. The local-only socket tests
+  were run with permission to bind loopback sockets.
+- Not performed / deferred: no authenticated browser or live-session test and
+  no GCP deployment. The active release verifier still reports an effective
+  Model2 runtime-configuration hash mismatch; the current data has no newly
+  verified backup plus isolated restore receipt, and no independently
+  verified rollback release is available. The owner-approved Model2
+  configuration was not changed to bypass these gates.
+- Risks and data handling: the v6/v4 code remains a non-authoritative,
+  non-active candidate; successful local tests do not qualify the VM. No
+  secrets, credentials, raw attacker data, or protected configuration were
+  added to Git.
+- Rollback: revert this source commit before any host application; no host
+  rollback applies because no host was changed.
+- Follow-up: reconcile the manifest against the preserved reviewed Model2
+  configuration, obtain a fresh non-overwriting backup and isolated restore,
+  identify and rehearse a verified rollback release, then repeat the VM
+  qualification runbook before deployment.
+- Related ADR/runbook: [GCP VM rebuild runbook](../honeypot-analysis/docs/GCP_VM_REBUILD_RUNBOOK.md),
+  [GCP current architecture](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md),
+  and [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
 ### 2026-10-07 — Resolve filesystem UI suite mismatches
 
 - Status: prepared on the isolated public-main candidate; not deployed to a

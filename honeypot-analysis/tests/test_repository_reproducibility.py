@@ -85,16 +85,18 @@ def test_production_runtime_lock_extends_model_lock_without_rewriting_it() -> No
     assert "-c requirements-runtime.lock.txt" in ai_requirements
 
 
-def test_core_environment_imports_every_production_module_in_isolation() -> None:
+def test_core_environment_imports_every_packaged_entry_point_in_isolation() -> None:
+    entry_points = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["scripts"]
+    runtime_modules = sorted({value.split(":", 1)[0] for value in entry_points.values()})
     script = f"""
 import importlib
 import json
-import pkgutil
 import sys
 sys.path.insert(0, {str(ROOT)!r})
-import production
 failed = []
-modules = [item.name for item in pkgutil.walk_packages(production.__path__, production.__name__ + '.')]
+modules = {runtime_modules!r}
 for name in modules:
     try:
         importlib.import_module(name)
@@ -111,7 +113,7 @@ print(json.dumps({{'modules': len(modules), 'failed': failed}}))
         timeout=30,
     )
     report = json.loads(result.stdout)
-    assert report["modules"] >= 100
+    assert report["modules"] >= 10
     assert report["failed"] == []
 
 

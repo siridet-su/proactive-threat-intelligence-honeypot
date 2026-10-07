@@ -287,6 +287,15 @@ describe("session assessment presentation", () => {
     expect(html).toContain("not proof that its effect succeeded");
   });
 
+  it("counts current graph-bound findings when the legacy summary is absent", () => {
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: [],
+      correlated_ttp_hypotheses: [],
+      behavioral_findings: [{ finding_id: "finding-current-v6" }],
+    }} />);
+    expect(html).toMatch(/Canonical findings<\/dt><dd[^>]*>1<\/dd>/);
+  });
+
   it("explains exactly which Model2 head makes a bound result partial", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-1", ensemble_evidence: { session_id: "session-1", run_id: "run-1",
