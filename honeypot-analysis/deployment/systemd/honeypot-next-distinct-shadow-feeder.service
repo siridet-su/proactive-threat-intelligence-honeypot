@@ -7,8 +7,10 @@ Wants=honeypot-next-distinct-shadow.service
 Type=simple
 User=honeypot
 Group=honeypot
+UMask=0077
 WorkingDirectory=/opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d
 EnvironmentFile=-/etc/honeypot/common.env
+EnvironmentFile=-/etc/honeypot/services/next-distinct-shadow-feeder.env
 LoadCredential=mongodb-uri
 ExecStart=/opt/honeypot/.venv/bin/python /opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d/mongodb_shadow_feeder_v1.py --config /opt/honeypot-shadow/prediction-next-distinct/live-integration-20260824-v3mongo-finalizer-a6-403c989d/feeder_config.json
 Restart=on-failure
@@ -29,4 +31,3 @@ ReadWritePaths=/var/lib/honeypot-shadow/prediction-next-distinct/live-integratio
 
 [Install]
 WantedBy=multi-user.target
-

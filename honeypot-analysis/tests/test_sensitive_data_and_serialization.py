@@ -176,6 +176,51 @@ def test_derived_raw_event_projection_drops_unknown_fields_and_login_credentials
     assert artifact_safe["raw_events"][0]["password_hash"] == REDACTION_MARKER
 
 
+def test_derived_raw_events_keep_only_bounded_deception_and_fs_binding_fields() -> None:
+    secret = "opaque-projection-secret"
+    projected = redact_for_artifact({
+        "raw_events": [
+            {
+                "eventid": "cowrie.command.input",
+                "invocation_id": "0123456789abcdef0123456789abcdef",
+                "input": "printf demo > /tmp/demo.sh",
+                "unexpected": secret,
+            },
+            {
+                "eventid": "cowrie.fs.operation_result",
+                "schema_version": "cowrie_fs_operation_result.v1",
+                "session": "bounded-projection-session",
+                "invocation_id": "0123456789abcdef0123456789abcdef",
+                "operation_type": "file_write",
+                "path": "/tmp/demo.sh",
+                "success": True,
+                "bytes_written": 4,
+                "unexpected": secret,
+            },
+            {
+                "eventid": "cowrie.deception.decoy_placed",
+                "session": "bounded-projection-session",
+                "timestamp": "2026-07-18T00:00:00Z",
+                "path": "/var/www/legacy-erp/config.php",
+                "unexpected": secret,
+            },
+            {
+                "eventid": "cowrie.deception.decoy_placed",
+                "path": "/tmp/../etc/passwd",
+            },
+        ]
+    })["raw_events"]
+
+    assert projected[0]["invocation_id"] == "0123456789abcdef0123456789abcdef"
+    assert "unexpected" not in projected[0]
+    assert projected[1]["path"] == "/tmp/demo.sh"
+    assert projected[1]["bytes_written"] == 4
+    assert "unexpected" not in projected[1]
+    assert projected[2]["path"] == "/var/www/legacy-erp/config.php"
+    assert "path" not in projected[3]
+    assert secret not in json.dumps(projected, sort_keys=True)
+
+
 @pytest.mark.parametrize(
     "command",
     [

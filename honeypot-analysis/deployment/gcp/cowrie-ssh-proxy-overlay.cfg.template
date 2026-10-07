@@ -1,0 +1,5 @@
+# Cowrie layered override: preserve the existing direct SSH listener and add a
+# separate HAProxy PROXY-protocol listener on the Pi's private overlay address.
+# Replace placeholders from the protected host inventory; do not commit values.
+[ssh]
+listen_endpoints = tcp:22:interface=__COWRIE_DIRECT_BIND_IP__ haproxy:tcp:2298:interface=__COWRIE_OVERLAY_IP__

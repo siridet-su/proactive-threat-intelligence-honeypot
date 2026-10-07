@@ -12,7 +12,9 @@
     "test:filesystem-history-integration": "node scripts/validate-filesystem-history-pipeline.mjs",
     "test:filesystem-audit-integration": "node scripts/validate-filesystem-audit-scale.mjs",
     "db:ensure-session-start-time-index": "node --env-file=.env.local scripts/ensure-session-start-time-index.mjs",
-    "test:external-ti": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/external-ti-presentation.test.mjs"
+    "test:external-ti": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/external-ti-presentation.test.mjs",
+    "test:deception-binding": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/deception-binding.node.mjs",
+    "test:technique-name-fallback": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types tests/technique-name-fallback.node.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.23",

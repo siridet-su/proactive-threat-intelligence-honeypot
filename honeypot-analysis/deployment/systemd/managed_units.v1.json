@@ -1,7 +1,7 @@
 {
   "schema_version": "managed_systemd_units.v1",
   "policy_id": "honeypot-controlled-poc-units",
-  "version": "2026-07-30",
+  "version": "2026-10-01",
   "profiles": {
     "gcp_backend": {
       "managed_installed_units": [
@@ -13,6 +13,8 @@
         "honeypot-feed-refresh.timer",
         "honeypot-ingest-api.service",
         "honeypot-monitor-web.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
         "honeypot-session-count-monitor.service",
         "honeypot-session-count-monitor.timer",
         "honeypot-session-worker.service",
@@ -38,6 +40,8 @@
         "honeypot-feed-refresh.timer",
         "honeypot-ingest-api.service",
         "honeypot-monitor-web.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
         "honeypot-session-count-monitor.timer",
         "honeypot-session-worker.service",
         "honeypot-threat-hunt-worker.service",
@@ -47,6 +51,8 @@
       "prohibited_units": [
         "honeypot-calibration-worker.service",
         "honeypot-calibration-worker.timer",
+        "honeypot-mongo-retention.service",
+        "honeypot-mongo-retention.timer",
         "honeypot-prediction-backtest.service",
         "honeypot-prediction-backtest.timer",
         "honeypot-prediction-retention.service",

@@ -2963,6 +2963,10 @@ def load_dashboard_session_detail(
     selected = _summarize_session(session_rows[0], latest_jobs, latest_reports)
     selected["command_count"] = count_command_events(event_rows)
     payload = selected["payload"]
+    # The durable event ledger is the count authority for the detail view.
+    # Keep the embedded read-only session projection aligned with the overview
+    # instead of leaking a stale denormalized count from the session row.
+    payload["command_count"] = selected["command_count"]
     latest_prediction = _row_with_payload(prediction_rows[0]) if prediction_rows else {}
     latest_prediction_payload = _payload_from_row(latest_prediction)
     if latest_prediction and _row_session_id(latest_prediction) != clean_session_id:
@@ -3572,6 +3576,11 @@ def load_session_report_pdf(
             clean_session_id,
             MAX_SESSION_EVENTS,
         )
+        # Use the same durable Cowrie input-event count as Session Analysis.
+        # The session row's cached count can lag the event ledger while a
+        # worker is processing late-arriving events; PDF must not disagree
+        # with the canonical detail projection.
+        session_payload["command_count"] = count_command_events(event_rows)
         # Reuse the bounded public event projection for the on-demand PDF.
         # This supplies lifecycle/authentication/CWD metadata to the renderer
         # without forwarding storage documents or raw command text.

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDeceptionDecisionByIp, getDeceptionDecisions } from "@/lib/deception-server";
+import { getDeceptionDecisionForSession, getDeceptionDecisions } from "@/lib/deception-server";
 import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +11,18 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const ip = new URL(request.url).searchParams.get("ip");
+  const params = new URL(request.url).searchParams;
+  const ip = params.get("ip");
+  const sessionId = params.get("session_id");
 
   try {
-    if (ip) {
-      const decision = await getDeceptionDecisionByIp(ip);
+    if (ip !== null || sessionId !== null) {
+      if (!ip?.trim() || !sessionId?.trim()) {
+        return NextResponse.json({ error: "Both IP and session_id are required" }, { status: 400 });
+      }
+      const decision = await getDeceptionDecisionForSession(ip, sessionId);
       if (!decision) {
-        return NextResponse.json({ error: "No deception decision for this IP" }, { status: 404 });
+        return NextResponse.json({ error: "No deception decision for this session and origin IP" }, { status: 404 });
       }
       return NextResponse.json(decision);
     }

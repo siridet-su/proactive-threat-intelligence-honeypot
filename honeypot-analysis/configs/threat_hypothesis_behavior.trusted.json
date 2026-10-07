@@ -1,7 +1,7 @@
 {
   "schema_version": "threat_hypothesis_behavior_policy.v1",
   "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-  "version": "2026-09-23-observed-attempt-hypothesis-v1",
+  "version": "2026-10-07-session-hypothesis-families-v1",
   "reference_manifest": {
     "path": "configs/trusted_reference_manifest.v1.json",
     "sha256": "788543ecef24c0d7a9a2adff869076eac9c788908f7a4669d328d462b1df3e0f"
@@ -22,11 +22,19 @@
       "Attempt-only typed HTTP(S) command transfer decision",
       "Exact-entity typed connected-chain and bounded incomplete-chain review",
       "Phase 4B hypothesis derive/render versus select/authorize boundary",
-      "Observed command-input versus confirmed outcome boundary for incomplete same-path hypotheses"
+      "Observed command-input versus confirmed outcome boundary for incomplete same-path hypotheses",
+      "Project-owner approval of bounded H1/H2 wording on 2026-09-28",
+      "Offline typed-chain negative-control replay for H1/H2",
+      "Project-owner-approved retry-aware selector revision for failed Cowrie prerequisites",
+      "Synthetic successful-retry and failed-only prerequisite regression review",
+      "Owner-approved session-bounded hypothesis families and manual guidance review",
+    "Exact session identity gate for login and deception placement evidence",
+    "Single-request unverified-content threshold with no delivery-success claim",
+    "Conflicting failed and successful requests for one URL suppress unverified-content hypothesis selection"
     ],
     "reviewed": true,
-    "reviewer": "project developer",
-    "last_reviewed": "2026-09-23",
+    "reviewer": "project developer (project-owner-approved revision)",
+    "last_reviewed": "2026-10-07",
     "review_status": "approved for scoped Cowrie SSH analysis",
     "reference_scope": {
       "supports": [
@@ -42,7 +50,7 @@
       {
         "artifact_id": "threat-hypothesis-runtime",
         "path": "production/reporting/threat_hypothesis.py",
-        "sha256": "a7bfbdc7be2b38cb0d2c652e29e90f96cf7795946127682293262a085230fefc",
+        "sha256": "e380b1f0fbd881ad77093f6c81f497c313bb03b896179a9b2bb835c10d40eb02",
         "purpose": "hypothesis derivation, evidence references, limitations, and authority boundary",
         "supports": [
           "the executable derive/render behavior bound to the reviewed policy"
@@ -54,7 +62,7 @@
       {
         "artifact_id": "typed-relationship-runtime",
         "path": "production/correlation/session_behavior_relationships.py",
-        "sha256": "0b0fff8136a8005a9db3efc7c105692fb1db056d8704e03f369975ab20ac5ed9",
+        "sha256": "278cdffcdbf8e20137e9e7e61d6410ffed6f7832e3eafab326f78ecbea3c9176",
         "purpose": "ordered relationship and same-entity predicate evaluation",
         "supports": [
           "typed chain predicates and chronological relationship checks"
@@ -64,9 +72,21 @@
         ]
       },
       {
+        "artifact_id": "cowrie-network-transfer-boundary",
+        "path": "production/utils/cowrie_transfer.py",
+        "sha256": "f5d7dca04e1c154acaec382fdabf9fbe23f5cd927b52305548b8d42cafb2d307",
+        "purpose": "distinguish Cowrie download events from local shell redirection artifacts",
+        "supports": [
+          "network transfer observation requires a parsed source URL for file_download"
+        ],
+        "does_not_support": [
+          "network transfer from a Cowrie event ID or artifact hash alone"
+        ]
+      },
+      {
         "artifact_id": "typed-chain-selector-runtime",
         "path": "production/reporting/typed_semantic_chain_selection.py",
-        "sha256": "dd16e8e34cf731958f88e937c35f263e280e166b7513299d19041cb9ef79e537",
+        "sha256": "ab2882d7097a5470f1ef01c53876eca8473ab0333af1da8ef421a5274e9afa73",
         "purpose": "same-entity, chronological and outcome-bounded chain selection",
         "supports": [
           "attempt-only incomplete hypothesis selection without canonical promotion"
@@ -78,13 +98,61 @@
       {
         "artifact_id": "behavior-policy-validator-runtime",
         "path": "production/policies/threat_hypothesis_behavior_policy.py",
-        "sha256": "28e86537418b5df9679fa82e06ea922b285c47bf488de7475da27bc759e4c80f",
+        "sha256": "4f8646c8c591bc2fedc7dda1b0577dd266cf85858b02532819732ee35eb1a7cf",
         "purpose": "fail-closed validation of the reviewed observed-attempt hypothesis rule",
         "supports": [
           "typed rule shape and scoped authority validation"
         ],
         "does_not_support": [
           "automatic promotion of contextual evidence to observed findings"
+        ]
+      },
+      {
+        "artifact_id": "session-assessment-runtime",
+        "path": "production/reporting/session_assessment_v4.py",
+      "sha256": "0d22ed30b116b673bbc152e3f062d8161e0d99ca0541f1f076a44051d82234cc",
+        "purpose": "derive and bind the session-scoped hypothesis families",
+        "supports": [
+          "bounded hypotheses with exact evidence references and explicit limitations"
+        ],
+        "does_not_support": [
+          "cross-session correlation or claims of real-host effects"
+        ]
+      },
+      {
+        "artifact_id": "response-guidance-runtime",
+        "path": "production/reporting/response_guidance_v3.py",
+        "sha256": "1637b203d9ee42772631e6586dd7d37745196e4e2b3e0772b68635714c53a7fd",
+        "purpose": "select manual guidance from evidence-bound hypothesis scopes",
+        "supports": [
+          "session-bounded review actions that require human approval"
+        ],
+        "does_not_support": [
+          "automatic execution or response authority"
+        ]
+      },
+      {
+        "artifact_id": "canonical-semantic-graph-runtime",
+        "path": "production/reporting/canonical_semantic_graph.py",
+        "sha256": "70591eb34c0b5f3dc69dd4e4bc05b51c1693f029acf65d59c28c0681c16fbbbc",
+        "purpose": "preserve linkability and uncertainty for path-bound evidence",
+        "supports": [
+          "path grouping only when canonical entities are linkable and certain"
+        ],
+        "does_not_support": [
+          "path identity based only on unvalidated display text"
+        ]
+      },
+      {
+        "artifact_id": "response-guidance-policy-validator",
+        "path": "production/policies/validate_response_guidance_policy.py",
+        "sha256": "78a45bd1123bb9f13a26d0abe141f89c7691256b85c0beb746b8af670f79b4a3",
+        "purpose": "fail-closed validation of path and hypothesis-scoped guidance rules",
+        "supports": [
+          "the supported manual-review predicate shapes"
+        ],
+        "does_not_support": [
+          "new predicate semantics without a reviewed validator change"
         ]
       },
       {
@@ -102,7 +170,7 @@
       {
         "artifact_id": "threat-hypothesis-policy-tests",
         "path": "tests/test_threat_hypothesis_behavior_policy.py",
-        "sha256": "bbc4f3d807bb106ac44662ce865f22571940eae3812c5bb7b2510016ca51611f",
+      "sha256": "52e582e05e7a8dc66ceefde86a0f2cb26e13b932c2a1d3cc1d3a3b8c2610cd1e",
         "purpose": "trusted policy validation and fail-closed regression coverage",
         "supports": [
           "repeatable policy and containment checks"
@@ -112,17 +180,89 @@
         ]
       },
       {
-        "artifact_id": "relationship-evaluation-tests",
-        "path": "tests/test_cross_family_relationship_evaluation.py",
-        "sha256": "f690e245436be955e1edbc06af2e587b7c96228150ed3151efb227ca9bdc5fea",
+        "artifact_id": "hypothesis-family-regression-tests",
+        "path": "tests/test_observed_attempt_hypothesis_revision.py",
+      "sha256": "9c38be559117e0b1184e228b5c48b4e3779eaaeca80f575632925d09524862b2",
+        "purpose": "exercise evidence, chronology, path, session, and negative-control gates",
+        "supports": [
+          "repeatable synthetic regression checks"
+        ],
+        "does_not_support": [
+          "field accuracy or production telemetry qualification"
+        ]
+      },
+    {
+      "artifact_id": "relationship-evaluation-tests",
+      "path": "tests/test_cross_family_relationship_evaluation.py",
+      "sha256": "f83ba84591e243470d979156cd89c55cf6ed717bfa4b363771c7385c61c9ee75",
         "purpose": "cross-family ordering and semantic containment regression coverage",
         "supports": [
           "repeatable relationship predicate checks"
         ],
-        "does_not_support": [
-          "production-world observation beyond the supplied test evidence"
-        ]
-      }
+      "does_not_support": [
+        "production-world observation beyond the supplied test evidence"
+      ]
+    },
+    {
+      "artifact_id": "redaction-runtime",
+      "path": "production/utils/sensitive_data.py",
+      "sha256": "ecd1a78bf1de7b5053eef692f4e58de277d02438db5ccb66ba71b7244d34ae01",
+      "purpose": "bounded retention of event fields required for exact Cowrie session and filesystem-operation evidence binding",
+      "supports": [
+        "validated command invocation IDs, Cowrie filesystem result metadata, and normalized deception placement paths survive analytics projection"
+      ],
+      "does_not_support": [
+        "arbitrary event fields or unvalidated paths being retained"
+      ]
+    },
+    {
+      "artifact_id": "redaction-regression-tests",
+      "path": "tests/test_sensitive_data_and_serialization.py",
+      "sha256": "245b8e656a51441f07f48f014e92fc999d17c5b56b92c65917843d727962d99f",
+      "purpose": "verify sensitive-data redaction and bounded event projection",
+      "supports": [
+        "unknown sensor fields and unsafe paths are omitted while required bounded evidence fields survive"
+      ],
+      "does_not_support": [
+        "a general security certification of every redaction boundary"
+      ]
+    },
+    {
+      "artifact_id": "bounded-hypothesis-guidance-tests",
+      "path": "tests/test_bounded_hypothesis_guidance_20260928.py",
+      "sha256": "985e06b479216bc7add61019dd5d8ff547d6e4d2ecfcb27f592a74af7f33d6f9",
+      "purpose": "exercise owner-reviewed bounded hypotheses and non-authoritative manual guidance through the active v3 runtime",
+      "supports": [
+        "same-path evidence, required human review, and no automatic execution behavior"
+      ],
+      "does_not_support": [
+        "production field accuracy or outcomes beyond the supplied synthetic evidence"
+      ]
+    },
+    {
+      "artifact_id": "transfer-boundary-regression-tests",
+      "path": "tests/test_transfer_family_migration.py",
+      "sha256": "7d2300d5d3fe44c4258810d7f80f153874a6071de3ab1afff55fb69d7ef8fc84",
+      "purpose": "verify direct transfer receipts, local redirection discrimination, and Cowrie operation-result binding",
+      "supports": [
+        "direct transfer authority and bounded event projection regression checks"
+      ],
+      "does_not_support": [
+        "proof of actual download or execution outside Cowrie"
+      ]
+    },
+    {
+      "artifact_id": "session-evidence-graph-runtime",
+      "path": "production/correlation/session_evidence_graph.py",
+      "sha256": "f17742604876fdd99ef6305266f8bdca9362c84232a6da249d8de800147f4392",
+      "purpose": "derive transfer flags only from validated Cowrie network-transfer events",
+      "supports": [
+        "local shell redirection events without a valid source URL are not represented as network transfers"
+      ],
+      "does_not_support": [
+        "proof that a remote transfer completed outside the honeypot"
+      ]
+    }
     ]
   },
   "policy": {
@@ -367,6 +507,42 @@
             "path_identity_not_shared",
             "prior_attempt_reported_failed"
           ]
+        },
+        {
+          "rule_id": "typed-file-preparation-without-execution",
+          "required_operation_types": ["file_write", "permission_modify", "execution_attempt"],
+          "minimum_incomplete_operation_count": 2,
+          "required_transition_types": ["same_path_transition"],
+          "same_entity_required": true,
+          "hypothesis_only": true,
+          "claim_type": "possible_file_preparation",
+          "text": "A file write and permission change were observed on the same path; later execution is not established.",
+          "evidence_status": "partially_supported",
+          "limitations": ["Cowrie-reported command success does not prove a real-host file change or intent."],
+          "incomplete_claim_type": "possible_file_preparation",
+          "incomplete_text": "A file write and permission change were observed on the same resolved path, but no supported execution attempt was observed for that path.",
+          "missing_evidence_text": "A supported execution-attempt observation for the same resolved path is missing.",
+          "alternative_text": "The sequence may be ordinary file maintenance or may have stopped here.",
+          "falsifier_codes": ["execution_observed_elsewhere_for_same_path", "path_identity_not_shared", "prior_attempt_reported_failed"]
+        },
+        {
+          "rule_id": "typed-unconfirmed-transfer-execution",
+          "required_operation_types": ["transfer_attempt", "execution_attempt"],
+          "minimum_incomplete_operation_count": 1,
+          "required_transition_types": ["same_path_transition"],
+          "same_entity_required": true,
+          "hypothesis_only": true,
+          "hypothesis_when_complete": true,
+          "suppress_when_direct_transfer_observed": true,
+          "claim_type": "possible_use_after_unconfirmed_transfer",
+          "text": "A remote-content request and an execution attempt referenced the same path; receipt of bytes is not established.",
+          "evidence_status": "partially_supported",
+          "limitations": ["No direct transfer observation binds received bytes to the executed path.", "Cowrie commands do not prove real-host effects or intent."],
+          "incomplete_claim_type": "possible_use_after_unconfirmed_transfer",
+          "incomplete_text": "A remote-content request was followed by an execution attempt for the same resolved path, but receipt of bytes was not confirmed.",
+          "missing_evidence_text": "No bound direct Cowrie transfer event confirms bytes or a hash for the executed path.",
+          "alternative_text": "The fetch may have failed and the execution attempt may refer to a pre-existing file.",
+          "falsifier_codes": ["direct_transfer_observed", "path_identity_not_shared", "prior_attempt_reported_failed"]
         }
       ],
       "independent": {

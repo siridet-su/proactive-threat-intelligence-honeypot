@@ -226,15 +226,56 @@ def _ordered_required_facts(
 ) -> list[tuple[str, dict[str, Any], dict[str, Any]]]:
     selected: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
     position = 0
+    pending_unconfirmed: tuple[str, dict[str, Any], dict[str, Any]] | None = None
     for fact_ref in chain.get("fact_refs") or []:
         fact = facts.get(_clean(fact_ref)) or {}
+        # A failed prerequisite cannot satisfy a later same-entity chain.
+        # Continue searching so a successful retry on the same path can be
+        # selected without promoting the failed attempt itself.
+        if (fact.get("outcome") or {}).get("status") == "reported_failure":
+            continue
         for operation in fact.get("operations") or []:
             if position >= len(required):
                 break
-            if operation.get("operation_type") == required[position]:
-                selected.append((fact_ref, fact, operation))
-                position += 1
+            if operation.get("effect_status") == "reported_failed":
+                continue
+            operation_type = operation.get("operation_type")
+            if pending_unconfirmed is not None:
+                # Prefer a confirmed retry only while it still precedes the
+                # next required operation. Otherwise retain the earlier
+                # unconfirmed attempt as an attempt-only prefix.
+                if (
+                    operation_type == required[position]
+                    and operation.get("effect_status") == "reported_completed"
+                    and (fact.get("outcome") or {}).get("status") == "reported_success"
+                    and (fact.get("outcome") or {}).get("scope") == "fragment"
+                ):
+                    selected.append((fact_ref, fact, operation))
+                    position += 1
+                    pending_unconfirmed = None
+                    break
+                if (
+                    position + 1 < len(required)
+                    and operation_type == required[position + 1]
+                ):
+                    selected.append(pending_unconfirmed)
+                    position += 1
+                    pending_unconfirmed = None
+                else:
+                    continue
+            if operation_type != required[position]:
+                continue
+            if (
+                operation.get("effect_status") == "attempted_unconfirmed"
+                and (fact.get("outcome") or {}).get("status") == "outcome_unknown"
+            ):
+                pending_unconfirmed = (fact_ref, fact, operation)
                 break
+            selected.append((fact_ref, fact, operation))
+            position += 1
+            break
+    if pending_unconfirmed is not None:
+        selected.append(pending_unconfirmed)
     return selected
 
 
@@ -281,6 +322,24 @@ def _selection_for_rule(
             < int(rule.get("minimum_incomplete_operation_count") or 1)
         ):
             continue
+        if not complete and selected:
+            # A reported failure for the *next* operation is contradictory
+            # evidence, not absence of that operation. A later successful
+            # retry is already selected as a complete chain above.
+            next_type = required[len(selected_types)]
+            chain_fact_refs = chain.get("fact_refs") or []
+            last_selected_index = chain_fact_refs.index(selected[-1][0])
+            if any(
+                operation.get("operation_type") == next_type
+                and (
+                    (fact.get("outcome") or {}).get("status") == "reported_failure"
+                    or operation.get("effect_status") == "reported_failed"
+                )
+                for fact_ref in chain_fact_refs[last_selected_index + 1:]
+                for fact in [facts.get(_clean(fact_ref)) or {}]
+                for operation in fact.get("operations") or []
+            ):
+                continue
         confirmed = all(
             operation.get("effect_status") == "reported_completed"
             and (fact.get("outcome") or {}).get("status") == "reported_success"

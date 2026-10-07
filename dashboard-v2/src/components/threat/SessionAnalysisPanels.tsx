@@ -34,6 +34,7 @@ import {
 import { projectAdminCommandRecords } from "@/lib/session-command-projection";
 import { projectContextualHypotheses } from "@/lib/contextual-hypothesis-presentation";
 import { hasBoundModel2, rankTtpRecommendations } from "@/lib/model-ttp-ranking";
+import { model1TechniqueNameFallback } from "@/lib/attack-technique-names";
 
 type JsonRecord = Record<string, unknown>;
 type LoadState = "loading" | "ready" | "limited" | "empty" | "not_applicable" | "unavailable";
@@ -1689,7 +1690,7 @@ export function Model2EnsembleSummary({ data }: { data: JsonRecord }) {
         <ul className="divide-y divide-border">
           {displayedTechniques.map((item, index) => <li key={item.techniqueId} className={`grid gap-1.5 px-3 py-2.5 text-xs sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center ${index === 0 ? "bg-primary-subtle/20" : ""}`}>
             {index === 0 ? <span className="ui-badge w-fit border-primary-border bg-surface text-[10px] font-bold uppercase text-primary-navy">Recommend</span> : <span aria-hidden="true" />}
-            <div className="min-w-0"><p className="font-mono font-semibold text-text">{item.techniqueId}<span className="ml-2 font-sans font-medium text-text-muted">{techniqueNames.get(item.techniqueId) || "Technique name not recorded"}</span></p><p className="mt-0.5 text-[10px] text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support Model1{index === 0 && item.evidenceRefs.length ? ` · Command refs: ${item.evidenceRefs.slice(0, 4).map((ref) => ref.commandRef).join(", ")}${item.evidenceRefs.length > 4 ? "…" : ""}` : ""}</p></div>
+            <div className="min-w-0"><p className="font-mono font-semibold text-text">{item.techniqueId}<span className="ml-2 font-sans font-medium text-text-muted">{techniqueNames.get(item.techniqueId) || model1TechniqueNameFallback(item.techniqueId) || "Technique name not recorded"}</span></p><p className="mt-0.5 text-[10px] text-text-muted">{item.supportingCommandEvents} of {item.assessedCommandEvents} assessed command events support Model1{index === 0 && item.evidenceRefs.length ? ` · Command refs: ${item.evidenceRefs.slice(0, 4).map((ref) => ref.commandRef).join(", ")}${item.evidenceRefs.length > 4 ? "…" : ""}` : ""}</p></div>
             {index === 0 && item.model2SupportAdded ? <span className="ui-badge w-fit text-[10px]">Model1 + Model2 support</span> : null}
           </li>)}
         </ul>

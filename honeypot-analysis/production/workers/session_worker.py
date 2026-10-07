@@ -138,44 +138,6 @@ def _safe_exception_text(exc: BaseException) -> str:
     return redact_exception_for_log(exc)
 
 
-def _await_terminal_model2_ensemble(
-    payload: Dict[str, Any],
-    initial: Dict[str, Any],
-    *,
-    attempts: int = 20,
-    delay_seconds: float = 0.5,
-    builder: Optional[Callable[..., Dict[str, Any]]] = None,
-    sleeper: Callable[[float], None] = time.sleep,
-    require_bridge: bool = True,
-    bridge_socket_path: str = "/run/model2-v7-ensemble/bridge.sock",
-) -> Dict[str, Any]:
-    """Refresh late Model2 evidence after the closed session is durable.
-
-    The receiver completes exact PCAP/Zeek processing asynchronously. Keep the
-    canonical terminal transition independent of model latency, then allow a
-    short bounded window for the advisory-only projection to catch up.
-    """
-
-    selected = dict(initial)
-    if (selected.get("model2") or {}).get("available") is True:
-        return selected
-    if require_bridge:
-        try:
-            if not Path(bridge_socket_path).is_socket():
-                return selected
-        except OSError:
-            return selected
-    selected_builder = builder or build_ensemble_from_session_payload
-    for _ in range(max(int(attempts), 0)):
-        sleeper(max(float(delay_seconds), 0.0))
-        candidate = selected_builder(payload, computed_at=utc_now())
-        if isinstance(candidate, dict):
-            selected = candidate
-        if (selected.get("model2") or {}).get("available") is True:
-            break
-    return selected
-
-
 def alert_payload(alert: Any, *, triggering_event_id: str = "") -> Dict[str, Any]:
     """Normalize a historical alert payload without granting storage authority.
 
@@ -940,10 +902,10 @@ class SessionWorker:
             "threat_hunt_jobs_enqueued",
             int(payload["threat_hunt_enqueue"].get("queued") or 0),
         )
-        payload["ensemble_evidence"] = _await_terminal_model2_ensemble(
-            payload,
-            payload.get("ensemble_evidence") or {},
-        )
+        # Model2 is asynchronous and advisory-only. Waiting here holds the
+        # event-queue consumer for up to ten seconds per closed session.
+        # Session detail and PDF reads refresh exact-session-bound evidence;
+        # preserve the close-time snapshot and let those read paths catch up.
         self.storage.save_session(payload)
         self._record_event_effect("session_saved")
         self._record_event_effect("session_closed")

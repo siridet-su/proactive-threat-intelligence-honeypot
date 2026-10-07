@@ -344,6 +344,12 @@ def test_systemd_units_use_service_specific_environment_files() -> None:
     assert units
     for unit in units:
         text = unit.read_text(encoding="utf-8")
+        if unit.name == "honeypot-next-distinct-shadow.service":
+            # The prediction-only shadow is intentionally self-contained: its
+            # immutable runtime binding cannot read application env/storage.
+            assert "InaccessiblePaths=/var/lib/honeypot" in text
+            assert " /etc/honeypot" in text
+            continue
         assert "/etc/honeypot/honeypot.env" not in text
         assert "EnvironmentFile=-/etc/honeypot/common.env" in text
         expected = unit.name.removeprefix("honeypot-").removesuffix(".service")

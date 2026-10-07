@@ -26,6 +26,7 @@ import { useThreatFeed } from "@/components/threat/ThreatFeedProvider";
 import { RegionState } from "@/components/ui/RegionState";
 import { TerminalStreamLoader } from "@/components/ui/loaders";
 import { isDeceptionDecision, type DeceptionDecision, type DeceptionLure } from "@/lib/dashboardTypes";
+import { matchesDeceptionSessionBinding } from "@/lib/deception-binding";
 import { useModalFocusTrap } from "@/lib/useModalFocusTrap";
 import {
   authoritativeEventTimestamp,
@@ -406,16 +407,16 @@ interface DeceptionResult {
 const DECEPTION_TIMEOUT_MS = 7_000;
 const DECEPTION_POLL_MS = 15_000;
 
-async function fetchDeceptionDecision(ip: string): Promise<DeceptionResult> {
+async function fetchDeceptionDecision(ip: string, sessionId: string): Promise<DeceptionResult> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), DECEPTION_TIMEOUT_MS);
   try {
-    const response = await fetch(`/api/deception?ip=${encodeURIComponent(ip)}`, {
+    const response = await fetch(`/api/deception?ip=${encodeURIComponent(ip)}&session_id=${encodeURIComponent(sessionId)}`, {
       cache: "no-store",
       signal: controller.signal,
     });
     if (response.status === 404) {
-      return { state: "empty", data: null, reason: "No deception decision recorded for this origin IP." };
+      return { state: "empty", data: null, reason: "No deception decision is bound to this session and origin IP." };
     }
     const text = await response.text();
     let parsed: unknown;
@@ -431,8 +432,8 @@ async function fetchDeceptionDecision(ip: string): Promise<DeceptionResult> {
         reason: textValue(recordValue(parsed).error, `HTTP ${response.status}`),
       };
     }
-    if (!isDeceptionDecision(parsed)) {
-      return { state: "unavailable", data: null, reason: "Deception response did not match the expected shape" };
+    if (!isDeceptionDecision(parsed) || !matchesDeceptionSessionBinding(parsed, ip, sessionId)) {
+      return { state: "unavailable", data: null, reason: "Deception response did not match the requested session and origin IP" };
     }
     return { state: "ready", data: parsed, reason: "" };
   } catch (error: unknown) {
@@ -447,14 +448,14 @@ async function fetchDeceptionDecision(ip: string): Promise<DeceptionResult> {
   }
 }
 
-function DeceptionStateFetcher({ ip }: { ip: string }) {
+function DeceptionStateFetcher({ ip, sessionId }: { ip: string; sessionId: string }) {
   const [result, setResult] = useState<DeceptionResult>({ state: "loading", data: null, reason: "" });
 
   useEffect(() => {
     let cancelled = false;
 
     const load = () => {
-      void fetchDeceptionDecision(ip).then((value) => {
+      void fetchDeceptionDecision(ip, sessionId).then((value) => {
         if (!cancelled) setResult(value);
       });
     };
@@ -468,7 +469,7 @@ function DeceptionStateFetcher({ ip }: { ip: string }) {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [ip]);
+  }, [ip, sessionId]);
 
   return <DeceptionPanel result={result} />;
 }
@@ -1214,7 +1215,7 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
             <RegionState kind="empty" title="No deception decision recorded" description="No origin IP resolved for this session yet." />
           </article>
         ) : (
-          <DeceptionStateFetcher key={originIp} ip={originIp} />
+          <DeceptionStateFetcher key={`${sessionId}:${originIp}`} ip={originIp} sessionId={sessionId} />
         )}
       </section>
 

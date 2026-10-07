@@ -686,7 +686,7 @@ export interface DeceptionLure {
   at: string;
 }
 
-/** One document per attacker IP, synced from Pi SQLite deception-core into `honeypot_db.deception_decisions`. */
+/** Latest per-IP document synced from Pi SQLite deception-core into `honeypot_db.deception_decisions`; detail views must also match session_id. */
 export interface DeceptionDecision {
   ip: string;
   session_id: string;

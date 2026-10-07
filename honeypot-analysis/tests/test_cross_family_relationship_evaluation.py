@@ -32,6 +32,15 @@ SPECS = (
     ("independent", "typed_cross_family_relationship_evaluation.v1", 8),
     ("holdout", "typed_cross_family_relationship_holdout.v1", 4),
 )
+EXPECTED_HYPOTHESIS_SCOPES = {
+    "CFR-001": ["bounded_cowrie_unverified_remote_content"],
+    "CFR-002": ["bounded_cowrie_unverified_remote_content"],
+    "CFR-003": ["bounded_cowrie_unverified_remote_content"],
+    "CFR-004": ["bounded_cowrie_unverified_remote_content"],
+    "CFR-006": ["bounded_cowrie_unverified_remote_content"],
+    "CRH-002": ["bounded_cowrie_unverified_remote_content"],
+    "CRH-003": ["bounded_cowrie_unverified_remote_content"],
+}
 
 
 def _load(
@@ -170,7 +179,9 @@ def _assert_case(case: dict[str, Any]) -> None:
     assert action_families == set(
         case["expected_action_families"]
     )
-    assert report["hypothesis_sets"] == []
+    assert [item["scope"] for item in report["hypothesis_sets"]] == (
+        EXPECTED_HYPOTHESIS_SCOPES.get(case["case_id"], [])
+    )
     assert not {
         "transformation",
         "collection",

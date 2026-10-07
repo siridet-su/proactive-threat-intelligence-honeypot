@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from types import SimpleNamespace
 
 from production.api.dashboard_api import _current_prediction_payload
 from production.api.monitor_web import _render_prediction_panel
@@ -204,21 +203,12 @@ def test_external_only_policy_contract_rejects_fallback_or_missing_pins() -> Non
     assert any("must not configure a primary fallback" in error for error in errors)
 
 
-def test_worker_requires_manifest_bound_artifact_for_external_only_mode(tmp_path) -> None:
+def test_external_only_missing_manifest_fails_policy_validation_without_worker_loader(tmp_path) -> None:
     policy = _external_only_policy()
     policy.update({
         "external_transition_model_path": str(tmp_path / "missing-artifact.json"),
         "external_transition_manifest_path": "",
     })
-    worker = SessionWorker.__new__(SessionWorker)
-    worker.config = SimpleNamespace(prediction_policy=policy)
-
-    model = worker._load_external_transition_model()
-
-    assert model["transition_count"] == 0.0
-    assert worker.external_artifact_validation == {
-        "status": "unavailable",
-        "valid": False,
-        "reasons": ["external_only_mode_requires_manifest_path"],
-        "artifact_path": str(tmp_path / "missing-artifact.json"),
-    }
+    assert not hasattr(SessionWorker, "_load_external_transition_model")
+    errors = validate_policy_document({"policy": policy})
+    assert any("requires policy.external_transition_manifest_path" in error for error in errors)

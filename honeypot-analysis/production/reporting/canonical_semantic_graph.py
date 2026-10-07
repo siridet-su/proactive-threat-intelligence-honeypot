@@ -204,6 +204,8 @@ def _entity_nodes(fact_set: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "entity_type": _text(entity.get("entity_type")),
                 "roles": [],
                 "fact_refs": [],
+                "linkable": entity.get("linkable") is True and entity.get("uncertain") is False,
+                "uncertain": entity.get("uncertain") is True,
             },
         )
         entity_type = _text(entity.get("entity_type"))
@@ -232,6 +234,15 @@ def _entity_nodes(fact_set: Mapping[str, Any]) -> list[dict[str, Any]]:
                 entity_id = _text(entity.get("entity_id"))
                 if entity_id in by_id and fact_id and fact_id not in by_id[entity_id]["fact_refs"]:
                     by_id[entity_id]["fact_refs"].append(fact_id)
+                if entity_id in by_id:
+                    by_id[entity_id]["linkable"] = (
+                        by_id[entity_id]["linkable"]
+                        and entity.get("linkable") is True
+                        and entity.get("uncertain") is False
+                    )
+                    by_id[entity_id]["uncertain"] = (
+                        by_id[entity_id]["uncertain"] or entity.get("uncertain") is True
+                    )
     return [
         {
             **node,

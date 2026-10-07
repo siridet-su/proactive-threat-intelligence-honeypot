@@ -4,19 +4,28 @@ import { getSessionFromRequest } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+const PRIVATE_NO_STORE_HEADERS = { "Cache-Control": "private, no-store" } as const;
 
 export async function GET(request: Request) {
   const session = await getSessionFromRequest(request);
   if (!session || session.mustChangePassword) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: PRIVATE_NO_STORE_HEADERS },
+    );
   }
 
   try {
     // hardware_live is the agent-maintained rolling window for the live monitor.
-    return NextResponse.json(await getRecentHardwareMetrics());
+    return NextResponse.json(await getRecentHardwareMetrics(), {
+      headers: PRIVATE_NO_STORE_HEADERS,
+    });
   } catch (error: unknown) {
     console.error("Failed to fetch hardware metrics:", error);
     const message = error instanceof Error ? error.message : "Failed to fetch metrics";
-    return NextResponse.json({ error: message }, { status: 503 });
+    return NextResponse.json(
+      { error: message },
+      { status: 503, headers: PRIVATE_NO_STORE_HEADERS },
+    );
   }
 }

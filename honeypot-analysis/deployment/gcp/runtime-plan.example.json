@@ -1,0 +1,49 @@
+{
+  "schema_version": "pti_backend_vm_runtime_plan.v1",
+  "host": {
+    "id": "REPLACE_FROM_SOURCE_INVENTORY",
+    "version_id": "REPLACE_FROM_SOURCE_INVENTORY",
+    "architecture": "REPLACE_FROM_SOURCE_INVENTORY"
+  },
+  "accounts": {},
+  "external_paths": [],
+  "required_units": [
+    "honeypot-ingest-api.service",
+    "honeypot-session-worker.service",
+    "honeypot-analysis-worker.service",
+    "honeypot-enrichment-worker.service",
+    "honeypot-dashboard-api.service",
+    "honeypot-monitor-web.service",
+    "honeypot-threat-hunt-worker.service",
+    "honeypot-webhook-dispatcher.service",
+    "honeypot-ai-advisory-worker.service",
+    "honeypot-next-distinct-shadow.service",
+    "honeypot-next-distinct-shadow-feeder.service",
+    "model2-v7-receiver.service",
+    "model2-v7-ensemble-bridge.service",
+    "honeypot-feed-refresh.timer",
+    "honeypot-session-count-monitor.timer",
+    "honeypot-service-watchdog.timer"
+  ],
+  "assets": [
+    {"component": "configuration", "source": "/etc/honeypot/production_config.json"},
+    {"component": "configuration", "source": "/etc/honeypot/common.env"},
+    {"component": "configuration", "source": "/etc/honeypot/services"},
+    {"component": "configuration", "source": "/etc/honeypot/canonical_storage_epoch.v2.json"},
+    {"component": "configuration", "source": "/etc/honeypot/storage_release_successors"},
+    {"component": "configuration", "source": "/etc/model2-v7/runtime.json"},
+    {"component": "credentials", "source": "/etc/honeypot/credentials"},
+    {"component": "credentials", "source": "/etc/credstore/mongodb-uri"},
+    {"component": "model1", "source": "/opt/honeypot-model-bundles/command_ttp_s1/REPLACE_WITH_EXACT_MODEL_RELEASE"},
+    {"component": "model2", "source": "/opt/model2-v7/REPLACE_WITH_EXACT_RUNTIME_AND_ARTIFACT_DIRECTORY"},
+    {"component": "next_distinct", "source": "/opt/honeypot-shadow/prediction-next-distinct/REPLACE_WITH_EXACT_SHADOW_DIRECTORY"},
+    {"component": "python_runtime", "source": "/opt/honeypot-python-runtimes/REPLACE_WITH_EXACT_RUNTIME_DIRECTORY"},
+    {"component": "feeds", "source": "/var/lib/honeypot/feeds"},
+    {"component": "rollback_backup", "source": "/var/backups/honeypot/REPLACE_WITH_VERIFIED_BACKUP/mongodb_epoch_rollback.db", "target": "/var/lib/honeypot/mongodb_epoch_rollback.db"},
+    {"component": "systemd", "source": "/etc/systemd/system/honeypot-ingest-api.service"},
+    {"component": "host_helpers", "source": "/usr/local/libexec/REPLACE_WITH_REVIEWED_MODEL2_HELPER"}
+  ],
+  "links": [
+    {"component": "python_runtime", "path": "/opt/honeypot-releases/{revision}/.venv", "target": "/opt/honeypot-python-runtimes/REPLACE_WITH_EXACT_RUNTIME_DIRECTORY"}
+  ]
+}

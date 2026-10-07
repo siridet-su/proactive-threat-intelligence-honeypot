@@ -1,0 +1,23 @@
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    chroot /var/lib/haproxy
+    user haproxy
+    group haproxy
+    maxconn 1024
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    timeout connect 5s
+    timeout client 60s
+    timeout server 60s
+
+frontend cowrie_public_ssh
+    bind __BACKEND_PUBLIC_IP__:2222
+    default_backend cowrie_pi_ssh
+
+backend cowrie_pi_ssh
+    # No active health check: a plain TCP probe would omit Cowrie's PROXY header.
+    server cowrie_pi __COWRIE_OVERLAY_IP__:2298 send-proxy

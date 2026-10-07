@@ -150,10 +150,21 @@ def _fake_plugin_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     loader_path.parent.mkdir(parents=True)
     base_path.write_text("output-base\n", encoding="utf-8")
     loader_path.write_text("plugin-loader\n", encoding="utf-8")
+    # Runtime readiness now verifies the entire immutable bundle. Build the
+    # reviewed manifest instead of presenting a single synthetic module file.
+    monkeypatch.setitem(
+        integration.DEPLOYMENT_CONTRACT["compatibility"],
+        "cowrie_output_base_sha256",
+        hashlib.sha256(base_path.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setitem(
+        integration.DEPLOYMENT_CONTRACT["compatibility"],
+        "cowrie_output_loader_sha256",
+        hashlib.sha256(loader_path.read_bytes()).hexdigest(),
+    )
     bundle = tmp_path / "bundle"
+    manifest = integration.build_bundle(Path(__file__).resolve().parents[1], bundle, REVISION)
     module_path = bundle / "production/cowrie_output/sanitized_jsonlog.py"
-    module_path.parent.mkdir(parents=True)
-    module_path.write_text("manifest-bound-module\n", encoding="utf-8")
     logs = tmp_path / "cowrie" / "var/log/cowrie"
     state_dir = tmp_path / "cowrie" / "var/lib/cowrie"
     logs.mkdir(parents=True, mode=0o700)
@@ -205,23 +216,13 @@ def _fake_plugin_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(
         __import__("sys").modules, "cowrie.output.sanitizedjson", plugin
     )
-    monkeypatch.setitem(
-        integration.DEPLOYMENT_CONTRACT["compatibility"],
-        "cowrie_output_base_sha256",
-        hashlib.sha256(base_path.read_bytes()).hexdigest(),
-    )
-    monkeypatch.setitem(
-        integration.DEPLOYMENT_CONTRACT["compatibility"],
-        "cowrie_output_loader_sha256",
-        hashlib.sha256(loader_path.read_bytes()).hexdigest(),
-    )
     monkeypatch.setenv("HONEYPOT_COWRIE_ROOT", str(tmp_path / "cowrie"))
     boundary = SimpleNamespace(
         bundle_root=bundle,
         module_sha256=hashlib.sha256(module_path.read_bytes()).hexdigest(),
         json_log_path=logs / "cowrie.json",
         lifecycle_state_path=state_dir / "cowrie-output-lifecycle.json",
-        component_id=COMPONENT_ID,
+        component_id=manifest["component_id"],
         git_revision=REVISION,
     )
     return boundary, plugin, FakeConfig

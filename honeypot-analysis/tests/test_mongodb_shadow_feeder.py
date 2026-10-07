@@ -214,3 +214,58 @@ def test_source_contains_no_mongo_mutation_methods() -> None:
         "bulk_write",
     ):
         assert token not in source
+
+
+def test_rejection_metrics_are_aggregated_by_safe_reason_code(tmp_path: Path, capsys) -> None:
+    rejected_source = row_from_fixture()
+    rejected_source["session_source"] = "untrusted_source"
+
+    malformed_payload = row_from_fixture(
+        session_id="session_v1_55555555555555555555555555555555",
+    )
+    malformed_payload["session_source"] = "production_live"
+    malformed_payload["updated_at"] = "2026-08-23T00:00:02+00:00"
+    malformed_payload["payload_json"] = "not-json-sensitive-marker"
+
+    class FakeCollection:
+        def find(self, *_args, **_kwargs):
+            return iter([rejected_source, malformed_payload])
+
+    class FakeDatabase:
+        def __getitem__(self, _name):
+            return FakeCollection()
+
+    class FakeAdmin:
+        @staticmethod
+        def command(_name):
+            return {"ok": 1}
+
+    class FakeClient:
+        admin = FakeAdmin()
+
+        def __getitem__(self, _name):
+            return FakeDatabase()
+
+        @staticmethod
+        def close():
+            return None
+
+    feeder = MongoShadowFeeder(config(tmp_path))
+    with patch.object(feeder, "_client", return_value=FakeClient()):
+        metrics = feeder.run_once()
+
+    assert metrics["rejected_rows"] == 2
+    assert metrics["rejected_reason_counts"] == {
+        "cursor_invalid": 0,
+        "source_ineligible": 1,
+        "payload_invalid": 1,
+        "trusted_history_invalid": 0,
+        "progression_invalid": 0,
+        "row_contract_rejected": 0,
+    }
+    stored_metrics = json.loads((tmp_path / "metrics.json").read_text())
+    serialized = json.dumps(stored_metrics)
+    assert "not-json-sensitive-marker" not in serialized
+    assert rejected_source["session_id"] not in serialized
+    assert malformed_payload["session_id"] not in serialized
+    assert "not-json-sensitive-marker" not in capsys.readouterr().out

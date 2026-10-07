@@ -5,11 +5,61 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import production.api.monitor_web as monitor_web
-from production.api.security import _compact_session_guidance, session_detail_view
+from production.api.security import (
+    _compact_hypothesis_sets,
+    _compact_session_guidance,
+    session_detail_view,
+)
 import production.prediction_next_distinct_poc.dashboard_adapter as next_distinct_adapter
 
 
 SESSION_ID = "session-detail-contract"
+
+
+def test_public_hypothesis_projection_keeps_all_sets_up_to_contract_bound() -> None:
+    source = [
+        {
+            "hypothesis_set_id": f"set-{index}",
+            "question": f"question-{index}",
+            "scope": "bounded_test_scope",
+            "hypotheses": [{
+                "hypothesis_id": f"hypothesis-{index}",
+                "statement": f"statement-{index}",
+                "status": "active",
+            }],
+        }
+        for index in range(11)
+    ]
+
+    public = _compact_hypothesis_sets(source)
+
+    assert len(public) == 10
+    assert public[8]["hypothesis_set_id"] == "set-8"
+    assert public[-1]["hypothesis_set_id"] == "set-9"
+
+
+def test_hypothesis_projection_requires_canonical_path_evidence() -> None:
+    hypothesis = {
+        "artifact_paths": [
+            "/var/www/legacy-erp/config.php",
+            "relative/path",
+            "/tmp/bad\npath",
+        ],
+        "supporting_evidence_refs": ["placed-1", "command-1"],
+    }
+    assert monitor_web._hypothesis_artifact_paths(
+        hypothesis, {"entities": []}
+    ) == []
+    assert monitor_web._hypothesis_artifact_paths(
+        hypothesis,
+        {"entities": [{
+            "entity_type": "path",
+            "linkable": True,
+            "uncertain": False,
+            "normalized_value": "/var/www/legacy-erp/config.php",
+            "evidence_refs": ["command-1"],
+        }]},
+    ) == ["/var/www/legacy-erp/config.php"]
 
 
 class DetailStorage:

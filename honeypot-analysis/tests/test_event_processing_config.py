@@ -23,6 +23,7 @@ def test_event_processing_config_defaults_are_safe() -> None:
     assert config.job_retry_base_seconds == 30.0
     assert config.job_retry_max_seconds == 1800.0
     assert config.threat_hunt_max_attempts == 3
+    assert config.forwarder_timeout_seconds == 60
 
 
 def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -40,6 +41,7 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
         "JOB_RETRY_BASE_SECONDS": "4.5",
         "JOB_RETRY_MAX_SECONDS": "90.5",
         "THREAT_HUNT_MAX_ATTEMPTS": "6",
+        "FORWARDER_TIMEOUT_SECONDS": "75",
     }
     for name, value in values.items():
         monkeypatch.setenv(name, value)
@@ -59,6 +61,7 @@ def test_event_processing_config_loads_environment(monkeypatch: pytest.MonkeyPat
     assert config.job_retry_base_seconds == 4.5
     assert config.job_retry_max_seconds == 90.5
     assert config.threat_hunt_max_attempts == 6
+    assert config.forwarder_timeout_seconds == 75
 
 
 def test_event_processing_config_loads_config_file(tmp_path) -> None:

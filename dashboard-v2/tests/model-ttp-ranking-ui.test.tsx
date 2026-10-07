@@ -3,6 +3,31 @@ import { describe, expect, it } from "vitest";
 import { Model2EnsembleSummary } from "../src/components/threat/SessionAnalysisPanels";
 
 describe("Model1 + Model2 advisory panel", () => {
+  it("shows bundled ATT&CK names for Model1 candidates when event payloads omit names", () => {
+    const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
+      session_id: "session-a",
+      session_ttp_advisory: {
+        schema_version: "session_model1_ttp_advisory.v1",
+        session_id: "session-a",
+        authority: "ADVISORY_ONLY",
+        assessed_command_events: 2,
+        techniques: [
+          { technique_id: "T1005", supporting_command_events: 2, evidence_refs: [] },
+          { technique_id: "T1078", supporting_command_events: 1, evidence_refs: [] },
+        ],
+      },
+      classification_events: [],
+      observed_trusted_ttps: [],
+      ensemble_evidence: { model1: { applicable: true }, results: [] },
+    }} />);
+
+    expect(html).toContain("T1005");
+    expect(html).toContain("Data from Local System");
+    expect(html).toContain("T1078");
+    expect(html).toContain("Valid Accounts");
+    expect(html).not.toContain("Technique name not recorded");
+  });
+
   it("shows one recommended TTP and the other candidates without a visible priority order", () => {
     const html = renderToStaticMarkup(<Model2EnsembleSummary data={{
       session_id: "session-a",

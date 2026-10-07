@@ -3391,6 +3391,44 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Follow-up: inspect the collapsed page, reopen Hardware actions/history, and confirm the operational detail panel in an authenticated staging browser.
 - Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
 
+### 2026-10-07 — Prepare public-safe runtime source curation
+
+- Status: isolated source curation prepared; not yet pushed or deployed.
+- Scope and intent: build a fast-forward candidate from the fetched upstream
+  `main`, carrying reviewed runtime code and tests without publishing the
+  local research/evaluation evidence corpus or host-state records.
+- Repository branch and commit/PR: `codex/public-main-curation-20261007`;
+  commit pending.
+- Repository changes: include selected Dashboard, Model2, Next-Distinct,
+  hypothesis/guidance, AI projection, storage, and backend bundle source;
+  related policy/configuration and regression tests; and a minimal public-safe
+  bundle README. GCP project/network values in examples are placeholders.
+  The AI projection recognizes the reviewed V3 manual-guidance rule IDs while
+  retaining manual-approval and no-auto-execution checks. Research/evaluation
+  corpora, receipts, databases, PDFs/screenshots, detailed host-state logs, and
+  network-specific Zeek configuration are excluded from this publication set.
+- Host/environment changes actually applied: none. No VM, Pi, database,
+  service, firewall, credential, or external endpoint was changed.
+- Runtime/exposure state: unchanged; this is repository content only. No
+  deployment or AI-provider activation is claimed.
+- Validation performed and outcome: 30 selected Python test modules passed
+  (618 passed, 11 expected failures); response-guidance and classification
+  policy validators passed. The focused AI/guidance integration set passed
+  (48 tests). Dashboard TypeScript and changed-file lint passed; the two
+  Node-runner checks passed (3 tests). The complete Dashboard Vitest suite
+  reported 853 passed, 4 failed, 1 expected failure, and 14 skipped; the four
+  failures are in existing filesystem UI tests outside this curation scope.
+- Not performed / deferred: live GCP/Pi validation, authenticated browser or
+  staging/production checks, deployment, and a complete repository-wide or
+  history-wide secret scan. GitHub publication is still pending.
+- Risks and data handling: dedicated secret-scanner binaries were unavailable;
+  heuristic checks are not proof of absence. This curation does not rewrite
+  remote history or audit every file already present on upstream `main`.
+  The complete previous local `main` remains preserved by a local archive ref.
+- Rollback: revert the eventual curation commit; no host rollback applies.
+- Follow-up: resolve the four unrelated Dashboard filesystem UI failures and
+  re-check the remote `main` SHA immediately before any fast-forward push.
+
 ### 2026-09-29 — Unify archive calendar across three backup sources
 
 - Status: repository change prepared; no host deployment in this entry.

@@ -65,11 +65,11 @@ def test_trusted_behavior_policy_is_valid_and_records_provenance() -> None:
     assert summary == {
         "schema_version": "threat_hypothesis_behavior_policy.v1",
         "policy_id": "cowrie-ssh-threat-hypothesis-behavior",
-        "version": "2026-09-23-observed-attempt-hypothesis-v1",
+        "version": "2026-10-07-session-hypothesis-families-v1",
         "enabled": True,
         "reviewed": True,
         "review_status": "approved for scoped Cowrie SSH analysis",
-        "last_reviewed": "2026-09-23",
+        "last_reviewed": "2026-10-07",
         "method": "developer-authored conservative behavior policy",
         "load_status": "loaded",
         "source": "threat_hypothesis_behavior.trusted.json",

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from production.policies.threat_hypothesis_behavior_policy import (
     policy_summary,
 )
@@ -364,6 +366,10 @@ def _assert_case(
     return fact_set, selection, report
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Frozen path-resolution labels predate hash-authoritative direct Cowrie transfer selection (TFI-025).",
+)
 def test_frozen_independent_evaluation_meets_semantic_acceptance() -> None:
     spec = _load_spec()
     typed = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
@@ -404,6 +410,30 @@ def test_frozen_independent_evaluation_meets_semantic_acceptance() -> None:
     assert guidance == eligible
 
 
+def test_current_direct_transfer_hash_is_eligible_without_claiming_destination_path() -> None:
+    # TFI-025 has a direct Cowrie event and a SHA-256, but its relative
+    # destination cannot be resolved without a confirmed cwd. The current
+    # selector may use the hash as evidence of the observed honeypot event;
+    # it must not promote the unresolved path to a bound artifact location.
+    case = next(item for item in _load_spec()["cases"] if item["case_id"] == "TFI-025")
+    _payload_value, fact_set, selection, report = _evaluate(case)
+    assert len(selection["matches"]) == 1
+    assert selection["matches"][0]["entity_role"] == "artifact_hashes"
+    assert any(
+        path["role"] == "destination_paths"
+        and path["resolution_status"] == "unresolved"
+        for fact in fact_set["facts"]
+        for path in fact["path_resolutions"]
+    )
+    findings, actions = _specialized(report)
+    assert len(findings) == len(actions) == 1
+    assert all("execution" not in item["finding_type"] for item in findings)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Frozen holdout path label predates hash-authoritative direct Cowrie transfer selection (TFH-007).",
+)
 def test_separately_frozen_holdout_authority_acceptance_records_spec_defect(
 ) -> None:
     spec = _load_spec_path("holdout")

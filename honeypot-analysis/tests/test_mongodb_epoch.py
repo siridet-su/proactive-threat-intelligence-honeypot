@@ -384,7 +384,7 @@ class _Mongo:
 
 @pytest.mark.parametrize("percent,state", [(59, "normal"), (60, "warning"), (75, "high"), (85, "fail_safe")])
 def test_capacity_thresholds_are_exact(percent, state):
-    total = 512 * 1024 * 1024
+    total = capacity_policy()["capacity_bytes"]
     guard = MongoCapacityGuard(_Mongo(math.ceil(total * percent / 100), 0))
     assert guard.status()["state"] == state
     if state == "fail_safe":

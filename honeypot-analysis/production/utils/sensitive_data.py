@@ -1059,6 +1059,7 @@ _DERIVED_EVENT_FIELDS = frozenset(
         "hassh",
         "high_confidence",
         "input",
+        "invocation_id",
         "ja3",
         "operator_after",
         "operator_before",
@@ -1136,25 +1137,81 @@ def _derived_raw_events(
                 continue
             active_container_ids.add(event_identity)
             try:
-                projected.append(
-                    {
-                        field_name: _redact(
-                            field_value,
-                            key=field_name,
+                event_id = event.get("eventid")
+                item = {
+                    field_name: _redact(
+                        field_value,
+                        key=field_name,
+                        policy=policy,
+                        depth=depth + 1,
+                        active_container_ids=active_container_ids,
+                    )
+                    for field_name, field_value in event.items()
+                    if isinstance(field_name, str)
+                    and field_name in _DERIVED_EVENT_FIELDS
+                }
+
+                invocation_id = event.get("invocation_id")
+                if (
+                    event_id in {
+                        "cowrie.command.input",
+                        "cowrie.fs.operation_result",
+                    }
+                    and isinstance(invocation_id, str)
+                    and re.fullmatch(r"[0-9a-f]{32}", invocation_id)
+                ):
+                    item["invocation_id"] = invocation_id
+
+                if event_id == "cowrie.fs.operation_result":
+                    if event.get("schema_version") == "cowrie_fs_operation_result.v1":
+                        item["schema_version"] = event["schema_version"]
+                    operation = event.get("operation_type")
+                    if operation in {"file_write", "permission_modify"}:
+                        item["operation_type"] = operation
+                    path = event.get("path")
+                    if _safe_derived_absolute_path(path):
+                        item["path"] = _redact(
+                            path,
+                            key="path",
                             policy=policy,
                             depth=depth + 1,
                             active_container_ids=active_container_ids,
                         )
-                        for field_name, field_value in event.items()
-                        if isinstance(field_name, str)
-                        and field_name in _DERIVED_EVENT_FIELDS
-                    }
-                )
+                    bytes_written = event.get("bytes_written")
+                    if (
+                        event.get("operation_type") == "file_write"
+                        and type(bytes_written) is int
+                        and 0 < bytes_written <= (2**53 - 1)
+                    ):
+                        item["bytes_written"] = bytes_written
+                elif event_id == "cowrie.deception.decoy_placed":
+                    path = event.get("path")
+                    if _safe_derived_absolute_path(path):
+                        item["path"] = _redact(
+                            path,
+                            key="path",
+                            policy=policy,
+                            depth=depth + 1,
+                            active_container_ids=active_container_ids,
+                        )
+
+                projected.append(item)
             finally:
                 active_container_ids.remove(event_identity)
         return projected
     finally:
         active_container_ids.remove(identity)
+
+
+def _safe_derived_absolute_path(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= 2_048
+        and value.startswith("/")
+        and value != "/"
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+        and posixpath.normpath(value) == value
+    )
 
 
 def _credential_path_entities_for_report(

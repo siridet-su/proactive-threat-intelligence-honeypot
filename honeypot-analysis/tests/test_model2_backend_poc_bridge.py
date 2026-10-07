@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from production.ensemble.evidence import (
     MODEL2_BACKEND_POC_ARTIFACT_SHA256, MODEL2_BACKEND_POC_PROJECTION_SHA256,
     MODEL2_BACKEND_POC_VERSION, MODEL2_V5_ARTIFACT_SHA256,
     MODEL2_V5_FEATURE_CONTRACT_SHA256,
 )
-from production.ensemble.model2_result_bridge import BINDING_SHA256, _valid_result
+from production.ensemble.model2_result_bridge import (
+    BINDING_SHA256,
+    _ResultIndex,
+    _find_result,
+    _valid_result,
+)
 
 
 def _result() -> dict:
@@ -58,3 +66,71 @@ def test_poc_result_cannot_claim_an_old_artifact() -> None:
                    "input_projection_contract_sha256": MODEL2_BACKEND_POC_PROJECTION_SHA256,
                    "source_feature_contract_sha256": MODEL2_V5_FEATURE_CONTRACT_SHA256})
     assert not _valid_result(result, session_id="session-a", run_id="run-a")
+
+
+def test_exact_session_index_survives_more_than_old_scan_limit(tmp_path: Path) -> None:
+    for index in range(4_097):
+        (tmp_path / f"invalid-{index:04d}.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "valid.json").write_text(json.dumps(_result()), encoding="utf-8")
+
+    status, value = _find_result(
+        tmp_path,
+        session_id="session-a",
+        run_id="run-a",
+        index=_ResultIndex(tmp_path),
+    )
+
+    assert status == "AVAILABLE"
+    assert value is not None
+    assert value["session_id"] == "session-a"
+
+
+def test_exact_session_index_refreshes_new_results_and_rejects_duplicates(
+    tmp_path: Path,
+) -> None:
+    result_index = _ResultIndex(tmp_path)
+    assert _find_result(
+        tmp_path,
+        session_id="session-a",
+        run_id="run-a",
+        index=result_index,
+    ) == ("UNAVAILABLE", None)
+
+    first = _result()
+    (tmp_path / "first.json").write_text(json.dumps(first), encoding="utf-8")
+    status, value = _find_result(
+        tmp_path,
+        session_id="session-a",
+        run_id="run-a",
+        index=result_index,
+    )
+    assert status == "AVAILABLE"
+    assert value is not None
+
+    updated = _result()
+    updated["session_id"] = "session-b"
+    replacement = tmp_path / "replacement.json"
+    replacement.write_text(json.dumps(updated), encoding="utf-8")
+    replacement.replace(tmp_path / "first.json")
+    assert _find_result(
+        tmp_path,
+        session_id="session-a",
+        run_id="run-a",
+        index=result_index,
+    ) == ("UNAVAILABLE", None)
+    status, value = _find_result(
+        tmp_path,
+        session_id="session-b",
+        run_id="run-a",
+        index=result_index,
+    )
+    assert status == "AVAILABLE"
+    assert value is not None
+
+    (tmp_path / "duplicate.json").write_text(json.dumps(updated), encoding="utf-8")
+    assert _find_result(
+        tmp_path,
+        session_id="session-b",
+        run_id="run-a",
+        index=result_index,
+    ) == ("UNAVAILABLE", None)

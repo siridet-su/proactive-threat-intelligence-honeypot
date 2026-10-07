@@ -200,7 +200,7 @@ def test_ai_worker_is_managed_but_static_and_disabled_by_default() -> None:
     assert "AI_ADVISORY_ALIAS_KEY_FILE=" in environment
     assert "AI_ADVISORY_RECONCILIATION_CUTOFF_JSON={}" in environment
     assert "AI_ADVISORY_PROVIDER=google_vertex_gemini" in environment
-    assert "AI_ADVISORY_PROJECT=project-dff4b23a-3010-4936-a02" in environment
+    assert "AI_ADVISORY_PROJECT=replace-with-gce-project-id" in environment
     assert "AI_ADVISORY_LOCATION=global" in environment
     assert "AI_ADVISORY_MODEL=gemini-3.6-flash" in environment
     assert not any(

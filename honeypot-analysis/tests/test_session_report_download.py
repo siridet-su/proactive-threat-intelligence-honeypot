@@ -224,6 +224,43 @@ def test_session_report_pdf_receives_bounded_cwd_projection(
     assert "payload_json" not in cwd_event
 
 
+def test_session_report_pdf_command_count_uses_durable_input_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    session_id = "session_v1_report_event_count"
+    captured = {}
+    event_rows = [
+        {
+            "event_id": f"command-event-{index}",
+            "session_id": session_id,
+            "eventid": "cowrie.command.input",
+            "timestamp": f"2026-09-22T10:00:0{index}Z",
+            "payload_json": json.dumps({"eventid": "cowrie.command.input", "input": command}),
+        }
+        for index, command in enumerate(("id", "uname -a", "ls -l /tmp"))
+    ]
+
+    def render(_report, session, **_kwargs):
+        captured["command_count"] = session.get("command_count")
+        return b"%PDF-1.7 event-count fixture"
+
+    monkeypatch.setattr(monitor_web, "render_pdf_report_bytes", render)
+    monkeypatch.setattr(monitor_web, "build_session_ti_projection", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(monitor_web, "load_ai_advisory_detail", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(monitor_web, "load_next_distinct_prediction", lambda *_args, **_kwargs: {})
+
+    pdf, error = monitor_web.load_session_report_pdf(
+        _config(tmp_path, session_id, event_rows=event_rows),
+        session_id,
+    )
+
+    assert pdf == b"%PDF-1.7 event-count fixture"
+    assert error == {}
+    # The stored fixture row says 2; the canonical event ledger says 3.
+    assert captured["command_count"] == 3
+
+
 def test_report_next_distinct_context_rejects_cross_session_and_stale_labels() -> None:
     session_id = "session_v1_report_prediction"
 

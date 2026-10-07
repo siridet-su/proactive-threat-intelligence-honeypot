@@ -384,7 +384,10 @@ class ProductionConfig:
     ingest_url: str = "http://127.0.0.1:8080/events"
     forwarder_batch_size: int = 50
     forwarder_poll_seconds: float = 2.0
-    forwarder_timeout_seconds: int = 15
+    # Batches are stored event-by-event by ingest; keep the ACK window long
+    # enough for a bounded batch to finish over the private overlay so a
+    # client timeout does not replay already-persisted events indefinitely.
+    forwarder_timeout_seconds: int = 60
     forwarder_max_spool_bytes: int = 64 * 1024 * 1024
     forwarder_min_free_bytes: int = 32 * 1024 * 1024
     forwarder_max_line_bytes: int = 256 * 1024

@@ -11,6 +11,7 @@ import json
 import re
 from numbers import Integral, Real
 from typing import Any, Callable, Dict, Mapping, Sequence
+from urllib.request import Request, urlopen
 
 from production.ai_advisory.contracts import AIAdvisoryContractError, sha256_json
 from production.ai_advisory.provider import AIProviderResponse, AIProviderUnavailable
@@ -98,10 +99,12 @@ def load_google_adc_credentials(
     project: str,
     *,
     credentials_loader: Callable[..., Any] | None = None,
+    metadata_scopes_loader: Callable[[], Sequence[str]] | None = None,
 ) -> Any:
     """Resolve ADC without refreshing it or reading credential JSON directly."""
 
     project_id = validate_vertex_project(project)
+    use_gce_metadata_scope_check = credentials_loader is None
     if credentials_loader is None:
         try:
             import google.auth
@@ -122,19 +125,51 @@ def load_google_adc_credentials(
     quota_project = str(getattr(credentials, "quota_project_id", "") or "")
     credential_module = type(credentials).__module__.lower()
     is_gce_metadata = credential_module.startswith("google.auth.compute_engine")
+    if is_gce_metadata and str(detected_project or "") != project_id:
+        raise ValueError(
+            "Vertex AI metadata ADC project does not match the configured project"
+        )
+    if is_gce_metadata and (
+        use_gce_metadata_scope_check or metadata_scopes_loader is not None
+    ):
+        scope_loader = metadata_scopes_loader or _read_gce_metadata_scopes
+        try:
+            granted_scopes = {str(item).strip() for item in scope_loader()}
+        except Exception:
+            raise ValueError("GCE metadata OAuth scopes are unavailable") from None
+        if ADC_SCOPE not in granted_scopes:
+            raise ValueError(
+                "Vertex AI GCE ADC requires the cloud-platform VM OAuth scope"
+            )
     if quota_project:
         if quota_project != project_id:
             raise ValueError(
                 "Vertex AI ADC quota project does not match the configured project"
             )
-    elif is_gce_metadata:
-        if str(detected_project or "") != project_id:
-            raise ValueError(
-                "Vertex AI metadata ADC project does not match the configured project"
-            )
-    else:
+    elif not is_gce_metadata:
         raise ValueError("Vertex AI ADC does not identify the configured quota project")
     return credentials
+
+
+def _read_gce_metadata_scopes() -> Sequence[str]:
+    """Read the VM's granted OAuth scopes without requesting an access token."""
+
+    request = Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/"
+        "service-accounts/default/scopes",
+        headers={"Metadata-Flavor": "Google"},
+    )
+    try:
+        with urlopen(request, timeout=2) as response:
+            if response.headers.get("Metadata-Flavor") != "Google":
+                raise ValueError("GCE metadata server identity is invalid")
+            payload = response.read(8192).decode("utf-8")
+    except Exception:
+        raise ValueError("GCE metadata OAuth scopes are unavailable") from None
+    scopes = [line.strip() for line in payload.splitlines() if line.strip()]
+    if not scopes:
+        raise ValueError("GCE metadata OAuth scopes are unavailable")
+    return scopes
 
 
 def _provider_error(exc: BaseException) -> Exception:

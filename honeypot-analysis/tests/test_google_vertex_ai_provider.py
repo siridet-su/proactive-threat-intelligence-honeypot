@@ -25,6 +25,7 @@ from production.ai_advisory.google_vertex_provider import (
     _vertex_response_schema,
     GoogleVertexGeminiProvider,
     load_google_adc_credentials,
+    _read_gce_metadata_scopes,
 )
 from production.ai_advisory.provider import AIProviderUnavailable
 from production.ai_advisory.security import endpoint_sha256
@@ -352,6 +353,102 @@ def test_gce_metadata_adc_requires_exact_metadata_project() -> None:
         load_google_adc_credentials(
             "reviewed-project-12345", credentials_loader=wrong_project
         )
+
+
+def test_gce_metadata_project_must_match_even_with_matching_quota_project() -> None:
+    credentials = _ComputeCredentials()
+    credentials.quota_project_id = "reviewed-project-12345"
+
+    def wrong_metadata_project(**_kwargs):
+        return credentials, "different-project-12345"
+
+    with pytest.raises(ValueError, match="metadata ADC project does not match"):
+        load_google_adc_credentials(
+            "reviewed-project-12345",
+            credentials_loader=wrong_metadata_project,
+        )
+
+
+def test_gce_metadata_adc_accepts_matching_metadata_and_quota_projects() -> None:
+    credentials = _ComputeCredentials()
+    credentials.quota_project_id = "reviewed-project-12345"
+
+    def matching_projects(**_kwargs):
+        return credentials, "reviewed-project-12345"
+
+    assert (
+        load_google_adc_credentials(
+            "reviewed-project-12345", credentials_loader=matching_projects
+        )
+        is credentials
+    )
+
+
+def test_gce_metadata_adc_requires_cloud_platform_scope() -> None:
+    credentials = _ComputeCredentials()
+    credentials.quota_project_id = "reviewed-project-12345"
+
+    def matching_projects(**_kwargs):
+        return credentials, "reviewed-project-12345"
+
+    with pytest.raises(ValueError, match="cloud-platform VM OAuth scope"):
+        load_google_adc_credentials(
+            "reviewed-project-12345",
+            credentials_loader=matching_projects,
+            metadata_scopes_loader=lambda: [
+                "https://www.googleapis.com/auth/devstorage.read_only"
+            ],
+        )
+
+    assert (
+        load_google_adc_credentials(
+            "reviewed-project-12345",
+            credentials_loader=matching_projects,
+            metadata_scopes_loader=lambda: [
+                "https://www.googleapis.com/auth/cloud-platform"
+            ],
+        )
+        is credentials
+    )
+
+
+def test_gce_metadata_scope_reader_requires_google_metadata_header(monkeypatch) -> None:
+    class _MetadataResponse:
+        headers = {"Metadata-Flavor": "Google"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        @staticmethod
+        def read(_limit):
+            return b"https://www.googleapis.com/auth/cloud-platform\n"
+
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["header"] = request.get_header("Metadata-flavor")
+        captured["timeout"] = timeout
+        return _MetadataResponse()
+
+    monkeypatch.setattr(
+        "production.ai_advisory.google_vertex_provider.urlopen", fake_urlopen
+    )
+
+    assert _read_gce_metadata_scopes() == [
+        "https://www.googleapis.com/auth/cloud-platform"
+    ]
+    assert captured == {
+        "url": (
+            "http://metadata.google.internal/computeMetadata/v1/instance/"
+            "service-accounts/default/scopes"
+        ),
+        "header": "Google",
+        "timeout": 2,
+    }
 
 
 def test_quota_less_non_metadata_adc_is_rejected() -> None:

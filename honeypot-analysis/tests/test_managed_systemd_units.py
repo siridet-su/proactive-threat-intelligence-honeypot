@@ -159,16 +159,54 @@ def test_pi_profile_bounds_management_to_forwarder_and_cowrie_dependency() -> No
 
 def test_gcp_managed_inventory_matches_repository_templates() -> None:
     loaded = _loaded()
-    expected = set(
-        loaded.document["profiles"]["gcp_backend"]["managed_installed_units"]
-    )
+    profile = loaded.document["profiles"]["gcp_backend"]
+    expected = set(profile["managed_installed_units"])
+    # Retired templates are kept as source/rollback evidence, not installed
+    # units in this reviewed profile.
+    prohibited = set(profile["prohibited_units"])
     templates = {
         path.name
         for path in (ROOT / "deployment" / "systemd").glob("honeypot-*")
         if path.suffix in {".service", ".timer"}
         and path.name != "honeypot-sensor-forwarder.service"
     }
-    assert templates == expected
+    assert templates - prohibited == expected
+
+
+def test_shadow_units_are_required_and_mongo_retention_is_prohibited() -> None:
+    loaded = _loaded()
+    profile = loaded.document["profiles"]["gcp_backend"]
+    shadow = {
+        "honeypot-next-distinct-shadow.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+    }
+    retention = {
+        "honeypot-mongo-retention.service",
+        "honeypot-mongo-retention.timer",
+    }
+    assert shadow <= set(profile["managed_installed_units"])
+    assert shadow <= set(profile["required_active_units"])
+    assert retention <= set(profile["prohibited_units"])
+
+    unit_files, active = _valid_gcp_inventory()
+    missing_shadow = validate_unit_inventory(
+        loaded,
+        "gcp_backend",
+        unit_files=unit_files,
+        active_units=active - {"honeypot-next-distinct-shadow-feeder.service"},
+    )
+    assert missing_shadow["errors"]["missing_active_units"] == [
+        "honeypot-next-distinct-shadow-feeder.service"
+    ]
+
+    unit_files["honeypot-mongo-retention.timer"] = "disabled"
+    result = validate_unit_inventory(
+        loaded, "gcp_backend", unit_files=unit_files, active_units=active
+    )
+    assert result["status"] == "invalid"
+    assert result["errors"]["present_prohibited_units"] == [
+        "honeypot-mongo-retention.timer"
+    ]
 
 
 def test_obsolete_unit_reconciler_is_exact_and_does_not_reenable_on_restore() -> None:
