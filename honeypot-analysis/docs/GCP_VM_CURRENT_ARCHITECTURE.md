@@ -106,18 +106,30 @@ managed units are expected to be enabled, active where applicable, hardened,
 and configured with `UMask=0077`; a managed-unit policy validation is a
 replacement-host gate.
 
-On 2026-10-08 the eight core daemons, Next-Distinct shadow/feeder, and Model2
-receiver/bridge were active with zero failed units. The feed and session-count
-timers were active. A service-watchdog timer and two Dashboard v2 services were
-also active outside the current `main` profile's external-unit allowlist. The
-managed-unit profile has not passed against this live inventory; reconcile the
-units before installing a new release. The AI advisory worker was inactive.
+The Next-Distinct shadow service and its passive feeder are explicitly
+installed, enabled, and required active in managed-unit policy revision
+`2026-10-08`. They remain non-authoritative. Model2 v7 uses separate
+`model2-v7-*` units and protected runtime files; those units are not inventoried
+by the current `honeypot-` prefix validator and need a separate reviewed
+receipt before being treated as manifest-bound deployment content.
 
-The ingest endpoint is bound to its authorized private overlay interface.
-Dashboard and monitor health endpoints responded locally during the bounded
-check. Exact listening addresses, firewall rule, target tag, overlay peer, and
-backend port remain in the owner-only inventory. This check did not enumerate
-all public listeners or verify the GCP firewall control plane.
+On 2026-10-08 the eight core daemons, Next-Distinct shadow/feeder, and Model2
+v7 services were active with zero failed units. The feed and session-count
+timers were active. The two GCP Dashboard v2 services and service-watchdog
+timer were stopped and disabled; their unit definitions were archived in the
+host's protected backup area. The watchdog timer remains disabled because its
+protected target list includes the two Dashboard services; its host program and
+configuration were not changed. The revised managed-unit policy passed against
+the `gcp_backend` inventory, but does not validate the independent Model2 v7
+units. The AI advisory worker was inactive.
+
+The ingest endpoint is bound to its authorized private overlay interface and
+returned HTTP 200 on that binding; Dashboard API and monitor health returned
+HTTP 200 on their local bindings. The GCP-hosted Dashboard v2 UI is not active;
+the intended local Dashboard-to-backend flow has not been qualified. Exact
+listening addresses, firewall rule, target tag, overlay peer, and backend port
+remain in the owner-only inventory. This check did not enumerate all public
+listeners or verify the GCP firewall control plane.
 
 ## Capacity boundary
 

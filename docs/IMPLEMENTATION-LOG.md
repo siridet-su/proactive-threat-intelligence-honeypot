@@ -3607,6 +3607,68 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
   [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
 
+### 2026-10-08 — Reconcile replacement-VM Dashboard units and Next-Distinct policy
+
+- Status: bounded host-unit change applied; runtime release not deployed.
+- Scope and intent: align the replacement VM with the requested local-Dashboard
+  direction, retain the shadow services already required by the backend profile,
+  and validate the resulting managed-unit inventory without changing Model2.
+- Repository branch and commit/PR: `main`, based on
+  `e959e90e80a828ff80fe50a811173a1ea7c296fb`.
+- Repository changes: revise
+  `honeypot-analysis/deployment/systemd/managed_units.v1.json` to policy version
+  `2026-10-08` and explicitly require the Next-Distinct shadow and feeder to be
+  enabled, matching their existing managed-installed and required-active status;
+  add a regression assertion and update the GCP current-state, architecture,
+  deployment/recovery, Dashboard staging runbook, service catalog, and
+  implementation-log records. Add ADR-0017 for the accepted local-UI/GCP-backend
+  direction and its unqualified API/credential boundary; retain ADR-0016 as
+  historical evidence and for its authentication safeguards.
+- Host/environment changes actually applied: archive the two GCP Dashboard v2
+  unit definitions and the watchdog service/timer definitions in the VM's
+  root-only protected backup area; stop and disable the two GCP Dashboard v2
+  services and the service-watchdog timer; clear only the intentional stopped
+  services' failed state. No service source, watchdog config, Model2 config,
+  database, release pointer, firewall, or core backend unit was changed.
+- Runtime/exposure state: the eight core services, Next-Distinct shadow/feeder,
+  and observed Model2 v7 service set remained active; zero systemd units were
+  failed. Dashboard API and monitor health returned HTTP 200 on local bindings;
+  ingest health returned HTTP 200 on its private overlay binding. GCP-hosted
+  Dashboard v2 UI services and watchdog timer are inactive/disabled. Model2
+  v7 units are outside the `honeypot-` validator's inventory scope and were
+  not qualified by this policy check.
+- Validation performed and outcome: managed-unit and release-manifest tests
+  passed (30 tests). The revised policy was copied to a temporary VM check area
+  and the read-only `gcp_backend` inventory validator returned `valid` with no
+  policy errors; temporary validator files were removed. All three backend
+  health endpoints returned HTTP 200 at their actual bind addresses. A final
+  unit check reported zero failed units; `git diff --check` passed.
+- Not performed / deferred: no release archive, active pointer, or core service
+  restart; no canonical MongoDB backup/isolated restore, verified rollback
+  release, synthetic session, local authenticated Dashboard-to-GCP flow,
+  Next-Distinct or Model2 inference, external TI provider, AI/Vertex request,
+  or PDF/report acceptance test. Watchdog reactivation awaits review because
+  its protected targets include the intentionally disabled Dashboard services.
+- Risks and data handling: disabling the watchdog timer pauses its periodic
+  recovery checks for its other targets as well; no restart regression test was
+  run. Protected telemetry/configuration remained on the host and was not copied
+  to Git. The SQLite mirror backup is not a backup of canonical MongoDB.
+- Rollback: for a return to hosted Dashboard mode, restore the archived unit
+  definitions from the VM's protected backup area, review the watchdog target
+  list, then explicitly re-enable/start only the approved services and timer.
+  No release or database rollback was performed.
+- Follow-up: qualify a canonical MongoDB backup and isolated restore, bind the
+  preserved Model2 config and independent Model2 units to reviewed receipts,
+  establish a manifest-verified recovery release, review watchdog targets for
+  the local-UI mode, and test the authenticated local Dashboard/backend route
+  before any release cutover.
+- Related ADR/runbook: [GCP current architecture](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md),
+  [current production state](../honeypot-analysis/docs/CURRENT_PRODUCTION_STATE.md),
+  [deployment and recovery](../honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md),
+  [GCP VM rebuild runbook](../honeypot-analysis/docs/GCP_VM_REBUILD_RUNBOOK.md),
+  [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md),
+  and [ADR-0017](adr/ADR-0017-local-dashboard-gcp-backend.md).
+
 ### 2026-10-08 — Addendum: report-contract qualification publication
 
 - Status: source commit published; GCP deployment remains deferred.

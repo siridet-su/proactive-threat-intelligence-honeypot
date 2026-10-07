@@ -132,12 +132,19 @@ independently checked through the GCP control plane. It is not a verified
 rollback target. Normal deployment and validation must use the active `capstone`
 VM and must not assume the former VM is available for recovery.
 
-The 2026-10-08 read-only check found the active release manifest does not match
-the preserved Model2 runtime-configuration hash, and the active and alternate
+The 2026-10-08 check found the active release manifest does not match the
+preserved Model2 runtime-configuration hash, and the active and alternate
 release directories did not provide a verified manifest-bound rollback target.
-The watchdog timer and two Dashboard v2 services were active outside the current
-`main` managed-unit allowlist. No release pointer, unit, service, firewall, or
-configuration was changed during the check. See
+In a later bounded host change, the two GCP Dashboard v2 services and the
+service-watchdog timer were stopped and disabled; their unit definitions were
+archived under the root-only host backup area. The watchdog program and its
+protected configuration were not changed. Its target list includes the
+Dashboard services, so do not re-enable the timer until its targets are
+reviewed for the local-dashboard operating mode. Managed-unit policy revision
+`2026-10-08` now includes Next-Distinct shadow/feeder in the required-enabled
+set and passed the `gcp_backend` inventory check. That validator does not cover
+the separate `model2-v7-*` units. No release pointer, core service, firewall,
+database, or protected runtime configuration was changed. See
 [CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md) for the current
 verification boundary.
 

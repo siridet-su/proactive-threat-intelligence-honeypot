@@ -186,6 +186,7 @@ def test_shadow_units_are_required_and_mongo_retention_is_prohibited() -> None:
     }
     assert shadow <= set(profile["managed_installed_units"])
     assert shadow <= set(profile["required_active_units"])
+    assert shadow <= set(profile["required_enabled_units"])
     assert retention <= set(profile["prohibited_units"])
 
     unit_files, active = _valid_gcp_inventory()

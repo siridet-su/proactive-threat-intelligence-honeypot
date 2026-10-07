@@ -25,21 +25,34 @@ is not a verified rollback target.
 
 ## Live checks and release boundary
 
-The 2026-10-08 read-only check found all eight core backend services, both
-Next-Distinct shadow services, and both Model2 shadow services active, with no
-failed systemd units. The ingest health endpoint returned 200 on its private
-overlay binding; Dashboard API and monitor health returned 200 locally. This
-was a health check only, not a synthetic session, model-inference, provider, or
-report/PDF acceptance test. AI advisory was inactive. Two Dashboard v2 services
-and the service-watchdog timer were also active outside the current `main`
-managed-unit allowlist, so the host does not yet match that policy's unit
-inventory.
+The 2026-10-08 bounded host follow-up found all eight core backend services,
+both Next-Distinct shadow services, and the observed Model2 v7 services active,
+with zero failed systemd units. Ingest health returned 200 on its private
+overlay binding; Dashboard API and monitor health returned 200 on their local
+bindings. The AI advisory worker was inactive. The two GCP Dashboard v2
+services were stopped and disabled to match the requested local-dashboard
+direction. Their unit definitions and the watchdog service/timer definitions
+were archived under the host's root-only backup area; the watchdog timer was
+also stopped and disabled because its protected target list includes those
+Dashboard services. The watchdog program and protected configuration were not
+changed.
+
+The repository managed-unit policy was revised to make the already-required
+Next-Distinct shadow and feeder units explicitly required-enabled. The revised
+`gcp_backend` policy passed a read-only inventory validation against the VM.
+That validator scopes unknown enabled units to the `honeypot-` prefix; it does
+not inventory the separate `model2-v7-*` services. Their presence and
+configuration remain outside that policy's proof and still require an
+independent reviewed runtime receipt. No synthetic session, model-inference,
+external-provider, authenticated UI, or report/PDF acceptance test was run.
 
 The active release verifier rejects the preserved Model2 runtime-configuration
 hash, and neither the active nor retained alternate release currently verifies
 as a manifest-bound rollback target. The Model2 configuration was not changed.
 The active release must remain in place until a successor release and rollback
-release both verify and the unit inventory is reconciled.
+release both verify, canonical MongoDB backup/restore is qualified, and the
+independent Model2 runtime boundary is reviewed. The policy validation does not
+qualify a release or substitute for those gates.
 
 A new root-only backup and isolated restore of the epoch-bound SQLite rollback
 mirror passed SHA-256, schema, table-count, `quick_check`, and full integrity

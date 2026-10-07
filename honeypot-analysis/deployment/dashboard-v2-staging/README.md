@@ -5,6 +5,14 @@ are not a production deployment mechanism. The runtime namespace is
 `/opt/honeypot-dashboard-v2-staging` and its `incoming/` directory is the only
 artifact upload area accepted by the root deployment wrapper.
 
+> **Current host status (2026-10-08):** the operator selected a local Dashboard
+> UI with the backend remaining on GCP. The GCP staging and production Dashboard
+> v2 services are stopped and disabled; their unit files were archived in the
+> host's protected backup area. Do not run this bootstrap or deploy workflow to
+> reactivate a hosted UI unless the operating decision is revisited. The local
+> Dashboard-to-GCP API path has not yet been qualified; see
+> [ADR-0017](../../../docs/adr/ADR-0017-local-dashboard-gcp-backend.md).
+
 ## One-time VM setup
 
 Run as the existing authorized VM administrator from this directory:

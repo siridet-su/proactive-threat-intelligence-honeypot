@@ -1,7 +1,7 @@
 {
   "schema_version": "managed_systemd_units.v1",
   "policy_id": "honeypot-controlled-poc-units",
-  "version": "2026-10-01",
+  "version": "2026-10-08",
   "profiles": {
     "gcp_backend": {
       "managed_installed_units": [
@@ -28,6 +28,8 @@
         "honeypot-feed-refresh.timer",
         "honeypot-ingest-api.service",
         "honeypot-monitor-web.service",
+        "honeypot-next-distinct-shadow-feeder.service",
+        "honeypot-next-distinct-shadow.service",
         "honeypot-session-count-monitor.timer",
         "honeypot-session-worker.service",
         "honeypot-threat-hunt-worker.service",
