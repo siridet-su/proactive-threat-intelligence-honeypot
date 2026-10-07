@@ -36,6 +36,7 @@ approval remains an explicit operational decision.
 
 ## Evidence notes
 
+- [Remote branch review and selective integration — 2026-10-07](2026-10-07-remote-branch-review.md): 43 remote refs compared against curated `main`; 11 unique branch heads reviewed individually and none approved for wholesale merge.
 - [Reimaged Azure ARM64 fresh activation — 2026-09-29](2026-09-29-azure-arm64-fresh-activation.md): full wrapper activation, synthetic Web-corp/Cowrie/Zeek event delivery, MongoDB counts, and remaining physical Pi/B2 limits.
 - [Reimaged Azure ARM64 fresh installer — 2026-09-29](2026-09-29-azure-arm64-fresh-installer.md): full-stack preparation, Ansible compatibility fixes, private env pause, and repeat run without active services.
 - [Azure ARM64 installer first run — 2026-09-28](2026-09-28-azure-arm64-installer-first-run.md): reviewed Go release preparation, private env skeletons, missing-value pause, and unchanged-file retry on a disposable VM.

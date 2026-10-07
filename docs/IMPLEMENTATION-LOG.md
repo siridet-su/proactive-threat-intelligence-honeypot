@@ -3521,3 +3521,46 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   rollback applies.
 - Follow-up: resolve the four existing Dashboard filesystem UI failures and
   complete live qualification before any deployment.
+
+### 2026-10-07 — Remote branch content review
+
+- Status: branch-by-branch source review complete; no runtime code or host
+  deployment in this entry.
+- Scope and intent: inspect remote branches after curated `main` publication,
+  decide which unique changes remain necessary, and explain why the GitHub
+  branch list does not change when only `main` advances.
+- Repository branch and commit/PR: review baseline `origin/main`
+  `89eb8cd141f556bc044ae16e64143283c5eb5ea8`; audit note added on the current
+  `main` line.
+- Repository changes: add
+  [the remote branch review](validation/2026-10-07-remote-branch-review.md)
+  and link it from the validation index. Of 43 actual remote refs including
+  `main`, 11 non-main heads had unique commits and were individually reviewed;
+  31 other non-main heads were already ancestors of `main`. Useful code from
+  selected old branches had already been ported to the published source
+  curation commit. No branch pointer was moved and no branch or commit was
+  deleted.
+- Host/environment changes actually applied: none. No GCP VM, Pi, Dashboard,
+  database, network, credential, or external service was changed.
+- Runtime/exposure state: unchanged. The review did not deploy or activate
+  code. GitHub continues to display the branch refs and their ahead/behind
+  counts because selectively publishing code to `main` does not merge or
+  repoint those refs.
+- Validation performed and outcome: fetched remote refs without pruning;
+  compared reachability and reviewed unique patches, source, and tests; checked
+  that the 31 non-main contained heads are ancestors of the recorded `main`
+  snapshot. Documentation links and whitespace are checked with this commit.
+- Not performed / deferred: no code test suite was rerun for this
+  documentation-only audit; prior curation test results remain recorded in
+  the preceding publication entry. No live staging/production test, full
+  history secret scan, branch deletion, or branch repointing was performed.
+- Risks and data handling: the very large PoC branch was not merged because it
+  includes databases, logs, and historical artifacts. No secret values,
+  raw sessions, or database contents were copied into this report.
+- Rollback: revert this documentation/index/log commit; no host rollback
+  applies. The append-only log must be corrected with a dated addendum rather
+  than silently rewritten.
+- Follow-up: keep branch refs for traceability. Consider archival/deletion
+  only as a separately authorized action after checking pull requests and
+  retention needs; port any future required code as a focused change against
+  current `main`.
