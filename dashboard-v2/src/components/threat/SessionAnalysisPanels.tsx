@@ -145,6 +145,8 @@ function thailandTimestamp(value: unknown): string {
 const CLIENT_TIMEOUT_MS = 45_000;
 const DETAIL_CLIENT_TIMEOUT_MS = 75_000;
 const SESSION_TI_CLIENT_TIMEOUT_MS = 75_000;
+const MAX_VISIBLE_HYPOTHESIS_SETS = 50;
+const CLOSED_SESSION_ANALYSIS_POLL_MAX_MS = 120_000;
 
 async function fetchCapability(
   capability: string,
@@ -1483,6 +1485,7 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
   const hypotheses = list(data.correlated_ttp_hypotheses);
   const contextualHypotheses = projectContextualHypotheses(hypotheses);
   const hypothesisSets = list(data.hypothesis_sets).map(record);
+  const hypothesisSetsTruncated = data.hypothesis_sets_truncated === true || hypothesisSets.length > MAX_VISIBLE_HYPOTHESIS_SETS;
   const sessionAssessment = record(data.session_hypothesis_assessment);
   const sessionFamilies = list(sessionAssessment.semantic_families).map(record);
   const sessionGraph = record(sessionAssessment.evidence_graph);
@@ -1495,11 +1498,11 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
     <div className="space-y-3">
       <div className="border-l-2 border-primary-border pl-3">
         <p className="text-[9px] font-semibold uppercase tracking-[0.12em] text-text-subtle">Assessment outcome</p>
-        <p className="mt-0.5 text-sm font-semibold text-text">{hypothesisSets.length > 0 ? `${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded` : "No threat hypothesis established"}</p>
+        <p className="mt-0.5 text-sm font-semibold text-text">{hypothesisSets.length > 0 ? `${hypothesisSetsTruncated ? "At least " : ""}${hypothesisSets.length} evidence-bounded hypothesis set${hypothesisSets.length === 1 ? "" : "s"} recorded` : "No threat hypothesis established"}</p>
         <p className="mt-0.5 text-[11px] text-text-muted">Analyst interpretation only · not response authority</p>
       </div>
       <dl className="grid grid-cols-3 divide-x divide-border rounded-lg border border-border bg-surface-subtle">
-        {[["Hypothesis sets", String(hypothesisSets.length)], ["Canonical findings", String(canonicalCount)], ["Related TTP context", String(contextualHypotheses.length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-base font-semibold text-text">{value}</dd></div>)}
+        {[["Hypothesis sets", `${hypothesisSetsTruncated ? "≥" : ""}${hypothesisSets.length}`], ["Canonical findings", String(canonicalCount)], ["Related TTP context", String(contextualHypotheses.length)]].map(([name, value]) => <div key={name} className="min-w-0 px-2.5 py-2.5 text-center sm:px-3"><dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-text-subtle sm:text-[10px]">{name}</dt><dd className="mt-0.5 text-base font-semibold text-text">{value}</dd></div>)}
       </dl>
       {hypothesisSets.length === 0 && missingEvidence.length > 0 && <details className="rounded-lg border border-border bg-surface-subtle px-3 py-2 text-xs">
         <summary className="cursor-pointer font-semibold text-text">Why no hypothesis was established · {missingEvidence.length} gate{missingEvidence.length === 1 ? "" : "s"}</summary>
@@ -1530,8 +1533,15 @@ export function HypothesisSummary({ data }: { data: JsonRecord }) {
       )}
       {hypothesisSets.length > 0 && (
         <ContentPanel title="Evidence-bounded hypothesis sets" count={hypothesisSets.length}>
+        {hypothesisSetsTruncated && (
+          <p className="mb-2 text-[10px] text-text-muted" role="status">
+            {hypothesisSets.length > MAX_VISIBLE_HYPOTHESIS_SETS
+              ? `Showing the first ${MAX_VISIBLE_HYPOTHESIS_SETS} of ${hypothesisSets.length} hypothesis sets.`
+              : `Showing the first ${MAX_VISIBLE_HYPOTHESIS_SETS}; additional sets were omitted by the bounded monitor projection.`}
+          </p>
+        )}
         <ol className="space-y-2">
-          {hypothesisSets.slice(0, 10).map((hypothesisSet, index) => (
+          {hypothesisSets.slice(0, MAX_VISIBLE_HYPOTHESIS_SETS).map((hypothesisSet, index) => (
             <li key={`${index}-${summaryValue(hypothesisSet.hypothesis_set_id, "hypothesis-set")}`} className="rounded-lg border border-border bg-surface-subtle p-3 text-xs">
               <p className="font-semibold text-text">{summaryValue(hypothesisSet.question, "Bounded hypothesis set")}</p>
               {list(hypothesisSet.hypotheses).map(record).slice(0, 8).map((hypothesis, hypothesisIndex) => (
@@ -1929,11 +1939,17 @@ export function SessionAnalysisPanels({
   useEffect(() => {
     let cancelled = false;
     let pollTimer: number | undefined;
+    let analysisPollTimer: number | undefined;
+    let analysisPollInFlight = false;
+    let analysisPollStarted = false;
+    let analysisPollAttempts = 0;
+    let analysisPollDeadline = 0;
     let tiPollTimer: number | undefined;
     let tiPollInFlight = false;
     let tiPollAttempts = 0;
     let pollInFlight = false;
     let lastDetail: JsonRecord = {};
+    let latestAiResult: CapabilityResult = { ...initialResult };
     const allCapabilities = [
       "detail",
       "commands",
@@ -1983,6 +1999,8 @@ export function SessionAnalysisPanels({
         [capability, normalizePanelResult(capability, result)] as const
       ));
       setResults((previous) => ({ ...previous, ...Object.fromEntries(normalizedEntries) }));
+      const aiEntry = normalizedEntries.find(([capability]) => capability === "ai-advisory");
+      if (aiEntry) latestAiResult = aiEntry[1];
       const nextDistinctEntry = normalizedEntries.find(([capability]) => capability === "next-distinct");
       if (nextDistinctEntry) {
         onNextDistinct?.(nextDistinctEntry[1].data, nextDistinctEntry[1].state, nextDistinctEntry[1].reason);
@@ -2015,6 +2033,57 @@ export function SessionAnalysisPanels({
         : [capabilities[index], unavailable("Panel request failed")] as const
     ));
 
+    const analysisComplete = (detail: JsonRecord, ai: CapabilityResult): boolean => (
+      list(detail.reports).length > 0 &&
+      ai.state === "ready" &&
+      label(ai.data.status, "").toLowerCase() === "accepted"
+    );
+
+    const stopAnalysisPoll = () => {
+      if (analysisPollTimer !== undefined) window.clearInterval(analysisPollTimer);
+      analysisPollTimer = undefined;
+    };
+
+    const startAnalysisPoll = (detail: JsonRecord, ai: CapabilityResult) => {
+      if (sessionIsActive(detail) || analysisPollStarted || analysisComplete(detail, ai)) return;
+      analysisPollStarted = true;
+      // Closed-session reports and AI advice are persisted asynchronously. Keep
+      // the exact-session view fresh for at most two minutes, then stop polling.
+      analysisPollDeadline = Date.now() + CLOSED_SESSION_ANALYSIS_POLL_MAX_MS;
+      analysisPollTimer = window.setInterval(async () => {
+        if (cancelled) return;
+        if (Date.now() >= analysisPollDeadline) {
+          stopAnalysisPoll();
+          return;
+        }
+        if (analysisPollInFlight) return;
+        analysisPollInFlight = true;
+        try {
+          const [detailResult, aiResult] = await Promise.all([
+            fetchCapability("detail", sessionId),
+            fetchCapability("ai-advisory", sessionId),
+          ]);
+          if (cancelled) return;
+          if (Date.now() >= analysisPollDeadline) {
+            stopAnalysisPoll();
+            return;
+          }
+          if (detailResult.state === "ready") {
+            apply([["detail", detailResult]]);
+            apply(derivedEntries(detailResult).filter(([capability]) => capability !== "ai-advisory"));
+          }
+          if (aiResult.state !== "unavailable") apply([["ai-advisory", aiResult]]);
+          analysisPollAttempts += 1;
+          if (
+            (detailResult.state === "ready" && analysisComplete(detailResult.data, aiResult)) ||
+            analysisPollAttempts >= 24
+          ) stopAnalysisPoll();
+        } finally {
+          analysisPollInFlight = false;
+        }
+      }, 5_000);
+    };
+
     const poll = async () => {
       if (cancelled || pollInFlight) return;
       pollInFlight = true;
@@ -2027,6 +2096,9 @@ export function SessionAnalysisPanels({
       if (detailEntry?.[1].state === "ready" && !sessionIsActive(detailEntry[1].data) && pollTimer !== undefined) {
         window.clearInterval(pollTimer);
         pollTimer = undefined;
+      }
+      if (detailEntry?.[1].state === "ready" && !sessionIsActive(detailEntry[1].data)) {
+        startAnalysisPoll(detailEntry[1].data, latestAiResult);
       }
       pollInFlight = false;
     };
@@ -2054,6 +2126,13 @@ export function SessionAnalysisPanels({
 
       apply(derivedEntries(detailEntry[1]));
       const detail = detailEntry[1].data;
+      // Independent AI context must not wait for optional provider lookups.
+      const aiRequest = fetchCapability("ai-advisory", sessionId).then((aiResult) => {
+        if (cancelled) return;
+        apply([["ai-advisory", aiResult]]);
+        if (analysisComplete(detail, aiResult)) stopAnalysisPoll();
+        else startAnalysisPoll(detail, aiResult);
+      });
       const overview = record(detail.overview);
       const sourceIp = label(overview.src_ip || record(detail.session).src_ip, "");
       const observables = list(detail.observables).filter(isRecord);
@@ -2086,8 +2165,7 @@ export function SessionAnalysisPanels({
           ["observable-ti", firstSupported ? unavailable("Observable-TI request was not started") : notApplicable("No supported IP or hash observable is stored for this exact session.")] as const,
         ]);
       }
-      const aiResult = await fetchCapability("ai-advisory", sessionId);
-      apply([["ai-advisory", aiResult]]);
+      await aiRequest;
       if (!cancelled && sessionIsActive(detailEntry[1].data)) {
         pollTimer = window.setInterval(() => {
           void poll();
@@ -2099,6 +2177,7 @@ export function SessionAnalysisPanels({
     return () => {
       cancelled = true;
       if (pollTimer !== undefined) window.clearInterval(pollTimer);
+      stopAnalysisPoll();
       stopTiPoll();
     };
   }, [sessionId, onDetail, onLiveInteraction, onNextDistinct]);

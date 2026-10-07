@@ -3564,3 +3564,45 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
   only as a separately authorized action after checking pull requests and
   retention needs; port any future required code as a focused change against
   current `main`.
+
+### 2026-10-07 — Reconcile dashboard freshness on the public-main candidate
+
+- Status: prepared on an isolated candidate branch; not deployed to a host.
+- Scope and intent: keep Filesystem Activity and Threat Feed snapshots current
+  when SSE remains open but quiet, show late session-analysis/advisory results,
+  and disclose when the bounded hypothesis projection omits additional sets.
+- Repository branch and commit/PR: `codex/public-main-20261007`, based on the
+  fetched `origin/main` snapshot `47e0913f89cc0a11a63eb7f9b7a21cd238b4cfc1`;
+  the focused source commit is created with this entry.
+- Repository changes: update the dashboard stream reconciliation and
+  session-detail refresh, bound the public hypothesis projection at 50 with a
+  truncation flag, add regression tests and current-state documentation, and
+  link those dashboard documents from this index. The fetched main already
+  contained the reviewed hypothesis-family policy; that policy was preserved.
+  The separate local research corpus, old VM migration/AI-provider work, and
+  unrelated local-only history were not copied into this candidate.
+- Host/environment changes actually applied: none. Dependencies were installed
+  from the lockfile in isolated local checkouts; no VM, Pi, database, service,
+  firewall, credential, or external endpoint was changed.
+- Runtime/exposure state: no host runtime changed. This candidate is not active
+  until a separately performed deployment.
+- Validation performed and outcome: focused dashboard tests passed (59); the
+  relevant backend contract/guidance tests passed (50); the three dedicated
+  Node test scripts passed (11); ESLint, `npx tsc --noEmit`, and the webpack
+  production build passed. The complete Vitest run had 861 passes, 4 existing
+  filesystem UI assertion failures, 1 expected failure, and 14 skipped tests.
+- Not performed / deferred: authenticated browser, staging/production,
+  live-session, and host deployment verification. The four existing UI test
+  failures remain open and must be resolved before claiming the complete suite
+  passes.
+- Risks and data handling: polling is bounded and limited to exact session
+  detail; truncation is disclosed instead of silently implying completeness.
+  No credentials, raw attacker data, or research database artifacts were
+  added.
+- Rollback: revert the focused source commit; no host rollback applies because
+  no host was changed.
+- Follow-up: resolve the four existing filesystem UI test failures and perform
+  authenticated staging/browser verification before deployment.
+- Related ADR/runbook: [Dashboard data semantics](../dashboard-v2/docs/DATA_SEMANTICS.md),
+  [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
+  [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).

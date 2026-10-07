@@ -48,6 +48,34 @@ describe("session assessment presentation", () => {
     expect(html.match(/<details/g)).toHaveLength(1);
   });
 
+  it("shows up to 50 hypothesis sets and discloses when the display bound is exceeded", () => {
+    const hypothesisSets = Array.from({ length: 55 }, (_, index) => ({
+      hypothesis_set_id: `set-${index}`,
+      question: `Question ${index}`,
+      hypotheses: [{ hypothesis_id: `hypothesis-${index}`, statement: `Statement ${index}` }],
+    }));
+    const html = renderToStaticMarkup(<HypothesisSummary data={{ hypothesis_sets: hypothesisSets }} />);
+
+    expect(html).toContain("Showing the first 50 of 55 hypothesis sets.");
+    expect(html).toContain("Question 49");
+    expect(html).not.toContain("Question 50");
+  });
+
+  it("discloses when the backend bounded projection omitted additional sets", () => {
+    const hypothesisSets = Array.from({ length: 50 }, (_, index) => ({
+      hypothesis_set_id: `set-${index}`,
+      question: `Question ${index}`,
+      hypotheses: [],
+    }));
+    const html = renderToStaticMarkup(<HypothesisSummary data={{
+      hypothesis_sets: hypothesisSets,
+      hypothesis_sets_truncated: true,
+    }} />);
+
+    expect(html).toContain("At least 50 evidence-bounded hypothesis sets recorded");
+    expect(html).toContain("additional sets were omitted by the bounded monitor projection.");
+  });
+
   it("keeps source-IP recurrence rows within a sticky-header scroll frame", () => {
     const sessions = Array.from({ length: 25 }, (_, index) => ({
       session_id: `session-${index + 1}`,

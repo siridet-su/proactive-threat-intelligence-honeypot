@@ -27,6 +27,15 @@ The current dashboard-v2 source labels model values generically (`score`, `weigh
 
 The current UI limits the model lane to the first eight ranked entries and displays score values as `score`; it does not silently convert or normalize them. Backtest and calibration endpoints expose run metadata, not a guarantee that the current prediction is calibrated.
 
+Session detail keeps evidence-bounded hypothesis sets separate from trusted
+observations. The compact monitor projection and UI each retain at most 50
+sets; the API marks a truncated projection and the UI discloses that additional
+sets were omitted. This is a transport
+and presentation bound, not a claim that 50 hypotheses exist or are confirmed.
+The UI refreshes a closed session's exact-session detail and AI advisory every
+five seconds for at most 24 attempts while asynchronous report/advisory output
+is incomplete. These refreshes do not create findings or change authority.
+
 ## Correlation semantics
 
 Correlation records must carry their producer-defined semantics. The source semantic marker is `developer_defined_heuristic_policy_strength_not_probability`; legacy missing or malformed markers are represented as `legacy_unresolved_correlation_score_semantics`. `confidence`, `strength`, and similarly named values must not be read as probabilities merely because of their names. Session links, campaign membership, and correlated TTP hypotheses are derived hypotheses.
@@ -35,7 +44,13 @@ Correlation records must carry their producer-defined semantics. The source sema
 
 Backend responses include a generated `timestamp`; rows may include `timestamp`, `created_at`, `updated_at`, `start_time`, `generated_at`, or `last_seen`. The dashboard’s `isFresh` helper compares an available timestamp with the response `asOf` time and marks a stream current when it is no more than 24 hours old. Invalid or missing timestamps produce an unknown state. Existing documents without a recent timestamp are not evidence that the service is live.
 
-The dashboard page uses `/api/events` for latest-observed context and `/api/sessions` for session-derived activity; the threat-intel page uses session timestamps and snapshot rows. There is no polling or automatic refresh in the current source. A current-looking local browser clock alone is not data freshness.
+The dashboard uses `/api/events` and `/api/sessions` for activity context. Threat
+and Filesystem Activity views consume SSE and reconcile from their bounded REST
+snapshot routes when a connected stream remains quiet; the threat feed checks
+every 15 seconds and reconciles after 20 seconds without data, while
+Filesystem Activity checks a quiet open stream every 15 seconds. If SSE fails,
+the existing REST fallback/reconnect behavior applies. A current-looking local
+browser clock alone is not data freshness.
 
 ## Redaction and safe fields
 

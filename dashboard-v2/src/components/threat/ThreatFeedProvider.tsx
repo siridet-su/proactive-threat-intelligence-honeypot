@@ -41,8 +41,13 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const hasSnapshot = useRef(false);
   const streamConnected = useRef(false);
+  const streamRevision = useRef(0);
+  const restRequestRevision = useRef(0);
+  const lastStreamDataAt = useRef(0);
 
   const fetchSnapshot = useCallback(async () => {
+    const requestRevision = ++restRequestRevision.current;
+    const streamRevisionAtStart = streamRevision.current;
     setStatus(hasSnapshot.current ? "refreshing" : "loading");
     try {
       const response = await fetch("/api/threats", { cache: "no-store" });
@@ -50,12 +55,21 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
       const data: unknown = await response.json();
       if (!Array.isArray(data)) throw new Error("Threat response unavailable");
 
+      // Never let a slower REST response replace a newer stream update, or a
+      // newer REST request that finished first.
+      if (requestRevision !== restRequestRevision.current) return;
+      if (streamRevision.current !== streamRevisionAtStart) {
+        if (hasSnapshot.current) setStatus(streamConnected.current ? "ready" : "stale");
+        return;
+      }
+
       setThreats(sortThreats(data.filter(isDashboardThreatEvent)));
       hasSnapshot.current = true;
       setLastUpdated(Date.now());
       setStatus(streamConnected.current ? "ready" : "stale");
     } catch {
-      setStatus(hasSnapshot.current ? "stale" : "error");
+      if (requestRevision !== restRequestRevision.current) return;
+      setStatus(hasSnapshot.current ? (streamConnected.current ? "ready" : "stale") : "error");
     }
   }, []);
 
@@ -64,6 +78,8 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
     let source: EventSource | null = null;
     let reconnectTimer: number | null = null;
     let fallbackTimer: number | null = null;
+    let reconciliationTimer: number | null = null;
+    let reconciliationInFlight = false;
 
     const stopFallback = () => {
       if (fallbackTimer === null) return;
@@ -91,6 +107,8 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
         if (!message) return;
 
         if (message.type === "snapshot") {
+          streamRevision.current++;
+          lastStreamDataAt.current = Date.now();
           setThreats(sortThreats(message.data));
           hasSnapshot.current = true;
           setLastUpdated(Date.now());
@@ -99,6 +117,8 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
         }
 
         if (message.type === "threat.upsert") {
+          streamRevision.current++;
+          lastStreamDataAt.current = Date.now();
           setThreats((current) => upsertThreat(current, message.data));
           hasSnapshot.current = true;
           setLastUpdated(Date.now());
@@ -120,6 +140,7 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
       connection.onopen = () => {
         if (disposed) return;
         streamConnected.current = true;
+        lastStreamDataAt.current = Date.now();
         stopFallback();
         if (hasSnapshot.current) setStatus("ready");
       };
@@ -136,12 +157,21 @@ export function ThreatFeedProvider({ children }: { children: React.ReactNode }) 
 
     void fetchSnapshot();
     connect();
+    reconciliationTimer = window.setInterval(() => {
+      if (streamConnected.current && !reconciliationInFlight && Date.now() - lastStreamDataAt.current >= 20_000) {
+        reconciliationInFlight = true;
+        void fetchSnapshot().finally(() => {
+          reconciliationInFlight = false;
+        });
+      }
+    }, 15_000);
 
     return () => {
       disposed = true;
       streamConnected.current = false;
       source?.close();
       stopFallback();
+      if (reconciliationTimer !== null) window.clearInterval(reconciliationTimer);
       if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
     };
   }, [fetchSnapshot]);

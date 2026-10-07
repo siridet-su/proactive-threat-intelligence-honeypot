@@ -45,6 +45,7 @@ and historical material inherited from the previous team.
 12. [Legacy forwarder purpose](LEGACY-SENSOR-FORWARDER.md) — why the existing Pi still sends a separate Cowrie stream to GCP.
 13. [MongoDB developer handoff](MONGODB-DEV-HANDOFF.md) — scoped read access or sanitized data without reusing owner credentials.
 14. [B2 archive handoff](B2-ARCHIVE-HANDOFF.md) — new-owner backup opt-in and read-only access to historical objects.
+15. [Dashboard data semantics](../dashboard-v2/docs/DATA_SEMANTICS.md) and [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md) — evidence boundaries, bounded session refresh, SSE/REST reconciliation, and freshness behavior.
 
 The first [Ansible Pi preparation slice](../deploy/ansible/README.md) has
 [partial ARM64 VM validation](validation/2026-09-28-azure-arm64-installer-first-run.md)

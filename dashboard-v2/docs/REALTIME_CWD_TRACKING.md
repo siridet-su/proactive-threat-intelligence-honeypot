@@ -102,6 +102,11 @@ connection ที่ไม่อาจยืนยันสถานะได้
 - `GET /api/filesystem-topology/stream` ส่ง snapshot และ update ผ่าน SSE; เมื่อมี
   CWD mutation หลายรายการในช่วงสั้น ๆ server จะ coalesce เป็น snapshot เดียวก่อน
   broadcast ให้ subscribers ใน Node process เดียวกัน
+- Browser โหลด REST snapshot ตั้งต้นควบคู่กับ SSE และเมื่อ SSE ยังเปิดอยู่แต่ไม่มี
+  snapshot/update ใหม่เป็นเวลา 15 วินาที จะอ่าน bounded REST snapshot ซ้ำทุก 15 วินาที
+  จนกว่าจะมี stream snapshot ใหม่หรือ connection เปลี่ยนสถานะ การตอบ REST ที่เริ่มก่อน
+  stream snapshot ใหม่จะถูกทิ้ง เพื่อไม่ให้ข้อมูลเก่าทับข้อมูลที่ใหม่กว่า; heartbeat
+  อย่างเดียวไม่ถือเป็น topology update
 - UI แสดง topology graph ขนาดใหญ่และ source-IP callout ของ session ที่ยัง active;
   กราฟ prioritise เส้นทางล่าสุดเพื่อให้อ่านง่าย ขณะที่ Path inspector ค้นหาและแบ่งหน้า
   session ที่จุดนั้นได้

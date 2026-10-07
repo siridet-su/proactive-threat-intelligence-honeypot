@@ -29,6 +29,9 @@ export class FilesystemStreamLifecycleManager {
   private currentGeneration = 0;
   private source: EventSource | null = null;
   private retryTimeout: ReturnType<typeof setTimeout> | null = null;
+  private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
+  private lastStreamSnapshotAt = 0;
+  private streamSnapshotRevision = 0;
   private fallbackAbortController: AbortController | null = null;
   private connectionCount = 0;
   private cleanupCount = 0;
@@ -45,6 +48,8 @@ export class FilesystemStreamLifecycleManager {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;
     }
+
+    this.stopReconciliation();
 
     if (this.fallbackAbortController) {
       this.fallbackAbortController.abort();
@@ -76,6 +81,8 @@ export class FilesystemStreamLifecycleManager {
         const data = (message as { data?: unknown }).data;
         if (!isSnapshot(data)) return;
         this.options.onSnapshot(data);
+        this.streamSnapshotRevision++;
+        this.lastStreamSnapshotAt = Date.now();
         this.options.onStreamState("live");
       } catch {
         /* retain last valid topology */
@@ -91,6 +98,16 @@ export class FilesystemStreamLifecycleManager {
       }
       this.options.onHydrated();
       this.options.onStreamState("live");
+      this.stopReconciliation();
+      this.lastStreamSnapshotAt = Date.now();
+      // A connected but quiet stream can still have a stalled data source.
+      // Reconcile the bounded REST snapshot; heartbeats are not data updates.
+      this.reconciliationTimer = setInterval(() => {
+        if (this.disposed || this.currentGeneration !== generation || this.source !== source) return;
+        if (Date.now() - this.lastStreamSnapshotAt >= 15_000) {
+          void this.fetchFallbackSnapshot(generation);
+        }
+      }, 15_000);
     };
 
     source.onerror = () => {
@@ -99,6 +116,7 @@ export class FilesystemStreamLifecycleManager {
       }
       this.options.onHydrated();
       this.options.onStreamState("stale");
+      this.stopReconciliation();
       this.cleanupCount++;
       source.close();
       this.source = null;
@@ -118,6 +136,7 @@ export class FilesystemStreamLifecycleManager {
 
   private async fetchFallbackSnapshot(generation: number): Promise<void> {
     if (this.disposed || this.currentGeneration !== generation) return;
+    const streamRevisionAtStart = this.streamSnapshotRevision;
 
     if (this.fallbackAbortController) {
       this.fallbackAbortController.abort();
@@ -138,6 +157,7 @@ export class FilesystemStreamLifecycleManager {
       if (!response.ok) throw new Error("Fallback request failed");
       const data: unknown = await response.json();
       if (this.disposed || this.currentGeneration !== generation) return;
+      if (abortController.signal.aborted || this.streamSnapshotRevision !== streamRevisionAtStart) return;
       if (!isSnapshot(data)) return;
       this.options.onSnapshot(data);
       this.options.onHydrated();
@@ -156,6 +176,13 @@ export class FilesystemStreamLifecycleManager {
     }
   }
 
+  private stopReconciliation(): void {
+    if (this.reconciliationTimer !== null) {
+      clearInterval(this.reconciliationTimer);
+      this.reconciliationTimer = null;
+    }
+  }
+
   public reconnect(): void {
     if (!this.disposed) {
       this.connect();
@@ -165,6 +192,7 @@ export class FilesystemStreamLifecycleManager {
   public dispose(): void {
     this.disposed = true;
     this.currentGeneration++;
+    this.stopReconciliation();
     if (this.retryTimeout !== null) {
       clearTimeout(this.retryTimeout);
       this.retryTimeout = null;

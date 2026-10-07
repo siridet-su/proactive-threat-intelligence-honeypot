@@ -1102,6 +1102,14 @@ def _compact_session_hypothesis_assessment(value: Any) -> Dict[str, Any]:
     }
 
 
+def _hypothesis_sets_truncated(value: Any) -> bool:
+    """Report whether the bounded public hypothesis projection omits sets."""
+
+    if not isinstance(value, (list, tuple)):
+        return False
+    return sum(1 for item in value if isinstance(item, Mapping)) > 50
+
+
 def _compact_hypothesis_sets(value: Any) -> list[Dict[str, Any]]:
     """Expose bounded hypothesis meaning without raw command/event payloads."""
 
@@ -1134,7 +1142,9 @@ def _compact_hypothesis_sets(value: Any) -> list[Dict[str, Any]]:
             "scope": str(raw_set.get("scope") or "")[:160],
             "hypotheses": hypotheses,
         })
-        if len(output) >= 10:
+        # Keep the public projection bounded while supporting sessions where
+        # multiple independent behavior families coexist.
+        if len(output) >= 50:
             break
     return output
 
@@ -1209,6 +1219,9 @@ def _compact_session_detail_view(detail: Mapping[str, Any]) -> Dict[str, Any]:
         ),
         "correlated_ttp_hypotheses": _compact_correlations(raw_correlations),
         "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "hypothesis_sets_truncated": _hypothesis_sets_truncated(
             detail.get("hypothesis_sets")
         ),
         "behavioral_findings": [
@@ -1348,6 +1361,9 @@ def session_detail_view(
         "observed_trusted_ttps": observed_trusted_ttps,
         "correlated_ttp_hypotheses": public_correlations,
         "hypothesis_sets": _compact_hypothesis_sets(
+            detail.get("hypothesis_sets")
+        ),
+        "hypothesis_sets_truncated": _hypothesis_sets_truncated(
             detail.get("hypothesis_sets")
         ),
         "session_hypothesis_assessment": _compact_session_hypothesis_assessment(

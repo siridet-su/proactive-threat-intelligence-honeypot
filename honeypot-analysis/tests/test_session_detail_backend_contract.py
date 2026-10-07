@@ -8,6 +8,7 @@ import production.api.monitor_web as monitor_web
 from production.api.security import (
     _compact_hypothesis_sets,
     _compact_session_guidance,
+    _hypothesis_sets_truncated,
     session_detail_view,
 )
 import production.prediction_next_distinct_poc.dashboard_adapter as next_distinct_adapter
@@ -28,14 +29,16 @@ def test_public_hypothesis_projection_keeps_all_sets_up_to_contract_bound() -> N
                 "status": "active",
             }],
         }
-        for index in range(11)
+        for index in range(51)
     ]
 
     public = _compact_hypothesis_sets(source)
 
-    assert len(public) == 10
+    assert len(public) == 50
     assert public[8]["hypothesis_set_id"] == "set-8"
-    assert public[-1]["hypothesis_set_id"] == "set-9"
+    assert public[-1]["hypothesis_set_id"] == "set-49"
+    assert _hypothesis_sets_truncated(source) is True
+    assert _hypothesis_sets_truncated(source[:50]) is False
 
 
 def test_hypothesis_projection_requires_canonical_path_evidence() -> None:

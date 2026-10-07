@@ -268,6 +268,59 @@ describe("Filesystem Freshness Semantics (FA-006 / FS-012)", () => {
       manager.dispose();
     });
 
+    it("reconciles an open quiet stream and stops the timer after disposal", async () => {
+      vi.useFakeTimers();
+      try {
+        const source = new MockEventSource("/api/filesystem-topology/stream");
+        const fetchFallback = vi.fn().mockResolvedValue(new Response(JSON.stringify(baseEmptySnapshot), { status: 200 }));
+        const manager = new FilesystemStreamLifecycleManager({
+          createEventSource: () => source as unknown as EventSource,
+          fetchFallback,
+          onSnapshot: vi.fn(),
+          onStreamState: vi.fn(),
+          onHydrated: vi.fn(),
+        });
+
+        manager.connect();
+        source.onopen?.();
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(fetchFallback).toHaveBeenCalledTimes(2); // initial + quiet-stream reconciliation
+
+        manager.dispose();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(fetchFallback).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not let a late REST snapshot overwrite a newer stream snapshot", async () => {
+      let resolveFetch: ((response: Response) => void) | null = null;
+      const fetchFallback = vi.fn(() => new Promise<Response>((resolve) => { resolveFetch = resolve; }));
+      const received: FilesystemTopologySnapshot[] = [];
+      const source = new MockEventSource("/api/filesystem-topology/stream");
+      const manager = new FilesystemStreamLifecycleManager({
+        createEventSource: () => source as unknown as EventSource,
+        fetchFallback,
+        onSnapshot: (snapshot) => received.push(snapshot),
+        onStreamState: vi.fn(),
+        onHydrated: vi.fn(),
+      });
+
+      manager.connect();
+      const streamSnapshot = { ...baseEmptySnapshot, generatedAt: "2026-09-17T10:05:00.000Z" };
+      source.listeners.snapshot?.forEach((listener) => listener({
+        data: JSON.stringify({ data: streamSnapshot }),
+      } as MessageEvent<string>));
+      const staleSnapshot = { ...baseEmptySnapshot, generatedAt: "2026-09-17T10:00:00.000Z" };
+      resolveFetch?.(new Response(JSON.stringify(staleSnapshot), { status: 200 }));
+      await vi.waitFor(() => expect(fetchFallback).toHaveBeenCalledOnce());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(received).toEqual([streamSnapshot]);
+      manager.dispose();
+    });
+
     it("shows an error instead of loading forever when both SSE and REST stall", async () => {
       vi.useFakeTimers();
       const onRegionStatus = vi.fn();
