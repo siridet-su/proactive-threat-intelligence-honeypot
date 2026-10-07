@@ -241,7 +241,7 @@ describe("FSV-006 rule-based path interest semantics", () => {
     assertForbiddenClaimsAbsent(container);
   });
 
-  it("does not mark an ordinary Canvas node and keeps a failed destination unmaterialized", async () => {
+  it("does not mark an ordinary node or materialize a failed destination on Canvas", async () => {
     const failedRoute = deriveActiveHopRoute(
       [failedEvent()],
       0,
@@ -254,7 +254,7 @@ describe("FSV-006 rule-based path interest semantics", () => {
     );
     expect(normalNode).not.toBeUndefined();
     expect(normalNode?.querySelector('[data-testid="rule-based-path-interest"]')).toBeNull();
-    expect(container.querySelector('[data-testid="failed-change-annotation"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="failed-change-annotation"]')).toBeNull();
     expect(container.querySelector('[data-testid="active-hop-target-badge"]')).toBeNull();
     expect(container.querySelector('[data-active-hop-connector="true"]')).toBeNull();
     expect(container.textContent).not.toContain("/tmp/unverified-destination");

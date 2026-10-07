@@ -198,7 +198,7 @@ describe("FA-012 ownership boundaries", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("No active honeypot sessions");
+    expect(container.textContent).toContain("No active filesystem sessions");
     expect(vi.getTimerCount()).toBe(0);
   });
 

@@ -440,13 +440,13 @@ function LiveTopologyStandby({
       ? "Loading live topology"
       : isReconnecting
         ? "Reconnecting to live activity"
-        : null;
+        : "No active filesystem sessions";
   const status =
     mode === "loading"
       ? "Preparing the latest activity"
       : isReconnecting
         ? "Showing the last available topology"
-        : null;
+        : "Waiting for verified CWD activity";
 
   return (
     <section

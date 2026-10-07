@@ -3606,3 +3606,36 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Related ADR/runbook: [Dashboard data semantics](../dashboard-v2/docs/DATA_SEMANTICS.md),
   [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
   [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
+### 2026-10-07 — Resolve filesystem UI suite mismatches
+
+- Status: prepared on the isolated public-main candidate; not deployed to a
+  host.
+- Scope and intent: make the empty live topology state explicit without
+  claiming there are no honeypot connections, and align stale filesystem tests
+  with the current evidence-separation and canvas-rendering contracts.
+- Repository branch and commit/PR: `codex/public-main-20261007`, follow-up to
+  `f32b646ed`; the follow-up commit is created with this entry.
+- Repository changes: show “No active filesystem sessions” and “Waiting for
+  verified CWD activity” in the valid empty state; update tests so session-level
+  command evidence is not implicitly bound to a CWD hop and failed destinations
+  remain absent from the topology canvas. This addendum updates the earlier
+  test snapshot: the four failures recorded there are now resolved.
+- Host/environment changes actually applied: none.
+- Runtime/exposure state: no host runtime changed; candidate remains undeployed.
+- Validation performed and outcome: full Vitest passed (81 files passed, 1
+  skipped; 865 tests passed, 1 expected failure, 14 skipped); the four affected
+  filesystem suites passed (40 tests); related backend tests passed (50); the
+  three dedicated Node scripts passed (11); ESLint, TypeScript, and the webpack
+  production build passed.
+- Not performed / deferred: authenticated browser, staging/production, and
+  live-session verification.
+- Risks and data handling: the empty state describes only tracked filesystem
+  sessions, not all honeypot connections. CWD route evidence and session command
+  evidence remain separate unless independently linked.
+- Rollback: revert the follow-up commit; no host rollback applies.
+- Follow-up: publish the validated candidate by fast-forward only, then perform
+  a separately authorized staging/live verification before deployment.
+- Related ADR/runbook: [Dashboard data semantics](../dashboard-v2/docs/DATA_SEMANTICS.md),
+  [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
+  [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).

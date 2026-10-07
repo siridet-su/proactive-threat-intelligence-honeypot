@@ -570,7 +570,7 @@ describe("FSV-005 failed-change visualization", () => {
     assertHostileDestinationAbsent(container);
   });
 
-  it("uses the verified origin as selected CWD context in the Evidence tab", async () => {
+  it("keeps session command evidence separate from the selected CWD route", async () => {
     await act(async () => {
       root.render(createElement(ReplayHistoryHarness, {
         history: [failedEvent],
@@ -580,9 +580,8 @@ describe("FSV-005 failed-change visualization", () => {
       await Promise.resolve();
     });
 
-    expect(container.textContent).toContain("Selected CWD context");
-    expect(container.textContent).toContain(VERIFIED_ORIGIN);
-    expect(container.textContent).toContain("attempted destination unavailable or unverified");
+    expect(container.textContent).toContain("not automatically linked to the selected CWD hop");
+    expect(container.textContent).not.toContain(VERIFIED_ORIGIN);
     assertHostileDestinationAbsent(container);
   });
 
