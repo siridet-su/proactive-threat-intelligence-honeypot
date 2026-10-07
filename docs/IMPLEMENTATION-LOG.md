@@ -3488,3 +3488,36 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Rollback: restore the previous immutable staging release through the reviewed staging deployment procedure if a visual regression is found.
 - Follow-up: inspect calendar status contrast in an authenticated browser and verify the production revision independently.
 - Related ADR/runbook: [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md) and [Dashboard API guide](../dashboard-v2/docs/API.md).
+
+### 2026-10-07 — Publication and log-order addendum
+
+- Status: source curation is published to GitHub `main`; this addendum is
+  repository-only and does not describe a host deployment.
+- Scope and intent: record the actual publication outcome and correct the
+  placement of the preceding curation record.
+- Repository branch and commit/PR: source curation commit
+  `3a3b2f8ace48ba732f1f508b81fce76f22489dc7` was pushed to
+  `origin/main` as a fast-forward from `8ff7c99c7ea2614a3ec1325274a6ba36545707f1`.
+  No force-push or history rewrite was used.
+- Repository changes: this addendum only. The earlier 2026-10-07 curation
+  entry remains unchanged but was inserted before EOF because its patch matched
+  a repeated line; this entry is the chronological EOF correction and records
+  the completed push.
+- Host/environment changes actually applied: none. No GCP VM, Pi, database,
+  service, firewall, credential, or external endpoint was changed.
+- Runtime/exposure state: unchanged; publication did not deploy or activate
+  the code.
+- Validation performed and outcome: post-commit backend/policy integration
+  tests passed (149); the selected Python suite passed (618, with 11 expected
+  failures); the complete Dashboard suite retained four failures in existing
+  filesystem UI tests. TypeScript, targeted lint, policy validators, and the
+  new Node checks passed.
+- Not performed / deferred: live host, browser, staging, or production
+  validation; full-history secret scanning; deployment.
+- Risks and data handling: publication was limited to the curated commit and
+  did not rewrite already-published history. Heuristic checks are not proof
+  that every pre-existing upstream file is free of sensitive content.
+- Rollback: revert the source curation commit and this addendum; no host
+  rollback applies.
+- Follow-up: resolve the four existing Dashboard filesystem UI failures and
+  complete live qualification before any deployment.
