@@ -39,7 +39,9 @@ and historical material inherited from the previous team.
    [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md) defines the
    hosted Dashboard source for Admin-only Cowrie command evidence.
    [ADR-0017](adr/ADR-0017-local-dashboard-gcp-backend.md) records the accepted
-   local-Dashboard/GCP-backend target and the still-unqualified private API path.
+   local-Dashboard/GCP-backend target and its operational addendum: current
+   workstation access uses the loopback-only GCP staging UI through SSH, while
+   native-local operation and full session/report acceptance remain unqualified.
 
 9. [Honeypot Portal & Customer Installer Blueprint](HONEYPOT-PORTAL-INSTALLER-GUIDE.md) — proposed appliance design and delivery gates; the installation manual is the next workstream and must follow current-state documents where this blueprint describes retired controls.
 10. [Installation readiness audit](INSTALLATION-READINESS-2026-09-28.md) — verified Pi/repository environment boundaries, clean-OS installation path, and blockers before writing runnable instructions.

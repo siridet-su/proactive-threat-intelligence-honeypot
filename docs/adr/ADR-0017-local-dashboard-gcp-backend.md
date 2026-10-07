@@ -65,3 +65,37 @@ The local BFF-to-GCP authentication and private transport have been implemented
 and tested, or the operator changes the Dashboard hosting requirement. Any
 re-enablement of a hosted UI or watchdog timer must update the reviewed target
 inventory and current-state documentation first.
+
+## Operational addendum — 2026-10-08
+
+The intended native-local UI was not established. To let the operator reach
+the existing staging build while retaining the backend on GCP, the staging
+service was enabled on the replacement VM at loopback `127.0.0.1:3001`; the
+operator's workstation reaches it through an SSH local forward bound to its
+own `127.0.0.1:3001`. The staging `/login` route returned HTTP 200 through that
+forward. No public listener, firewall rule, production Dashboard service, or
+backend release pointer was changed. The staging environment explicitly opts
+into non-Secure cookies for this HTTP-over-loopback path; the app must not be
+exposed on a LAN or public interface. Its env backup remains root-only on the
+VM.
+
+This is a temporary operational exception to the decision above, not a change
+of target architecture and not evidence that a local Next.js process is
+running. In one authenticated session inspection, Model1 evidence, threat
+hypotheses, TTP ranking, and a session-bound Next-Distinct prediction were
+returned. Response Guidance for the stored report was rejected because its
+referenced policy 3.8.0 could not be resolved by the active runtime, and the
+PDF endpoint returned HTTP 503 while validating that report. External TI was
+pending with no provider call; the AI worker was inactive, so no live AI API
+request was tested. A separate SSH test attempt was not accepted as a verified
+Cowrie session because the target service identity and resulting canonical
+session could not be confirmed. These checks do not qualify the complete
+demonstration flow.
+
+The staging UI may be used for limited inspection through the SSH forward, but
+do not describe Response Guidance, PDF generation, external TI, AI API, or a
+fresh-session end-to-end demonstration as ready until their individual gates
+pass. The production UI and recovery-watchdog timer remain disabled. The
+active backend release and Model2 configuration remain unchanged; the release
+manifest/rollback and canonical MongoDB recovery gates still block backend
+cutover.

@@ -115,21 +115,26 @@ receipt before being treated as manifest-bound deployment content.
 
 On 2026-10-08 the eight core daemons, Next-Distinct shadow/feeder, and Model2
 v7 services were active with zero failed units. The feed and session-count
-timers were active. The two GCP Dashboard v2 services and service-watchdog
-timer were stopped and disabled; their unit definitions were archived in the
-host's protected backup area. The watchdog timer remains disabled because its
-protected target list includes the two Dashboard services; its host program and
-configuration were not changed. The revised managed-unit policy passed against
-the `gcp_backend` inventory, but does not validate the independent Model2 v7
-units. The AI advisory worker was inactive.
+timers were active. The production Dashboard service and service-watchdog timer
+remain stopped/disabled. The staging Dashboard service was subsequently enabled
+for loopback-only workstation access and is active at `127.0.0.1:3001`; access
+uses an SSH local forward. Its staging environment allows a non-Secure cookie
+only for that HTTP-over-loopback mode. No public listener/firewall change was
+made. The watchdog timer remains disabled because its protected target list
+includes the Dashboard services; its host program and configuration were not
+changed. The revised managed-unit policy passed against the `gcp_backend`
+inventory, but does not validate the independent Model2 v7 units. The AI
+advisory worker was inactive.
 
 The ingest endpoint is bound to its authorized private overlay interface and
 returned HTTP 200 on that binding; Dashboard API and monitor health returned
-HTTP 200 on their local bindings. The GCP-hosted Dashboard v2 UI is not active;
-the intended local Dashboard-to-backend flow has not been qualified. Exact
-listening addresses, firewall rule, target tag, overlay peer, and backend port
-remain in the owner-only inventory. This check did not enumerate all public
-listeners or verify the GCP firewall control plane.
+HTTP 200 on their local bindings. The forwarded staging login page returned
+HTTP 200. This confirms reachability/authentication smoke only, not complete
+session analysis: stored Response Guidance referencing policy 3.8.0 is
+rejected, and the corresponding PDF request returns 503. Exact firewall rule,
+target tag, overlay peer, and backend port remain in the owner-only inventory.
+This check did not enumerate all public listeners or verify the GCP firewall
+control plane. The native-local Dashboard target remains unqualified.
 
 ## Capacity boundary
 

@@ -148,6 +148,16 @@ database, or protected runtime configuration was changed. See
 [CURRENT_PRODUCTION_STATE.md](CURRENT_PRODUCTION_STATE.md) for the current
 verification boundary.
 
+Operational addendum, 2026-10-08: the GCP staging Dashboard was subsequently
+enabled for limited operator inspection and is active only on VM loopback
+`127.0.0.1:3001`; the workstation reaches it through an SSH local forward.
+Production Dashboard and the watchdog timer remain disabled. The forwarded
+login route passed, but the inspected stored report's policy-3.8 Response
+Guidance was rejected and its PDF returned 503. This does not change the
+blocked backend release decision or qualify the full user workflow. See the
+[staging runbook](../deployment/dashboard-v2-staging/README.md) and
+[ADR-0017](../../docs/adr/ADR-0017-local-dashboard-gcp-backend.md).
+
 The machine-readable receipt
 `evaluation/next_tactic_final_production_activation_20260802.json` records the
 earlier VM's activation and rollback rehearsal. Its revisions, addresses,

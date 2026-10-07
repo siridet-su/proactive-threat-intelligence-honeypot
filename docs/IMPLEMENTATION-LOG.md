@@ -3829,3 +3829,83 @@ Additional validation on 2026-09-28: a local Zeek policy render with ports 2222/
 - Related ADR/runbook: [Dashboard data semantics](../dashboard-v2/docs/DATA_SEMANTICS.md),
   [real-time CWD tracking](../dashboard-v2/docs/REALTIME_CWD_TRACKING.md), and
   [Dashboard staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).
+
+### 2026-10-08 — Re-enable loopback staging UI and record session acceptance gaps
+
+- Status: staging UI active for limited inspection; end-to-end workflow not ready.
+- Scope and intent: provide workstation access to the existing GCP staging UI
+  while keeping the backend on GCP, then verify a stored session across analysis,
+  recommendation, TI, AI advisory, and PDF boundaries without weakening policy
+  validation or changing the backend release.
+- Repository branch and commit/PR: `main`, based on
+  `b0c4aa032f73135d9daf1dee9ef991f3360320f8`; this documentation-only
+  follow-up is included in the commit containing this entry.
+- Repository changes: correct current-state, service-catalog, staging-runbook,
+  and ADR-0017 descriptions to state that GCP staging is active on loopback and
+  reached from the workstation through SSH; document the limited HTTP-cookie
+  opt-in and its loopback-only constraint; record live-session failure details
+  without changing prior audit entries. No runtime source, policy, model,
+  release manifest, secret, or telemetry fixture was changed.
+- Host/environment changes actually applied: earlier on 2026-10-08, enable and
+  start `honeypot-dashboard-v2-staging.service`; set `HONEYPOT_ENV=local` and
+  `DASHBOARD_ALLOW_HTTP_COOKIE=true` in its root-owned environment after
+  preserving the pre-change file at
+  `/var/backups/honeypot/dashboard-v2-staging.env.pre-local-cookie-20261008`.
+  No public firewall/listener, production Dashboard, watchdog timer, backend
+  release pointer, database, or Model2 configuration was changed by this
+  staging access setup. No current-main Dashboard artifact was deployed by this
+  entry.
+- Runtime/exposure state: staging listens only on VM `127.0.0.1:3001`; the
+  workstation forward listens only on `127.0.0.1:3001`. GCP production
+  Dashboard and recovery-watchdog timer remain disabled. Backend release
+  `dcaa63b606da637a41b78e6c123a2df62d63de56` remains active; the newer
+  repository candidate remains undeployed because manifest-bound release and
+  rollback gates are not met.
+- Validation performed and outcome: read-only tunnel check reported a loopback
+  SSH listener and `GET /login` HTTP 200. Earlier same-day authenticated smoke
+  returned login/session/logout HTTP 200/200/200 and then session HTTP 401;
+  headless Chromium found the staging login form with no page errors. Local
+  `npx tsc --noEmit` and `npm run build -- --webpack` passed; Dashboard Vitest
+  passed 81 files (866 passed, 1 skipped; 1 expected failure, 14 skipped), and
+  focused backend tests passed 36/36. The inspected existing session returned
+  session analysis HTTP 200 with six classification events, three trusted
+  observations, one hypothesis set/two hypotheses, a Model1-led TTP candidate,
+  and session-bound Next-Distinct `PREDICTED/FINAL`; Model2 was partial.
+  Response Guidance was `invalid_stored_guidance` because its stored record
+  referenced policy 3.8.0 that the active runtime could not resolve. A read-only
+  scan of repository refs found top-level policy versions 3.7.0 and 4.0.0, but
+  no exact 3.8.0 policy file. PDF returned HTTP 503 (`pdf_render_failed`) from
+  the same assessment validation failure; ReportLab was present in the runtime.
+  ETI remained pending with zero provider calls because the observable was
+  ineligible for lookup. The AI advisory worker was inactive; its stored
+  selection did not prove a live AI API call. A bounded SSH probe to the
+  operator-designated test endpoint did not establish Cowrie identity or a
+  canonical resulting session and is not accepted as a fresh-session test. No
+  command output or session data was added to Git.
+- Not performed / deferred: backend release/cutover; current-main artifact
+  deployment; canonical MongoDB backup/isolated restore; manifest-bound
+  rollback qualification; fresh verified Cowrie session; current-policy
+  Response Guidance; new-report PDF; eligible public-IP external TI lookup;
+  live AI API call; authenticated Web-corp page; and native-local Next.js UI.
+- Risks and data handling: the HTTP cookie exception is safe only while both
+  endpoints remain loopback-bound and the SSH forward is used. The old stored
+  report is immutable and must not be reinterpreted using policy 4.0.0 to
+  replace its missing exact policy 3.8.0. The SSH test target was not
+  independently identified as Cowrie; do not send more commands to it until
+  its identity is verified. No credentials, tokens, report contents, or raw
+  attacker data were recorded.
+- Rollback: stop and disable only the staging Dashboard service and restore
+  its root-only pre-change environment backup if returning to the prior
+  host state; leave production and watchdog disabled. Keep the SSH forward
+  closed when the Dashboard is not in use. No backend or data rollback applies.
+- Follow-up: identify the Cowrie test endpoint before another session test;
+  recover/verify the exact historical policy by recorded hash or explicitly
+  mark the report's Response Guidance unavailable; qualify a new current-policy
+  report and PDF; perform the provider-eligible ETI test and AI API test only
+  after its worker/provider configuration is approved; complete canonical
+  MongoDB and release rollback gates before backend deployment.
+- Related ADR/runbook: [ADR-0017](adr/ADR-0017-local-dashboard-gcp-backend.md),
+  [current production state](../honeypot-analysis/docs/CURRENT_PRODUCTION_STATE.md),
+  [GCP architecture](../honeypot-analysis/docs/GCP_VM_CURRENT_ARCHITECTURE.md),
+  [deployment and recovery](../honeypot-analysis/docs/DEPLOYMENT_AND_RECOVERY.md),
+  and [staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md).

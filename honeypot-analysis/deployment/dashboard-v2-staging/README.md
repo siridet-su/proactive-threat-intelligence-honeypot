@@ -5,13 +5,38 @@ are not a production deployment mechanism. The runtime namespace is
 `/opt/honeypot-dashboard-v2-staging` and its `incoming/` directory is the only
 artifact upload area accepted by the root deployment wrapper.
 
-> **Current host status (2026-10-08):** the operator selected a local Dashboard
-> UI with the backend remaining on GCP. The GCP staging and production Dashboard
-> v2 services are stopped and disabled; their unit files were archived in the
-> host's protected backup area. Do not run this bootstrap or deploy workflow to
-> reactivate a hosted UI unless the operating decision is revisited. The local
-> Dashboard-to-GCP API path has not yet been qualified; see
-> [ADR-0017](../../../docs/adr/ADR-0017-local-dashboard-gcp-backend.md).
+> **Current host status (2026-10-08):** the GCP staging Dashboard service is
+> active on loopback `127.0.0.1:3001`; production Dashboard remains stopped and
+> disabled. The workstation can reach staging through an SSH local forward;
+> this is a remote GCP process, not a native-local UI. The forwarded `/login`
+> route returned HTTP 200. Full session analysis/report acceptance is incomplete:
+> one stored response-guidance record was rejected for an unavailable historical
+> policy, and its PDF route returned 503. The backend release pointer and public
+> firewall were not changed. See
+> [ADR-0017](../../../docs/adr/ADR-0017-local-dashboard-gcp-backend.md) and
+> [current production state](../../docs/CURRENT_PRODUCTION_STATE.md).
+
+## Workstation access to the active staging UI
+
+Use the approved SSH host profile with host-key checking enabled. Keep the
+forward bound to workstation loopback; do not bind it to `0.0.0.0` or expose
+the staging service to a LAN:
+
+```bash
+ssh -N -L 127.0.0.1:3001:127.0.0.1:3001 <verified-SSH-profile>
+```
+
+Replace `<verified-SSH-profile>` with the existing owner-approved SSH alias or
+destination; keep host-key verification enabled.
+
+Then open `http://127.0.0.1:3001/login`. This forwards to the remote staging
+service and does not run the Next.js process locally. The staging environment
+uses `HONEYPOT_ENV=local` and `DASHBOARD_ALLOW_HTTP_COOKIE=true` solely for this
+HTTP-over-loopback access; the SSH connection protects workstation-to-VM
+transport. Never reuse this cookie configuration on a publicly reachable or
+LAN-bound listener. The last check confirmed a loopback-only SSH listener and
+HTTP 200 from `/login`; the complete live-session/PDF workflow remains
+unqualified.
 
 ## One-time VM setup
 
@@ -91,6 +116,7 @@ backend-independent router check.
 ## Rollback
 
 Rollback is automatic when the wrapper's post-restart health check fails. The
-wrapper restores the previous symlink and restarts only staging. Production
-continues using `/opt/honeypot-dashboard-v2/current` and
-`honeypot-dashboard-v2.service` on port 3000.
+wrapper restores the previous symlink and restarts only staging. The
+production service is currently stopped/disabled; do not infer it is available
+on port 3000. Production activation requires a separate reviewed release and
+operational approval.

@@ -1,8 +1,8 @@
 ---
 title: Current honeypot architecture
 status: current
-last_verified: 2026-09-28
-last_updated: 2026-09-28
+last_verified: 2026-10-08
+last_updated: 2026-10-08
 ---
 
 # Current honeypot architecture
@@ -78,7 +78,7 @@ key and explicitly enable backup; historical object read access is separate.
 | Redis and Zeek | Active | Pi Zeek has `wlan0`, ZeroTier, and `wg0` workers. The filter admits Cowrie TCP 22/23 on the first two interfaces and Web-corp TCP 80 on ZeroTier and `wg0`; other development/management traffic is excluded. Synthetic public HTTPS traffic produced `wg0` conn/http events in MongoDB. Tailscale inner traffic remains outside Zeek capture. |
 | TI worker | Active (verified 2026-09-24) | `honeypot-ti-worker.service` is enabled and running on the Pi. It consumes validated jobs from Redis `ti:jobs` under queue, cache, and provider-quota controls. Web-corp login is excluded. |
 | Dashboard Web-corp HTTP activity | Active on GCP (validated 2026-09-25) | Read-only MongoDB integration; production projection and unauthenticated API boundary were checked. Authenticated browser rendering was not exercised. |
-| Dashboard Filesystem Activity | Local UI target; local-to-GCP path unqualified | `main` retains Route Replay and Admin-only command/download Evidence after retiring session termination. The GCP production and staging Dashboard v2 services were stopped and disabled on 2026-10-08. A local authenticated BFF-to-GCP path, session details, command evidence, reports, and PDF generation have not been requalified. Do not copy a production MongoDB URI into browser code or open a public API listener. The Artifact Intelligence link destination remains unverified. The Pi response agent remains retired; tailnet ACL cleanup and the next Cowrie restart remain pending. See [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md), [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md), [ADR-0017](adr/ADR-0017-local-dashboard-gcp-backend.md), the [retirement runbook](RESPONSE-CONTROL-PLANE.md), and the [Filesystem working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md). |
+| Dashboard v2 UI and session analysis | GCP staging UI, loopback only; workstation access via SSH tunnel | Staging service on the replacement VM is active on `127.0.0.1:3001`; workstation tunnel returned HTTP 200 for `/login` on 2026-10-08. This is a remote GCP process, not a native local Next.js process. GCP production Dashboard and recovery-watchdog timer remain disabled. One authenticated session/API smoke was partial: Model1 evidence, hypotheses, TTP ranking, and Next-Distinct were present, but stored Response Guidance referencing policy 3.8.0 was rejected because that exact policy was unavailable in the active runtime; the PDF route returned 503 for the same invalid stored report. ETI remained pending (no eligible public observable/provider call); AI advisory was stored/selected but the AI worker was inactive and no live AI request was made. Do not call the complete workflow qualified or copy a production MongoDB URI into browser code/open a public listener. Native-local UI, a fresh verified Cowrie session, valid current-policy guidance, and PDF acceptance remain open. See [ADR-0007](adr/ADR-0007-retire-dashboard-session-termination.md), [ADR-0016](adr/ADR-0016-hosted-dashboard-command-evidence.md), [ADR-0017](adr/ADR-0017-local-dashboard-gcp-backend.md), the [staging runbook](../honeypot-analysis/deployment/dashboard-v2-staging/README.md), and the [Filesystem working state](FILESYSTEM-ACTIVITY-WORKING-STATE.md). The Pi response agent remains retired; tailnet ACL cleanup and the next Cowrie restart remain pending. |
 | Adaptive raw-command gateway | Experiment | Loopback POC only; not attached to the live Cowrie listener. |
 | Post-session/cloud analysis | Target workstream | Under active development. |
 | Hailo/Ollama runtime | Experimental candidate | Not the current Cowrie execution path. |
