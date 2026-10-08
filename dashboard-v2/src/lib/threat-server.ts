@@ -224,6 +224,11 @@ function normalizeThreat(
   ipCache = new Map<string, { lat: number; lon: number; country: string; city: string }>(),
 ): DashboardThreatEvent {
   const payload = storedSessionPayload(session);
+  const rawProtocol = session.protocol ?? payload.protocol ?? session.service ?? payload.service;
+  const normalizedProtocol = typeof rawProtocol === "string" ? rawProtocol.trim().toLowerCase() : "";
+  const protocol = normalizedProtocol === "ssh" || normalizedProtocol === "telnet"
+    ? normalizedProtocol
+    : "unknown";
   let lat = 0;
   let lon = 0;
   let country = "Unknown";
@@ -291,6 +296,7 @@ function normalizeThreat(
     date: dateObj.toLocaleDateString("en-GB"),
     time: `${dateObj.toLocaleTimeString("en-US", { hour12: false })} UTC`,
     sensor: typeof session.session_source === "string" && session.session_source ? session.session_source : "Unknown",
+    protocol,
     src_ip: ip,
     sourceIp: ip,
     severity,

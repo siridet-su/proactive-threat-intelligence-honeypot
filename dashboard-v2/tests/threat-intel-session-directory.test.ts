@@ -14,6 +14,7 @@ const sshSession: DashboardThreatEvent = {
   date: "27/09/2026",
   time: "12:00:00 UTC",
   sensor: "pi-cowrie-01",
+  protocol: "ssh",
   src_ip: "198.51.100.10",
   sourceIp: "198.51.100.10",
   severity: "Medium",
@@ -112,6 +113,18 @@ describe("unified session directory projection", () => {
       activity: "Command activity",
       dwellTime: "24s",
       status: "Closed",
+    });
+  });
+
+  it("shows Telnet sessions as Telnet inside the Cowrie directory", () => {
+    const telnetSession = { ...sshSession, id: "telnet-session-1", protocol: "telnet" };
+    const [row] = buildSessionDirectoryRows([telnetSession], [], "ssh");
+
+    expect(row).toMatchObject({
+      id: "telnet-session-1",
+      protocol: "TELNET",
+      href: "/threat-intel/telnet-session-1",
+      dwellTime: "24s",
     });
   });
 

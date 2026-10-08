@@ -199,7 +199,7 @@ export default function ThreatIntelPage() {
             </span>
           </div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-text sm:text-3xl">Threat Intelligence Console</h1>
-          <p className="text-sm text-text-muted">Browse SSH and HTTP interactions together, then open protocol-specific session evidence.</p>
+          <p className="text-sm text-text-muted">Browse Cowrie SSH/Telnet and HTTP interactions together, then open protocol-specific session evidence.</p>
         </div>
         <div className="flex items-center gap-2.5 sm:gap-3 flex-wrap sm:flex-nowrap">
           <RefreshStatus status={status} />
@@ -220,7 +220,7 @@ export default function ThreatIntelPage() {
 
       {/* KPI Top Cards */}
       <section aria-label="Threat intelligence overview" aria-busy={isInitialLoad} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="SSH Sessions" value={stats.total.toLocaleString()} description="Retained Cowrie sessions" icon={Database} tone="info" loading={isDirectoryInitialLoad} unavailable={isDirectoryUnavailable} />
+        <MetricCard label="Cowrie Sessions" value={stats.total.toLocaleString()} description="Retained SSH and Telnet sessions" icon={Database} tone="info" loading={isDirectoryInitialLoad} unavailable={isDirectoryUnavailable} />
         <MetricCard label="HTTP Sessions" value={stats.httpSessions.toLocaleString()} description="Grouped from the latest 50 HTTP events" icon={Globe} tone="warning" loading={!httpItems && !httpError} unavailable={httpError} />
         <MetricCard label="Active Connections" value={stats.activeSessions.toLocaleString()} description="Currently connected to honeypot" icon={Activity} tone="danger" loading={isInitialLoad} unavailable={isUnavailable} />
         <MetricCard label="Live Origin IPs" value={stats.uniqueOrigins.toLocaleString()} description="Distinct sources in live feed" icon={Globe} tone="warning" loading={isInitialLoad} unavailable={isUnavailable} />
@@ -249,8 +249,8 @@ export default function ThreatIntelPage() {
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div role="group" aria-label="Session protocol filter" className="inline-flex w-fit rounded-lg border border-[#18227A]/20 bg-surface-subtle p-1">
                 {([
-                  { id: "all", label: "All", count: directory ? `${(directoryTotal + matchingHttpCount).toLocaleString()}+` : "—", title: "SSH total plus HTTP sessions represented in the latest 50 request events" },
-                  { id: "ssh", label: "SSH", count: directory ? directoryTotal.toLocaleString() : "—", title: "Matching retained SSH/Cowrie sessions" },
+                  { id: "all", label: "All", count: directory ? `${(directoryTotal + matchingHttpCount).toLocaleString()}+` : "—", title: "Cowrie total plus HTTP sessions represented in the latest 50 request events" },
+                  { id: "ssh", label: "Cowrie", count: directory ? directoryTotal.toLocaleString() : "—", title: "Matching retained Cowrie SSH and Telnet sessions" },
                   { id: "http", label: "HTTP", count: httpItems ? `${matchingHttpCount} recent` : "—", title: "Cookie sessions grouped from the latest 50 stored HTTP events" },
                 ] as const).map((tab) => (
                   <button
@@ -313,7 +313,7 @@ export default function ThreatIntelPage() {
                     <label htmlFor="session-attacker-type" className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-text-muted">Attacker type</label>
                     <select
                       id="session-attacker-type"
-                      aria-label="Filter SSH sessions by attacker type"
+                      aria-label="Filter Cowrie sessions by attacker type"
                       value={attackerTypeFilter}
                       onChange={(event) => {
                         setAttackerTypeFilter(event.target.value as SessionAttackerTypeFilter);
@@ -334,10 +334,10 @@ export default function ThreatIntelPage() {
                     onClick={() => void handleExport()}
                     disabled={!directoryTotal || isExporting}
                     className="ui-button h-8 min-h-8 px-2.5 text-xs"
-                    title={exportStatus || "Export matching SSH session records to CSV"}
+                    title={exportStatus || "Export matching Cowrie session records to CSV"}
                   >
                     <Download className="h-3.5 w-3.5" aria-hidden="true" />
-                    {isExporting ? "Exporting..." : "Export SSH"}
+                    {isExporting ? "Exporting..." : "Export Cowrie"}
                   </button>
                 )}
               </div>
@@ -345,9 +345,9 @@ export default function ThreatIntelPage() {
 
             <p className="text-xs leading-5 text-text-muted">
               {protocolFilter === "all"
-                ? "All combines each paginated SSH result page with HTTP sessions represented in the latest 50 request events. The recent HTTP window stays pinned while you browse SSH history."
+                ? "All combines each paginated Cowrie result page with HTTP sessions represented in the latest 50 request events. The recent HTTP window stays pinned while you browse Cowrie history."
                 : protocolFilter === "ssh"
-                  ? "SSH sessions are server-searched and paginated. Command counts are shown only where session-bound data is available."
+                  ? "Cowrie sessions are server-searched and paginated. Command counts are shown only where session-bound data is available."
                   : "HTTP sessions are grouped by browser-cookie continuity and cover the latest 50 stored events; this does not verify attacker identity."}
             </p>
           </div>
@@ -368,13 +368,13 @@ export default function ThreatIntelPage() {
         <div>
           {protocolFilter !== "http" && isDirectoryUnavailable && (
             <p role="alert" className="border-b border-warning-border bg-warning-subtle px-5 py-2 text-xs text-warning">
-              SSH sessions could not be loaded. HTTP results remain available when present.
-              <button type="button" onClick={() => void loadDirectory()} className="ml-2 font-semibold underline">Retry SSH</button>
+              Cowrie sessions could not be loaded. HTTP results remain available when present.
+              <button type="button" onClick={() => void loadDirectory()} className="ml-2 font-semibold underline">Retry Cowrie</button>
             </p>
           )}
           {protocolFilter !== "ssh" && httpError && (
             <p role="alert" className="border-b border-warning-border bg-warning-subtle px-5 py-2 text-xs text-warning">
-              HTTP sessions could not be refreshed. SSH sessions remain available.
+              HTTP sessions could not be refreshed. Cowrie sessions remain available.
             </p>
           )}
           {protocolFilter !== "ssh" && !httpItems && !httpError && sessionRows.length > 0 && (
@@ -387,7 +387,7 @@ export default function ThreatIntelPage() {
           ) : (protocolFilter !== "http" && isDirectoryUnavailable) || (protocolFilter !== "ssh" && httpError) ? (
             <div className="p-8 text-center">
               <RegionState kind="error" title="Session directory unavailable" description="The selected protocol data could not be retrieved." />
-              {protocolFilter !== "http" && <button type="button" onClick={() => void loadDirectory()} className="ui-button mt-3 text-xs"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Retry SSH</button>}
+              {protocolFilter !== "http" && <button type="button" onClick={() => void loadDirectory()} className="ui-button mt-3 text-xs"><RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />Retry Cowrie</button>}
             </div>
           ) : (
             <div className="p-8">
@@ -400,12 +400,12 @@ export default function ThreatIntelPage() {
           )}
         </div>
 
-        {/* SSH history keeps its existing server-backed pagination in All and SSH views. */}
+        {/* Cowrie history keeps its existing server-backed pagination in All and Cowrie views. */}
         {protocolFilter !== "http" && directoryTotal > 0 && directoryTotalPages > 1 && (
           <nav aria-label="Session directory pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface-subtle/50 px-5 py-2.5 text-xs">
             <div className="flex items-center gap-3">
               <p className="text-text-muted">
-                SSH page <strong className="text-text">{currentPage}</strong> of <strong className="text-text">{directoryTotalPages}</strong> ({directoryTotal.toLocaleString()} sessions)
+                Cowrie page <strong className="text-text">{currentPage}</strong> of <strong className="text-text">{directoryTotalPages}</strong> ({directoryTotal.toLocaleString()} sessions)
                 {protocolFilter === "all" && <span className="ml-1">· {matchingHttpCount} recent HTTP session{matchingHttpCount === 1 ? "" : "s"} included</span>}
               </p>
               {(directoryRefreshing || isPageChanging) && (
@@ -416,7 +416,7 @@ export default function ThreatIntelPage() {
               )}
               
               <div className="hidden sm:flex items-center gap-2 border-l border-border pl-4">
-                <label htmlFor="rows-per-page" className="text-text-muted">SSH rows:</label>
+                <label htmlFor="rows-per-page" className="text-text-muted">Cowrie rows:</label>
                 <select
                   id="rows-per-page"
                   value={pageSize}
@@ -592,7 +592,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
           </thead>
           <tbody className="divide-y divide-border/70">
             {rows.map((row) => {
-              const ProtocolIcon = row.protocol === "SSH" ? Terminal : Globe;
+              const ProtocolIcon = row.protocol === "HTTP" ? Globe : Terminal;
               return (
                 <tr
                   key={row.key}
@@ -615,7 +615,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
                   <td className="py-3 px-5">
                     <span className={cn(
                       "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold uppercase tracking-wide",
-                      row.protocol === "SSH"
+                      row.protocol !== "HTTP"
                         ? "border-[#18227A]/20 bg-[#18227A]/[0.05] text-[#18227A]"
                         : "border-primary/25 bg-primary-subtle text-primary",
                     )}>
@@ -630,7 +630,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
                   </td>
                   <td className="whitespace-nowrap py-3 px-5 text-text-muted" title={row.startedAt || undefined}>{row.startedLabel}</td>
                   <td className="py-3 px-5 text-text">
-                    {row.protocol === "SSH"
+                    {row.protocol !== "HTTP"
                       ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} />
                       : <>{row.activity}{row.activity.includes("injection hint") && <span className="ml-1 text-[10px] text-warning">· review only</span>}</>}
                   </td>
@@ -647,7 +647,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
 
       <div className="grid gap-2 p-3 md:hidden">
         {rows.map((row) => {
-          const ProtocolIcon = row.protocol === "SSH" ? Terminal : Globe;
+          const ProtocolIcon = row.protocol === "HTTP" ? Globe : Terminal;
           return (
             <Link key={row.key} href={row.href} className="rounded-lg border border-border bg-surface p-3 transition hover:border-primary/40 hover:bg-surface-hover">
               <div className="flex items-start justify-between gap-3">
@@ -663,7 +663,7 @@ function DirectoryResults({ rows }: { rows: SessionDirectoryRow[] }) {
               <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Origin</span><span className="font-mono text-text">{row.origin}</span><span className="block text-[10px] text-text-muted">{row.originDetail}</span></div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Started</span><span className="text-text">{row.startedLabel}</span></div>
-                <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">{row.protocol === "SSH" ? "Attacker type" : "Activity"}</span>{row.protocol === "SSH" ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} /> : <><span className="text-text">{row.activity}</span>{row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}</>}</div>
+                <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">{row.protocol !== "HTTP" ? "Attacker type" : "Activity"}</span>{row.protocol !== "HTTP" ? <AttackerTypeBadge type={row.attackerType ?? "Unclassified"} /> : <><span className="text-text">{row.activity}</span>{row.activity.includes("injection hint") && <span className="block text-[10px] text-warning">Review hint only</span>}</>}</div>
                 <div><span className="block text-[10px] uppercase tracking-wide text-text-subtle">Dwell time</span><span className="font-mono text-text-muted">{row.dwellTime}</span></div>
               </div>
             </Link>

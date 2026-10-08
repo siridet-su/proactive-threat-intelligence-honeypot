@@ -5,6 +5,18 @@ are not a production deployment mechanism. The runtime namespace is
 `/opt/honeypot-dashboard-v2-staging` and its `incoming/` directory is the only
 artifact upload area accepted by the root deployment wrapper.
 
+> **Current host status (2026-10-08):** staging is active on
+> `127.0.0.1:3001` from release `a6f63b3`; production Dashboard remains
+> stopped. Via the loopback SSH forward, `/login` returned HTTP 200 and the
+> router check returned the expected HTTP 405 for `GET /api/auth/login`. An
+> authenticated exact-session detail request for a fresh Cowrie Telnet session
+> returned protocol `telnet`, five events, three command events, and matching
+> start/end timestamps. The current bundle still labels Cowrie sessions as
+> SSH. A tested source correction is prepared on the `staging` base but is not
+> deployed; use the CI staging artifact workflow below. Historical-policy/PDF,
+> live AI, and eligible external-TI acceptance remain separate unresolved
+> checks. No public listener or firewall change was made.
+
 ## One-time VM setup
 
 Run as the existing authorized VM administrator from this directory:

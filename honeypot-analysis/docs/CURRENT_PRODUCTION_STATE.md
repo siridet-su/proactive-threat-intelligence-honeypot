@@ -98,3 +98,17 @@ automatic restarts; Redis is loopback-only and active, while no local
 `mongod.service` is installed. Those services were not stopped or changed.
 Their ownership and data-retention purpose must be resolved before any legacy
 path is retired or any MongoDB environment is reused.
+
+## Fresh Cowrie Telnet and staging directory check — 2026-10-08
+
+A narrowly scoped reconciliation corrected one stale cached demo-account row
+on the Pi; the Cowrie configuration and running service were not changed. The
+pre-change `/home/cowrie/users.txt` file was retained in a root-only backup at
+`/var/backups/honeypot/cowrie-login-cache-reconcile-20261008T111140Z/users.txt.before`.
+A bounded Telnet login and shell close then completed. The sanitized Cowrie
+event feed recorded five events, including three command events. The staging
+exact-session detail API returned protocol `telnet` and matching start/end
+timestamps. The active directory bundle still presented the Cowrie row as
+`SSH`; its source correction is tested but awaits deployment. Model1,
+Next-Distinct, threat hypotheses, response guidance, ETI, and AI were not
+evaluated for this fresh session.

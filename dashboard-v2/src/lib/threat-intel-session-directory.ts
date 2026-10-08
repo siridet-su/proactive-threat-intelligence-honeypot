@@ -27,7 +27,7 @@ export type SessionDirectoryRow = {
   key: string;
   id: string;
   href: string;
-  protocol: "SSH" | "HTTP";
+  protocol: "SSH" | "TELNET" | "COWRIE" | "HTTP";
   attackerType: SessionAttackerType | null;
   sensor: string;
   origin: string;
@@ -51,6 +51,7 @@ function startedLabel(value: string): string {
   const parsed = timestamp(value);
   if (parsed === null) return "Not recorded";
   return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Bangkok",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -79,7 +80,7 @@ function sshDwellTime(session: DashboardThreatEvent, status: "Active" | "Closed"
   return "Not recorded";
 }
 
-function sshRow(session: DashboardThreatEvent): SessionDirectoryRow {
+function cowrieRow(session: DashboardThreatEvent): SessionDirectoryRow {
   const status: "Active" | "Closed" = session.session_status === "active" || session.duration === "Active"
     ? "Active"
     : "Closed";
@@ -89,12 +90,17 @@ function sshRow(session: DashboardThreatEvent): SessionDirectoryRow {
     : "Country unavailable";
   const sensor = session.sensor || "Cowrie";
   const attackerType = normalizeAttackerType(session.classification);
+  const protocol = typeof session.protocol === "string" && session.protocol.trim().toLowerCase() === "telnet"
+    ? "TELNET"
+    : typeof session.protocol === "string" && session.protocol.trim().toLowerCase() === "ssh"
+      ? "SSH"
+      : "COWRIE";
 
   return {
-    key: `ssh:${session.id}`,
+    key: `cowrie:${session.id}`,
     id: session.id,
     href: `/threat-intel/${encodeURIComponent(session.id)}`,
-    protocol: "SSH",
+    protocol,
     attackerType,
     sensor,
     origin: session.sourceIp || "Origin unavailable",
@@ -106,7 +112,7 @@ function sshRow(session: DashboardThreatEvent): SessionDirectoryRow {
     dwellTime: sshDwellTime(session, status),
     status,
     sortTimestamp: timestamp(startedAt) ?? 0,
-    searchText: [session.id, session.sourceIp, session.sensor, country, attackerType, "ssh cowrie"].join(" ").toLowerCase(),
+    searchText: [session.id, session.sourceIp, session.sensor, country, attackerType, protocol, "ssh telnet cowrie"].join(" ").toLowerCase(),
   };
 }
 
@@ -166,7 +172,7 @@ export function buildSessionDirectoryRows(
   const normalizedSearch = search.trim().toLowerCase();
   const rows: SessionDirectoryRow[] = [];
 
-  if (protocol !== "http") rows.push(...sshSessions.map(sshRow));
+  if (protocol !== "http") rows.push(...sshSessions.map(cowrieRow));
   if (protocol !== "ssh") {
     rows.push(...httpSessions
       .filter((session): session is WebHttpSession & { id: string } => typeof session.id === "string")

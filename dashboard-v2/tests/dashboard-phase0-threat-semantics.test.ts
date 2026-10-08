@@ -96,6 +96,15 @@ describe("Phase 0.1A threat and lifecycle semantic baseline", () => {
     expect(buildSessionDirectoryRows([threat], [], "ssh")[0].dwellTime).toBe("24s");
   });
 
+  it("preserves the Cowrie protocol from its stored session payload", async () => {
+    const [threat] = await normalizedDirectory([sessionFixture({
+      session_id: "phase0-telnet-protocol",
+      payload_json: JSON.stringify({ protocol: "telnet" }),
+    })]);
+
+    expect(threat.protocol).toBe("telnet");
+  });
+
   it("uses explicit lifecycle evidence rather than recency for active and closed state", async () => {
     const [active, closed] = await normalizedDirectory([
       explicitlyActiveSession,

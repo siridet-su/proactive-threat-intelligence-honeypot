@@ -823,7 +823,8 @@ export default function SessionDetailPage({ params }: { params: Promise<{ id: st
   const city = threatData?.geo.city || textValue(detailGeo.city, "Unknown");
   const lat = threatData?.geo.lat ?? numberValue(detailGeo.lat);
   const lon = threatData?.geo.lon ?? numberValue(detailGeo.lon);
-  const protocol = threatData?.protocol || textValue(detailOverview.protocol);
+  // Exact-session detail is authoritative; feed rows can omit the Cowrie protocol.
+  const protocol = textValue(detailOverview.protocol, threatData?.protocol || "Unavailable");
   const sensor = threatData?.sensor || textValue(detailOverview.sensor);
   const durationCandidate = textValue(detailOverview.duration || threatData?.duration);
   const capturedAt = thailandTimestamp(detailOverview.start_time || (threatData ? threatData.date + " " + threatData.time : undefined));

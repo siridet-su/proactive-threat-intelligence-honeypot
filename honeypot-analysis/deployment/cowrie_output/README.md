@@ -223,3 +223,21 @@ owner-only in the receipt. It does not rewrite or delete historical Cowrie
 event logs. Because the prior observer is known to persist credentials,
 rollback is an emergency recovery boundary, not an acceptable steady state.
 Reapply the verified bundle before any credential acceptance replay.
+
+## Bounded Telnet demo-account troubleshooting
+
+If a configured Cowrie demo account repeatedly rejects Telnet authentication,
+do not change the active authentication class or expose credential values in
+logs or terminal output. This installation also has a protected
+`/home/cowrie/users.txt` cache; a stale row for the same demo username can
+prevent the configured test credential from being accepted by the custom
+Telnet authentication path.
+
+Before retrying, verify the active configuration and that only the intended
+demo-account row is stale without printing either value. Back up the exact
+file to a new root-only, non-overwriting location, reconcile only that row,
+and preserve the original owner/group and mode `0600`. Do not inspect or share
+the credential-bearing custom diagnostic log. Make one bounded Telnet test,
+then verify start/login/command/close evidence through the sanitized Cowrie
+feed and exact-session Dashboard API. The test does not establish activity on
+a real host or validate Model1/Model2 accuracy.
