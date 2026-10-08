@@ -7,15 +7,18 @@ artifact upload area accepted by the root deployment wrapper.
 
 > **Current host status (2026-10-08):** staging is active on
 > `127.0.0.1:3001` from release `a6f63b3`; production Dashboard remains
-> stopped. Via the loopback SSH forward, `/login` returned HTTP 200 and the
-> router check returned the expected HTTP 405 for `GET /api/auth/login`. An
-> authenticated exact-session detail request for a fresh Cowrie Telnet session
-> returned protocol `telnet`, five events, three command events, and matching
-> start/end timestamps. The current bundle still labels Cowrie sessions as
-> SSH. A tested source correction is prepared on the `staging` base but is not
-> deployed; use the CI staging artifact workflow below. Historical-policy/PDF,
-> live AI, and eligible external-TI acceptance remain separate unresolved
-> checks. No public listener or firewall change was made.
+> stopped. Via the loopback SSH forward, `/` and `/login` returned HTTP 200,
+> and `GET /api/auth/login` returned the expected HTTP 405. The authenticated
+> exact-session API for a fresh Cowrie Telnet session returned protocol
+> `telnet`, five events, three command events, and matching start/end times.
+> The corrected UI is committed on `staging` as `9958737` and its CI job
+> passed, but the deploy job failed before switching releases. The active UI
+> therefore still has the old Cowrie-as-SSH label. Read-only VM inspection
+> found the dedicated `dashboard-staging-deploy` account/group and the required
+> `incoming/` directory are absent; resolve the pinned-key provisioning
+> prerequisite before retrying CI. No new release, production service, public
+> listener, firewall rule, or backend was changed. Historical-policy/PDF, live
+> AI, and eligible external-TI acceptance remain separate unresolved checks.
 
 ## One-time VM setup
 

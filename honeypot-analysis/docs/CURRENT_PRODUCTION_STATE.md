@@ -112,3 +112,12 @@ timestamps. The active directory bundle still presented the Cowrie row as
 `SSH`; its source correction is tested but awaits deployment. Model1,
 Next-Distinct, threat hypotheses, response guidance, ETI, and AI were not
 evaluated for this fresh session.
+
+The UI correction was pushed to `staging` as `9958737`. Its GitHub Actions CI
+job passed, but the staging deployment job failed in its transfer/deploy step.
+Read-only inspection of the new VM confirmed the staging service remains active
+on loopback at the prior release `a6f63b3`; `/` and `/login` returned HTTP 200,
+and the explicit router probe returned HTTP 405. The host does not yet have the
+dedicated deploy user/group or the required artifact upload directory. The
+corrected TELNET label and dwell-time presentation have therefore not yet been
+verified on the webpage. No new host release was applied.
